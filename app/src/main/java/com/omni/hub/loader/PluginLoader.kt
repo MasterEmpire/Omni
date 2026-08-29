@@ -67,8 +67,18 @@ object PluginLoader {
         val optDir = context.getDir("dex_opt", Context.MODE_PRIVATE)
         if (!optDir.exists()) optDir.mkdirs()
 
+        // Assemble Multi-DEX Path including persistent shared runtime packs
+        val sharedPaths = SharedLibManager.getSharedDexPaths(context)
+        val combinedDexPath = if (sharedPaths.isNotEmpty()) {
+            (listOf(dexFile.absolutePath) + sharedPaths).joinToString(File.pathSeparator)
+        } else {
+            dexFile.absolutePath
+        }
+
+        com.omni.hub.api.OmniLogger.log("LOADER", "Initializing DexClassLoader with classpath: $combinedDexPath")
+
         val loader = DexClassLoader(
-            dexFile.absolutePath,
+            combinedDexPath,
             optDir.absolutePath,
             null,
             context.classLoader
@@ -105,19 +115,27 @@ object PluginLoader {
         }
 
         dexFile.setReadOnly()
-
         val optDir = context.getDir("dex_opt", Context.MODE_PRIVATE)
         if (!optDir.exists()) optDir.mkdirs()
 
+        // Assemble Multi-DEX Path including persistent shared runtime packs
+        val sharedPaths = SharedLibManager.getSharedDexPaths(context)
+        val combinedDexPath = if (sharedPaths.isNotEmpty()) {
+            (listOf(dexFile.absolutePath) + sharedPaths).joinToString(File.pathSeparator)
+        } else {
+            dexFile.absolutePath
+        }
+
+        com.omni.hub.api.OmniLogger.log("LOADER", "Loading directory plugin [$pluginId] with classpath: $combinedDexPath")
+
         val loader = DexClassLoader(
-            dexFile.absolutePath,
+            combinedDexPath,
             optDir.absolutePath,
             null,
             context.classLoader
         )
 
-        val clazz = loader.loadClass(entryClassName)
-        val instance = clazz.getDeclaredConstructor().newInstance() as? PluginEntry
+        val clazz = loader.loadClass(finalClass)
             ?: throw ClassCastException("Class $entryClassName does not extend PluginEntry contract.")
 
         return LoadedPlugin(
