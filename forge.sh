@@ -97,9 +97,16 @@ find "$CLASSES_DIR" -path "*/com/omni/hub/api/*" -delete
 echo "🔩 Converting Bytecode to classes.dex..."
 BUILD_TOOLS_DIR=$(ls -d ${ANDROID_SDK_ROOT}/build-tools/34.* | head -1)
 
+D8_CLASSPATH=""
+for jar in $(find "$LIBS_DIR" -name "*.jar"); do
+    D8_CLASSPATH="$D8_CLASSPATH --classpath $jar"
+done
+
 $BUILD_TOOLS_DIR/d8 \
     --output "$DEX_DIR/" \
     --lib "${ANDROID_SDK_ROOT}/platforms/android-34/android.jar" \
+    $D8_CLASSPATH \
+    --min-api 26 \
     $(find "$CLASSES_DIR" -name "*.class")
 
 # 8. Package Bundle ZIP with Manifest
