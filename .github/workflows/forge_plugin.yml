@@ -1,0 +1,59 @@
+name: Forge Dynamic Plugin Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      plugin_label:
+        description: 'Display name of the plugin module'
+        required: true
+        default: 'SampleUtility'
+      file_name:
+        description: 'Output ZIP filename (e.g. utility_bundle.zip)'
+        required: true
+        default: 'bundle.zip'
+      skip_res:
+        description: 'Skip packaging dynamic resources'
+        required: false
+        default: 'false'
+
+jobs:
+  build-plugin-bundle:
+    runs-on: ubuntu-latest
+    env:
+      PLUGIN_NAME: ${{ github.event.inputs.plugin_label }}
+      OUTPUT_FILENAME: ${{ github.event.inputs.file_name }}
+      SKIP_RESOURCES: ${{ github.event.inputs.skip_res }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Restore Armory Dependency Cache
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: app/build/harvested_libs
+          key: omni-armory-${{ hashFiles('app/build.gradle') }}
+
+      - name: Harvest Dependencies (If Cache Miss)
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: ./gradlew app:harvestDeps
+
+      - name: Compile and Forge Dynamic DEX
+        run: |
+          chmod +x forge.sh
+          ./forge.sh
+
+      - name: Upload Plugin Bundle Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.OUTPUT_FILENAME }}
+          path: bundle.zip
