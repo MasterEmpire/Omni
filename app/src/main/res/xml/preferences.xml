@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <PreferenceCategory android:title="Plugin Storage">
+        <SwitchPreferenceCompat
+            android:key="auto_reload"
+            android:title="Auto-Reload Bundles"
+            android:summary="Reload dynamic DEX modules on launch"
+            android:defaultValue="true" />
+    </PreferenceCategory>
+</PreferenceScreen>
