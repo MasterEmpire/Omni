@@ -2,9 +2,9 @@ name: Build Omni Hub APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ conduit-dev, main, master ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ conduit-dev, main, master ]
   workflow_dispatch:
 
 jobs:
