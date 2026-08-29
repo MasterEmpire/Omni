@@ -8,6 +8,11 @@ APP_LABEL="${1:-${PLUGIN_NAME:-${APP_LABEL:-sample_utility}}}"
 OUTPUT_FILE="${2:-${OUTPUT_FILENAME:-${FILE_NAME:-bundle.zip}}}"
 SKIP_RESOURCES="${3:-${SKIP_RESOURCES:-false}}"
 
+# Ensure OUTPUT_FILE always ends with .zip
+if [[ "$OUTPUT_FILE" != *.zip ]]; then
+    OUTPUT_FILE="${OUTPUT_FILE}.zip"
+fi
+
 WORKDIR="dynamic_build"
 CLASSES_DIR="$WORKDIR/classes"
 DEX_DIR="$WORKDIR/dex"
@@ -148,6 +153,6 @@ if [ "$SKIP_RESOURCES" != "true" ] && [ -n "$RES_TARGET" ] && [ -d "$RES_TARGET"
 fi
 
 cd "$BUNDLE_DIR" && zip -r "../../$OUTPUT_FILE" . && cd ../..
-cp "$OUTPUT_FILE" bundle.zip 2>/dev/null || true
+cp -f "$OUTPUT_FILE" bundle.zip
 
 echo "✅ [Omni Hub Forge] Build Complete: $OUTPUT_FILE"
