@@ -1,0 +1,7 @@
+{
+  "id": "sample_utility",
+  "name": "Sample Utility",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.SampleUtility",
+  "description": "Modular Jetpack Compose Utility with Auto-Discovery"
+}
