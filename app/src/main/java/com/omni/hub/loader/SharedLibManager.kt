@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 object SharedLibManager {
     private const val RUNTIME_DEX_NAME = "extended_icons.dex"
     private const val CLOUD_RUNTIME_URL = "https://vlzgfaqrnyiqfxxxvtas.supabase.co/storage/v1/object/public/omni-modules/extended_icons.dex"
+    private const val ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsemdmYXFybnlpcWZ4eHh2dGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU1NTk5NDAsImV4cCI6MjA4MTEzNTk0MH0.y93d68JWyGL7NKXZEHLunAuayMEWw1K6yATFGLxkUxY"
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -75,7 +76,11 @@ object SharedLibManager {
         // 3. Silent Cloud Download (One-Time Fetch)
         try {
             OmniLogger.log("RUNTIME", "Fetching shared runtime pack from cloud CDN...")
-            val request = Request.Builder().url(CLOUD_RUNTIME_URL).build()
+            val request = Request.Builder()
+                .url(CLOUD_RUNTIME_URL)
+                .addHeader("apikey", ANON_KEY)
+                .addHeader("Authorization", "Bearer $ANON_KEY")
+                .build()
             val response = httpClient.newCall(request).execute()
 
             if (!response.isSuccessful) {
