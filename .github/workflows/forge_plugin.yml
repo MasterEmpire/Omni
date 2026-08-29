@@ -1,0 +1,123 @@
+name: Forge and Ship Dynamic Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_label:
+        description: 'Module or Folder Name (Conduit IDE)'
+        required: true
+        default: 'sample_utility'
+      file_name:
+        description: 'Storage ZIP filename (e.g. sample_utility.zip)'
+        required: true
+        default: 'sample_utility.zip'
+      skip_res:
+        description: 'Ignore dynamic resources'
+        required: false
+        default: 'false'
+  repository_dispatch:
+    types: [conduit_forge_trigger, forge_plugin]
+
+jobs:
+  build-and-ship:
+    runs-on: ubuntu-latest
+    env:
+      APP_LABEL: ${{ github.event.inputs.app_label || github.event.client_payload.app_label || 'sample_utility' }}
+      TARGET_FILENAME: ${{ github.event.inputs.file_name || github.event.client_payload.file_name || 'sample_utility.zip' }}
+      SKIP_RESOURCES: ${{ github.event.inputs.skip_res || github.event.client_payload.skip_res || 'false' }}
+      SUPABASE_URL: https://vlzgfaqrnyiqfxxxvtas.supabase.co
+      ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsemdmYXFybnlpcWZ4eHh2dGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU1NTk5NDAsImV4cCI6MjA4MTEzNTk0MH0.y93d68JWyGL7NKXZEHLunAuayMEWw1K6yATFGLxkUxY
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Restore Armory Dependency Cache
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: app/build/harvested_libs
+          key: omni-armory-${{ hashFiles('app/build.gradle') }}
+
+      - name: Harvest Dependencies (If Cache Miss)
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: gradle app:harvestDeps
+
+      - name: Compile and Forge Dynamic DEX
+        run: |
+          chmod +x forge.sh
+          ./forge.sh "$APP_LABEL" "$TARGET_FILENAME" "$SKIP_RESOURCES"
+
+      - name: Upload GitHub Actions Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.TARGET_FILENAME }}
+          path: bundle.zip
+
+      - name: Ship Bundle to Supabase Storage & Catalog
+        run: |
+          echo "🚀 Uploading bundle.zip to Supabase Storage bucket 'omni-modules'..."
+          STORAGE_STATUS=$(curl -s -o response_storage.txt -w "%{http_code}" -X POST "$SUPABASE_URL/storage/v1/object/omni-modules/$TARGET_FILENAME" \
+            -H "Authorization: Bearer $ANON_KEY" \
+            -H "apikey: $ANON_KEY" \
+            -H "Content-Type: application/zip" \
+            -H "x-upsert: true" \
+            --data-binary @bundle.zip)
+
+          if [ "$STORAGE_STATUS" -ge 200 ] && [ "$STORAGE_STATUS" -lt 300 ]; then
+            echo "✅ Storage upload complete (HTTP $STORAGE_STATUS)."
+          else
+            echo "❌ Storage upload FAILED (HTTP $STORAGE_STATUS)."
+            cat response_storage.txt
+            exit 1
+          fi
+
+          DOWNLOAD_URL="$SUPABASE_URL/storage/v1/object/public/omni-modules/$TARGET_FILENAME"
+          echo "🌐 Public CDN URL: $DOWNLOAD_URL"
+
+          echo "📝 Extracting manifest metadata from bundle and updating catalog..."
+          python3 -c "
+import zipfile, json, os, urllib.request, sys
+
+target_zip = '$TARGET_FILENAME' if os.path.exists('$TARGET_FILENAME') else 'bundle.zip'
+
+with zipfile.ZipFile(target_zip, 'r') as z:
+    manifest = json.loads(z.read('plugin.json').decode('utf-8'))
+
+payload = {
+    'id': manifest.get('id', '$APP_LABEL'),
+    'name': manifest.get('name', '$APP_LABEL'),
+    'description': manifest.get('description', 'Dynamic Omni Hub Module'),
+    'version': manifest.get('version', '1.0.0'),
+    'entry_class': manifest.get('entryClass', 'com.omni.plugin.SampleUtility'),
+    'file_name': '$TARGET_FILENAME',
+    'download_url': '$DOWNLOAD_URL'
+}
+
+req = urllib.request.Request(
+    '$SUPABASE_URL/rest/v1/omni_modules?on_conflict=id',
+    data=json.dumps(payload).encode('utf-8'),
+    headers={
+        'Authorization': 'Bearer $ANON_KEY',
+        'apikey': '$ANON_KEY',
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+    },
+    method='POST'
+)
+
+try:
+    with urllib.request.urlopen(req) as resp:
+        print(f'✅ Omni Hub Cloud Catalog Updated successfully (HTTP {resp.status}).')
+except Exception as e:
+    print(f'❌ Database catalog update FAILED: {e}', file=sys.stderr)
+    sys.exit(1)
+"
