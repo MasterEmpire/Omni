@@ -1,0 +1,11 @@
+{
+  "id": "omni_browser",
+  "name": "Omni Chrome",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.browser.OmniBrowser",
+  "description": "Stealthy Chromium-style Web Browser with Anti-Bot Evasions, Desktop Mode, and Speed Dial",
+  "permissions": [
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE"
+  ]
+}
