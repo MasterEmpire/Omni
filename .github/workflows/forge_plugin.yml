@@ -3,32 +3,16 @@ name: Forge and Ship Dynamic Plugin
 on:
   workflow_dispatch:
     inputs:
-      plugin_id:
-        description: 'Unique Module ID (e.g. sample_utility)'
+      app_label:
+        description: 'Module or Folder Name (Conduit IDE)'
         required: true
         default: 'sample_utility'
-      plugin_label:
-        description: 'Display name in Omni Hub Store'
-        required: true
-        default: 'Sample Utility'
-      plugin_version:
-        description: 'Semantic Version'
-        required: true
-        default: '1.0.0'
-      entry_class:
-        description: 'Fully Qualified Entry Class Name'
-        required: true
-        default: 'com.omni.plugin.SampleUtility'
-      description:
-        description: 'Module Description'
-        required: false
-        default: 'Dynamic Jetpack Compose Utility Module'
       file_name:
-        description: 'Output ZIP filename in Supabase Bucket'
+        description: 'Storage ZIP filename (e.g. sample_utility.zip)'
         required: true
         default: 'sample_utility.zip'
       skip_res:
-        description: 'Skip packaging dynamic resources'
+        description: 'Ignore dynamic resources'
         required: false
         default: 'false'
 
@@ -36,11 +20,7 @@ jobs:
   build-and-ship:
     runs-on: ubuntu-latest
     env:
-      PLUGIN_ID: ${{ github.event.inputs.plugin_id }}
-      PLUGIN_LABEL: ${{ github.event.inputs.plugin_label }}
-      PLUGIN_VER: ${{ github.event.inputs.plugin_version }}
-      ENTRY_CLASS: ${{ github.event.inputs.entry_class }}
-      PLUGIN_DESC: ${{ github.event.inputs.description }}
+      APP_LABEL: ${{ github.event.inputs.app_label }}
       TARGET_FILENAME: ${{ github.event.inputs.file_name }}
       SKIP_RESOURCES: ${{ github.event.inputs.skip_res }}
       SUPABASE_URL: https://vlzgfaqrnyiqfxxxvtas.supabase.co
@@ -72,7 +52,7 @@ jobs:
       - name: Compile and Forge Dynamic DEX
         run: |
           chmod +x forge.sh
-          ./forge.sh
+          ./forge.sh "$APP_LABEL" "$TARGET_FILENAME" "$SKIP_RESOURCES"
 
       - name: Upload GitHub Actions Artifact
         uses: actions/upload-artifact@v4
@@ -101,21 +81,38 @@ jobs:
           DOWNLOAD_URL="$SUPABASE_URL/storage/v1/object/public/omni-modules/$TARGET_FILENAME"
           echo "🌐 Public CDN URL: $DOWNLOAD_URL"
 
-          echo "📝 Registering module in 'omni_modules' database catalog..."
-          DB_STATUS=$(curl -s -o response_db.txt -w "%{http_code}" -X POST "$SUPABASE_URL/rest/v1/omni_modules?on_conflict=id" \
-            -H "Authorization: Bearer $ANON_KEY" \
-            -H "apikey: $ANON_KEY" \
-            -H "Content-Type: application/json" \
-            -H "Prefer: resolution=merge-duplicates" \
-            -d "{
-              \"id\": \"$PLUGIN_ID\",
-              \"name\": \"$PLUGIN_LABEL\",
-              \"description\": \"$PLUGIN_DESC\",
-              \"version\": \"$PLUGIN_VER\",
-              \"entry_class\": \"$ENTRY_CLASS\",
-              \"file_name\": \"$TARGET_FILENAME\",
-              \"download_url\": \"$DOWNLOAD_URL\"
-            }")
+          echo "📝 Extracting manifest metadata from bundle..."
+          python3 -c "
+import zipfile, json, os, urllib.request
+
+with zipfile.ZipFile('$TARGET_FILENAME', 'r') as z:
+    manifest = json.loads(z.read('plugin.json').decode('utf-8'))
+
+payload = {
+    'id': manifest.get('id', '$APP_LABEL'),
+    'name': manifest.get('name', '$APP_LABEL'),
+    'description': manifest.get('description', 'Dynamic Omni Hub Module'),
+    'version': manifest.get('version', '1.0.0'),
+    'entry_class': manifest.get('entryClass', 'com.omni.plugin.SampleUtility'),
+    'file_name': '$TARGET_FILENAME',
+    'download_url': '$DOWNLOAD_URL'
+}
+
+req = urllib.request.Request(
+    '$SUPABASE_URL/rest/v1/omni_modules?on_conflict=id',
+    data=json.dumps(payload).encode('utf-8'),
+    headers={
+        'Authorization': 'Bearer $ANON_KEY',
+        'apikey': '$ANON_KEY',
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+    },
+    method='POST'
+)
+
+with urllib.request.urlopen(req) as resp:
+    print('✅ Omni Hub Cloud Catalog Updated. Status:', resp.status)
+"
 
           if [ "$DB_STATUS" -ge 200 ] && [ "$DB_STATUS" -lt 300 ]; then
             echo "✅ Omni Hub Cloud Catalog Updated (HTTP $DB_STATUS)."
