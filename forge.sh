@@ -79,9 +79,11 @@ echo "📂 Target Source: $SRC_TARGET"
 
 # 5. Compile Dynamic Source against Contract & Compose Plugin
 echo "⚙️ Compiling Kotlin & Compose UI..."
+API_SOURCES=$(find app/src/main/java/com/omni/hub/api -name "*.kt" 2>/dev/null)
+
 $WORKDIR/kotlinc/bin/kotlinc \
     $SRC_TARGET \
-    app/src/main/java/com/omni/hub/api/PluginEntry.kt \
+    $API_SOURCES \
     -cp "$CP" \
     -Xplugin="$WORKDIR/compose-compiler.jar" \
     -jvm-target 17 \
@@ -89,7 +91,7 @@ $WORKDIR/kotlinc/bin/kotlinc \
 
 # 6. Strip Contract Interface Class to avoid ClassCastException
 echo "🧹 Stripping duplicate contract classes from bundle..."
-find "$CLASSES_DIR" -name "PluginEntry*" -delete
+find "$CLASSES_DIR" -path "*/com/omni/hub/api/*" -delete
 
 # 7. Convert Bytecode to Android DEX via d8
 echo "🔩 Converting Bytecode to classes.dex..."
