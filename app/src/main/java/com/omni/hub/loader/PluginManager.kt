@@ -44,8 +44,8 @@ object PluginManager {
     fun installPluginFromUri(
         context: Context,
         uri: Uri,
-        name: String,
-        entryClass: String,
+        name: String? = null,
+        entryClass: String? = null,
         description: String = "Imported Module"
     ): LoadedPlugin {
         val tempFile = File(context.cacheDir, "import_${System.currentTimeMillis()}.zip")
@@ -55,24 +55,36 @@ object PluginManager {
             }
         } ?: throw IllegalArgumentException("Cannot open content stream from URI: $uri")
 
-        val pluginId = name.replace(Regex("[^a-zA-Z0-9_]"), "_").lowercase()
-        val loaded = PluginLoader.loadFromZip(context, pluginId, tempFile, entryClass)
-        tempFile.delete()
+        val loaded = try {
+            PluginLoader.loadFromZip(context, tempFile, name, entryClass)
+        } finally {
+            if (tempFile.exists()) tempFile.delete()
+        }
 
         // Register in persistent preferences
-        val currentList = getInstalledPlugins(context).filter { it.id != pluginId }.toMutableList()
+        val currentList = getInstalledPlugins(context).filter { it.id != loaded.id }.toMutableList()
         currentList.add(
             PluginMetadata(
-                id = pluginId,
-                name = name,
+                id = loaded.id,
+                name = loaded.name,
                 description = description,
-                entryClass = entryClass,
+                entryClass = loaded.entryClass,
                 installedAt = System.currentTimeMillis()
             )
         )
         saveRegistry(context, currentList)
 
         return loaded
+    }
+
+    suspend fun installPluginFromUrl(
+        context: Context,
+        url: String,
+        name: String? = null,
+        entryClass: String? = null,
+        description: String = "Remote OTA Plugin"
+    ): LoadedPlugin {
+        return RemotePluginDownloader.downloadAndInstall(context, url, name, entryClass, description)
     }
 
     fun deletePlugin(context: Context, pluginId: String) {
@@ -83,7 +95,7 @@ object PluginManager {
         saveRegistry(context, updated)
     }
 
-    private fun saveRegistry(context: Context, plugins: List<PluginMetadata>) {
+    internal fun saveRegistry(context: Context, plugins: List<PluginMetadata>) {
         val arr = JSONArray()
         plugins.forEach { p ->
             val obj = JSONObject().apply {
