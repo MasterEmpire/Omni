@@ -1,0 +1,12 @@
+{
+  "id": "sample_utility",
+  "name": "Sample Utility",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.SampleUtility",
+  "description": "Dynamic Jetpack Compose Utility Module with OTA Hot-Reload",
+  "icon": "res/logo.png",
+  "permissions": [
+    "android.permission.VIBRATE",
+    "android.permission.ACCESS_NETWORK_STATE"
+  ]
+}
