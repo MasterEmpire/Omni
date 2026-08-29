@@ -308,20 +308,6 @@ fun DashboardScreen(context: Context) {
                                         }
                                     )
                             )
-                            
-                            Spacer(Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFF21262D)
-                            ) {
-                                Text(
-                                    "CONTAINER",
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF58A6FF)
-                                )
-                            }
                         }
                     },
                     navigationIcon = {
