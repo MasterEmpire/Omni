@@ -396,12 +396,9 @@ class OmniBrowser : PluginEntry() {
                                     // Perfect Stealth Evasion Suite (Plugins Array, W3C Permissions, WebDriver, Chrome Runtime)
                                     val stealthPolyfill = """
                                         javascript:(function() {
-                                            // 1. Strip WebDriver flag
+                                            // 1. Strip WebDriver flag completely without leaving property keys behind
                                             try {
                                                 delete Object.getPrototypeOf(navigator).webdriver;
-                                            } catch(e) {}
-                                            try {
-                                                Object.defineProperty(navigator, 'webdriver', { get: () => undefined, enumerable: false, configurable: true });
                                             } catch(e) {}
 
                                             // 2. Mock full window.chrome object
@@ -461,18 +458,31 @@ class OmniBrowser : PluginEntry() {
                                                 });
                                             } catch(e) {}
 
-                                            // 4. Fix W3C Permissions Query API (Must return 'prompt', 'granted', or 'denied')
+                                            // 4. Align Notification.permission and W3C Permissions Query API
+                                            try {
+                                                if (!window.Notification) {
+                                                    window.Notification = {
+                                                        permission: 'default',
+                                                        requestPermission: function() { return Promise.resolve('default'); },
+                                                        maxActions: 2
+                                                    };
+                                                } else {
+                                                    try {
+                                                        Object.defineProperty(window.Notification, 'permission', { get: () => 'default', configurable: true });
+                                                    } catch(e) {}
+                                                }
+                                            } catch(e) {}
+
                                             try {
                                                 if (navigator.permissions && navigator.permissions.query) {
                                                     const origQuery = navigator.permissions.query;
                                                     navigator.permissions.query = function(params) {
-                                                        if (params && (params.name === 'notifications' || params.name === 'geolocation' || params.name === 'camera')) {
-                                                            const permState = (window.Notification && Notification.permission === 'granted') ? 'granted' : (window.Notification && Notification.permission === 'denied') ? 'denied' : 'prompt';
+                                                        if (params && params.name === 'notifications') {
                                                             const status = Object.create(PermissionStatus.prototype || Object.prototype);
                                                             Object.defineProperties(status, {
-                                                                name: { value: params.name, enumerable: true },
-                                                                state: { value: permState, enumerable: true, writable: false },
-                                                                status: { value: permState, enumerable: true, writable: false },
+                                                                name: { value: 'notifications', enumerable: true },
+                                                                state: { value: 'prompt', enumerable: true, writable: false },
+                                                                status: { value: 'prompt', enumerable: true, writable: false },
                                                                 onchange: { value: null, enumerable: true, writable: true }
                                                             });
                                                             return Promise.resolve(status);
