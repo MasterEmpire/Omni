@@ -17,12 +17,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -186,7 +186,7 @@ fun DashboardScreen(context: Context) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Cloud, contentDescription = null, tint = Color(0xFF58A6FF))
+                            Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF58A6FF))
                             Spacer(Modifier.width(8.dp))
                             Text("Cloud Catalog", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
                         }
@@ -270,7 +270,7 @@ fun DashboardScreen(context: Context) {
                                                 Spacer(Modifier.width(4.dp))
                                                 Text("Update / Re-install", fontSize = 12.sp)
                                             } else {
-                                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                                                 Spacer(Modifier.width(4.dp))
                                                 Text("Download & Install", fontSize = 12.sp)
                                             }
