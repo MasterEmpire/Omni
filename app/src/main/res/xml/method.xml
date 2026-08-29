@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<descriptor xmlns:android="http://schemas.android.com/apk/res/android">
+    <module name="OmniHub" version="1.0.0" />
+</descriptor>
