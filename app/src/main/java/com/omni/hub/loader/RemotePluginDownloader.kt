@@ -22,8 +22,8 @@ object RemotePluginDownloader {
     suspend fun downloadAndInstall(
         context: Context,
         url: String,
-        name: String,
-        entryClass: String,
+        name: String? = null,
+        entryClass: String? = null,
         description: String = "Remote OTA Plugin"
     ): LoadedPlugin = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).build()
@@ -43,23 +43,20 @@ object RemotePluginDownloader {
         }
 
         try {
-            val pluginId = name.replace(Regex("[^a-zA-Z0-9_]"), "_").lowercase()
-            val loaded = PluginLoader.loadFromZip(context, pluginId, tempFile, entryClass)
+            val loaded = PluginLoader.loadFromZip(context, tempFile, name, entryClass)
 
             // Register in metadata registry
-            val currentList = PluginManager.getInstalledPlugins(context).filter { it.id != pluginId }.toMutableList()
+            val currentList = PluginManager.getInstalledPlugins(context).filter { it.id != loaded.id }.toMutableList()
             currentList.add(
                 PluginMetadata(
-                    id = pluginId,
-                    name = name,
+                    id = loaded.id,
+                    name = loaded.name,
                     description = description,
-                    entryClass = entryClass,
+                    entryClass = loaded.entryClass,
                     installedAt = System.currentTimeMillis()
                 )
             )
-            val saveMethod = PluginManager::class.java.getDeclaredMethod("saveRegistry", Context::class.java, List::class.java)
-            saveMethod.isAccessible = true
-            saveMethod.invoke(PluginManager, context, currentList)
+            PluginManager.saveRegistry(context, currentList)
 
             loaded
         } finally {
