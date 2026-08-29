@@ -81,11 +81,13 @@ jobs:
           DOWNLOAD_URL="$SUPABASE_URL/storage/v1/object/public/omni-modules/$TARGET_FILENAME"
           echo "🌐 Public CDN URL: $DOWNLOAD_URL"
 
-          echo "📝 Extracting manifest metadata from bundle..."
+          echo "📝 Extracting manifest metadata from bundle and updating catalog..."
           python3 -c "
-import zipfile, json, os, urllib.request
+import zipfile, json, os, urllib.request, sys
 
-with zipfile.ZipFile('$TARGET_FILENAME', 'r') as z:
+target_zip = '$TARGET_FILENAME' if os.path.exists('$TARGET_FILENAME') else 'bundle.zip'
+
+with zipfile.ZipFile(target_zip, 'r') as z:
     manifest = json.loads(z.read('plugin.json').decode('utf-8'))
 
 payload = {
@@ -110,14 +112,10 @@ req = urllib.request.Request(
     method='POST'
 )
 
-with urllib.request.urlopen(req) as resp:
-    print('✅ Omni Hub Cloud Catalog Updated. Status:', resp.status)
+try:
+    with urllib.request.urlopen(req) as resp:
+        print(f'✅ Omni Hub Cloud Catalog Updated successfully (HTTP {resp.status}).')
+except Exception as e:
+    print(f'❌ Database catalog update FAILED: {e}', file=sys.stderr)
+    sys.exit(1)
 "
-
-          if [ "$DB_STATUS" -ge 200 ] && [ "$DB_STATUS" -lt 300 ]; then
-            echo "✅ Omni Hub Cloud Catalog Updated (HTTP $DB_STATUS)."
-          else
-            echo "❌ Database catalog update FAILED (HTTP $DB_STATUS)."
-            cat response_db.txt
-            exit 1
-          fi
