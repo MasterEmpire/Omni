@@ -81,8 +81,9 @@ private val supabaseHttpClient = OkHttpClient.Builder()
     .readTimeout(20, TimeUnit.SECONDS)
     .build()
 
-private suspend fun fetchCloudModules(): List<CloudModule> = withContext(Dispatchers.IO) {
+private suspend fun fetchCloudModules(): Pair<Boolean, List<CloudModule>> = withContext(Dispatchers.IO) {
     val list = mutableListOf<CloudModule>()
+    var isOnline = false
     try {
         val url = "https://vlzgfaqrnyiqfxxxvtas.supabase.co/rest/v1/omni_modules?select=*&order=created_at.desc"
         val anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsemdmYXFybnlpcWZ4eHh2dGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU1NTk5NDAsImV4cCI6MjA4MTEzNTk0MH0.y93d68JWyGL7NKXZEHLunAuayMEWw1K6yATFGLxkUxY"
@@ -94,6 +95,7 @@ private suspend fun fetchCloudModules(): List<CloudModule> = withContext(Dispatc
 
         val response = supabaseHttpClient.newCall(request).execute()
         if (response.isSuccessful) {
+            isOnline = true
             val jsonStr = response.body?.string() ?: "[]"
             val arr = JSONArray(jsonStr)
             for (i in 0 until arr.length()) {
@@ -112,7 +114,7 @@ private suspend fun fetchCloudModules(): List<CloudModule> = withContext(Dispatc
             }
         }
     } catch (_: Exception) {}
-    list
+    Pair(isOnline, list)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -141,8 +143,9 @@ fun DashboardScreen(context: Context) {
         scope.launch {
             isCloudLoading = true
             OmniLogger.log("CATALOG", "Fetching live module catalog from Supabase...")
-            cloudModules = fetchCloudModules()
-            isBackendOnline = cloudModules.isNotEmpty() || SharedLibManager.getSharedDexPaths(context).isNotEmpty()
+            val (isOnline, modules) = fetchCloudModules()
+            cloudModules = modules
+            isBackendOnline = isOnline
             isCloudLoading = false
         }
     }
