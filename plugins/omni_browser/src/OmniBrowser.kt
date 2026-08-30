@@ -493,20 +493,27 @@ class OmniBrowser : PluginEntry() {
                                                 }
                                             } catch(e) {}
 
-                                            // 5. Iframe Sandbox Stealth Inheritance
+                                            // 5. Synchronous Iframe Stealth Inheritance (Fixes HEADCHR_IFRAME)
                                             try {
-                                                const originalCreateElement = document.createElement;
-                                                document.createElement = function(tagName) {
-                                                    const el = originalCreateElement.call(document, tagName);
-                                                    if (tagName.toLowerCase() === 'iframe') {
-                                                        el.addEventListener('load', function() {
-                                                            try { delete Object.getPrototypeOf(this.contentWindow.navigator).webdriver; } catch(e) {}
-                                                            try { this.contentWindow.chrome = window.chrome; } catch(e) {}
-                                                        });
-                                                    }
-                                                    return el;
-                                                };
-                                                document.createElement.toString = function() { return "function createElement() { [native code] }"; };
+                                                const originalContentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get;
+                                                Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+                                                    get: function() {
+                                                        const win = originalContentWindow.call(this);
+                                                        if (win) {
+                                                            try {
+                                                                if (!win.chrome) {
+                                                                    win.chrome = window.chrome;
+                                                                }
+                                                                if (win.navigator) {
+                                                                    delete Object.getPrototypeOf(win.navigator).webdriver;
+                                                                }
+                                                            } catch(e) {}
+                                                        }
+                                                        return win;
+                                                    },
+                                                    configurable: true,
+                                                    enumerable: true
+                                                });
                                             } catch(e) {}
                                         })();
                                     """.trimIndent()
