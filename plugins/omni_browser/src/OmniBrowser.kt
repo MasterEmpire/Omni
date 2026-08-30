@@ -529,6 +529,11 @@ class OmniBrowser : PluginEntry() {
                 }
 
                 webViewClient = object : WebViewClient() {
+                    override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
+                        // Allow navigation through self-signed and local development certificates
+                        handler?.proceed()
+                    }
+
                     override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                         if (activeTabId == tabId) {
                             canGoBack = view?.canGoBack() ?: false
@@ -948,6 +953,7 @@ class OmniBrowser : PluginEntry() {
             val target = when {
                 input == "about:blank" -> "about:blank"
                 input.startsWith("http://") || input.startsWith("https://") -> input
+                input.startsWith("localhost") || input.startsWith("127.0.0.1") || input.startsWith("192.168.") || input.startsWith("10.") || input.startsWith("172.") -> "http://$input"
                 input.contains(".") && !input.contains(" ") -> "https://$input"
                 else -> "https://www.google.com/search?q=${URLEncoder.encode(input, "UTF-8")}"
             }
@@ -1076,9 +1082,9 @@ class OmniBrowser : PluginEntry() {
                                     .padding(horizontal = 12.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else Icons.Default.Search,
+                                    imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
                                     contentDescription = null,
-                                    tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else Color(0xFF9AA0A6),
+                                    tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else if (currentUrl.startsWith("http://")) Color(0xFFFDD663) else Color(0xFF9AA0A6),
                                     modifier = Modifier.size(16.dp)
                                 )
 
