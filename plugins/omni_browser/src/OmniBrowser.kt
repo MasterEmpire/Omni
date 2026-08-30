@@ -22,6 +22,8 @@ import java.io.FileOutputStream
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import androidx.webkit.ProfileStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -176,6 +178,15 @@ class OmniBrowser : PluginEntry() {
         var solverApiKey by remember { mutableStateOf("") }
         var autoSolveEnabled by remember { mutableStateOf(true) }
         var isSolvingCaptcha by remember { mutableStateOf(false) }
+
+        var activeFileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+        val fileChooserLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            activeFileChooserCallback?.onReceiveValue(uris)
+            activeFileChooserCallback = null
+        }
 
         val desktopUA = remember {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -753,6 +764,28 @@ class OmniBrowser : PluginEntry() {
 
                     override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
                         callback?.invoke(origin, true, false)
+                    }
+
+                    override fun onShowFileChooser(
+                        view: WebView?,
+                        filePathCallback: ValueCallback<Array<Uri>>?,
+                        fileChooserParams: FileChooserParams?
+                    ): Boolean {
+                        activeFileChooserCallback?.onReceiveValue(null)
+                        activeFileChooserCallback = filePathCallback
+                        return try {
+                            val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "*/*"
+                            }
+                            fileChooserLauncher.launch(intent)
+                            true
+                        } catch (e: Exception) {
+                            bridge.log("FILE_CHOOSER_ERR", "Failed to launch file picker: ${e.message}")
+                            activeFileChooserCallback?.onReceiveValue(null)
+                            activeFileChooserCallback = null
+                            false
+                        }
                     }
                 }
 
