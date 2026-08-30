@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.PlatformTextStyle
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex.zIndex
 import com.omni.hub.api.HostBridge
 import com.omni.hub.api.PluginEntry
 import kotlinx.coroutines.Dispatchers
@@ -330,6 +332,8 @@ class OmniBrowser : PluginEntry() {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .zIndex(1f)
+                    .graphicsLayer()
                     .background(Color(0xFF1F2227))
             ) {
                 Row(
@@ -1040,6 +1044,8 @@ class OmniBrowser : PluginEntry() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
+                    .zIndex(1f)
+                    .graphicsLayer()
                     .background(Color(0xFF1F2227))
             ) {
                 Row(
