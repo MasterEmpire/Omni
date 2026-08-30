@@ -258,22 +258,8 @@ fun DashboardScreen(context: Context) {
                         "Supabase Public Module Store",
                         fontSize = 11.sp,
                         color = Color(0xFF8B949E),
-                        modifier = Modifier.padding(bottom = 10.dp)
+                        modifier = Modifier.padding(bottom = 14.dp)
                     )
-
-                    Button(
-                        onClick = { filePicker.launch("application/zip") },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(38.dp)
-                            .padding(bottom = 14.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Import Bundle (.zip)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
 
                     if (isCloudLoading) {
                         Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
