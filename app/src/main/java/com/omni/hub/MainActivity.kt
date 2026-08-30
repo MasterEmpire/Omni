@@ -2,21 +2,28 @@ package com.omni.hub
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
@@ -29,11 +36,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.omni.hub.api.OmniLogger
 import com.omni.hub.container.PluginContainerActivity
+import com.omni.hub.loader.AppTaskSession
+import com.omni.hub.loader.OmniTaskManager
 import com.omni.hub.loader.PluginManager
 import com.omni.hub.loader.PluginMetadata
 import com.omni.hub.loader.PluginTaskEngine
@@ -132,6 +147,7 @@ fun DashboardScreen(context: Context) {
     var showImportDialog by remember { mutableStateOf(false) }
     var showUrlDialog by remember { mutableStateOf(false) }
     var showLogModal by remember { mutableStateOf(false) }
+    var showTaskManagerModal by remember { mutableStateOf(false) }
     var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
     var runningStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
 
@@ -171,8 +187,11 @@ fun DashboardScreen(context: Context) {
         }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
+    val currentSession = OmniTaskManager.currentForegroundSession
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = Color(0xFF161B22),
@@ -188,13 +207,14 @@ fun DashboardScreen(context: Context) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Text("Cloud Catalog", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF58A6FF))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Cloud Catalog", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
-                        }
-                        IconButton(onClick = { loadCloudCatalog() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh Catalog", tint = Color(0xFF8B949E))
+                            IconButton(onClick = { filePicker.launch("application/zip") }) {
+                                Icon(Icons.Default.Add, contentDescription = "Import Zip Bundle", tint = Color(0xFF238636))
+                            }
+                            IconButton(onClick = { loadCloudCatalog() }) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh Catalog", tint = Color(0xFF8B949E))
+                            }
                         }
                     }
 
@@ -202,8 +222,22 @@ fun DashboardScreen(context: Context) {
                         "Supabase Public Module Store",
                         fontSize = 11.sp,
                         color = Color(0xFF8B949E),
-                        modifier = Modifier.padding(bottom = 16.dp)
+                        modifier = Modifier.padding(bottom = 10.dp)
                     )
+
+                    Button(
+                        onClick = { filePicker.launch("application/zip") },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(38.dp)
+                            .padding(bottom = 14.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import Bundle (.zip)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
 
                     if (isCloudLoading) {
                         Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -347,11 +381,23 @@ fun DashboardScreen(context: Context) {
                 )
             },
             floatingActionButton = {
+                val taskCount = OmniTaskManager.activeSessions.size
                 ExtendedFloatingActionButton(
-                    onClick = { filePicker.launch("application/zip") },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Import Bundle (.zip)") },
-                    containerColor = Color(0xFF238636),
+                    onClick = { showTaskManagerModal = true },
+                    icon = {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = "Recents Task Manager",
+                            tint = Color.White
+                        )
+                    },
+                    text = {
+                        Text(
+                            if (taskCount > 0) "Recents ($taskCount)" else "Recents",
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    containerColor = if (taskCount > 0) Color(0xFF1F6FEB) else Color(0xFF21262D),
                     contentColor = Color.White
                 )
             }
@@ -395,11 +441,7 @@ fun DashboardScreen(context: Context) {
                                 plugin = plugin,
                                 isHeadlessRunning = isHeadlessRunning,
                                 onLaunchUI = {
-                                    val intent = Intent(context, PluginContainerActivity::class.java).apply {
-                                        putExtra(PluginContainerActivity.EXTRA_PLUGIN_ID, plugin.id)
-                                        putExtra(PluginContainerActivity.EXTRA_ENTRY_CLASS, plugin.entryClass)
-                                    }
-                                    context.startActivity(intent)
+                                    OmniTaskManager.launchOrResume(context, plugin.id, plugin.name, plugin.entryClass)
                                 },
                                 onToggleHeadless = {
                                     if (isHeadlessRunning) {
@@ -413,6 +455,10 @@ fun DashboardScreen(context: Context) {
                                 },
                                 onDelete = {
                                     PluginTaskEngine.stopTask(context, plugin.id)
+                                    val activeSession = OmniTaskManager.activeSessions.find { it.pluginId == plugin.id }
+                                    if (activeSession != null) {
+                                        OmniTaskManager.killTask(context, activeSession.taskId)
+                                    }
                                     PluginManager.deletePlugin(context, plugin.id)
                                     plugins = PluginManager.getInstalledPlugins(context)
                                     refreshRunningStates()
@@ -475,6 +521,197 @@ fun DashboardScreen(context: Context) {
             }
         )
     }
+
+    if (showTaskManagerModal) {
+        TaskManagerDialog(
+            sessions = OmniTaskManager.activeSessions,
+            onResumeTask = { session ->
+                OmniTaskManager.resumeSession(session)
+                showTaskManagerModal = false
+            },
+            onKillTask = { taskId ->
+                OmniTaskManager.killTask(context, taskId)
+            },
+            onKillAll = {
+                OmniTaskManager.killAllTasks(context)
+                showTaskManagerModal = false
+            },
+            onDismiss = { showTaskManagerModal = false }
+        )
+    }
+
+    // Fullscreen Active App Overlay
+    if (currentSession != null) {
+        BackHandler {
+            OmniTaskManager.suspendCurrent()
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0D1117))
+        ) {
+            AndroidView(
+                factory = {
+                    val parent = currentSession.pluginView.parent as? ViewGroup
+                    parent?.removeView(currentSession.pluginView)
+                    currentSession.pluginView.apply {
+                        setViewTreeLifecycleOwner(context as? ComponentActivity)
+                        setViewTreeViewModelStoreOwner(context as? ComponentActivity)
+                        setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+}
+
+@Composable
+fun TaskManagerDialog(
+    sessions: List<AppTaskSession>,
+    onResumeTask: (AppTaskSession) -> Unit,
+    onKillTask: (String) -> Unit,
+    onKillAll: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF161B22),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Recent Tasks", color = Color(0xFF58A6FF), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF21262D)) {
+                        Text(
+                            "${sessions.size}",
+                            color = Color(0xFFC9D1D9),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                if (sessions.isNotEmpty()) {
+                    TextButton(onClick = onKillAll) {
+                        Text("Clear All", color = Color(0xFFDA3633), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        },
+        text = {
+            if (sessions.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("No recent apps in memory", color = Color(0xFF8B949E), fontSize = 14.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Launched apps stay here when you exit.", color = Color(0xFF484F58), fontSize = 11.sp)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(sessions, key = { it.taskId }) { session ->
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onResumeTask(session) }
+                        ) {
+                            Column {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF21262D))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF238636))
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            session.pluginName,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { onKillTask(session.taskId) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Kill Task",
+                                            tint = Color(0xFFF85149),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(110.dp)
+                                        .background(Color(0xFF161B22)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (session.thumbnail != null) {
+                                        Image(
+                                            bitmap = session.thumbnail!!.asImageBitmap(),
+                                            contentDescription = session.pluginName,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("📱", fontSize = 24.sp)
+                                            Spacer(Modifier.height(4.dp))
+                                            Text("Tap to resume", color = Color(0xFF8B949E), fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D))
+            ) {
+                Text("Close", color = Color(0xFFC9D1D9))
+            }
+        }
+    )
 }
 
 @Composable
