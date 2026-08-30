@@ -42,6 +42,11 @@ interface HostBridge {
     fun copyToClipboard(text: String)
     fun vibrate(durationMs: Long)
 
+    // --- Permissions & Security ---
+    fun hasPermission(permission: String): Boolean
+    fun requestPermission(permission: String, onResult: (Boolean) -> Unit)
+    fun requestPermissions(permissions: Array<String>, onResult: (Map<String, Boolean>) -> Unit)
+
     // --- Device Diagnostics & Hardware Info ---
     fun getBatteryLevel(): Int
     fun isCharging(): Boolean
@@ -78,6 +83,27 @@ interface HostBridge {
     fun log(tag: String, message: String)
 }
 
+object PermissionDispatcher {
+    private var launcher: ((Array<String>, (Map<String, Boolean>) -> Unit) -> Unit)? = null
+
+    fun registerLauncher(block: (Array<String>, (Map<String, Boolean>) -> Unit) -> Unit) {
+        launcher = block
+    }
+
+    fun request(permissions: Array<String>, callback: (Map<String, Boolean>) -> Unit) {
+        val l = launcher
+        if (l != null) {
+            Handler(Looper.getMainLooper()).post {
+                l(permissions, callback)
+            }
+        } else {
+            Handler(Looper.getMainLooper()).post {
+                callback(permissions.associateWith { false })
+            }
+        }
+    }
+}
+
 /**
  * Concrete implementation of the HostBridge instantiated by Omni Hub.
  */
@@ -86,6 +112,37 @@ class HostBridgeImpl(
     private val pluginDir: File,
     private val onCloseRequested: () -> Unit
 ) : HostBridge {
+
+    override fun hasPermission(permission: String): Boolean {
+        return androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            permission
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    override fun requestPermission(permission: String, onResult: (Boolean) -> Unit) {
+        if (hasPermission(permission)) {
+            Handler(Looper.getMainLooper()).post { onResult(true) }
+            return
+        }
+        PermissionDispatcher.request(arrayOf(permission)) { result ->
+            onResult(result[permission] == true)
+        }
+    }
+
+    override fun requestPermissions(permissions: Array<String>, onResult: (Map<String, Boolean>) -> Unit) {
+        val missing = permissions.filter { !hasPermission(it) }
+        if (missing.isEmpty()) {
+            Handler(Looper.getMainLooper()).post {
+                onResult(permissions.associateWith { true })
+            }
+            return
+        }
+        PermissionDispatcher.request(permissions) { result ->
+            val completeMap = permissions.associateWith { hasPermission(it) || result[it] == true }
+            onResult(completeMap)
+        }
+    }
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
