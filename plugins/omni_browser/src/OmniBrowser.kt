@@ -153,6 +153,26 @@ class OmniBrowser : PluginEntry() {
             } catch (_: Exception) {}
         }
 
+        fun saveSessionToDisk(tabList: List<BrowserTab>, currentActiveId: String) {
+            try {
+                val json = org.json.JSONObject()
+                json.put("activeTabId", currentActiveId)
+                val arr = org.json.JSONArray()
+                tabList.forEach { tab ->
+                    val tObj = org.json.JSONObject().apply {
+                        put("id", tab.id)
+                        put("title", tab.title)
+                        put("url", tab.url)
+                        put("profileId", tab.profileId)
+                        put("lastAccessedTime", tab.lastAccessedTime)
+                    }
+                    arr.put(tObj)
+                }
+                json.put("tabs", arr)
+                bridge.saveFile("config/session.json", json.toString().toByteArray(Charsets.UTF_8))
+            } catch (_: Exception) {}
+        }
+
         var tabs by remember {
             mutableStateOf(
                 listOf(
@@ -215,6 +235,39 @@ class OmniBrowser : PluginEntry() {
                     }
                     if (loaded.isNotEmpty()) {
                         profiles = loaded
+                    }
+                }
+            } catch (_: Exception) {}
+
+            try {
+                val sessionBytes = bridge.readFile("config/session.json")
+                if (sessionBytes != null) {
+                    val sObj = org.json.JSONObject(String(sessionBytes, Charsets.UTF_8))
+                    val savedActiveId = sObj.optString("activeTabId", "")
+                    val arr = sObj.optJSONArray("tabs")
+                    if (arr != null && arr.length() > 0) {
+                        val loadedTabs = mutableListOf<BrowserTab>()
+                        for (i in 0 until arr.length()) {
+                            val tObj = arr.getJSONObject(i)
+                            loadedTabs.add(
+                                BrowserTab(
+                                    id = tObj.getString("id"),
+                                    title = tObj.optString("title", "New Tab"),
+                                    url = tObj.optString("url", "about:blank"),
+                                    lastAccessedTime = tObj.optLong("lastAccessedTime", System.currentTimeMillis()),
+                                    profileId = tObj.optString("profileId", "default")
+                                )
+                            )
+                        }
+                        if (loadedTabs.isNotEmpty()) {
+                            tabs = loadedTabs
+                            val targetId = if (savedActiveId.isNotEmpty() && loadedTabs.any { it.id == savedActiveId }) savedActiveId else loadedTabs.first().id
+                            activeTabId = targetId
+                            val currentActive = loadedTabs.first { it.id == targetId }
+                            currentUrl = currentActive.url
+                            urlInputText = if (currentActive.url == "about:blank") "" else currentActive.url
+                            pageTitle = currentActive.title
+                        }
                     }
                 }
             } catch (_: Exception) {}
@@ -457,6 +510,7 @@ class OmniBrowser : PluginEntry() {
                         if (!title.isNullOrEmpty()) {
                             if (activeTabId == tabId) pageTitle = title
                             tabs = tabs.map { if (it.id == tabId) it.copy(title = title) else it }
+                            saveSessionToDisk(tabs, activeTabId)
                         }
                     }
 
@@ -486,6 +540,7 @@ class OmniBrowser : PluginEntry() {
                         }
                         if (url != null && url != "about:blank") {
                             tabs = tabs.map { if (it.id == tabId) it.copy(url = url) else it }
+                            saveSessionToDisk(tabs, activeTabId)
                         }
                     }
 
@@ -812,6 +867,7 @@ class OmniBrowser : PluginEntry() {
             activeTabId = newId
             isTabSwitcherOpen = false
 
+            saveSessionToDisk(tabs, newId)
             attachTabWebView(newId)
         }
 
@@ -831,6 +887,7 @@ class OmniBrowser : PluginEntry() {
             activeTabId = targetId
             isTabSwitcherOpen = false
 
+            saveSessionToDisk(tabs, targetId)
             attachTabWebView(targetId)
         }
 
@@ -850,6 +907,7 @@ class OmniBrowser : PluginEntry() {
                 val freshTab = BrowserTab(id = newId, title = "New Tab", url = "about:blank")
                 tabs = listOf(freshTab)
                 activeTabId = newId
+                saveSessionToDisk(tabs, newId)
                 attachTabWebView(newId)
             } else {
                 tabs = remainingTabs
@@ -857,7 +915,10 @@ class OmniBrowser : PluginEntry() {
                     val nextIdx = (currentIdx - 1).coerceAtLeast(0).coerceAtMost(remainingTabs.size - 1)
                     val nextTab = remainingTabs[nextIdx]
                     activeTabId = nextTab.id
+                    saveSessionToDisk(tabs, nextTab.id)
                     attachTabWebView(nextTab.id)
+                } else {
+                    saveSessionToDisk(tabs, activeTabId)
                 }
             }
         }
@@ -876,6 +937,7 @@ class OmniBrowser : PluginEntry() {
             activeTabId = newId
             isTabSwitcherOpen = false
 
+            saveSessionToDisk(tabs, newId)
             attachTabWebView(newId)
         }
 
