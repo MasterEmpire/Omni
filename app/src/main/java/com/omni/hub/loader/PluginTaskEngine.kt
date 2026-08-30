@@ -25,7 +25,7 @@ object PluginTaskEngine {
         val job = scope.launch {
             try {
                 val loadedPlugin = PluginLoader.loadFromDir(context, pluginId, entryClass)
-                val bridge = HostBridgeImpl(context, loadedPlugin.baseDir) {
+                val bridge = HostBridgeImpl(context, loadedPlugin.dataDir) {
                     stopTask(context, pluginId)
                 }
 
