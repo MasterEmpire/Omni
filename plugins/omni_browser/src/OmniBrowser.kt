@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.webkit.*
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -93,6 +94,7 @@ class OmniBrowser : PluginEntry() {
     @SuppressLint("SetJavaScriptEnabled")
     @Composable
     fun ChromeBrowserScreen(bridge: HostBridge) {
+        val context = androidx.compose.ui.platform.LocalContext.current
         val focusManager = LocalFocusManager.current
 
         var tabs by remember {
@@ -119,7 +121,20 @@ class OmniBrowser : PluginEntry() {
         var isDesktopMode by remember { mutableStateOf(false) }
         var showMenu by remember { mutableStateOf(false) }
 
+        val webViewPool = remember { mutableMapOf<String, WebView>() }
+        var containerLayout: FrameLayout? by remember { mutableStateOf(null) }
         var webViewInstance: WebView? by remember { mutableStateOf(null) }
+
+        var mobileUA by remember { mutableStateOf("") }
+        var showSolverDialog by remember { mutableStateOf(false) }
+        var solverApiKey by remember { mutableStateOf("") }
+        var autoSolveEnabled by remember { mutableStateOf(true) }
+        var isSolvingCaptcha by remember { mutableStateOf(false) }
+        val coroutineScope = rememberCoroutineScope()
+
+        val desktopUA = remember {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        }
 
         fun captureThumbnail(): Bitmap? {
             val wv = webViewInstance ?: return null
@@ -138,21 +153,366 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
+        fun createConfiguredWebView(tabId: String, initialUrl: String): WebView {
+            val webView = WebView(context).apply {
+                setBackgroundColor(android.graphics.Color.parseColor("#1F2227"))
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+
+                val rawUA = settings.userAgentString
+                val mobileUserAgent = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
+                mobileUA = mobileUserAgent
+                settings.userAgentString = mobileUserAgent
+
+                webChromeClient = object : WebChromeClient() {
+                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                        if (activeTabId == tabId) {
+                            loadProgress = newProgress / 100f
+                            isLoading = newProgress in 1..99
+                        }
+                    }
+
+                    override fun onReceivedTitle(view: WebView?, title: String?) {
+                        if (!title.isNullOrEmpty()) {
+                            if (activeTabId == tabId) pageTitle = title
+                            tabs = tabs.map { if (it.id == tabId) it.copy(title = title) else it }
+                        }
+                    }
+
+                    override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                        bridge.log("CHROME_CONSOLE", "[$tabId][${consoleMessage?.messageLevel()}] ${consoleMessage?.message()}")
+                        return true
+                    }
+
+                    override fun onPermissionRequest(request: PermissionRequest?) {
+                        request?.grant(request.resources)
+                    }
+
+                    override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
+                        callback?.invoke(origin, true, false)
+                    }
+                }
+
+                webViewClient = object : WebViewClient() {
+                    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                        if (activeTabId == tabId) {
+                            canGoBack = view?.canGoBack() ?: false
+                            canGoForward = view?.canGoForward() ?: false
+                            if (url != null && url != "about:blank") {
+                                currentUrl = url
+                                urlInputText = url
+                            }
+                        }
+                        if (url != null && url != "about:blank") {
+                            tabs = tabs.map { if (it.id == tabId) it.copy(url = url) else it }
+                        }
+                    }
+
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        if (activeTabId == tabId) isLoading = true
+
+                        val stealthPolyfill = """
+                            javascript:(function() {
+                                const nativeToString = Function.prototype.toString;
+                                const registeredNativeFunctions = new WeakSet();
+
+                                function makeNative(fn, name) {
+                                    if (name) {
+                                        try {
+                                            Object.defineProperty(fn, 'name', { value: name, configurable: true });
+                                        } catch(e) {}
+                                    }
+                                    registeredNativeFunctions.add(fn);
+                                    return fn;
+                                }
+
+                                Function.prototype.toString = function() {
+                                    if (registeredNativeFunctions.has(this)) {
+                                        return "function " + (this.name || "") + "() { [native code] }";
+                                    }
+                                    return nativeToString.apply(this, arguments);
+                                };
+                                makeNative(Function.prototype.toString, 'toString');
+
+                                try {
+                                    delete Object.getPrototypeOf(navigator).webdriver;
+                                } catch(e) {}
+
+                                try {
+                                    if (!window.chrome) {
+                                        window.chrome = {
+                                            app: {
+                                                isInstalled: false,
+                                                InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
+                                                RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" }
+                                            },
+                                            runtime: {
+                                                OnInstalledReason: {},
+                                                OnRestartRequiredReason: {},
+                                                PlatformArch: {},
+                                                PlatformNaclArch: {},
+                                                PlatformOs: {},
+                                                RequestUpdateCheckStatus: {},
+                                                connect: makeNative(function connect(){}, 'connect'),
+                                                sendMessage: makeNative(function sendMessage(){}, 'sendMessage')
+                                            },
+                                            csi: makeNative(function csi(){}, 'csi'),
+                                            loadTimes: makeNative(function loadTimes(){}, 'loadTimes')
+                                        };
+                                    }
+                                } catch(e) {}
+
+                                try {
+                                    const pluginData = [
+                                        { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+                                        { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+                                        { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+                                        { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+                                        { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format" }
+                                    ];
+
+                                    const fakePlugins = Object.create(PluginArray.prototype);
+                                    const fakeMimes = Object.create(MimeTypeArray.prototype);
+
+                                    pluginData.forEach((p, idx) => {
+                                        const pluginObj = Object.create(Plugin.prototype);
+                                        Object.defineProperties(pluginObj, {
+                                            name: { value: p.name, enumerable: true },
+                                            filename: { value: p.filename, enumerable: true },
+                                            description: { value: p.description, enumerable: true },
+                                            length: { value: 0, enumerable: true }
+                                        });
+                                        fakePlugins[idx] = pluginObj;
+                                        fakePlugins[p.name] = pluginObj;
+                                    });
+
+                                    Object.defineProperties(fakePlugins, {
+                                        length: { value: pluginData.length, enumerable: false },
+                                        item: { value: makeNative(function item(i) { return this[i] || null; }, 'item'), enumerable: false },
+                                        namedItem: { value: makeNative(function namedItem(name) { return this[name] || null; }, 'namedItem'), enumerable: false },
+                                        refresh: { value: makeNative(function refresh() {}, 'refresh'), enumerable: false }
+                                    });
+
+                                    const navProto = Object.getPrototypeOf(navigator);
+                                    Object.defineProperty(navProto, 'plugins', {
+                                        get: makeNative(function plugins() { return fakePlugins; }, 'get plugins'),
+                                        enumerable: true,
+                                        configurable: true
+                                    });
+
+                                    Object.defineProperty(navProto, 'mimeTypes', {
+                                        get: makeNative(function mimeTypes() { return fakeMimes; }, 'get mimeTypes'),
+                                        enumerable: true,
+                                        configurable: true
+                                    });
+
+                                    Object.defineProperty(navProto, 'pdfViewerEnabled', {
+                                        get: makeNative(function pdfViewerEnabled() { return true; }, 'get pdfViewerEnabled'),
+                                        enumerable: true,
+                                        configurable: true
+                                    });
+                                } catch(e) {}
+
+                                try {
+                                    const chromeBrands = Object.freeze([
+                                        Object.freeze({ brand: 'Not_A Brand', version: '8' }),
+                                        Object.freeze({ brand: 'Chromium', version: '128' }),
+                                        Object.freeze({ brand: 'Google Chrome', version: '128' })
+                                    ]);
+
+                                    const fakeUaData = {
+                                        brands: chromeBrands,
+                                        mobile: true,
+                                        platform: 'Android',
+                                        getHighEntropyValues: makeNative(function getHighEntropyValues(hints) {
+                                            return Promise.resolve({
+                                                brands: chromeBrands,
+                                                mobile: true,
+                                                platform: 'Android',
+                                                architecture: 'arm',
+                                                bitness: '64',
+                                                model: 'SM-A315G',
+                                                platformVersion: '12.0.0',
+                                                fullVersionList: chromeBrands
+                                            });
+                                        }, 'getHighEntropyValues'),
+                                        toJSON: makeNative(function toJSON() {
+                                            return { brands: chromeBrands, mobile: true, platform: 'Android' };
+                                        }, 'toJSON')
+                                    };
+
+                                    const navProto = Object.getPrototypeOf(navigator);
+                                    Object.defineProperty(navProto, 'userAgentData', {
+                                        get: makeNative(function userAgentData() { return fakeUaData; }, 'get userAgentData'),
+                                        configurable: true,
+                                        enumerable: true
+                                    });
+                                } catch(e) {}
+
+                                try {
+                                    if (window.Notification) {
+                                        Object.defineProperty(window.Notification, 'permission', {
+                                            get: makeNative(function permission() { return 'default'; }, 'get permission'),
+                                            configurable: true,
+                                            enumerable: true
+                                        });
+                                    }
+
+                                    if (window.Permissions && Permissions.prototype && Permissions.prototype.query) {
+                                        const origQuery = Permissions.prototype.query;
+                                        Permissions.prototype.query = makeNative(function query(params) {
+                                            if (params && params.name === 'notifications') {
+                                                const status = Object.create(PermissionStatus.prototype || Object.prototype);
+                                                Object.defineProperties(status, {
+                                                    name: { value: 'notifications', enumerable: true },
+                                                    state: { value: 'prompt', enumerable: true, writable: false },
+                                                    status: { value: 'prompt', enumerable: true, writable: false },
+                                                    onchange: { value: null, enumerable: true, writable: true }
+                                                });
+                                                return Promise.resolve(status);
+                                            }
+                                            return origQuery.apply(this, arguments);
+                                        }, 'query');
+                                    }
+                                } catch(e) {}
+
+                                try {
+                                    const originalContentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get;
+                                    Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+                                        get: makeNative(function contentWindow() {
+                                            const win = originalContentWindow.call(this);
+                                            if (win) {
+                                                try {
+                                                    if (!win.chrome) win.chrome = window.chrome;
+                                                    if (win.navigator) delete Object.getPrototypeOf(win.navigator).webdriver;
+                                                } catch(e) {}
+                                            }
+                                            return win;
+                                        }, 'get contentWindow'),
+                                        configurable: true,
+                                        enumerable: true
+                                    });
+                                } catch(e) {}
+
+                                try {
+                                    if (!('speechSynthesis' in window)) {
+                                        window.speechSynthesis = {
+                                            pending: false,
+                                            speaking: false,
+                                            paused: false,
+                                            onvoiceschanged: null,
+                                            getVoices: makeNative(function getVoices() { return []; }, 'getVoices'),
+                                            speak: makeNative(function speak() {}, 'speak'),
+                                            cancel: makeNative(function cancel() {}, 'cancel'),
+                                            pause: makeNative(function pause() {}, 'pause'),
+                                            resume: makeNative(function resume() {}, 'resume'),
+                                            addEventListener: makeNative(function addEventListener() {}, 'addEventListener'),
+                                            removeEventListener: makeNative(function removeEventListener() {}, 'removeEventListener'),
+                                            dispatchEvent: makeNative(function dispatchEvent() { return true; }, 'dispatchEvent')
+                                        };
+                                    }
+                                } catch(e) {}
+                            })();
+                        """.trimIndent()
+                        view?.evaluateJavascript(stealthPolyfill, null)
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        if (activeTabId == tabId) isLoading = false
+
+                        if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != null && url != "about:blank") {
+                            val detectorScript = """
+                                (function() {
+                                    const el = document.querySelector('[data-sitekey]');
+                                    if (el) return el.getAttribute('data-sitekey');
+                                    const iframe = document.querySelector('iframe[src*="recaptcha"], iframe[src*="turnstile"]');
+                                    if (iframe) {
+                                        const m = iframe.src.match(/k=([^&]+)/) || iframe.src.match(/sitekey=([^&]+)/);
+                                        if (m) return m[1];
+                                    }
+                                    return '';
+                                })();
+                            """.trimIndent()
+
+                            view?.evaluateJavascript(detectorScript) { siteKeyRaw ->
+                                val siteKey = siteKeyRaw?.replace("\"", "")?.trim() ?: ""
+                                if (siteKey.isNotEmpty()) {
+                                    executeSolver(siteKey, url)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    databaseEnabled = true
+                    setSupportMultipleWindows(true)
+                    javaScriptCanOpenWindowsAutomatically = true
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    cacheMode = WebSettings.LOAD_DEFAULT
+                    mediaPlaybackRequiresUserGesture = false
+                    loadWithOverviewMode = true
+                    useWideViewPort = true
+
+                    try {
+                        val method = javaClass.getMethod("setRequestedWithHeaderOriginAllowList", Set::class.java)
+                        method.invoke(this, emptySet<String>())
+                    } catch (_: Exception) {}
+                }
+
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            }
+
+            if (initialUrl.isNotEmpty() && initialUrl != "about:blank") {
+                webView.loadUrl(initialUrl)
+            }
+            return webView
+        }
+
+        fun attachTabWebView(targetTabId: String) {
+            val container = containerLayout ?: return
+            
+            webViewPool.forEach { (id, wv) ->
+                if (id != targetTabId) {
+                    wv.onPause()
+                }
+            }
+            container.removeAllViews()
+
+            val targetTab = tabs.find { it.id == targetTabId } ?: return
+            val targetWv = webViewPool.getOrPut(targetTabId) {
+                createConfiguredWebView(targetTabId, targetTab.url)
+            }
+
+            container.addView(targetWv)
+            targetWv.onResume()
+            webViewInstance = targetWv
+
+            currentUrl = targetTab.url
+            urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
+            pageTitle = targetTab.title
+            canGoBack = targetWv.canGoBack()
+            canGoForward = targetWv.canGoForward()
+        }
+
         fun createNewTab(targetUrl: String = "about:blank") {
             val thumb = captureThumbnail()
-            val bundle = Bundle()
-            webViewInstance?.saveState(bundle)
-            val updatedTabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb) else it }
+            val updatedTabs = tabs.map { if (it.id == activeTabId && thumb != null) it.copy(thumbnail = thumb) else it }
 
             val newId = "tab_${System.currentTimeMillis()}"
             val newTab = BrowserTab(id = newId, title = if (targetUrl == "about:blank") "New Tab" else targetUrl, url = targetUrl)
             tabs = updatedTabs + newTab
             activeTabId = newId
-            currentUrl = targetUrl
-            urlInputText = if (targetUrl == "about:blank") "" else targetUrl
-            pageTitle = if (targetUrl == "about:blank") "New Tab" else targetUrl
             isTabSwitcherOpen = false
-            webViewInstance?.loadUrl(targetUrl)
+
+            attachTabWebView(newId)
         }
 
         fun switchToTab(targetId: String) {
@@ -161,27 +521,22 @@ class OmniBrowser : PluginEntry() {
                 return
             }
             val thumb = captureThumbnail()
-            val bundle = Bundle()
-            webViewInstance?.saveState(bundle)
-            val updatedTabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb) else it }
-
-            activeTabId = targetId
+            val updatedTabs = tabs.map { if (it.id == activeTabId && thumb != null) it.copy(thumbnail = thumb) else it }
             tabs = updatedTabs
-            val targetTab = updatedTabs.find { it.id == targetId }
-            if (targetTab != null) {
-                currentUrl = targetTab.url
-                urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
-                pageTitle = targetTab.title
-                if (targetTab.stateBundle != null) {
-                    webViewInstance?.restoreState(targetTab.stateBundle)
-                } else {
-                    webViewInstance?.loadUrl(targetTab.url)
-                }
-            }
+            activeTabId = targetId
             isTabSwitcherOpen = false
+
+            attachTabWebView(targetId)
         }
 
         fun closeTab(targetId: String) {
+            webViewPool.remove(targetId)?.let { wv ->
+                wv.stopLoading()
+                wv.onPause()
+                containerLayout?.removeView(wv)
+                wv.destroy()
+            }
+
             val currentIdx = tabs.indexOfFirst { it.id == targetId }
             val remainingTabs = tabs.filter { it.id != targetId }
 
@@ -190,37 +545,33 @@ class OmniBrowser : PluginEntry() {
                 val freshTab = BrowserTab(id = newId, title = "New Tab", url = "about:blank")
                 tabs = listOf(freshTab)
                 activeTabId = newId
-                currentUrl = "about:blank"
-                urlInputText = ""
-                pageTitle = "New Tab"
-                webViewInstance?.loadUrl("about:blank")
+                attachTabWebView(newId)
             } else {
                 tabs = remainingTabs
                 if (targetId == activeTabId) {
                     val nextIdx = (currentIdx - 1).coerceAtLeast(0).coerceAtMost(remainingTabs.size - 1)
                     val nextTab = remainingTabs[nextIdx]
                     activeTabId = nextTab.id
-                    currentUrl = nextTab.url
-                    urlInputText = if (nextTab.url == "about:blank") "" else nextTab.url
-                    pageTitle = nextTab.title
-                    if (nextTab.stateBundle != null) {
-                        webViewInstance?.restoreState(nextTab.stateBundle)
-                    } else {
-                        webViewInstance?.loadUrl(nextTab.url)
-                    }
+                    attachTabWebView(nextTab.id)
                 }
             }
         }
 
         fun closeAllTabs() {
+            webViewPool.forEach { (_, wv) ->
+                wv.stopLoading()
+                wv.onPause()
+                wv.destroy()
+            }
+            webViewPool.clear()
+            containerLayout?.removeAllViews()
+
             val newId = "tab_${System.currentTimeMillis()}"
             tabs = listOf(BrowserTab(id = newId, title = "New Tab", url = "about:blank"))
             activeTabId = newId
-            currentUrl = "about:blank"
-            urlInputText = ""
-            pageTitle = "New Tab"
             isTabSwitcherOpen = false
-            webViewInstance?.loadUrl("about:blank")
+
+            attachTabWebView(newId)
         }
         var mobileUA by remember { mutableStateOf("") }
         var showSolverDialog by remember { mutableStateOf(false) }
@@ -759,331 +1110,22 @@ class OmniBrowser : PluginEntry() {
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                // Background WebView (Always Alive)
+                // Dedicated Multi-WebView Host Container
                 AndroidView(
                     factory = { ctx ->
-                        WebView(ctx).apply {
-                            setBackgroundColor(android.graphics.Color.parseColor("#1F2227"))
+                        FrameLayout(ctx).apply {
                             layoutParams = ViewGroup.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT
                             )
-
-                            // 1. Dynamic Hardware-Matched User-Agent Sanitization
-                            val rawUA = settings.userAgentString
-                            mobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
-                            settings.userAgentString = mobileUA
-
-                            webChromeClient = object : WebChromeClient() {
-                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                    loadProgress = newProgress / 100f
-                                    isLoading = newProgress in 1..99
-                                }
-
-                                override fun onReceivedTitle(view: WebView?, title: String?) {
-                                    if (!title.isNullOrEmpty()) {
-                                        pageTitle = title
-                                        tabs = tabs.map { if (it.id == activeTabId) it.copy(title = title) else it }
-                                    }
-                                }
-
-                                override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
-                                    bridge.log("CHROME_CONSOLE", "[${consoleMessage?.messageLevel()}] ${consoleMessage?.message()}")
-                                    return true
-                                }
-
-                                override fun onPermissionRequest(request: PermissionRequest?) {
-                                    request?.grant(request.resources)
-                                }
-
-                                override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
-                                    callback?.invoke(origin, true, false)
-                                }
+                            containerLayout = this
+                            val initialWv = webViewPool.getOrPut(activeTabId) {
+                                createConfiguredWebView(activeTabId, currentUrl)
                             }
-
-                            webViewClient = object : WebViewClient() {
-                                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-                                    canGoBack = view?.canGoBack() ?: false
-                                    canGoForward = view?.canGoForward() ?: false
-                                    if (url != null && url != "about:blank") {
-                                        currentUrl = url
-                                        urlInputText = url
-                                        tabs = tabs.map { if (it.id == activeTabId) it.copy(url = url) else it }
-                                    }
-                                }
-
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                    super.onPageStarted(view, url, favicon)
-                                    isLoading = true
-
-                                    // Deep Prototype & Native toString Stealth Engine
-                                    val stealthPolyfill = """
-                                        javascript:(function() {
-                                            // --- 0. Global Native toString Masking Engine (Parrot Fix) ---
-                                            const nativeToString = Function.prototype.toString;
-                                            const registeredNativeFunctions = new WeakSet();
-
-                                            function makeNative(fn, name) {
-                                                if (name) {
-                                                    try {
-                                                        Object.defineProperty(fn, 'name', { value: name, configurable: true });
-                                                    } catch(e) {}
-                                                }
-                                                registeredNativeFunctions.add(fn);
-                                                return fn;
-                                            }
-
-                                            Function.prototype.toString = function() {
-                                                if (registeredNativeFunctions.has(this)) {
-                                                    return "function " + (this.name || "") + "() { [native code] }";
-                                                }
-                                                return nativeToString.apply(this, arguments);
-                                            };
-                                            makeNative(Function.prototype.toString, 'toString');
-
-                                            // --- 1. Strip WebDriver Cleanly ---
-                                            try {
-                                                delete Object.getPrototypeOf(navigator).webdriver;
-                                            } catch(e) {}
-
-                                            // --- 2. Mock Chrome Runtime Object ---
-                                            try {
-                                                if (!window.chrome) {
-                                                    window.chrome = {
-                                                        app: {
-                                                            isInstalled: false,
-                                                            InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
-                                                            RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" }
-                                                        },
-                                                        runtime: {
-                                                            OnInstalledReason: {},
-                                                            OnRestartRequiredReason: {},
-                                                            PlatformArch: {},
-                                                            PlatformNaclArch: {},
-                                                            PlatformOs: {},
-                                                            RequestUpdateCheckStatus: {},
-                                                            connect: makeNative(function connect(){}, 'connect'),
-                                                            sendMessage: makeNative(function sendMessage(){}, 'sendMessage')
-                                                        },
-                                                        csi: makeNative(function csi(){}, 'csi'),
-                                                        loadTimes: makeNative(function loadTimes(){}, 'loadTimes')
-                                                    };
-                                                }
-                                            } catch(e) {}
-
-                                            // --- 3. Mock Real Chromium PluginArray & MimeTypes on Navigator.prototype (Peacock Fix) ---
-                                            try {
-                                                const pluginData = [
-                                                    { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-                                                    { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-                                                    { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-                                                    { name: "Microsoft Edge PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
-                                                    { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format" }
-                                                ];
-
-                                                const fakePlugins = Object.create(PluginArray.prototype);
-                                                const fakeMimes = Object.create(MimeTypeArray.prototype);
-
-                                                pluginData.forEach((p, idx) => {
-                                                    const pluginObj = Object.create(Plugin.prototype);
-                                                    Object.defineProperties(pluginObj, {
-                                                        name: { value: p.name, enumerable: true },
-                                                        filename: { value: p.filename, enumerable: true },
-                                                        description: { value: p.description, enumerable: true },
-                                                        length: { value: 0, enumerable: true }
-                                                    });
-                                                    fakePlugins[idx] = pluginObj;
-                                                    fakePlugins[p.name] = pluginObj;
-                                                });
-
-                                                Object.defineProperties(fakePlugins, {
-                                                    length: { value: pluginData.length, enumerable: false },
-                                                    item: { value: makeNative(function item(i) { return this[i] || null; }, 'item'), enumerable: false },
-                                                    namedItem: { value: makeNative(function namedItem(name) { return this[name] || null; }, 'namedItem'), enumerable: false },
-                                                    refresh: { value: makeNative(function refresh() {}, 'refresh'), enumerable: false }
-                                                });
-
-                                                const navProto = Object.getPrototypeOf(navigator);
-                                                Object.defineProperty(navProto, 'plugins', {
-                                                    get: makeNative(function plugins() { return fakePlugins; }, 'get plugins'),
-                                                    enumerable: true,
-                                                    configurable: true
-                                                });
-
-                                                Object.defineProperty(navProto, 'mimeTypes', {
-                                                    get: makeNative(function mimeTypes() { return fakeMimes; }, 'get mimeTypes'),
-                                                    enumerable: true,
-                                                    configurable: true
-                                                });
-
-                                                Object.defineProperty(navProto, 'pdfViewerEnabled', {
-                                                    get: makeNative(function pdfViewerEnabled() { return true; }, 'get pdfViewerEnabled'),
-                                                    enumerable: true,
-                                                    configurable: true
-                                                });
-                                            } catch(e) {}
-
-                                            // --- 4. Prototype-Level Client Hints (Leopard & Peacock Fix) ---
-                                            try {
-                                                const chromeBrands = Object.freeze([
-                                                    Object.freeze({ brand: 'Not_A Brand', version: '8' }),
-                                                    Object.freeze({ brand: 'Chromium', version: '128' }),
-                                                    Object.freeze({ brand: 'Google Chrome', version: '128' })
-                                                ]);
-
-                                                const fakeUaData = {
-                                                    brands: chromeBrands,
-                                                    mobile: true,
-                                                    platform: 'Android',
-                                                    getHighEntropyValues: makeNative(function getHighEntropyValues(hints) {
-                                                        return Promise.resolve({
-                                                            brands: chromeBrands,
-                                                            mobile: true,
-                                                            platform: 'Android',
-                                                            architecture: 'arm',
-                                                            bitness: '64',
-                                                            model: 'SM-A315G',
-                                                            platformVersion: '12.0.0',
-                                                            fullVersionList: chromeBrands
-                                                        });
-                                                    }, 'getHighEntropyValues'),
-                                                    toJSON: makeNative(function toJSON() {
-                                                        return { brands: chromeBrands, mobile: true, platform: 'Android' };
-                                                    }, 'toJSON')
-                                                };
-
-                                                const navProto = Object.getPrototypeOf(navigator);
-                                                Object.defineProperty(navProto, 'userAgentData', {
-                                                    get: makeNative(function userAgentData() { return fakeUaData; }, 'get userAgentData'),
-                                                    configurable: true,
-                                                    enumerable: true
-                                                });
-                                            } catch(e) {}
-
-                                            // --- 5. Prototype-Level Permissions Alignment ---
-                                            try {
-                                                if (window.Notification) {
-                                                    Object.defineProperty(window.Notification, 'permission', {
-                                                        get: makeNative(function permission() { return 'default'; }, 'get permission'),
-                                                        configurable: true,
-                                                        enumerable: true
-                                                    });
-                                                }
-
-                                                if (window.Permissions && Permissions.prototype && Permissions.prototype.query) {
-                                                    const origQuery = Permissions.prototype.query;
-                                                    Permissions.prototype.query = makeNative(function query(params) {
-                                                        if (params && params.name === 'notifications') {
-                                                            const status = Object.create(PermissionStatus.prototype || Object.prototype);
-                                                            Object.defineProperties(status, {
-                                                                name: { value: 'notifications', enumerable: true },
-                                                                state: { value: 'prompt', enumerable: true, writable: false },
-                                                                status: { value: 'prompt', enumerable: true, writable: false },
-                                                                onchange: { value: null, enumerable: true, writable: true }
-                                                            });
-                                                            return Promise.resolve(status);
-                                                        }
-                                                        return origQuery.apply(this, arguments);
-                                                    }, 'query');
-                                                }
-                                            } catch(e) {}
-
-                                            // --- 6. Synchronous Iframe Stealth ---
-                                            try {
-                                                const originalContentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get;
-                                                Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
-                                                    get: makeNative(function contentWindow() {
-                                                        const win = originalContentWindow.call(this);
-                                                        if (win) {
-                                                            try {
-                                                                if (!win.chrome) win.chrome = window.chrome;
-                                                                if (win.navigator) delete Object.getPrototypeOf(win.navigator).webdriver;
-                                                            } catch(e) {}
-                                                        }
-                                                        return win;
-                                                    }, 'get contentWindow'),
-                                                    configurable: true,
-                                                    enumerable: true
-                                                });
-                                            } catch(e) {}
-
-                                            // --- 7. Native Web Speech API Mock (Parrot Compliant) ---
-                                            try {
-                                                if (!('speechSynthesis' in window)) {
-                                                    window.speechSynthesis = {
-                                                        pending: false,
-                                                        speaking: false,
-                                                        paused: false,
-                                                        onvoiceschanged: null,
-                                                        getVoices: makeNative(function getVoices() { return []; }, 'getVoices'),
-                                                        speak: makeNative(function speak() {}, 'speak'),
-                                                        cancel: makeNative(function cancel() {}, 'cancel'),
-                                                        pause: makeNative(function pause() {}, 'pause'),
-                                                        resume: makeNative(function resume() {}, 'resume'),
-                                                        addEventListener: makeNative(function addEventListener() {}, 'addEventListener'),
-                                                        removeEventListener: makeNative(function removeEventListener() {}, 'removeEventListener'),
-                                                        dispatchEvent: makeNative(function dispatchEvent() { return true; }, 'dispatchEvent')
-                                                    };
-                                                }
-                                            } catch(e) {}
-                                        })();
-                                    """.trimIndent()
-                                    view?.evaluateJavascript(stealthPolyfill, null)
-                                }
-
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    isLoading = false
-
-                                    // Automatic Challenge Detection on Page Load
-                                    if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != null && url != "about:blank") {
-                                        val detectorScript = """
-                                            (function() {
-                                                const el = document.querySelector('[data-sitekey]');
-                                                if (el) return el.getAttribute('data-sitekey');
-                                                const iframe = document.querySelector('iframe[src*="recaptcha"], iframe[src*="turnstile"]');
-                                                if (iframe) {
-                                                    const m = iframe.src.match(/k=([^&]+)/) || iframe.src.match(/sitekey=([^&]+)/);
-                                                    if (m) return m[1];
-                                                }
-                                                return '';
-                                            })();
-                                        """.trimIndent()
-
-                                        view?.evaluateJavascript(detectorScript) { siteKeyRaw ->
-                                            val siteKey = siteKeyRaw?.replace("\"", "")?.trim() ?: ""
-                                            if (siteKey.isNotEmpty()) {
-                                                executeSolver(siteKey, url)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                databaseEnabled = true
-                                setSupportMultipleWindows(true)
-                                javaScriptCanOpenWindowsAutomatically = true
-                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                cacheMode = WebSettings.LOAD_DEFAULT
-                                mediaPlaybackRequiresUserGesture = false
-                                loadWithOverviewMode = true
-                                useWideViewPort = true
-
-                                // Suppress 'X-Requested-With: com.omni.hub' HTTP header across all network requests
-                                try {
-                                    val method = javaClass.getMethod("setRequestedWithHeaderOriginAllowList", Set::class.java)
-                                    method.invoke(this, emptySet<String>())
-                                } catch (_: Exception) {}
-                            }
-
-                            CookieManager.getInstance().setAcceptCookie(true)
-                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                            webViewInstance = initialWv
+                            addView(initialWv)
                         }
                     },
-                    update = { view -> webViewInstance = view },
                     modifier = Modifier.fillMaxSize()
                 )
 
