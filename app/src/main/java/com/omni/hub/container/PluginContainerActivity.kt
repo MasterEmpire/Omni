@@ -38,6 +38,7 @@ class PluginContainerActivity : Activity(), LifecycleOwner, ViewModelStoreOwner,
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.decorView.setBackgroundColor(android.graphics.Color.parseColor("#1F2227"))
         savedStateRegistryController.performRestore(savedInstanceState)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
 
