@@ -43,7 +43,7 @@ object OmniTaskManager {
         OmniLogger.log("TASK_MANAGER", "Instantiating new session for [$pluginName] ($entryClass)")
         val loaded = PluginLoader.loadFromDir(context, pluginId, entryClass)
 
-        val bridge = HostBridgeImpl(context, loaded.baseDir) {
+        val bridge = HostBridgeImpl(context, loaded.dataDir) {
             suspendCurrent()
         }
 
