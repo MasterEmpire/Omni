@@ -82,6 +82,23 @@ class OmniBrowser : PluginEntry() {
 
         var webViewInstance: WebView? by remember { mutableStateOf(null) }
         var mobileUA by remember { mutableStateOf("") }
+        var showSolverDialog by remember { mutableStateOf(false) }
+        var solverApiKey by remember { mutableStateOf("") }
+        var autoSolveEnabled by remember { mutableStateOf(true) }
+        var isSolvingCaptcha by remember { mutableStateOf(false) }
+        val coroutineScope = rememberCoroutineScope()
+
+        // Load persisted solver configuration
+        LaunchedEffect(Unit) {
+            try {
+                val savedBytes = bridge.readFile("config/solver.json")
+                if (savedBytes != null) {
+                    val json = org.json.JSONObject(String(savedBytes, Charsets.UTF_8))
+                    solverApiKey = json.optString("apiKey", "")
+                    autoSolveEnabled = json.optBoolean("autoSolve", true)
+                }
+            } catch (_: Exception) {}
+        }
 
         val desktopUA = remember {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -120,6 +137,105 @@ class OmniBrowser : PluginEntry() {
                     bridge.showToast("DOM Snapshot Saved to $filename")
                 } else {
                     bridge.showToast("Could not capture page DOM.")
+                }
+            }
+        }
+
+        fun executeSolver(siteKey: String, pageUrl: String) {
+            if (solverApiKey.isEmpty()) {
+                bridge.showToast("Configure NoCaptchaAI API key in settings first.")
+                return
+            }
+            if (isSolvingCaptcha) return
+
+            isSolvingCaptcha = true
+            bridge.showToast("🤖 Solving CAPTCHA with NoCaptchaAI...")
+            bridge.log("SOLVER", "Dispatching task for sitekey: $siteKey on $pageUrl")
+
+            coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val payload = org.json.JSONObject().apply {
+                        put("clientKey", solverApiKey)
+                        put("task", org.json.JSONObject().apply {
+                            put("type", "ReCaptchaV2TaskProxyLess")
+                            put("websiteURL", pageUrl)
+                            put("websiteKey", siteKey)
+                        })
+                    }
+
+                    val responseStr = bridge.httpPost("https://api.nocaptchaai.com/solve", payload.toString())
+                    if (responseStr != null) {
+                        val respObj = org.json.JSONObject(responseStr)
+                        val token = respObj.optJSONObject("solution")?.optString("gRecaptchaResponse")
+                            ?: respObj.optString("token", "")
+
+                        if (token.isNotEmpty()) {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                val injectionScript = """
+                                    javascript:(function() {
+                                        const token = '$token';
+                                        const textareas = document.querySelectorAll('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
+                                        textareas.forEach(t => { t.value = token; t.innerHTML = token; });
+                                        try {
+                                            if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {
+                                                Object.values(window.___grecaptcha_cfg.clients).forEach(client => {
+                                                    for (const key in client) {
+                                                        if (client[key] && typeof client[key].callback === 'function') {
+                                                            client[key].callback(token);
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        } catch(e) {}
+                                    })();
+                                """.trimIndent()
+                                webViewInstance?.evaluateJavascript(injectionScript, null)
+                                bridge.showToast("✅ CAPTCHA Solved & Injected!")
+                                bridge.log("SOLVER", "Successfully injected response token into DOM.")
+                            }
+                        } else {
+                            val errMsg = respObj.optString("errorDescription", respObj.optString("status", "Unknown error"))
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                bridge.showToast("Solver returned: $errMsg")
+                                bridge.log("SOLVER_ERR", "API Response: $responseStr")
+                            }
+                        }
+                    } else {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            bridge.showToast("Failed to reach solver API endpoint.")
+                        }
+                    }
+                } catch (e: Exception) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        bridge.showToast("Solver error: ${e.message}")
+                        bridge.log("SOLVER_ERR", "Exception: ${e.message}")
+                    }
+                } finally {
+                    isSolvingCaptcha = false
+                }
+            }
+        }
+
+        fun scanAndSolveCaptcha() {
+            val detectorScript = """
+                (function() {
+                    const el = document.querySelector('[data-sitekey]');
+                    if (el) return el.getAttribute('data-sitekey');
+                    const iframe = document.querySelector('iframe[src*="recaptcha"], iframe[src*="turnstile"]');
+                    if (iframe) {
+                        const m = iframe.src.match(/k=([^&]+)/) || iframe.src.match(/sitekey=([^&]+)/);
+                        if (m) return m[1];
+                    }
+                    return '';
+                })();
+            """.trimIndent()
+
+            webViewInstance?.evaluateJavascript(detectorScript) { siteKeyRaw ->
+                val siteKey = siteKeyRaw?.replace("\"", "")?.trim() ?: ""
+                if (siteKey.isNotEmpty()) {
+                    executeSolver(siteKey, currentUrl)
+                } else {
+                    bridge.showToast("No active CAPTCHA widget found on page.")
                 }
             }
         }
@@ -284,6 +400,22 @@ class OmniBrowser : PluginEntry() {
                                     if (currentUrl != "about:blank") {
                                         bridge.copyToClipboard(currentUrl)
                                     }
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("🤖 Auto-Solve CAPTCHA", color = Color(0xFF81C995), fontWeight = FontWeight.Bold) },
+                                onClick = {
+                                    showMenu = false
+                                    scanAndSolveCaptcha()
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("⚙️ Solver Settings", color = Color(0xFF8AB4F8)) },
+                                onClick = {
+                                    showMenu = false
+                                    showSolverDialog = true
                                 }
                             )
 
@@ -611,6 +743,29 @@ class OmniBrowser : PluginEntry() {
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
                                     isLoading = false
+
+                                    // Automatic Challenge Detection on Page Load
+                                    if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != null && url != "about:blank") {
+                                        val detectorScript = """
+                                            (function() {
+                                                const el = document.querySelector('[data-sitekey]');
+                                                if (el) return el.getAttribute('data-sitekey');
+                                                const iframe = document.querySelector('iframe[src*="recaptcha"], iframe[src*="turnstile"]');
+                                                if (iframe) {
+                                                    const m = iframe.src.match(/k=([^&]+)/) || iframe.src.match(/sitekey=([^&]+)/);
+                                                    if (m) return m[1];
+                                                }
+                                                return '';
+                                            })();
+                                        """.trimIndent()
+
+                                        view.evaluateJavascript(detectorScript) { siteKeyRaw ->
+                                            val siteKey = siteKeyRaw?.replace("\"", "")?.trim() ?: ""
+                                            if (siteKey.isNotEmpty()) {
+                                                executeSolver(siteKey, url)
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -717,6 +872,83 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 }
+            }
+
+            // --- Solver Settings Dialog ---
+            if (showSolverDialog) {
+                var tempKey by remember { mutableStateOf(solverApiKey) }
+                var tempAuto by remember { mutableStateOf(autoSolveEnabled) }
+
+                AlertDialog(
+                    onDismissRequest = { showSolverDialog = false },
+                    containerColor = Color(0xFF282C34),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🤖", fontSize = 20.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("NoCaptchaAI Settings", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                "Enter your NoCaptchaAI client key to enable automated background CAPTCHA resolution.",
+                                color = Color(0xFF9AA0A6),
+                                fontSize = 12.sp
+                            )
+
+                            OutlinedTextField(
+                                value = tempKey,
+                                onValueChange = { tempKey = it },
+                                label = { Text("NoCaptchaAI API Key") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Auto-Solve on Page Load", color = Color(0xFFE8EAED), fontSize = 13.sp)
+                                Switch(
+                                    checked = tempAuto,
+                                    onCheckedChange = { tempAuto = it },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                solverApiKey = tempKey.trim()
+                                autoSolveEnabled = tempAuto
+                                val cfg = org.json.JSONObject().apply {
+                                    put("apiKey", solverApiKey)
+                                    put("autoSolve", autoSolveEnabled)
+                                }
+                                bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
+                                bridge.showToast("Solver settings saved!")
+                                showSolverDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
+                        ) {
+                            Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showSolverDialog = false }) {
+                            Text("Cancel", color = Color(0xFF9AA0A6))
+                        }
+                    }
+                )
             }
 
             // --- Bottom Navigation Toolbar ---
