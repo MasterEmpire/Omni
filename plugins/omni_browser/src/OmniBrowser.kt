@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
@@ -28,10 +29,12 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -78,7 +81,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-data class ShortcutItem(val title: String, val url: String, val iconText: String, val color: Color)
+data class ShortcutItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val url: String,
+    val iconText: String = "",
+    val colorValue: Long = 0xFF4285F4
+)
 
 data class BrowserProfile(
     val id: String,
@@ -127,6 +136,7 @@ class OmniBrowser : PluginEntry() {
         }
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     @SuppressLint("SetJavaScriptEnabled")
     @Composable
     fun ChromeBrowserScreen(bridge: HostBridge) {
@@ -145,6 +155,8 @@ class OmniBrowser : PluginEntry() {
         }
         var selectedProfileId by remember { mutableStateOf("default") }
         var editingProfile by remember { mutableStateOf<BrowserProfile?>(null) }
+        var editingShortcut by remember { mutableStateOf<ShortcutItem?>(null) }
+        var isAddingShortcut by remember { mutableStateOf(false) }
 
         var tabs by remember {
             mutableStateOf(
@@ -195,6 +207,33 @@ class OmniBrowser : PluginEntry() {
         }
 
         var createNewTabHandler: ((String) -> Unit)? = null
+
+        fun extractDomain(url: String): String {
+            return try {
+                val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+                val uri = Uri.parse(clean)
+                uri.host?.removePrefix("www.") ?: url
+            } catch (_: Exception) {
+                url
+            }
+        }
+
+        fun saveShortcutsToDisk(list: List<ShortcutItem>) {
+            try {
+                val arr = org.json.JSONArray()
+                list.forEach { s ->
+                    val obj = org.json.JSONObject().apply {
+                        put("id", s.id)
+                        put("title", s.title)
+                        put("url", s.url)
+                        put("iconText", s.iconText)
+                        put("colorValue", s.colorValue)
+                    }
+                    arr.put(obj)
+                }
+                bridge.saveFile("config/shortcuts.json", arr.toString().toByteArray(Charsets.UTF_8))
+            } catch (_: Exception) {}
+        }
 
         fun saveProfilesToDisk(list: List<BrowserProfile>) {
             try {
@@ -424,6 +463,29 @@ class OmniBrowser : PluginEntry() {
                     val json = org.json.JSONObject(String(savedBytes, Charsets.UTF_8))
                     solverApiKey = json.optString("apiKey", "")
                     autoSolveEnabled = json.optBoolean("autoSolve", true)
+                }
+            } catch (_: Exception) {}
+
+            try {
+                val scBytes = bridge.readFile("config/shortcuts.json")
+                if (scBytes != null) {
+                    val arr = org.json.JSONArray(String(scBytes, Charsets.UTF_8))
+                    val loadedSc = mutableListOf<ShortcutItem>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        loadedSc.add(
+                            ShortcutItem(
+                                id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                                title = obj.getString("title"),
+                                url = obj.getString("url"),
+                                iconText = obj.optString("iconText", ""),
+                                colorValue = obj.optLong("colorValue", 0xFF4285F4)
+                            )
+                        )
+                    }
+                    if (loadedSc.isNotEmpty()) {
+                        shortcuts = loadedSc
+                    }
                 }
             } catch (_: Exception) {}
 
@@ -1149,23 +1211,59 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
-        val shortcuts = remember {
+        val defaultShortcuts = remember {
             listOf(
-                ShortcutItem("Bot Test", "https://bot.sannysoft.com/", "🕵️", Color(0xFF34A853)),
-                ShortcutItem("Google", "https://www.google.com", "G", Color(0xFF4285F4)),
-                ShortcutItem("YouTube", "https://m.youtube.com", "▶", Color(0xFFEA4335)),
-                ShortcutItem("GitHub", "https://github.com", "⌥", Color(0xFF24292E)),
-                ShortcutItem("Reddit", "https://reddit.com", "R", Color(0xFFFF4500)),
-                ShortcutItem("DuckDuckGo", "https://duckduckgo.com", "D", Color(0xFFDE5833)),
-                ShortcutItem("Wikipedia", "https://wikipedia.org", "W", Color(0xFF5F6368)),
-                ShortcutItem("BrowserLeaks", "https://browserleaks.com/javascript", "🔍", Color(0xFF9C27B0))
+                ShortcutItem(title = "Google", url = "https://www.google.com", iconText = "G", colorValue = 0xFF4285F4),
+                ShortcutItem(title = "YouTube", url = "https://m.youtube.com", iconText = "▶", colorValue = 0xFFEA4335),
+                ShortcutItem(title = "Bot Test", url = "https://bot.sannysoft.com/", iconText = "🕵️", colorValue = 0xFF34A853),
+                ShortcutItem(title = "GitHub", url = "https://github.com", iconText = "⌥", colorValue = 0xFF24292E),
+                ShortcutItem(title = "Reddit", url = "https://reddit.com", iconText = "R", colorValue = 0xFFFF4500),
+                ShortcutItem(title = "DuckDuckGo", url = "https://duckduckgo.com", iconText = "D", colorValue = 0xFFDE5833),
+                ShortcutItem(title = "Wikipedia", url = "https://wikipedia.org", iconText = "W", colorValue = 0xFF5F6368),
+                ShortcutItem(title = "BrowserLeaks", url = "https://browserleaks.com/javascript", iconText = "🔍", colorValue = 0xFF9C27B0)
             )
         }
 
+        var shortcuts by remember { mutableStateOf(defaultShortcuts) }
+        val faviconCache = remember { mutableStateMapOf<String, Bitmap>() }
+
+        fun fetchFavicon(domain: String) {
+            if (domain.isEmpty() || faviconCache.containsKey(domain)) return
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val clean = domain.removePrefix("www.")
+                    val faviconUrl = "https://www.google.com/s2/favicons?domain=$clean&sz=128"
+                    val conn = java.net.URL(faviconUrl).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 6000
+                    conn.readTimeout = 6000
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                    if (conn.responseCode in 200..299) {
+                        conn.inputStream.use { input ->
+                            val bmp = BitmapFactory.decodeStream(input)
+                            if (bmp != null) {
+                                withContext(Dispatchers.Main) {
+                                    faviconCache[domain] = bmp
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
         // Intercept hardware and gesture back navigation
-        DisposableEffect(isTabSwitcherOpen, showSolverDialog, editingProfile, canGoBack, currentUrl, webViewInstance) {
+        // Intercept hardware and gesture back navigation
+        DisposableEffect(isTabSwitcherOpen, showSolverDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance) {
             bridge.setOnBackPressedHandler {
                 when {
+                    editingShortcut != null -> {
+                        editingShortcut = null
+                        true
+                    }
+                    isAddingShortcut -> {
+                        isAddingShortcut = false
+                        true
+                    }
                     editingProfile != null -> {
                         editingProfile = null
                         true
@@ -1178,7 +1276,6 @@ class OmniBrowser : PluginEntry() {
                         isTabSwitcherOpen = false
                         true
                     }
-                    webViewInstance?.canGoBack() == true -> {
                         webViewInstance?.goBack()
                         true
                     }
@@ -1572,18 +1669,38 @@ class OmniBrowser : PluginEntry() {
                             )
 
                             // Shortcuts Grid
+                            // Shortcuts Grid with Favicons & Long-Press Management
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(4),
                                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                items(shortcuts) { item ->
+                                items(shortcuts, key = { it.id }) { item ->
+                                    val domain = remember(item.url) { extractDomain(item.url) }
+                                    LaunchedEffect(domain) {
+                                        fetchFavicon(domain)
+                                    }
+                                    val iconBmp = faviconCache[domain]
+
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(12.dp))
-                                            .clickable { navigateTo(item.url) }
+                                            .combinedClickable(
+                                                onClick = {
+                                                    if (isHomeOverlayOpen && currentUrl != "about:blank") {
+                                                        isHomeOverlayOpen = false
+                                                        createNewTab(item.url)
+                                                    } else {
+                                                        navigateTo(item.url)
+                                                    }
+                                                },
+                                                onLongClick = {
+                                                    bridge.vibrate(40L)
+                                                    editingShortcut = item
+                                                }
+                                            )
                                             .padding(8.dp)
                                     ) {
                                         Surface(
@@ -1592,7 +1709,23 @@ class OmniBrowser : PluginEntry() {
                                             modifier = Modifier.size(48.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
-                                                Text(item.iconText, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = item.color)
+                                                if (iconBmp != null) {
+                                                    Image(
+                                                        bitmap = iconBmp.asImageBitmap(),
+                                                        contentDescription = item.title,
+                                                        modifier = Modifier
+                                                            .size(26.dp)
+                                                            .clip(CircleShape),
+                                                        contentScale = ContentScale.Fit
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        text = item.iconText.ifEmpty { item.title.take(1).uppercase() },
+                                                        fontSize = 18.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(item.colorValue)
+                                                    )
+                                                }
                                             }
                                         }
                                         Spacer(Modifier.height(8.dp))
@@ -1602,6 +1735,41 @@ class OmniBrowser : PluginEntry() {
                                             color = Color(0xFFE8EAED),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+
+                                // "+" Add Shortcut Button Tile
+                                item {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { isAddingShortcut = true }
+                                            .padding(8.dp)
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = Color(0xFF282C34),
+                                            border = BorderStroke(1.dp, Color(0xFF5F6368)),
+                                            modifier = Modifier.size(48.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.Add,
+                                                    contentDescription = "Add Shortcut",
+                                                    tint = Color(0xFF8AB4F8),
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            "Add",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF8AB4F8),
+                                            maxLines = 1,
                                             textAlign = TextAlign.Center
                                         )
                                     }
@@ -1683,6 +1851,408 @@ class OmniBrowser : PluginEntry() {
                     },
                     dismissButton = {
                         TextButton(onClick = { showSolverDialog = false }) {
+                            Text("Cancel", color = Color(0xFF9AA0A6))
+                        }
+                    }
+                )
+            }
+
+            // --- Edit Shortcut Dialog ---
+            if (editingShortcut != null) {
+                val targetItem = editingShortcut!!
+                var editName by remember(targetItem) { mutableStateOf(targetItem.title) }
+                var editUrl by remember(targetItem) { mutableStateOf(targetItem.url) }
+                val previewDomain = remember(editUrl) { extractDomain(editUrl) }
+
+                LaunchedEffect(previewDomain) {
+                    fetchFavicon(previewDomain)
+                }
+                val previewBmp = faviconCache[previewDomain]
+
+                AlertDialog(
+                    onDismissRequest = { editingShortcut = null },
+                    containerColor = Color(0xFF282C34),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (previewBmp != null) {
+                                Image(
+                                    bitmap = previewBmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp).clip(CircleShape)
+                                )
+                            } else {
+                                Surface(shape = CircleShape, color = Color(targetItem.colorValue), modifier = Modifier.size(24.dp)) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(editName.take(1).uppercase(), fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text("Edit Shortcut", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = editName,
+                                onValueChange = { editName = it },
+                                label = { Text("Name") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = editUrl,
+                                onValueChange = { editUrl = it },
+                                label = { Text("URL") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = {
+                                    val updated = shortcuts.filter { it.id != targetItem.id }
+                                    shortcuts = updated
+                                    saveShortcutsToDisk(updated)
+                                    editingShortcut = null
+                                    bridge.showToast("Shortcut deleted")
+                                }
+                            ) {
+                                Text("Delete", color = Color(0xFFF28B82), fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    val formattedUrl = if (!editUrl.startsWith("http://") && !editUrl.startsWith("https://")) "https://${editUrl.trim()}" else editUrl.trim()
+                                    val updated = shortcuts.map {
+                                        if (it.id == targetItem.id) it.copy(
+                                            title = editName.trim().ifEmpty { targetItem.title },
+                                            url = formattedUrl
+                                        ) else it
+                                    }
+                                    shortcuts = updated
+                                    saveShortcutsToDisk(updated)
+                                    fetchFavicon(extractDomain(formattedUrl))
+                                    editingShortcut = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
+                            ) {
+                                Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { editingShortcut = null }) {
+                            Text("Cancel", color = Color(0xFF9AA0A6))
+                        }
+                    }
+                )
+            }
+
+            // --- Add Shortcut Dialog ---
+            if (isAddingShortcut) {
+                var newName by remember { mutableStateOf("") }
+                var newUrl by remember { mutableStateOf("https://") }
+                val previewDomain = remember(newUrl) { extractDomain(newUrl) }
+
+                LaunchedEffect(previewDomain) {
+                    if (previewDomain.isNotEmpty() && previewDomain != "https://") {
+                        fetchFavicon(previewDomain)
+                    }
+                }
+                val previewBmp = faviconCache[previewDomain]
+
+                AlertDialog(
+                    onDismissRequest = { isAddingShortcut = false },
+                    containerColor = Color(0xFF282C34),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (previewBmp != null) {
+                                Image(
+                                    bitmap = previewBmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp).clip(CircleShape)
+                                )
+                            } else {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF8AB4F8))
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text("Add Shortcut", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = newName,
+                                onValueChange = { newName = it },
+                                label = { Text("Name (e.g. GitHub)") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = newUrl,
+                                onValueChange = { newUrl = it },
+                                label = { Text("URL") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val formattedUrl = if (!newUrl.startsWith("http://") && !newUrl.startsWith("https://")) "https://${newUrl.trim()}" else newUrl.trim()
+                                val title = newName.trim().ifEmpty { extractDomain(formattedUrl) }
+                                val newItem = ShortcutItem(
+                                    title = title,
+                                    url = formattedUrl,
+                                    iconText = title.take(1).uppercase(),
+                                    colorValue = 0xFF8AB4F8
+                                )
+                                val updated = shortcuts + newItem
+                                shortcuts = updated
+                                saveShortcutsToDisk(updated)
+                                fetchFavicon(extractDomain(formattedUrl))
+                                isAddingShortcut = false
+                            },
+                            enabled = newUrl.length > 8,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
+                        ) {
+                            Text("Add", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { isAddingShortcut = false }) {
+                            Text("Cancel", color = Color(0xFF9AA0A6))
+                        }
+                    }
+                )
+            }
+
+            // --- Rename Profile Dialog ---
+            if (editingProfile != null) {</find>
+<replace_with>            // --- Edit Shortcut Dialog ---
+            if (editingShortcut != null) {
+                val targetItem = editingShortcut!!
+                var editName by remember(targetItem) { mutableStateOf(targetItem.title) }
+                var editUrl by remember(targetItem) { mutableStateOf(targetItem.url) }
+                val previewDomain = remember(editUrl) { extractDomain(editUrl) }
+
+                LaunchedEffect(previewDomain) {
+                    fetchFavicon(previewDomain)
+                }
+                val previewBmp = faviconCache[previewDomain]
+
+                AlertDialog(
+                    onDismissRequest = { editingShortcut = null },
+                    containerColor = Color(0xFF282C34),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (previewBmp != null) {
+                                Image(
+                                    bitmap = previewBmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp).clip(CircleShape)
+                                )
+                            } else {
+                                Surface(shape = CircleShape, color = Color(targetItem.colorValue), modifier = Modifier.size(24.dp)) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(editName.take(1).uppercase(), fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text("Edit Shortcut", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = editName,
+                                onValueChange = { editName = it },
+                                label = { Text("Name") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = editUrl,
+                                onValueChange = { editUrl = it },
+                                label = { Text("URL") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = {
+                                    val updated = shortcuts.filter { it.id != targetItem.id }
+                                    shortcuts = updated
+                                    saveShortcutsToDisk(updated)
+                                    editingShortcut = null
+                                    bridge.showToast("Shortcut deleted")
+                                }
+                            ) {
+                                Text("Delete", color = Color(0xFFF28B82), fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    val formattedUrl = if (!editUrl.startsWith("http://") && !editUrl.startsWith("https://")) "https://${editUrl.trim()}" else editUrl.trim()
+                                    val updated = shortcuts.map {
+                                        if (it.id == targetItem.id) it.copy(
+                                            title = editName.trim().ifEmpty { targetItem.title },
+                                            url = formattedUrl
+                                        ) else it
+                                    }
+                                    shortcuts = updated
+                                    saveShortcutsToDisk(updated)
+                                    fetchFavicon(extractDomain(formattedUrl))
+                                    editingShortcut = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
+                            ) {
+                                Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { editingShortcut = null }) {
+                            Text("Cancel", color = Color(0xFF9AA0A6))
+                        }
+                    }
+                )
+            }
+
+            // --- Add Shortcut Dialog ---
+            if (isAddingShortcut) {
+                var newName by remember { mutableStateOf("") }
+                var newUrl by remember { mutableStateOf("https://") }
+                val previewDomain = remember(newUrl) { extractDomain(newUrl) }
+
+                LaunchedEffect(previewDomain) {
+                    if (previewDomain.isNotEmpty() && previewDomain != "https://") {
+                        fetchFavicon(previewDomain)
+                    }
+                }
+                val previewBmp = faviconCache[previewDomain]
+
+                AlertDialog(
+                    onDismissRequest = { isAddingShortcut = false },
+                    containerColor = Color(0xFF282C34),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (previewBmp != null) {
+                                Image(
+                                    bitmap = previewBmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp).clip(CircleShape)
+                                )
+                            } else {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF8AB4F8))
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text("Add Shortcut", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = newName,
+                                onValueChange = { newName = it },
+                                label = { Text("Name (e.g. GitHub)") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = newUrl,
+                                onValueChange = { newUrl = it },
+                                label = { Text("URL") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF5F6368)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val formattedUrl = if (!newUrl.startsWith("http://") && !newUrl.startsWith("https://")) "https://${newUrl.trim()}" else newUrl.trim()
+                                val title = newName.trim().ifEmpty { extractDomain(formattedUrl) }
+                                val newItem = ShortcutItem(
+                                    title = title,
+                                    url = formattedUrl,
+                                    iconText = title.take(1).uppercase(),
+                                    colorValue = 0xFF8AB4F8
+                                )
+                                val updated = shortcuts + newItem
+                                shortcuts = updated
+                                saveShortcutsToDisk(updated)
+                                fetchFavicon(extractDomain(formattedUrl))
+                                isAddingShortcut = false
+                            },
+                            enabled = newUrl.length > 8,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
+                        ) {
+                            Text("Add", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { isAddingShortcut = false }) {
                             Text("Cancel", color = Color(0xFF9AA0A6))
                         }
                     }
