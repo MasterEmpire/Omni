@@ -557,6 +557,43 @@ class OmniBrowser : PluginEntry() {
                                                     enumerable: true
                                                 });
                                             } catch(e) {}
+
+                                            // 6. Mock Web Speech API (speechSynthesis & SpeechSynthesisUtterance for Iphey / CreepJS)
+                                            try {
+                                                if (!('speechSynthesis' in window)) {
+                                                    window.speechSynthesis = {
+                                                        pending: false,
+                                                        speaking: false,
+                                                        paused: false,
+                                                        onvoiceschanged: null,
+                                                        getVoices: function() { return []; },
+                                                        speak: function() {},
+                                                        cancel: function() {},
+                                                        pause: function() {},
+                                                        resume: function() {},
+                                                        addEventListener: function() {},
+                                                        removeEventListener: function() {},
+                                                        dispatchEvent: function() { return true; }
+                                                    };
+                                                }
+                                                if (!('SpeechSynthesisUtterance' in window)) {
+                                                    window.SpeechSynthesisUtterance = function(text) {
+                                                        this.text = text || '';
+                                                        this.lang = '';
+                                                        this.voice = null;
+                                                        this.volume = 1;
+                                                        this.rate = 1;
+                                                        this.pitch = 1;
+                                                        this.onstart = null;
+                                                        this.onend = null;
+                                                        this.onerror = null;
+                                                        this.onpause = null;
+                                                        this.onresume = null;
+                                                        this.onmark = null;
+                                                        this.onboundary = null;
+                                                    };
+                                                }
+                                            } catch(e) {}
                                         })();
                                     """.trimIndent()
                                     view?.evaluateJavascript(stealthPolyfill, null)
@@ -579,6 +616,12 @@ class OmniBrowser : PluginEntry() {
                                 mediaPlaybackRequiresUserGesture = false
                                 loadWithOverviewMode = true
                                 useWideViewPort = true
+
+                                // Suppress 'X-Requested-With: com.omni.hub' HTTP header across all network requests
+                                try {
+                                    val method = javaClass.getMethod("setRequestedWithHeaderOriginAllowList", Set::class.java)
+                                    method.invoke(this, emptySet<String>())
+                                } catch (_: Exception) {}
                             }
 
                             CookieManager.getInstance().setAcceptCookie(true)
