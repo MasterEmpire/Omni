@@ -48,6 +48,9 @@ object OmniTaskManager {
         }
 
         val pluginView = loaded.instance.onCreateView(context, bridge, loaded.baseDir.absolutePath)
+        (pluginView as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+        }
         val session = AppTaskSession(
             taskId = "task_${System.currentTimeMillis()}",
             pluginId = pluginId,
