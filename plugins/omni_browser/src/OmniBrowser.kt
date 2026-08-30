@@ -413,7 +413,7 @@ class OmniBrowser : PluginEntry() {
                                                 }
                                             } catch(e) {}
 
-                                            // 3. Mock Real Chromium PluginArray & MimeTypeArray
+                                            // 3. Mock Real Chromium PluginArray & MimeTypeArray + pdfViewerEnabled
                                             try {
                                                 const pluginData = [
                                                     { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
@@ -456,6 +456,48 @@ class OmniBrowser : PluginEntry() {
                                                     enumerable: true,
                                                     configurable: true
                                                 });
+
+                                                Object.defineProperty(navigator, 'pdfViewerEnabled', {
+                                                    get: () => true,
+                                                    enumerable: true,
+                                                    configurable: true
+                                                });
+                                            } catch(e) {}
+
+                                            // 3.1. Spoof Client Hints (navigator.userAgentData)
+                                            try {
+                                                if (navigator.userAgentData) {
+                                                    const chromeBrands = [
+                                                        { brand: 'Not_A Brand', version: '8' },
+                                                        { brand: 'Chromium', version: '128' },
+                                                        { brand: 'Google Chrome', version: '128' }
+                                                    ];
+                                                    const fakeUaData = {
+                                                        brands: chromeBrands,
+                                                        mobile: true,
+                                                        platform: 'Android',
+                                                        getHighEntropyValues: function(hints) {
+                                                            return Promise.resolve({
+                                                                brands: chromeBrands,
+                                                                mobile: true,
+                                                                platform: 'Android',
+                                                                architecture: 'arm',
+                                                                bitness: '64',
+                                                                model: 'SM-A315G',
+                                                                platformVersion: '12.0.0',
+                                                                fullVersionList: chromeBrands
+                                                            });
+                                                        },
+                                                        toJSON: function() {
+                                                            return { brands: chromeBrands, mobile: true, platform: 'Android' };
+                                                        }
+                                                    };
+                                                    Object.defineProperty(navigator, 'userAgentData', {
+                                                        get: () => fakeUaData,
+                                                        configurable: true,
+                                                        enumerable: true
+                                                    });
+                                                }
                                             } catch(e) {}
 
                                             // 4. Align Notification.permission and W3C Permissions Query API
