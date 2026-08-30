@@ -3,6 +3,7 @@ package com.omni.plugin.browser
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -11,6 +12,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,7 +34,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.PlatformTextStyle
@@ -63,7 +67,8 @@ data class BrowserTab(
     val id: String,
     val title: String = "New Tab",
     val url: String = "about:blank",
-    val stateBundle: Bundle? = null
+    val stateBundle: Bundle? = null,
+    val thumbnail: Bitmap? = null
 )
 
 class OmniBrowser : PluginEntry() {
@@ -116,10 +121,28 @@ class OmniBrowser : PluginEntry() {
 
         var webViewInstance: WebView? by remember { mutableStateOf(null) }
 
+        fun captureThumbnail(): Bitmap? {
+            val wv = webViewInstance ?: return null
+            if (wv.width <= 0 || wv.height <= 0) return null
+            return try {
+                val scale = 0.5f
+                val w = (wv.width * scale).toInt().coerceAtLeast(1)
+                val h = (wv.height * scale).toInt().coerceAtLeast(1)
+                val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
+                val canvas = Canvas(bitmap)
+                canvas.scale(scale, scale)
+                wv.draw(canvas)
+                bitmap
+            } catch (_: Exception) {
+                null
+            }
+        }
+
         fun createNewTab(targetUrl: String = "about:blank") {
+            val thumb = captureThumbnail()
             val bundle = Bundle()
             webViewInstance?.saveState(bundle)
-            val updatedTabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle) else it }
+            val updatedTabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb) else it }
 
             val newId = "tab_${System.currentTimeMillis()}"
             val newTab = BrowserTab(id = newId, title = if (targetUrl == "about:blank") "New Tab" else targetUrl, url = targetUrl)
@@ -137,9 +160,10 @@ class OmniBrowser : PluginEntry() {
                 isTabSwitcherOpen = false
                 return
             }
+            val thumb = captureThumbnail()
             val bundle = Bundle()
             webViewInstance?.saveState(bundle)
-            val updatedTabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle) else it }
+            val updatedTabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb) else it }
 
             activeTabId = targetId
             tabs = updatedTabs
@@ -428,17 +452,7 @@ class OmniBrowser : PluginEntry() {
             )
         }
 
-        if (isTabSwitcherOpen) {
-            TabSwitcherScreen(
-                tabs = tabs,
-                activeTabId = activeTabId,
-                onSelectTab = { switchToTab(it) },
-                onCloseTab = { closeTab(it) },
-                onNewTab = { createNewTab() },
-                onCloseAll = { closeAllTabs() },
-                onCloseSwitcher = { isTabSwitcherOpen = false }
-            )
-        } else {
+        Box(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -559,9 +573,10 @@ class OmniBrowser : PluginEntry() {
                             .clip(RoundedCornerShape(6.dp))
                             .border(1.5.dp, Color(0xFF9AA0A6), RoundedCornerShape(6.dp))
                             .clickable {
+                                val thumb = captureThumbnail()
                                 val bundle = Bundle()
                                 webViewInstance?.saveState(bundle)
-                                tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle) else it }
+                                tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb) else it }
                                 isTabSwitcherOpen = true
                             }
                     ) {
@@ -1226,6 +1241,19 @@ class OmniBrowser : PluginEntry() {
                     }
                 )
             }
+
+            if (isTabSwitcherOpen) {
+                TabSwitcherScreen(
+                    tabs = tabs,
+                    activeTabId = activeTabId,
+                    onSelectTab = { switchToTab(it) },
+                    onCloseTab = { closeTab(it) },
+                    onNewTab = { createNewTab() },
+                    onCloseAll = { closeAllTabs() },
+                    onCloseSwitcher = { isTabSwitcherOpen = false },
+                    modifier = Modifier.fillMaxSize().zIndex(10f)
+                )
+            }
         }
     }
 }
@@ -1239,13 +1267,13 @@ fun TabSwitcherScreen(
     onCloseTab: (String) -> Unit,
     onNewTab: () -> Unit,
     onCloseAll: () -> Unit,
-    onCloseSwitcher: () -> Unit
+    onCloseSwitcher: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var showTabMenu by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
+        modifier = modifier
             .background(Color(0xFF1F2227))
             .statusBarsPadding()
     ) {
@@ -1368,24 +1396,35 @@ fun TabSwitcherScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
-                                .background(Color(0xFF1F2227))
-                                .padding(12.dp),
+                                .background(Color(0xFF1F2227)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = if (tab.url == "about:blank") "🌐" else "📄",
-                                    fontSize = 24.sp
+                            if (tab.thumbnail != null && tab.url != "about:blank") {
+                                Image(
+                                    bitmap = tab.thumbnail.asImageBitmap(),
+                                    contentDescription = tab.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
                                 )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = if (tab.url == "about:blank") "about:blank" else tab.url.replace("https://", "").replace("http://", "").take(25),
-                                    color = Color(0xFF9AA0A6),
-                                    fontSize = 10.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center
-                                )
+                            } else {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(12.dp)
+                                ) {
+                                    Text(
+                                        text = if (tab.url == "about:blank") "🌐" else "📄",
+                                        fontSize = 24.sp
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = if (tab.url == "about:blank") "about:blank" else tab.url.replace("https://", "").replace("http://", "").take(25),
+                                        color = Color(0xFF9AA0A6),
+                                        fontSize = 10.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
                             }
                         }
                     }
