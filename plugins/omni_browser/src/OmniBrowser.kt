@@ -1,20 +1,23 @@
 package com.omni.plugin.browser
 
 import android.annotation.SuppressLint
+import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Context
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
-import java.io.File
-import java.io.FileOutputStream
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.util.Base64
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.webkit.*
+import android.widget.FrameLayout
+import java.io.File
+import java.io.FileOutputStream
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import androidx.webkit.ProfileStore
@@ -171,6 +174,111 @@ class OmniBrowser : PluginEntry() {
                 json.put("tabs", arr)
                 bridge.saveFile("config/session.json", json.toString().toByteArray(Charsets.UTF_8))
             } catch (_: Exception) {}
+        }
+
+        fun saveBase64ToDownloads(base64Data: String, mimeType: String, rawFilename: String) {
+            try {
+                val cleanBase64 = if (base64Data.contains(",")) base64Data.substringAfter(",") else base64Data
+                val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                val ext = when {
+                    mimeType.contains("pdf") -> "pdf"
+                    mimeType.contains("png") -> "png"
+                    mimeType.contains("jpeg") || mimeType.contains("jpg") -> "jpg"
+                    mimeType.contains("zip") -> "zip"
+                    mimeType.contains("json") -> "json"
+                    mimeType.contains("html") -> "html"
+                    else -> "bin"
+                }
+                val filename = if (rawFilename.isNotEmpty() && rawFilename != "null" && rawFilename != "blob") rawFilename else "download_${System.currentTimeMillis()}.$ext"
+
+                var saved = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                        put(MediaStore.MediaColumns.MIME_TYPE, mimeType.ifEmpty { "application/octet-stream" })
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/OmniDownloads")
+                    }
+                    val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                    if (uri != null) {
+                        context.contentResolver.openOutputStream(uri)?.use { os ->
+                            os.write(bytes)
+                        }
+                        saved = true
+                    }
+                } else {
+                    val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val targetDir = File(dir, "OmniDownloads").apply { mkdirs() }
+                    val file = File(targetDir, filename)
+                    FileOutputStream(file).use { it.write(bytes) }
+                    saved = true
+                }
+
+                if (saved) {
+                    bridge.showToast("Saved $filename to Downloads/OmniDownloads")
+                    bridge.log("DOWNLOAD", "Saved Blob download: $filename (${bytes.size} bytes)")
+                }
+            } catch (e: Exception) {
+                bridge.showToast("Blob download failed: ${e.message}")
+                bridge.log("DOWNLOAD_ERR", "Blob decode error: ${e.message}")
+            }
+        }
+
+        fun triggerFileDownload(url: String, userAgent: String, contentDisposition: String, mimeType: String) {
+            if (url.startsWith("blob:") || url.startsWith("data:")) {
+                val suggestedName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                if (url.startsWith("data:")) {
+                    saveBase64ToDownloads(url, mimeType, suggestedName)
+                } else {
+                    val blobScript = """
+                        (function() {
+                            var xhr = new XMLHttpRequest();
+                            xhr.open('GET', '$url', true);
+                            xhr.responseType = 'blob';
+                            xhr.onload = function() {
+                                if (this.status === 200 || this.status === 0) {
+                                    var reader = new FileReader();
+                                    reader.readAsDataURL(this.response);
+                                    reader.onloadend = function() {
+                                        window.OmniBlobDownloader.processBlob(reader.result, '$mimeType', '$suggestedName');
+                                    };
+                                }
+                            };
+                            xhr.send();
+                        })();
+                    """.trimIndent()
+                    webViewInstance?.evaluateJavascript(blobScript, null)
+                    bridge.showToast("Extracting Blob download...")
+                }
+                return
+            }
+
+            try {
+                val filename = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                val request = DownloadManager.Request(Uri.parse(url)).apply {
+                    if (mimeType.isNotEmpty() && mimeType != "application/octet-stream") {
+                        setMimeType(mimeType)
+                    }
+                    addRequestHeader("User-Agent", userAgent)
+                    val cookie = CookieManager.getInstance().getCookie(url)
+                    if (!cookie.isNullOrEmpty()) {
+                        addRequestHeader("Cookie", cookie)
+                    }
+                    setDescription("Downloading file...")
+                    setTitle(filename)
+                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+                    setAllowedOverMetered(true)
+                    setAllowedOverRoaming(true)
+                }
+
+                val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                dm?.enqueue(request)
+                bridge.showToast("Downloading $filename...")
+                bridge.log("DOWNLOAD", "Queued system download for $url ($filename)")
+            } catch (e: Exception) {
+                bridge.showToast("Download error: ${e.message}")
+                bridge.log("DOWNLOAD_ERR", "Download queue exception: ${e.message}")
+            }
         }
 
         var tabs by remember {
@@ -488,17 +596,50 @@ class OmniBrowser : PluginEntry() {
                     } catch (e: Exception) {
                         bridge.log("PROFILE_WARN", "Could not set profile '$profileId': ${e.message}")
                     }
-                } else {
-                    CookieManager.getInstance().setAcceptCookie(true)
-                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+                    triggerFileDownload(url, userAgent, contentDisposition, mimeType)
                 }
 
-                val rawUA = settings.userAgentString
-                val mobileUserAgent = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun processBlob(base64Data: String, mimeType: String, filename: String) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            saveBase64ToDownloads(base64Data, mimeType, filename)
+                        }
+                    }
+                }, "OmniBlobDownloader")
+            }
+
+            if (savedState != null) {
                 mobileUA = mobileUserAgent
                 settings.userAgentString = if (isDesktopMode) desktopUA else mobileUserAgent
 
                 webChromeClient = object : WebChromeClient() {
+                    override fun onCreateWindow(
+                        view: WebView?,
+                        isDialog: Boolean,
+                        isUserGesture: Boolean,
+                        resultMsg: android.os.Message?
+                    ): Boolean {
+                        if (resultMsg == null) return false
+                        val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                        val tempWv = WebView(context).apply {
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
+                                    val targetUrl = req?.url?.toString() ?: return false
+                                    createNewTab(targetUrl)
+                                    return true
+                                }
+                            }
+                        }
+                        transport.webView = tempWv
+                        resultMsg.sendToTarget()
+                        return true
+                    }
+
                     override fun onProgressChanged(view: WebView?, newProgress: Int) {
                         if (activeTabId == tabId) {
                             loadProgress = newProgress / 100f
@@ -529,6 +670,21 @@ class OmniBrowser : PluginEntry() {
                 }
 
                 webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                        val url = request?.url?.toString() ?: return false
+                        if (url.startsWith("blob:") || url.startsWith("data:")) {
+                            triggerFileDownload(url, view?.settings?.userAgentString ?: "", "", "")
+                            return true
+                        }
+                        if (url.startsWith("intent://") || url.startsWith("market://") || url.startsWith("tel:") || url.startsWith("mailto:")) {
+                            try {
+                                bridge.runIntent(android.content.Intent.ACTION_VIEW, url, null)
+                                return true
+                            } catch (_: Exception) {}
+                        }
+                        return false
+                    }
+
                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
                         // Allow navigation through self-signed and local development certificates
                         handler?.proceed()
