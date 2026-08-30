@@ -14,6 +14,7 @@ data class LoadedPlugin(
     val entryClass: String,
     val instance: PluginEntry,
     val baseDir: File,
+    val dataDir: File,
     val classLoader: ClassLoader
 )
 
@@ -88,6 +89,9 @@ object PluginLoader {
         val optDir = context.getDir("dex_opt", Context.MODE_PRIVATE)
         if (!optDir.exists()) optDir.mkdirs()
 
+        val dataBaseDir = context.getDir("plugins_data", Context.MODE_PRIVATE)
+        val dataDir = File(dataBaseDir, finalId).apply { if (!exists()) mkdirs() }
+
         val loader = DexClassLoader(
             combinedDexPath,
             optDir.absolutePath,
@@ -105,6 +109,7 @@ object PluginLoader {
             entryClass = finalClass,
             instance = instance,
             baseDir = pluginDir,
+            dataDir = dataDir,
             classLoader = loader
         )
     }
@@ -145,6 +150,9 @@ object PluginLoader {
 
         OmniLogger.log("LOADER", "Loading directory plugin [$pluginId] with classpath: $combinedDexPath")
 
+        val dataBaseDir = context.getDir("plugins_data", Context.MODE_PRIVATE)
+        val dataDir = File(dataBaseDir, pluginId).apply { if (!exists()) mkdirs() }
+
         val loader = DexClassLoader(
             combinedDexPath,
             optDir.absolutePath,
@@ -162,6 +170,7 @@ object PluginLoader {
             entryClass = finalClass,
             instance = instance,
             baseDir = pluginDir,
+            dataDir = dataDir,
             classLoader = loader
         )
     }
