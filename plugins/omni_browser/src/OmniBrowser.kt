@@ -1219,7 +1219,7 @@ class OmniBrowser : PluginEntry() {
                             Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
                         }
                     },
-                                        dismissButton = {
+                    dismissButton = {
                         TextButton(onClick = { showSolverDialog = false }) {
                             Text("Cancel", color = Color(0xFF9AA0A6))
                         }
@@ -1228,6 +1228,7 @@ class OmniBrowser : PluginEntry() {
             }
         }
     }
+}
 }
 
 @Composable
