@@ -1086,6 +1086,38 @@ class OmniBrowser : PluginEntry() {
             )
         }
 
+        // Intercept hardware and gesture back navigation
+        DisposableEffect(isTabSwitcherOpen, showSolverDialog, editingProfile, canGoBack, currentUrl, webViewInstance) {
+            bridge.setOnBackPressedHandler {
+                when {
+                    editingProfile != null -> {
+                        editingProfile = null
+                        true
+                    }
+                    showSolverDialog -> {
+                        showSolverDialog = false
+                        true
+                    }
+                    isTabSwitcherOpen -> {
+                        isTabSwitcherOpen = false
+                        true
+                    }
+                    webViewInstance?.canGoBack() == true -> {
+                        webViewInstance?.goBack()
+                        true
+                    }
+                    currentUrl != "about:blank" -> {
+                        navigateTo("about:blank")
+                        true
+                    }
+                    else -> false
+                }
+            }
+            onDispose {
+                bridge.setOnBackPressedHandler(null)
+            }
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
