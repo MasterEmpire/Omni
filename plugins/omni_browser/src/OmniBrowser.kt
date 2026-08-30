@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
@@ -220,6 +221,86 @@ class OmniBrowser : PluginEntry() {
             } catch (e: Exception) {
                 bridge.showToast("Blob download failed: ${e.message}")
                 bridge.log("DOWNLOAD_ERR", "Blob decode error: ${e.message}")
+            }
+        }
+
+        fun handleExternalUri(url: String, view: WebView?): Boolean {
+            if (url.startsWith("http://") || url.startsWith("https://")) {
+                if (url.contains("play.google.com/store/apps/details")) {
+                    val uri = Uri.parse(url)
+                    val pkg = uri.getQueryParameter("id")
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            setPackage("com.android.vending")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        return try {
+                            context.startActivity(marketIntent)
+                            true
+                        } catch (_: Exception) {
+                            false
+                        }
+                    }
+                }
+                return false
+            }
+
+            if (url.startsWith("intent://")) {
+                return try {
+                    val parsedIntent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+                    if (resolveInfo != null) {
+                        context.startActivity(parsedIntent)
+                        true
+                    } else {
+                        val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                        if (!fallbackUrl.isNullOrEmpty()) {
+                            view?.loadUrl(fallbackUrl)
+                            true
+                        } else {
+                            val pkg = parsedIntent.`package`
+                            if (!pkg.isNullOrEmpty()) {
+                                val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(marketIntent)
+                                true
+                            } else false
+                        }
+                    }
+                } catch (e: Exception) {
+                    bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+                    false
+                }
+            }
+
+            if (url.startsWith("market://")) {
+                return try {
+                    val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(marketIntent)
+                    true
+                } catch (e: Exception) {
+                    val pkg = Uri.parse(url).getQueryParameter("id")
+                    if (!pkg.isNullOrEmpty()) {
+                        view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                        true
+                    } else false
+                }
+            }
+
+            return try {
+                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(genericIntent)
+                true
+            } catch (e: Exception) {
+                bridge.log("INTENT_WARN", "No handler for scheme: $url")
+                false
             }
         }
 
@@ -630,6 +711,9 @@ class OmniBrowser : PluginEntry() {
                             webViewClient = object : WebViewClient() {
                                 override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
                                     val targetUrl = req?.url?.toString() ?: return false
+                                    if (handleExternalUri(targetUrl, v)) {
+                                        return true
+                                    }
                                     createNewTab(targetUrl)
                                     return true
                                 }
@@ -676,13 +760,7 @@ class OmniBrowser : PluginEntry() {
                             triggerFileDownload(url, view?.settings?.userAgentString ?: "", "", "")
                             return true
                         }
-                        if (url.startsWith("intent://") || url.startsWith("market://") || url.startsWith("tel:") || url.startsWith("mailto:")) {
-                            try {
-                                bridge.runIntent(android.content.Intent.ACTION_VIEW, url, null)
-                                return true
-                            } catch (_: Exception) {}
-                        }
-                        return false
+                        return handleExternalUri(url, view)
                     }
 
                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
