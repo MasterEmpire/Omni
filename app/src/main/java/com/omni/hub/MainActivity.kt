@@ -45,6 +45,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.omni.hub.api.FilePickerDispatcher
 import com.omni.hub.api.OmniLogger
 import com.omni.hub.api.PermissionDispatcher
 import com.omni.hub.container.PluginContainerActivity
@@ -175,10 +176,32 @@ fun DashboardScreen(context: Context) {
         activePermissionCallback = null
     }
 
+    var activeFilePickerCallback by remember { mutableStateOf<((List<Uri>) -> Unit)?>(null) }
+    val singleFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        activeFilePickerCallback?.invoke(if (uri != null) listOf(uri) else emptyList())
+        activeFilePickerCallback = null
+    }
+    val multipleFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        activeFilePickerCallback?.invoke(uris)
+        activeFilePickerCallback = null
+    }
+
     LaunchedEffect(Unit) {
         PermissionDispatcher.registerLauncher { perms, cb ->
             activePermissionCallback = cb
             permissionLauncher.launch(perms)
+        }
+        FilePickerDispatcher.registerLauncher { mimeType, allowMultiple, cb ->
+            activeFilePickerCallback = cb
+            if (allowMultiple) {
+                multipleFilePicker.launch(mimeType)
+            } else {
+                singleFilePicker.launch(mimeType)
+            }
         }
         OmniLogger.log("INIT", "Omni Hub Dashboard loaded. Ensuring shared runtime...")
         scope.launch {
