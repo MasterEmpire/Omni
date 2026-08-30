@@ -40,6 +40,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.omni.hub.api.HostBridge
 import com.omni.hub.api.PluginEntry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
@@ -144,6 +145,18 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
+        fun extractSolverError(json: org.json.JSONObject, raw: String): String {
+            val desc = json.optString("errorDescription")
+            if (desc.isNotEmpty()) return desc
+            val code = json.optString("errorCode")
+            if (code.isNotEmpty()) return code
+            val msg = json.optString("message", json.optString("msg", json.optString("error", "")))
+            if (msg.isNotEmpty()) return msg
+            val status = json.optString("status")
+            if (status.isNotEmpty() && status != "processing") return status
+            return if (raw.length > 120) raw.take(120) + "..." else raw
+        }
+
         fun executeSolver(siteKey: String, pageUrl: String) {
             if (solverApiKey.isEmpty()) {
                 bridge.showToast("Configure NoCaptchaAI API key in settings first.")
@@ -153,11 +166,11 @@ class OmniBrowser : PluginEntry() {
 
             isSolvingCaptcha = true
             bridge.showToast("🤖 Solving CAPTCHA with NoCaptchaAI...")
-            bridge.log("SOLVER", "Dispatching task for sitekey: $siteKey on $pageUrl")
+            bridge.log("SOLVER", "Creating task for sitekey: $siteKey on $pageUrl")
 
-            coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    val payload = org.json.JSONObject().apply {
+                    val createPayload = org.json.JSONObject().apply {
                         put("clientKey", solverApiKey)
                         put("task", org.json.JSONObject().apply {
                             put("type", "ReCaptchaV2TaskProxyLess")
@@ -166,17 +179,61 @@ class OmniBrowser : PluginEntry() {
                         })
                     }
 
-                    val responseStr = bridge.httpPost("https://api.nocaptchaai.com/solve", payload.toString())
+                    // 1. Dispatch Task Creation
+                    var responseStr = bridge.httpPost("https://api.nocaptchaai.com/createTask", createPayload.toString())
+                    if (responseStr == null) {
+                        responseStr = bridge.httpPost("https://api.nocaptchaai.com/solve", createPayload.toString())
+                    }
+
                     if (responseStr != null) {
+                        bridge.log("SOLVER", "Task Creation Response: $responseStr")
                         val respObj = org.json.JSONObject(responseStr)
-                        val token = respObj.optJSONObject("solution")?.optString("gRecaptchaResponse")
+
+                        var solutionToken = respObj.optJSONObject("solution")?.optString("gRecaptchaResponse")
                             ?: respObj.optString("token", "")
 
-                        if (token.isNotEmpty()) {
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        val taskId = respObj.optString("taskId", "")
+
+                        // 2. Poll getTaskResult if taskId returned asynchronously
+                        if (solutionToken.isEmpty() && taskId.isNotEmpty()) {
+                            bridge.log("SOLVER", "Task registered with ID: $taskId. Polling for solution...")
+                            val pollPayload = org.json.JSONObject().apply {
+                                put("clientKey", solverApiKey)
+                                put("taskId", taskId)
+                            }.toString()
+
+                            var attempts = 0
+                            while (attempts < 15 && solutionToken.isEmpty()) {
+                                delay(2000)
+                                attempts++
+                                val pollRespStr = bridge.httpPost("https://api.nocaptchaai.com/getTaskResult", pollPayload)
+                                if (pollRespStr != null) {
+                                    val pollObj = org.json.JSONObject(pollRespStr)
+                                    val status = pollObj.optString("status", "")
+                                    bridge.log("SOLVER", "Poll #$attempts status: $status")
+
+                                    if (status == "ready" || status == "solved") {
+                                        solutionToken = pollObj.optJSONObject("solution")?.optString("gRecaptchaResponse")
+                                            ?: pollObj.optString("token", "")
+                                        break
+                                    } else if (status == "failed" || pollObj.optInt("errorId", 0) != 0) {
+                                        val err = extractSolverError(pollObj, pollRespStr)
+                                        withContext(Dispatchers.Main) {
+                                            bridge.showToast("Solver failed: $err")
+                                            bridge.log("SOLVER_ERR", "Polling Error: $pollRespStr")
+                                        }
+                                        return@launch
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Inject Solution Token into DOM
+                        if (solutionToken.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
                                 val injectionScript = """
                                     javascript:(function() {
-                                        const token = '$token';
+                                        const token = '$solutionToken';
                                         const textareas = document.querySelectorAll('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
                                         textareas.forEach(t => { t.value = token; t.innerHTML = token; });
                                         try {
@@ -197,19 +254,20 @@ class OmniBrowser : PluginEntry() {
                                 bridge.log("SOLVER", "Successfully injected response token into DOM.")
                             }
                         } else {
-                            val errMsg = respObj.optString("errorDescription", respObj.optString("status", "Unknown error"))
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            val errMsg = extractSolverError(respObj, responseStr)
+                            withContext(Dispatchers.Main) {
                                 bridge.showToast("Solver returned: $errMsg")
                                 bridge.log("SOLVER_ERR", "API Response: $responseStr")
                             }
                         }
                     } else {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        withContext(Dispatchers.Main) {
                             bridge.showToast("Failed to reach solver API endpoint.")
+                            bridge.log("SOLVER_ERR", "HTTP POST to solver endpoint returned null.")
                         }
                     }
                 } catch (e: Exception) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         bridge.showToast("Solver error: ${e.message}")
                         bridge.log("SOLVER_ERR", "Exception: ${e.message}")
                     }
