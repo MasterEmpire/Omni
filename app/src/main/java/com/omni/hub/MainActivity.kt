@@ -46,6 +46,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.omni.hub.api.OmniLogger
+import com.omni.hub.api.PermissionDispatcher
 import com.omni.hub.container.PluginContainerActivity
 import com.omni.hub.loader.AppTaskSession
 import com.omni.hub.loader.OmniTaskManager
@@ -166,7 +167,19 @@ fun DashboardScreen(context: Context) {
         }
     }
 
+    var activePermissionCallback by remember { mutableStateOf<((Map<String, Boolean>) -> Unit)?>(null) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        activePermissionCallback?.invoke(result)
+        activePermissionCallback = null
+    }
+
     LaunchedEffect(Unit) {
+        PermissionDispatcher.registerLauncher { perms, cb ->
+            activePermissionCallback = cb
+            permissionLauncher.launch(perms)
+        }
         OmniLogger.log("INIT", "Omni Hub Dashboard loaded. Ensuring shared runtime...")
         scope.launch {
             SharedLibManager.ensureSharedRuntime(context)
