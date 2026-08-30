@@ -1,7 +1,13 @@
 package com.omni.plugin.browser
 
 import android.annotation.SuppressLint
+import android.content.ContentValues
 import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import java.io.File
+import java.io.FileOutputStream
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Bundle
@@ -856,10 +862,45 @@ class OmniBrowser : PluginEntry() {
                     } else html
 
                     val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    val filename = "snapshots/DOM_Dump_$timestamp.html"
-                    bridge.saveFile(filename, rawHtml.toByteArray(Charsets.UTF_8))
-                    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot to: $filename (${rawHtml.length} bytes)")
-                    bridge.showToast("DOM Snapshot Saved to $filename")
+                    val filename = "DOM_Dump_$timestamp.html"
+                    var savedToDownloads = false
+
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val contentValues = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                                put(MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+                            }
+                            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                            if (uri != null) {
+                                context.contentResolver.openOutputStream(uri)?.use { os ->
+                                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                                }
+                                savedToDownloads = true
+                            }
+                        } else {
+                            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                            val targetDir = File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+                            val targetFile = File(targetDir, filename)
+                            FileOutputStream(targetFile).use { os ->
+                                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                            }
+                            savedToDownloads = true
+                        }
+                    } catch (e: Exception) {
+                        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+                    }
+
+                    // Keep backup in plugin workspace
+                    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+                    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $filename (${rawHtml.length} bytes)")
+
+                    if (savedToDownloads) {
+                        bridge.showToast("Saved to Downloads/OmniSnapshots/$filename")
+                    } else {
+                        bridge.showToast("Saved to plugin sandbox: snapshots/$filename")
+                    }
                 } else {
                     bridge.showToast("Could not capture page DOM.")
                 }
