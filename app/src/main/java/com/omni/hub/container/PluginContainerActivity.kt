@@ -54,7 +54,7 @@ class PluginContainerActivity : Activity(), LifecycleOwner, ViewModelStoreOwner,
             val loadedPlugin = PluginLoader.loadFromDir(this, pluginId, entryClass)
             currentPluginBaseDir = loadedPlugin.baseDir
 
-            val hostBridge = HostBridgeImpl(this, loadedPlugin.baseDir) {
+            val hostBridge = HostBridgeImpl(this, loadedPlugin.dataDir) {
                 finish()
             }
 
