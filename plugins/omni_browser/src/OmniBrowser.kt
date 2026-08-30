@@ -127,13 +127,40 @@ class OmniBrowser : PluginEntry() {
 
         val MAX_HOT_TABS = 8
 
+        // Multi-Profile State Management
+        var profiles by remember {
+            mutableStateOf(
+                listOf(
+                    BrowserProfile("default", "Default", 0xFF8AB4F8)
+                )
+            )
+        }
+        var selectedProfileId by remember { mutableStateOf("default") }
+        var editingProfile by remember { mutableStateOf<BrowserProfile?>(null) }
+
+        fun saveProfilesToDisk(list: List<BrowserProfile>) {
+            try {
+                val arr = org.json.JSONArray()
+                list.forEach { p ->
+                    val obj = org.json.JSONObject().apply {
+                        put("id", p.id)
+                        put("name", p.name)
+                        put("colorValue", p.colorValue)
+                    }
+                    arr.put(obj)
+                }
+                bridge.saveFile("config/profiles.json", arr.toString().toByteArray(Charsets.UTF_8))
+            } catch (_: Exception) {}
+        }
+
         var tabs by remember {
             mutableStateOf(
                 listOf(
                     BrowserTab(
                         id = "tab_1",
                         title = "New Tab",
-                        url = "about:blank"
+                        url = "about:blank",
+                        profileId = "default"
                     )
                 )
             )
@@ -166,7 +193,7 @@ class OmniBrowser : PluginEntry() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         }
 
-        // Load persisted solver configuration
+        // Load persisted solver and profile configurations
         LaunchedEffect(Unit) {
             try {
                 val savedBytes = bridge.readFile("config/solver.json")
@@ -174,6 +201,21 @@ class OmniBrowser : PluginEntry() {
                     val json = org.json.JSONObject(String(savedBytes, Charsets.UTF_8))
                     solverApiKey = json.optString("apiKey", "")
                     autoSolveEnabled = json.optBoolean("autoSolve", true)
+                }
+            } catch (_: Exception) {}
+
+            try {
+                val profBytes = bridge.readFile("config/profiles.json")
+                if (profBytes != null) {
+                    val arr = org.json.JSONArray(String(profBytes, Charsets.UTF_8))
+                    val loaded = mutableListOf<BrowserProfile>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        loaded.add(BrowserProfile(obj.getString("id"), obj.getString("name"), obj.getLong("colorValue")))
+                    }
+                    if (loaded.isNotEmpty()) {
+                        profiles = loaded
+                    }
                 }
             } catch (_: Exception) {}
         }
@@ -382,15 +424,20 @@ class OmniBrowser : PluginEntry() {
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
 
-                // Multi-Profile container binding
+                // Multi-Profile container binding & Cookie Isolation
                 if (profileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
                     try {
                         val profileStore = ProfileStore.getInstance()
-                        profileStore.getOrCreateProfile(profileId)
+                        val profile = profileStore.getOrCreateProfile(profileId)
                         WebViewCompat.setProfile(this, profileId)
+                        profile.cookieManager.setAcceptCookie(true)
+                        profile.cookieManager.setAcceptThirdPartyCookies(this, true)
                     } catch (e: Exception) {
                         bridge.log("PROFILE_WARN", "Could not set profile '$profileId': ${e.message}")
                     }
+                } else {
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 }
 
                 val rawUA = settings.userAgentString
@@ -699,8 +746,6 @@ class OmniBrowser : PluginEntry() {
                     } catch (_: Exception) {}
                 }
 
-                CookieManager.getInstance().setAcceptCookie(true)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             }
 
             if (savedState != null) {
