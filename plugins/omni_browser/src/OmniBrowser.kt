@@ -461,6 +461,59 @@ class OmniBrowser : PluginEntry() {
                             onDismissRequest = { showMenu = false },
                             modifier = Modifier.background(Color(0xFF282C34))
                         ) {
+                            // Chrome-style Quick Action Row (Back, Forward, Reload)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceAround,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        showMenu = false
+                                        if (canGoBack) webViewInstance?.goBack()
+                                        else if (currentUrl != "about:blank") navigateTo("about:blank")
+                                    },
+                                    enabled = canGoBack || currentUrl != "about:blank"
+                                ) {
+                                    Icon(
+                                        Icons.Default.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = if (canGoBack || currentUrl != "about:blank") Color(0xFFE8EAED) else Color(0xFF5F6368)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        showMenu = false
+                                        webViewInstance?.goForward()
+                                    },
+                                    enabled = canGoForward
+                                ) {
+                                    Icon(
+                                        Icons.Default.ArrowForward,
+                                        contentDescription = "Forward",
+                                        tint = if (canGoForward) Color(0xFFE8EAED) else Color(0xFF5F6368)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        showMenu = false
+                                        webViewInstance?.reload()
+                                    }
+                                ) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Reload",
+                                        tint = Color(0xFFE8EAED)
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = Color(0xFF3C4043))
+
                             DropdownMenuItem(
                                 text = { Text(if (isDesktopMode) "✓ Desktop Site" else "Desktop Site", color = Color(0xFFE8EAED)) },
                                 onClick = {
@@ -469,14 +522,6 @@ class OmniBrowser : PluginEntry() {
                                     webViewInstance?.settings?.userAgentString = if (isDesktopMode) desktopUA else mobileUA
                                     webViewInstance?.reload()
                                     bridge.showToast(if (isDesktopMode) "Desktop Mode Enabled" else "Mobile Mode Enabled")
-                                }
-                            )
-
-                            DropdownMenuItem(
-                                text = { Text("Reload Page", color = Color(0xFFE8EAED)) },
-                                onClick = {
-                                    showMenu = false
-                                    webViewInstance?.reload()
                                 }
                             )
 
@@ -1039,60 +1084,7 @@ class OmniBrowser : PluginEntry() {
                 )
             }
 
-            // --- Bottom Navigation Toolbar ---
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .zIndex(1f)
-                    .graphicsLayer()
-                    .background(Color(0xFF1F2227))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            if (canGoBack) webViewInstance?.goBack()
-                            else if (currentUrl != "about:blank") navigateTo("about:blank")
-                        },
-                        enabled = canGoBack || currentUrl != "about:blank"
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowBack,
-                            contentDescription = "Back",
-                            tint = if (canGoBack || currentUrl != "about:blank") Color(0xFFE8EAED) else Color(0xFF5F6368)
-                        )
-                    }
 
-                    IconButton(
-                        onClick = { webViewInstance?.goForward() },
-                        enabled = canGoForward
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowForward,
-                            contentDescription = "Forward",
-                            tint = if (canGoForward) Color(0xFFE8EAED) else Color(0xFF5F6368)
-                        )
-                    }
-
-                    IconButton(onClick = { navigateTo("about:blank") }) {
-                        Icon(Icons.Default.Home, contentDescription = "New Tab", tint = Color(0xFFE8EAED))
-                    }
-
-                    IconButton(onClick = { webViewInstance?.reload() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = Color(0xFFE8EAED))
-                    }
-
-                    IconButton(onClick = { bridge.close() }) {
-                        Icon(Icons.Default.Close, contentDescription = "Exit", tint = Color(0xFFF28B82))
-                    }
-                }
-            }
         }
     }
 }
