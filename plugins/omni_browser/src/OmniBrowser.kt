@@ -9,6 +9,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.webkit.*
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import androidx.webkit.ProfileStore
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -64,13 +67,31 @@ import java.util.Locale
 
 data class ShortcutItem(val title: String, val url: String, val iconText: String, val color: Color)
 
+data class BrowserProfile(
+    val id: String,
+    val name: String,
+    val colorValue: Long
+)
+
+val PROFILE_PALETTE = listOf(
+    0xFF8AB4F8, // Blue (Default)
+    0xFFC58AF9, // Purple (AI 2)
+    0xFF81C995, // Emerald (AI 3)
+    0xFFFDD663, // Amber
+    0xFFF28B82, // Coral Rose
+    0xFF78D9EC, // Cyan
+    0xFFFFB74D, // Orange
+    0xFFA7FFEB  // Mint
+)
+
 data class BrowserTab(
     val id: String,
     val title: String = "New Tab",
     val url: String = "about:blank",
     val stateBundle: Bundle? = null,
     val thumbnail: Bitmap? = null,
-    val lastAccessedTime: Long = System.currentTimeMillis()
+    val lastAccessedTime: Long = System.currentTimeMillis(),
+    val profileId: String = "default"
 )
 
 class OmniBrowser : PluginEntry() {
@@ -347,13 +368,24 @@ class OmniBrowser : PluginEntry() {
             CookieManager.getInstance().flush()
         }
 
-        fun createConfiguredWebView(tabId: String, initialUrl: String, savedState: Bundle? = null): WebView {
+        fun createConfiguredWebView(tabId: String, initialUrl: String, savedState: Bundle? = null, profileId: String = "default"): WebView {
             val webView = WebView(context).apply {
                 setBackgroundColor(android.graphics.Color.parseColor("#1F2227"))
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
+
+                // Multi-Profile container binding
+                if (profileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+                    try {
+                        val profileStore = ProfileStore.getInstance()
+                        profileStore.getOrCreateProfile(profileId)
+                        WebViewCompat.setProfile(this, profileId)
+                    } catch (e: Exception) {
+                        bridge.log("PROFILE_WARN", "Could not set profile '$profileId': ${e.message}")
+                    }
+                }
 
                 val rawUA = settings.userAgentString
                 val mobileUserAgent = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
@@ -690,7 +722,7 @@ class OmniBrowser : PluginEntry() {
             val isNewInstance = !webViewPool.containsKey(targetTabId)
 
             val targetWv = webViewPool.getOrPut(targetTabId) {
-                createConfiguredWebView(targetTabId, targetTab.url, targetTab.stateBundle)
+                createConfiguredWebView(targetTabId, targetTab.url, targetTab.stateBundle, targetTab.profileId)
             }
 
             if (isNewInstance) {
@@ -708,7 +740,7 @@ class OmniBrowser : PluginEntry() {
             canGoForward = targetWv.canGoForward()
         }
 
-        fun createNewTab(targetUrl: String = "about:blank") {
+        fun createNewTab(targetUrl: String = "about:blank", targetProfileId: String = selectedProfileId) {
             val thumb = captureThumbnail()
             val bundle = Bundle()
             webViewInstance?.saveState(bundle)
@@ -722,7 +754,8 @@ class OmniBrowser : PluginEntry() {
                 id = newId, 
                 title = if (targetUrl == "about:blank") "New Tab" else targetUrl, 
                 url = targetUrl,
-                lastAccessedTime = System.currentTimeMillis()
+                lastAccessedTime = System.currentTimeMillis(),
+                profileId = targetProfileId
             )
             tabs = updatedTabs + newTab
             activeTabId = newId
@@ -876,13 +909,17 @@ class OmniBrowser : PluginEntry() {
                             Icon(Icons.Default.Home, contentDescription = "Home", tint = Color(0xFF9AA0A6))
                         }
 
-                        // Chrome Address Pill
+                        val activeTab = tabs.find { it.id == activeTabId }
+                        val activeProf = profiles.find { it.id == activeTab?.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF8AB4F8)
+
+                        // Chrome Address Pill with Account Color Glow
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(44.dp)
                                 .clip(RoundedCornerShape(22.dp))
                                 .background(Color(0xFF282C34))
+                                .border(1.dp, Color(activeProf.colorValue).copy(alpha = 0.5f), RoundedCornerShape(22.dp))
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1329,13 +1366,87 @@ class OmniBrowser : PluginEntry() {
                 )
             }
 
+            // --- Rename Profile Dialog ---
+            if (editingProfile != null) {
+                val targetProf = editingProfile!!
+                var renameText by remember(targetProf) { mutableStateOf(targetProf.name) }
+
+                AlertDialog(
+                    onDismissRequest = { editingProfile = null },
+                    containerColor = Color(0xFF282C34),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(targetProf.colorValue))
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Rename Profile", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        OutlinedTextField(
+                            value = renameText,
+                            onValueChange = { renameText = it },
+                            label = { Text("Profile Display Name") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color(0xFFE8EAED),
+                                unfocusedTextColor = Color(0xFFE8EAED),
+                                focusedBorderColor = Color(targetProf.colorValue),
+                                unfocusedBorderColor = Color(0xFF5F6368)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val newName = renameText.trim().ifEmpty { targetProf.name }
+                                val updated = profiles.map { if (it.id == targetProf.id) it.copy(name = newName) else it }
+                                profiles = updated
+                                saveProfilesToDisk(updated)
+                                editingProfile = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(targetProf.colorValue))
+                        ) {
+                            Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { editingProfile = null }) {
+                            Text("Cancel", color = Color(0xFF9AA0A6))
+                        }
+                    }
+                )
+            }
+
             if (isTabSwitcherOpen) {
                 TabSwitcherScreen(
                     tabs = tabs,
                     activeTabId = activeTabId,
+                    profiles = profiles,
+                    selectedProfileId = selectedProfileId,
+                    onSelectProfile = {
+                        selectedProfileId = it
+                        saveProfilesToDisk(profiles)
+                    },
+                    onAddProfile = {
+                        val nextIdx = profiles.size
+                        val newId = "profile_${System.currentTimeMillis()}"
+                        val newColor = PROFILE_PALETTE[nextIdx % PROFILE_PALETTE.size]
+                        val newProf = BrowserProfile(newId, "Account ${nextIdx + 1}", newColor)
+                        val updated = profiles + newProf
+                        profiles = updated
+                        selectedProfileId = newId
+                        saveProfilesToDisk(updated)
+                    },
+                    onRenameProfile = { prof -> editingProfile = prof },
                     onSelectTab = { switchToTab(it) },
                     onCloseTab = { closeTab(it) },
-                    onNewTab = { createNewTab() },
+                    onNewTab = { profId -> createNewTab(targetProfileId = profId) },
                     onCloseAll = { closeAllTabs() },
                     onCloseSwitcher = { isTabSwitcherOpen = false },
                     modifier = Modifier.fillMaxSize().zIndex(10f)
@@ -1349,14 +1460,21 @@ class OmniBrowser : PluginEntry() {
 fun TabSwitcherScreen(
     tabs: List<BrowserTab>,
     activeTabId: String,
+    profiles: List<BrowserProfile>,
+    selectedProfileId: String,
+    onSelectProfile: (String) -> Unit,
+    onAddProfile: () -> Unit,
+    onRenameProfile: (BrowserProfile) -> Unit,
     onSelectTab: (String) -> Unit,
     onCloseTab: (String) -> Unit,
-    onNewTab: () -> Unit,
+    onNewTab: (String) -> Unit,
     onCloseAll: () -> Unit,
     onCloseSwitcher: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showTabMenu by remember { mutableStateOf(false) }
+    var profileMenuExpanded by remember { mutableStateOf(false) }
+    val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF8AB4F8)
 
     Column(
         modifier = modifier
@@ -1369,22 +1487,141 @@ fun TabSwitcherScreen(
                 .fillMaxWidth()
                 .height(56.dp)
                 .background(Color(0xFF1F2227))
-                .padding(horizontal = 12.dp)
+                .padding(horizontal = 8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onNewTab) {
-                    Icon(Icons.Default.Add, contentDescription = "New Tab", tint = Color(0xFFE8EAED))
+                // Left: New Tab Button & Profile Selector Pill
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { onNewTab(selectedProfileId) }) {
+                        Icon(Icons.Default.Add, contentDescription = "New Tab", tint = Color(0xFFE8EAED))
+                    }
+
+                    // Profile Selector Pill
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(currentProfile.colorValue).copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, Color(currentProfile.colorValue).copy(alpha = 0.6f)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { profileMenuExpanded = true }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(currentProfile.colorValue))
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = currentProfile.name.take(14),
+                                    color = Color(currentProfile.colorValue),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Icon(
+                                    Icons.Default.ArrowDropDown,
+                                    contentDescription = "Select Profile",
+                                    tint = Color(currentProfile.colorValue),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = profileMenuExpanded,
+                            onDismissRequest = { profileMenuExpanded = false },
+                            modifier = Modifier.background(Color(0xFF282C34))
+                        ) {
+                            Text(
+                                "Account Profiles",
+                                color = Color(0xFF9AA0A6),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                            HorizontalDivider(color = Color(0xFF3C4043))
+
+                            profiles.forEach { prof ->
+                                val isSelected = prof.id == selectedProfileId
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(9.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(prof.colorValue))
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                prof.name,
+                                                color = if (isSelected) Color(prof.colorValue) else Color(0xFFE8EAED),
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 13.sp,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    profileMenuExpanded = false
+                                                    onRenameProfile(prof)
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription = "Rename",
+                                                    tint = Color(0xFF9AA0A6),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        onSelectProfile(prof.id)
+                                        profileMenuExpanded = false
+                                    }
+                                )
+                            }
+
+                            HorizontalDivider(color = Color(0xFF3C4043))
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF8AB4F8), modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("+ Add Account Profile", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                },
+                                onClick = {
+                                    profileMenuExpanded = false
+                                    onAddProfile()
+                                }
+                            )
+                        }
+                    }
                 }
 
                 Text(
                     text = "${tabs.size} open ${if (tabs.size == 1) "tab" else "tabs"}",
                     color = Color(0xFFE8EAED),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    fontSize = 14.sp
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1405,7 +1642,7 @@ fun TabSwitcherScreen(
                                 text = { Text("New Tab", color = Color(0xFFE8EAED)) },
                                 onClick = {
                                     showTabMenu = false
-                                    onNewTab()
+                                    onNewTab(selectedProfileId)
                                 }
                             )
                             DropdownMenuItem(
@@ -1435,10 +1672,12 @@ fun TabSwitcherScreen(
         ) {
             items(tabs, key = { it.id }) { tab ->
                 val isActive = tab.id == activeTabId
+                val tabProfile = profiles.find { it.id == tab.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF8AB4F8)
+
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF282C34)),
-                    border = if (isActive) BorderStroke(2.dp, Color(0xFF8AB4F8)) else null,
+                    border = if (isActive) BorderStroke(2.dp, Color(tabProfile.colorValue)) else null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(180.dp)
@@ -1454,6 +1693,15 @@ fun TabSwitcherScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Account Color Dot
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(tabProfile.colorValue))
+                            )
+                            Spacer(Modifier.width(6.dp))
+
                             Text(
                                 text = if (tab.url == "about:blank") "New Tab" else tab.title.ifEmpty { "Web Page" },
                                 color = Color(0xFFE8EAED),
