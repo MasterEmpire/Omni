@@ -39,6 +39,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.omni.hub.api.HostBridge
 import com.omni.hub.api.PluginEntry
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -759,7 +762,7 @@ class OmniBrowser : PluginEntry() {
                                             })();
                                         """.trimIndent()
 
-                                        view.evaluateJavascript(detectorScript) { siteKeyRaw ->
+                                        view?.evaluateJavascript(detectorScript) { siteKeyRaw ->
                                             val siteKey = siteKeyRaw?.replace("\"", "")?.trim() ?: ""
                                             if (siteKey.isNotEmpty()) {
                                                 executeSolver(siteKey, url)
