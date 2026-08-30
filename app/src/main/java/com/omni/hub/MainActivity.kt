@@ -591,13 +591,17 @@ fun DashboardScreen(context: Context) {
         ) {
             AndroidView(
                 factory = {
-                    val parent = currentSession.pluginView.parent as? ViewGroup
-                    parent?.removeView(currentSession.pluginView)
-                    currentSession.pluginView.apply {
+                    val view = currentSession.pluginView
+                    (view.parent as? ViewGroup)?.removeView(view)
+                    (view as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
+                        setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                    }
+                    view.apply {
                         setViewTreeLifecycleOwner(context as? ComponentActivity)
                         setViewTreeViewModelStoreOwner(context as? ComponentActivity)
                         setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
                     }
+                    view
                 },
                 modifier = Modifier.fillMaxSize()
             )
