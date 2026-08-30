@@ -556,7 +556,10 @@ fun DashboardScreen(context: Context) {
     // Fullscreen Active App Overlay
     if (currentSession != null) {
         BackHandler {
-            OmniTaskManager.suspendCurrent()
+            val handled = currentSession.bridge.handleBackPressed()
+            if (!handled) {
+                OmniTaskManager.suspendCurrent()
+            }
         }
         Box(
             modifier = Modifier
