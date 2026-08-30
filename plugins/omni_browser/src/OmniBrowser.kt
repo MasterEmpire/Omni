@@ -393,27 +393,62 @@ class OmniBrowser : PluginEntry() {
                                     super.onPageStarted(view, url, favicon)
                                     isLoading = true
 
-                                    // Perfect Stealth Evasion Suite (Plugins Array, W3C Permissions, WebDriver, Chrome Runtime)
+                                    // Deep Prototype & Native toString Stealth Engine
                                     val stealthPolyfill = """
                                         javascript:(function() {
-                                            // 1. Strip WebDriver flag completely without leaving property keys behind
+                                            // --- 0. Global Native toString Masking Engine (Parrot Fix) ---
+                                            const nativeToString = Function.prototype.toString;
+                                            const registeredNativeFunctions = new WeakSet();
+
+                                            function makeNative(fn, name) {
+                                                if (name) {
+                                                    try {
+                                                        Object.defineProperty(fn, 'name', { value: name, configurable: true });
+                                                    } catch(e) {}
+                                                }
+                                                registeredNativeFunctions.add(fn);
+                                                return fn;
+                                            }
+
+                                            Function.prototype.toString = function() {
+                                                if (registeredNativeFunctions.has(this)) {
+                                                    return "function " + (this.name || "") + "() { [native code] }";
+                                                }
+                                                return nativeToString.apply(this, arguments);
+                                            };
+                                            makeNative(Function.prototype.toString, 'toString');
+
+                                            // --- 1. Strip WebDriver Cleanly ---
                                             try {
                                                 delete Object.getPrototypeOf(navigator).webdriver;
                                             } catch(e) {}
 
-                                            // 2. Mock full window.chrome object
+                                            // --- 2. Mock Chrome Runtime Object ---
                                             try {
                                                 if (!window.chrome) {
                                                     window.chrome = {
-                                                        app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
-                                                        runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {}, connect: function(){}, sendMessage: function(){} },
-                                                        csi: function(){},
-                                                        loadTimes: function(){}
+                                                        app: {
+                                                            isInstalled: false,
+                                                            InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
+                                                            RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" }
+                                                        },
+                                                        runtime: {
+                                                            OnInstalledReason: {},
+                                                            OnRestartRequiredReason: {},
+                                                            PlatformArch: {},
+                                                            PlatformNaclArch: {},
+                                                            PlatformOs: {},
+                                                            RequestUpdateCheckStatus: {},
+                                                            connect: makeNative(function connect(){}, 'connect'),
+                                                            sendMessage: makeNative(function sendMessage(){}, 'sendMessage')
+                                                        },
+                                                        csi: makeNative(function csi(){}, 'csi'),
+                                                        loadTimes: makeNative(function loadTimes(){}, 'loadTimes')
                                                     };
                                                 }
                                             } catch(e) {}
 
-                                            // 3. Mock Real Chromium PluginArray & MimeTypeArray + pdfViewerEnabled
+                                            // --- 3. Mock Real Chromium PluginArray & MimeTypes on Navigator.prototype (Peacock Fix) ---
                                             try {
                                                 const pluginData = [
                                                     { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
@@ -440,85 +475,81 @@ class OmniBrowser : PluginEntry() {
 
                                                 Object.defineProperties(fakePlugins, {
                                                     length: { value: pluginData.length, enumerable: false },
-                                                    item: { value: function(i) { return this[i] || null; }, enumerable: false },
-                                                    namedItem: { value: function(name) { return this[name] || null; }, enumerable: false },
-                                                    refresh: { value: function() {}, enumerable: false }
+                                                    item: { value: makeNative(function item(i) { return this[i] || null; }, 'item'), enumerable: false },
+                                                    namedItem: { value: makeNative(function namedItem(name) { return this[name] || null; }, 'namedItem'), enumerable: false },
+                                                    refresh: { value: makeNative(function refresh() {}, 'refresh'), enumerable: false }
                                                 });
 
-                                                Object.defineProperty(navigator, 'plugins', {
-                                                    get: () => fakePlugins,
+                                                const navProto = Object.getPrototypeOf(navigator);
+                                                Object.defineProperty(navProto, 'plugins', {
+                                                    get: makeNative(function plugins() { return fakePlugins; }, 'get plugins'),
                                                     enumerable: true,
                                                     configurable: true
                                                 });
 
-                                                Object.defineProperty(navigator, 'mimeTypes', {
-                                                    get: () => fakeMimes,
+                                                Object.defineProperty(navProto, 'mimeTypes', {
+                                                    get: makeNative(function mimeTypes() { return fakeMimes; }, 'get mimeTypes'),
                                                     enumerable: true,
                                                     configurable: true
                                                 });
 
-                                                Object.defineProperty(navigator, 'pdfViewerEnabled', {
-                                                    get: () => true,
+                                                Object.defineProperty(navProto, 'pdfViewerEnabled', {
+                                                    get: makeNative(function pdfViewerEnabled() { return true; }, 'get pdfViewerEnabled'),
                                                     enumerable: true,
                                                     configurable: true
                                                 });
                                             } catch(e) {}
 
-                                            // 3.1. Spoof Client Hints (navigator.userAgentData)
+                                            // --- 4. Prototype-Level Client Hints (Leopard & Peacock Fix) ---
                                             try {
-                                                if (navigator.userAgentData) {
-                                                    const chromeBrands = [
-                                                        { brand: 'Not_A Brand', version: '8' },
-                                                        { brand: 'Chromium', version: '128' },
-                                                        { brand: 'Google Chrome', version: '128' }
-                                                    ];
-                                                    const fakeUaData = {
-                                                        brands: chromeBrands,
-                                                        mobile: true,
-                                                        platform: 'Android',
-                                                        getHighEntropyValues: function(hints) {
-                                                            return Promise.resolve({
-                                                                brands: chromeBrands,
-                                                                mobile: true,
-                                                                platform: 'Android',
-                                                                architecture: 'arm',
-                                                                bitness: '64',
-                                                                model: 'SM-A315G',
-                                                                platformVersion: '12.0.0',
-                                                                fullVersionList: chromeBrands
-                                                            });
-                                                        },
-                                                        toJSON: function() {
-                                                            return { brands: chromeBrands, mobile: true, platform: 'Android' };
-                                                        }
-                                                    };
-                                                    Object.defineProperty(navigator, 'userAgentData', {
-                                                        get: () => fakeUaData,
+                                                const chromeBrands = Object.freeze([
+                                                    Object.freeze({ brand: 'Not_A Brand', version: '8' }),
+                                                    Object.freeze({ brand: 'Chromium', version: '128' }),
+                                                    Object.freeze({ brand: 'Google Chrome', version: '128' })
+                                                ]);
+
+                                                const fakeUaData = {
+                                                    brands: chromeBrands,
+                                                    mobile: true,
+                                                    platform: 'Android',
+                                                    getHighEntropyValues: makeNative(function getHighEntropyValues(hints) {
+                                                        return Promise.resolve({
+                                                            brands: chromeBrands,
+                                                            mobile: true,
+                                                            platform: 'Android',
+                                                            architecture: 'arm',
+                                                            bitness: '64',
+                                                            model: 'SM-A315G',
+                                                            platformVersion: '12.0.0',
+                                                            fullVersionList: chromeBrands
+                                                        });
+                                                    }, 'getHighEntropyValues'),
+                                                    toJSON: makeNative(function toJSON() {
+                                                        return { brands: chromeBrands, mobile: true, platform: 'Android' };
+                                                    }, 'toJSON')
+                                                };
+
+                                                const navProto = Object.getPrototypeOf(navigator);
+                                                Object.defineProperty(navProto, 'userAgentData', {
+                                                    get: makeNative(function userAgentData() { return fakeUaData; }, 'get userAgentData'),
+                                                    configurable: true,
+                                                    enumerable: true
+                                                });
+                                            } catch(e) {}
+
+                                            // --- 5. Prototype-Level Permissions Alignment ---
+                                            try {
+                                                if (window.Notification) {
+                                                    Object.defineProperty(window.Notification, 'permission', {
+                                                        get: makeNative(function permission() { return 'default'; }, 'get permission'),
                                                         configurable: true,
                                                         enumerable: true
                                                     });
                                                 }
-                                            } catch(e) {}
 
-                                            // 4. Align Notification.permission and W3C Permissions Query API
-                                            try {
-                                                if (!window.Notification) {
-                                                    window.Notification = {
-                                                        permission: 'default',
-                                                        requestPermission: function() { return Promise.resolve('default'); },
-                                                        maxActions: 2
-                                                    };
-                                                } else {
-                                                    try {
-                                                        Object.defineProperty(window.Notification, 'permission', { get: () => 'default', configurable: true });
-                                                    } catch(e) {}
-                                                }
-                                            } catch(e) {}
-
-                                            try {
-                                                if (navigator.permissions && navigator.permissions.query) {
-                                                    const origQuery = navigator.permissions.query;
-                                                    navigator.permissions.query = function(params) {
+                                                if (window.Permissions && Permissions.prototype && Permissions.prototype.query) {
+                                                    const origQuery = Permissions.prototype.query;
+                                                    Permissions.prototype.query = makeNative(function query(params) {
                                                         if (params && params.name === 'notifications') {
                                                             const status = Object.create(PermissionStatus.prototype || Object.prototype);
                                                             Object.defineProperties(status, {
@@ -530,35 +561,30 @@ class OmniBrowser : PluginEntry() {
                                                             return Promise.resolve(status);
                                                         }
                                                         return origQuery.apply(this, arguments);
-                                                    };
-                                                    navigator.permissions.query.toString = function() { return "function query() { [native code] }"; };
+                                                    }, 'query');
                                                 }
                                             } catch(e) {}
 
-                                            // 5. Synchronous Iframe Stealth Inheritance (Fixes HEADCHR_IFRAME)
+                                            // --- 6. Synchronous Iframe Stealth ---
                                             try {
                                                 const originalContentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get;
                                                 Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
-                                                    get: function() {
+                                                    get: makeNative(function contentWindow() {
                                                         const win = originalContentWindow.call(this);
                                                         if (win) {
                                                             try {
-                                                                if (!win.chrome) {
-                                                                    win.chrome = window.chrome;
-                                                                }
-                                                                if (win.navigator) {
-                                                                    delete Object.getPrototypeOf(win.navigator).webdriver;
-                                                                }
+                                                                if (!win.chrome) win.chrome = window.chrome;
+                                                                if (win.navigator) delete Object.getPrototypeOf(win.navigator).webdriver;
                                                             } catch(e) {}
                                                         }
                                                         return win;
-                                                    },
+                                                    }, 'get contentWindow'),
                                                     configurable: true,
                                                     enumerable: true
                                                 });
                                             } catch(e) {}
 
-                                            // 6. Mock Web Speech API (speechSynthesis & SpeechSynthesisUtterance for Iphey / CreepJS)
+                                            // --- 7. Native Web Speech API Mock (Parrot Compliant) ---
                                             try {
                                                 if (!('speechSynthesis' in window)) {
                                                     window.speechSynthesis = {
@@ -566,31 +592,14 @@ class OmniBrowser : PluginEntry() {
                                                         speaking: false,
                                                         paused: false,
                                                         onvoiceschanged: null,
-                                                        getVoices: function() { return []; },
-                                                        speak: function() {},
-                                                        cancel: function() {},
-                                                        pause: function() {},
-                                                        resume: function() {},
-                                                        addEventListener: function() {},
-                                                        removeEventListener: function() {},
-                                                        dispatchEvent: function() { return true; }
-                                                    };
-                                                }
-                                                if (!('SpeechSynthesisUtterance' in window)) {
-                                                    window.SpeechSynthesisUtterance = function(text) {
-                                                        this.text = text || '';
-                                                        this.lang = '';
-                                                        this.voice = null;
-                                                        this.volume = 1;
-                                                        this.rate = 1;
-                                                        this.pitch = 1;
-                                                        this.onstart = null;
-                                                        this.onend = null;
-                                                        this.onerror = null;
-                                                        this.onpause = null;
-                                                        this.onresume = null;
-                                                        this.onmark = null;
-                                                        this.onboundary = null;
+                                                        getVoices: makeNative(function getVoices() { return []; }, 'getVoices'),
+                                                        speak: makeNative(function speak() {}, 'speak'),
+                                                        cancel: makeNative(function cancel() {}, 'cancel'),
+                                                        pause: makeNative(function pause() {}, 'pause'),
+                                                        resume: makeNative(function resume() {}, 'resume'),
+                                                        addEventListener: makeNative(function addEventListener() {}, 'addEventListener'),
+                                                        removeEventListener: makeNative(function removeEventListener() {}, 'removeEventListener'),
+                                                        dispatchEvent: makeNative(function dispatchEvent() { return true; }, 'dispatchEvent')
                                                     };
                                                 }
                                             } catch(e) {}
