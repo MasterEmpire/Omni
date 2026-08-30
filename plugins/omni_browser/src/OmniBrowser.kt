@@ -1033,6 +1033,47 @@ class OmniBrowser : PluginEntry() {
             focusManager.clearFocus()
         }
 
+        fun injectErudaDevTools() {
+            if (currentUrl == "about:blank" || webViewInstance == null) {
+                bridge.showToast("Cannot inject DevTools on a blank page.")
+                return
+            }
+            bridge.showToast("🛠️ Initializing Eruda DevTools...")
+            val erudaScript = """
+                (function() {
+                    if (window.eruda) {
+                        if (window.eruda._isInit) {
+                            var devtools = eruda.get();
+                            if (devtools && devtools._isShow) {
+                                eruda.hide();
+                            } else {
+                                eruda.show();
+                            }
+                        } else {
+                            eruda.init();
+                            eruda.show();
+                        }
+                        return;
+                    }
+                    var script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/eruda';
+                    script.onload = function() {
+                        eruda.init({
+                            tool: ['console', 'elements', 'network', 'resource', 'info', 'snippets', 'storage'],
+                            defaults: {
+                                displaySize: 60,
+                                transparency: 0.95,
+                                theme: 'Dark'
+                            }
+                        });
+                        eruda.show();
+                    };
+                    document.body.appendChild(script);
+                })();
+            """.trimIndent()
+            webViewInstance?.evaluateJavascript(erudaScript, null)
+        }
+
         fun captureDomSnapshot() {
             val script = """
                 (function() {
@@ -1408,6 +1449,14 @@ class OmniBrowser : PluginEntry() {
                                     onClick = {
                                         showMenu = false
                                         showSolverDialog = true
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = { Text("🛠️ Eruda DevTools (Console)", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold) },
+                                    onClick = {
+                                        showMenu = false
+                                        injectErudaDevTools()
                                     }
                                 )
 
