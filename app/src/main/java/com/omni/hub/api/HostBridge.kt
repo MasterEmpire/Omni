@@ -380,22 +380,26 @@ class HostBridgeImpl(
 
     override fun runIntent(action: String, dataUri: String?, extras: Map<String, Any>?): Boolean {
         return try {
-            val intent = Intent(action).apply {
-                if (!dataUri.isNullOrEmpty()) {
-                    data = Uri.parse(dataUri)
-                }
-                extras?.forEach { (k, v) ->
-                    when (v) {
-                        is Boolean -> putExtra(k, v)
-                        is Int -> putExtra(k, v)
-                        is Long -> putExtra(k, v)
-                        is Float -> putExtra(k, v)
-                        is Double -> putExtra(k, v)
-                        else -> putExtra(k, v.toString())
+            val intent = if (!dataUri.isNullOrEmpty() && dataUri.startsWith("intent://")) {
+                Intent.parseUri(dataUri, Intent.URI_INTENT_SCHEME)
+            } else {
+                Intent(action).apply {
+                    if (!dataUri.isNullOrEmpty()) {
+                        data = Uri.parse(dataUri)
+                    }
+                    extras?.forEach { (k, v) ->
+                        when (v) {
+                            is Boolean -> putExtra(k, v)
+                            is Int -> putExtra(k, v)
+                            is Long -> putExtra(k, v)
+                            is Float -> putExtra(k, v)
+                            is Double -> putExtra(k, v)
+                            else -> putExtra(k, v.toString())
+                        }
                     }
                 }
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
             true
         } catch (_: Exception) {
