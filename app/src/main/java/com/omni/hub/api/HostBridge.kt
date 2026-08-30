@@ -41,6 +41,8 @@ interface HostBridge {
     fun showToast(message: String)
     fun copyToClipboard(text: String)
     fun vibrate(durationMs: Long)
+    fun setOnBackPressedHandler(handler: (() -> Boolean)?)
+    fun handleBackPressed(): Boolean
 
     // --- Permissions & Security ---
     fun hasPermission(permission: String): Boolean
@@ -112,6 +114,16 @@ class HostBridgeImpl(
     private val pluginDir: File,
     private val onCloseRequested: () -> Unit
 ) : HostBridge {
+
+    private var backPressedHandler: (() -> Boolean)? = null
+
+    override fun setOnBackPressedHandler(handler: (() -> Boolean)?) {
+        backPressedHandler = handler
+    }
+
+    override fun handleBackPressed(): Boolean {
+        return backPressedHandler?.invoke() ?: false
+    }
 
     override fun hasPermission(permission: String): Boolean {
         return androidx.core.content.ContextCompat.checkSelfPermission(
