@@ -3,12 +3,14 @@ package com.omni.plugin.browser
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,6 +59,13 @@ import java.util.Locale
 
 data class ShortcutItem(val title: String, val url: String, val iconText: String, val color: Color)
 
+data class BrowserTab(
+    val id: String,
+    val title: String = "New Tab",
+    val url: String = "about:blank",
+    val stateBundle: Bundle? = null
+)
+
 class OmniBrowser : PluginEntry() {
 
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
@@ -81,6 +90,20 @@ class OmniBrowser : PluginEntry() {
     fun ChromeBrowserScreen(bridge: HostBridge) {
         val focusManager = LocalFocusManager.current
 
+        var tabs by remember {
+            mutableStateOf(
+                listOf(
+                    BrowserTab(
+                        id = "tab_1",
+                        title = "New Tab",
+                        url = "about:blank"
+                    )
+                )
+            )
+        }
+        var activeTabId by remember { mutableStateOf("tab_1") }
+        var isTabSwitcherOpen by remember { mutableStateOf(false) }
+
         var currentUrl by remember { mutableStateOf("about:blank") }
         var urlInputText by remember { mutableStateOf("") }
         var pageTitle by remember { mutableStateOf("New Tab") }
@@ -92,6 +115,89 @@ class OmniBrowser : PluginEntry() {
         var showMenu by remember { mutableStateOf(false) }
 
         var webViewInstance: WebView? by remember { mutableStateOf(null) }
+
+        fun createNewTab(targetUrl: String = "about:blank") {
+            val bundle = Bundle()
+            webViewInstance?.saveState(bundle)
+            val updatedTabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle) else it }
+
+            val newId = "tab_${System.currentTimeMillis()}"
+            val newTab = BrowserTab(id = newId, title = if (targetUrl == "about:blank") "New Tab" else targetUrl, url = targetUrl)
+            tabs = updatedTabs + newTab
+            activeTabId = newId
+            currentUrl = targetUrl
+            urlInputText = if (targetUrl == "about:blank") "" else targetUrl
+            pageTitle = if (targetUrl == "about:blank") "New Tab" else targetUrl
+            isTabSwitcherOpen = false
+            webViewInstance?.loadUrl(targetUrl)
+        }
+
+        fun switchToTab(targetId: String) {
+            if (targetId == activeTabId) {
+                isTabSwitcherOpen = false
+                return
+            }
+            val bundle = Bundle()
+            webViewInstance?.saveState(bundle)
+            val updatedTabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle) else it }
+
+            activeTabId = targetId
+            tabs = updatedTabs
+            val targetTab = updatedTabs.find { it.id == targetId }
+            if (targetTab != null) {
+                currentUrl = targetTab.url
+                urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
+                pageTitle = targetTab.title
+                if (targetTab.stateBundle != null) {
+                    webViewInstance?.restoreState(targetTab.stateBundle)
+                } else {
+                    webViewInstance?.loadUrl(targetTab.url)
+                }
+            }
+            isTabSwitcherOpen = false
+        }
+
+        fun closeTab(targetId: String) {
+            val currentIdx = tabs.indexOfFirst { it.id == targetId }
+            val remainingTabs = tabs.filter { it.id != targetId }
+
+            if (remainingTabs.isEmpty()) {
+                val newId = "tab_${System.currentTimeMillis()}"
+                val freshTab = BrowserTab(id = newId, title = "New Tab", url = "about:blank")
+                tabs = listOf(freshTab)
+                activeTabId = newId
+                currentUrl = "about:blank"
+                urlInputText = ""
+                pageTitle = "New Tab"
+                webViewInstance?.loadUrl("about:blank")
+            } else {
+                tabs = remainingTabs
+                if (targetId == activeTabId) {
+                    val nextIdx = (currentIdx - 1).coerceAtLeast(0).coerceAtMost(remainingTabs.size - 1)
+                    val nextTab = remainingTabs[nextIdx]
+                    activeTabId = nextTab.id
+                    currentUrl = nextTab.url
+                    urlInputText = if (nextTab.url == "about:blank") "" else nextTab.url
+                    pageTitle = nextTab.title
+                    if (nextTab.stateBundle != null) {
+                        webViewInstance?.restoreState(nextTab.stateBundle)
+                    } else {
+                        webViewInstance?.loadUrl(nextTab.url)
+                    }
+                }
+            }
+        }
+
+        fun closeAllTabs() {
+            val newId = "tab_${System.currentTimeMillis()}"
+            tabs = listOf(BrowserTab(id = newId, title = "New Tab", url = "about:blank"))
+            activeTabId = newId
+            currentUrl = "about:blank"
+            urlInputText = ""
+            pageTitle = "New Tab"
+            isTabSwitcherOpen = false
+            webViewInstance?.loadUrl("about:blank")
+        }
         var mobileUA by remember { mutableStateOf("") }
         var showSolverDialog by remember { mutableStateOf(false) }
         var solverApiKey by remember { mutableStateOf("") }
@@ -128,6 +234,7 @@ class OmniBrowser : PluginEntry() {
 
             urlInputText = if (target == "about:blank") "" else target
             currentUrl = target
+            tabs = tabs.map { if (it.id == activeTabId) it.copy(url = target) else it }
             webViewInstance?.loadUrl(target)
             focusManager.clearFocus()
         }
@@ -321,14 +428,25 @@ class OmniBrowser : PluginEntry() {
             )
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF1F2227))
-                .statusBarsPadding()
-                .imePadding()
-        ) {
-            // --- Top Chrome Omnibox Header ---
+        if (isTabSwitcherOpen) {
+            TabSwitcherScreen(
+                tabs = tabs,
+                activeTabId = activeTabId,
+                onSelectTab = { switchToTab(it) },
+                onCloseTab = { closeTab(it) },
+                onNewTab = { createNewTab() },
+                onCloseAll = { closeAllTabs() },
+                onCloseSwitcher = { isTabSwitcherOpen = false }
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF1F2227))
+                    .statusBarsPadding()
+                    .imePadding()
+            ) {
+                // --- Top Chrome Omnibox Header ---
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -440,9 +558,14 @@ class OmniBrowser : PluginEntry() {
                             .size(28.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .border(1.5.dp, Color(0xFF9AA0A6), RoundedCornerShape(6.dp))
-                            .clickable { bridge.showToast("Tab management ready in next update!") }
+                            .clickable {
+                                val bundle = Bundle()
+                                webViewInstance?.saveState(bundle)
+                                tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle) else it }
+                                isTabSwitcherOpen = true
+                            }
                     ) {
-                        Text("1", color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("${tabs.size}", color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(Modifier.width(4.dp))
@@ -513,6 +636,22 @@ class OmniBrowser : PluginEntry() {
                             }
 
                             HorizontalDivider(color = Color(0xFF3C4043))
+
+                            DropdownMenuItem(
+                                text = { Text("+ New Tab", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold) },
+                                onClick = {
+                                    showMenu = false
+                                    createNewTab()
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Close Tab", color = Color(0xFFE8EAED)) },
+                                onClick = {
+                                    showMenu = false
+                                    closeTab(activeTabId)
+                                }
+                            )
 
                             DropdownMenuItem(
                                 text = { Text(if (isDesktopMode) "✓ Desktop Site" else "Desktop Site", color = Color(0xFFE8EAED)) },
@@ -627,7 +766,10 @@ class OmniBrowser : PluginEntry() {
                                 }
 
                                 override fun onReceivedTitle(view: WebView?, title: String?) {
-                                    if (!title.isNullOrEmpty()) pageTitle = title
+                                    if (!title.isNullOrEmpty()) {
+                                        pageTitle = title
+                                        tabs = tabs.map { if (it.id == activeTabId) it.copy(title = title) else it }
+                                    }
                                 }
 
                                 override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
@@ -651,6 +793,7 @@ class OmniBrowser : PluginEntry() {
                                     if (url != null && url != "about:blank") {
                                         currentUrl = url
                                         urlInputText = url
+                                        tabs = tabs.map { if (it.id == activeTabId) it.copy(url = url) else it }
                                     }
                                 }
 
@@ -1076,15 +1219,177 @@ class OmniBrowser : PluginEntry() {
                             Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
                         }
                     },
-                    dismissButton = {
+                                        dismissButton = {
                         TextButton(onClick = { showSolverDialog = false }) {
                             Text("Cancel", color = Color(0xFF9AA0A6))
                         }
                     }
                 )
             }
+        }
+    }
+}
 
+@Composable
+fun TabSwitcherScreen(
+    tabs: List<BrowserTab>,
+    activeTabId: String,
+    onSelectTab: (String) -> Unit,
+    onCloseTab: (String) -> Unit,
+    onNewTab: () -> Unit,
+    onCloseAll: () -> Unit,
+    onCloseSwitcher: () -> Unit
+) {
+    var showTabMenu by remember { mutableStateOf(false) }
 
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1F2227))
+            .statusBarsPadding()
+    ) {
+        // Tab Switcher Header Bar
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .background(Color(0xFF1F2227))
+                .padding(horizontal = 12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onNewTab) {
+                    Icon(Icons.Default.Add, contentDescription = "New Tab", tint = Color(0xFFE8EAED))
+                }
+
+                Text(
+                    text = "${tabs.size} open ${if (tabs.size == 1) "tab" else "tabs"}",
+                    color = Color(0xFFE8EAED),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onCloseSwitcher) {
+                        Text("Done", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    Box {
+                        IconButton(onClick = { showTabMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Tab Menu", tint = Color(0xFF9AA0A6))
+                        }
+                        DropdownMenu(
+                            expanded = showTabMenu,
+                            onDismissRequest = { showTabMenu = false },
+                            modifier = Modifier.background(Color(0xFF282C34))
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("New Tab", color = Color(0xFFE8EAED)) },
+                                onClick = {
+                                    showTabMenu = false
+                                    onNewTab()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Close All Tabs", color = Color(0xFFF28B82)) },
+                                onClick = {
+                                    showTabMenu = false
+                                    onCloseAll()
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider(color = Color(0xFF282C34))
+
+        // 2-Column Tabs Card Grid
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            items(tabs, key = { it.id }) { tab ->
+                val isActive = tab.id == activeTabId
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF282C34)),
+                    border = if (isActive) BorderStroke(2.dp, Color(0xFF8AB4F8)) else null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .clickable { onSelectTab(tab.id) }
+                ) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Tab Card Header
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(if (isActive) Color(0xFF333842) else Color(0xFF21252B))
+                                .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (tab.url == "about:blank") "New Tab" else tab.title.ifEmpty { "Web Page" },
+                                color = Color(0xFFE8EAED),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            IconButton(
+                                onClick = { onCloseTab(tab.id) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close Tab",
+                                    tint = Color(0xFF9AA0A6),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+
+                        // Tab Card Preview Body
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .background(Color(0xFF1F2227))
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = if (tab.url == "about:blank") "🌐" else "📄",
+                                    fontSize = 24.sp
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = if (tab.url == "about:blank") "about:blank" else tab.url.replace("https://", "").replace("http://", "").take(25),
+                                    color = Color(0xFF9AA0A6),
+                                    fontSize = 10.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
