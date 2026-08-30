@@ -128,10 +128,10 @@ class OmniBrowser : PluginEntry() {
     fun ChromeBrowserScreen(bridge: HostBridge) {
         val context = androidx.compose.ui.platform.LocalContext.current
         val focusManager = LocalFocusManager.current
-
+        val coroutineScope = rememberCoroutineScope()
         val MAX_HOT_TABS = 8
 
-        // Multi-Profile State Management
+        // --- All State Definitions Hoisted to Top ---
         var profiles by remember {
             mutableStateOf(
                 listOf(
@@ -141,6 +141,47 @@ class OmniBrowser : PluginEntry() {
         }
         var selectedProfileId by remember { mutableStateOf("default") }
         var editingProfile by remember { mutableStateOf<BrowserProfile?>(null) }
+
+        var tabs by remember {
+            mutableStateOf(
+                listOf(
+                    BrowserTab(
+                        id = "tab_1",
+                        title = "New Tab",
+                        url = "about:blank",
+                        profileId = "default"
+                    )
+                )
+            )
+        }
+        var activeTabId by remember { mutableStateOf("tab_1") }
+        var isTabSwitcherOpen by remember { mutableStateOf(false) }
+
+        var currentUrl by remember { mutableStateOf("about:blank") }
+        var urlInputText by remember { mutableStateOf("") }
+        var pageTitle by remember { mutableStateOf("New Tab") }
+        var isLoading by remember { mutableStateOf(false) }
+        var loadProgress by remember { mutableFloatStateOf(0f) }
+        var canGoBack by remember { mutableStateOf(false) }
+        var canGoForward by remember { mutableStateOf(false) }
+        var isDesktopMode by remember { mutableStateOf(false) }
+        var showMenu by remember { mutableStateOf(false) }
+
+        val webViewPool = remember { mutableMapOf<String, WebView>() }
+        var containerLayout: FrameLayout? by remember { mutableStateOf(null) }
+        var webViewInstance: WebView? by remember { mutableStateOf(null) }
+
+        var mobileUA by remember { mutableStateOf("") }
+        var showSolverDialog by remember { mutableStateOf(false) }
+        var solverApiKey by remember { mutableStateOf("") }
+        var autoSolveEnabled by remember { mutableStateOf(true) }
+        var isSolvingCaptcha by remember { mutableStateOf(false) }
+
+        val desktopUA = remember {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        }
+
+        var createNewTabHandler: ((String) -> Unit)? = null
 
         fun saveProfilesToDisk(list: List<BrowserProfile>) {
             try {
@@ -360,46 +401,6 @@ class OmniBrowser : PluginEntry() {
                 bridge.showToast("Download error: ${e.message}")
                 bridge.log("DOWNLOAD_ERR", "Download queue exception: ${e.message}")
             }
-        }
-
-        var tabs by remember {
-            mutableStateOf(
-                listOf(
-                    BrowserTab(
-                        id = "tab_1",
-                        title = "New Tab",
-                        url = "about:blank",
-                        profileId = "default"
-                    )
-                )
-            )
-        }
-        var activeTabId by remember { mutableStateOf("tab_1") }
-        var isTabSwitcherOpen by remember { mutableStateOf(false) }
-
-        var currentUrl by remember { mutableStateOf("about:blank") }
-        var urlInputText by remember { mutableStateOf("") }
-        var pageTitle by remember { mutableStateOf("New Tab") }
-        var isLoading by remember { mutableStateOf(false) }
-        var loadProgress by remember { mutableFloatStateOf(0f) }
-        var canGoBack by remember { mutableStateOf(false) }
-        var canGoForward by remember { mutableStateOf(false) }
-        var isDesktopMode by remember { mutableStateOf(false) }
-        var showMenu by remember { mutableStateOf(false) }
-
-        val webViewPool = remember { mutableMapOf<String, WebView>() }
-        var containerLayout: FrameLayout? by remember { mutableStateOf(null) }
-        var webViewInstance: WebView? by remember { mutableStateOf(null) }
-
-        var mobileUA by remember { mutableStateOf("") }
-        var showSolverDialog by remember { mutableStateOf(false) }
-        var solverApiKey by remember { mutableStateOf("") }
-        var autoSolveEnabled by remember { mutableStateOf(true) }
-        var isSolvingCaptcha by remember { mutableStateOf(false) }
-        val coroutineScope = rememberCoroutineScope()
-
-        val desktopUA = remember {
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         }
 
         // Load persisted solver and profile configurations
@@ -716,7 +717,7 @@ class OmniBrowser : PluginEntry() {
                                     if (handleExternalUri(targetUrl, v)) {
                                         return true
                                     }
-                                    createNewTab(targetUrl)
+                                    createNewTabHandler?.invoke(targetUrl)
                                     return true
                                 }
                             }
@@ -1110,6 +1111,8 @@ class OmniBrowser : PluginEntry() {
             saveSessionToDisk(tabs, newId)
             attachTabWebView(newId)
         }
+
+        createNewTabHandler = { targetUrl -> createNewTab(targetUrl) }
 
         fun switchToTab(targetId: String) {
             if (targetId == activeTabId) {
