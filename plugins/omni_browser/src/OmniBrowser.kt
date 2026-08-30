@@ -43,7 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.zIndex.zIndex
+import androidx.compose.ui.zIndex
 import com.omni.hub.api.HostBridge
 import com.omni.hub.api.PluginEntry
 import kotlinx.coroutines.Dispatchers
