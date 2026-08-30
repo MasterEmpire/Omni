@@ -10,6 +10,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -326,9 +327,10 @@ class OmniBrowser : PluginEntry() {
                 .imePadding()
         ) {
             // --- Top Chrome Omnibox Header ---
-            Surface(
-                color = Color(0xFF1F2227),
-                modifier = Modifier.fillMaxWidth()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF1F2227))
             ) {
                 Row(
                     modifier = Modifier
@@ -345,12 +347,12 @@ class OmniBrowser : PluginEntry() {
                     }
 
                     // Chrome Address Pill
-                    Surface(
-                        shape = RoundedCornerShape(22.dp),
-                        color = Color(0xFF282C34),
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(Color(0xFF282C34))
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -428,17 +430,15 @@ class OmniBrowser : PluginEntry() {
                     Spacer(Modifier.width(6.dp))
 
                     // Tab Counter Badge
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color.Transparent,
-                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF9AA0A6)),
+                    Box(
+                        contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .size(28.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .border(1.5.dp, Color(0xFF9AA0A6), RoundedCornerShape(6.dp))
                             .clickable { bridge.showToast("Tab management ready in next update!") }
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text("1", color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Text("1", color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(Modifier.width(4.dp))
@@ -1036,11 +1036,11 @@ class OmniBrowser : PluginEntry() {
             }
 
             // --- Bottom Navigation Toolbar ---
-            Surface(
-                color = Color(0xFF1F2227),
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
+                    .background(Color(0xFF1F2227))
             ) {
                 Row(
                     modifier = Modifier
