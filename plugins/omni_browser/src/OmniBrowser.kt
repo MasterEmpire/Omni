@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -27,8 +28,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -363,17 +367,20 @@ class OmniBrowser : PluginEntry() {
 
                             Spacer(Modifier.width(8.dp))
 
-                            TextField(
+                            BasicTextField(
                                 value = urlInputText,
                                 onValueChange = { urlInputText = it },
-                                placeholder = {
-                                    Text(
-                                        "Search or type URL",
-                                        color = Color(0xFF80868B),
-                                        fontSize = 14.sp
-                                    )
-                                },
                                 singleLine = true,
+                                maxLines = 1,
+                                cursorBrush = SolidColor(Color(0xFF8AB4F8)),
+                                textStyle = TextStyle(
+                                    color = Color(0xFFE8EAED),
+                                    fontSize = 14.sp,
+                                    lineHeight = 18.sp,
+                                    platformStyle = PlatformTextStyle(
+                                        includeFontPadding = false
+                                    )
+                                ),
                                 keyboardOptions = KeyboardOptions(
                                     keyboardType = KeyboardType.Uri,
                                     imeAction = ImeAction.Go
@@ -381,15 +388,30 @@ class OmniBrowser : PluginEntry() {
                                 keyboardActions = KeyboardActions(
                                     onGo = { navigateTo(urlInputText) }
                                 ),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    focusedTextColor = Color(0xFFE8EAED),
-                                    unfocusedTextColor = Color(0xFFE8EAED)
-                                ),
-                                modifier = Modifier.weight(1f)
+                                decorationBox = { innerTextField ->
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (urlInputText.isEmpty()) {
+                                            Text(
+                                                text = "Search or type URL",
+                                                color = Color(0xFF80868B),
+                                                fontSize = 14.sp,
+                                                style = TextStyle(
+                                                    platformStyle = PlatformTextStyle(
+                                                        includeFontPadding = false
+                                                    )
+                                                )
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .wrapContentHeight(Alignment.CenterVertically)
                             )
 
                             if (urlInputText.isNotEmpty()) {
@@ -538,6 +560,7 @@ class OmniBrowser : PluginEntry() {
                 AndroidView(
                     factory = { ctx ->
                         WebView(ctx).apply {
+                            setBackgroundColor(android.graphics.Color.parseColor("#1F2227"))
                             layoutParams = ViewGroup.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT
