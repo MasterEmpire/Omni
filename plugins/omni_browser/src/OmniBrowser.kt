@@ -677,8 +677,10 @@ class OmniBrowser : PluginEntry() {
                     } catch (e: Exception) {
                         bridge.log("PROFILE_WARN", "Could not set profile '$profileId': ${e.message}")
                     }
-                CookieManager.getInstance().setAcceptCookie(true)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                } else {
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                }
 
                 setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
                     triggerFileDownload(url, userAgent, contentDisposition, mimeType)
@@ -692,9 +694,9 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 }, "OmniBlobDownloader")
-            }
 
-            if (savedState != null) {
+                val rawUA = settings.userAgentString
+                val mobileUserAgent = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
                 mobileUA = mobileUserAgent
                 settings.userAgentString = if (isDesktopMode) desktopUA else mobileUserAgent
 
@@ -1039,7 +1041,6 @@ class OmniBrowser : PluginEntry() {
                         method.invoke(this, emptySet<String>())
                     } catch (_: Exception) {}
                 }
-
             }
 
             if (savedState != null) {
