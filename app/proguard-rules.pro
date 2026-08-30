@@ -23,3 +23,7 @@
 -keep class okio.** { *; }
 -dontwarn okhttp3.**
 -dontwarn okio.**
+
+# WebKit & Multi-Profile Support
+-keep class androidx.webkit.** { *; }
+-dontwarn androidx.webkit.**
