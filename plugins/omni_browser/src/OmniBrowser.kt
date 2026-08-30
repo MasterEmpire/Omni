@@ -344,6 +344,7 @@ class OmniBrowser : PluginEntry() {
                     bridge.log("HOT_POOL", "Evicted cold tab: ${tabToEvict.id} (${tabToEvict.title})")
                 }
             }
+            CookieManager.getInstance().flush()
         }
 
         fun createConfiguredWebView(tabId: String, initialUrl: String, savedState: Bundle? = null): WebView {
@@ -682,6 +683,7 @@ class OmniBrowser : PluginEntry() {
                     wv.onPause()
                 }
             }
+            CookieManager.getInstance().flush()
             container.removeAllViews()
 
             val targetTab = tabs.find { it.id == targetTabId } ?: return
@@ -969,6 +971,7 @@ class OmniBrowser : PluginEntry() {
                                     val bundle = Bundle()
                                     webViewInstance?.saveState(bundle)
                                     tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
+                                    CookieManager.getInstance().flush()
                                     isTabSwitcherOpen = true
                                 }
                         ) {
