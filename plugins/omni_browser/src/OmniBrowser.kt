@@ -1200,7 +1200,27 @@ class OmniBrowser : PluginEntry() {
         }
 
         fun captureDomSnapshot() {
-            webViewInstance?.evaluateJavascript("(function() { return document.documentElement.outerHTML; })();") { html ->
+            val script = """
+                (function() {
+                    try {
+                        var clone = document.documentElement.cloneNode(true);
+                        var head = clone.querySelector('head');
+                        if (head) {
+                            var existingBase = head.querySelector('base');
+                            if (!existingBase) {
+                                var base = document.createElement('base');
+                                base.href = window.location.href;
+                                head.insertBefore(base, head.firstChild);
+                            }
+                        }
+                        return '<!DOCTYPE html>\n' + clone.outerHTML;
+                    } catch(e) {
+                        return document.documentElement.outerHTML;
+                    }
+                })();
+            """.trimIndent()
+
+            webViewInstance?.evaluateJavascript(script) { html ->
                 if (!html.isNullOrEmpty()) {
                     val rawHtml = if (html.startsWith("\"") && html.endsWith("\"")) {
                         try {
