@@ -43,6 +43,7 @@ interface HostBridge {
     fun vibrate(durationMs: Long)
     fun setOnBackPressedHandler(handler: (() -> Boolean)?)
     fun handleBackPressed(): Boolean
+    fun pickFiles(mimeType: String = "*/*", allowMultiple: Boolean = false, onResult: (List<Uri>) -> Unit)
 
     // --- Permissions & Security ---
     fun hasPermission(permission: String): Boolean
@@ -106,6 +107,27 @@ object PermissionDispatcher {
     }
 }
 
+object FilePickerDispatcher {
+    private var launcher: ((String, Boolean, (List<Uri>) -> Unit) -> Unit)? = null
+
+    fun registerLauncher(block: (String, Boolean, (List<Uri>) -> Unit) -> Unit) {
+        launcher = block
+    }
+
+    fun pick(mimeType: String, allowMultiple: Boolean, callback: (List<Uri>) -> Unit) {
+        val l = launcher
+        if (l != null) {
+            Handler(Looper.getMainLooper()).post {
+                l(mimeType, allowMultiple, callback)
+            }
+        } else {
+            Handler(Looper.getMainLooper()).post {
+                callback(emptyList())
+            }
+        }
+    }
+}
+
 /**
  * Concrete implementation of the HostBridge instantiated by Omni Hub.
  */
@@ -123,6 +145,10 @@ class HostBridgeImpl(
 
     override fun handleBackPressed(): Boolean {
         return backPressedHandler?.invoke() ?: false
+    }
+
+    override fun pickFiles(mimeType: String, allowMultiple: Boolean, onResult: (List<Uri>) -> Unit) {
+        FilePickerDispatcher.pick(mimeType, allowMultiple, onResult)
     }
 
     override fun hasPermission(permission: String): Boolean {
