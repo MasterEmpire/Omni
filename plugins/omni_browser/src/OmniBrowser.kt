@@ -136,6 +136,174 @@ class OmniBrowser : PluginEntry() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         }
 
+        // Load persisted solver configuration
+        LaunchedEffect(Unit) {
+            try {
+                val savedBytes = bridge.readFile("config/solver.json")
+                if (savedBytes != null) {
+                    val json = org.json.JSONObject(String(savedBytes, Charsets.UTF_8))
+                    solverApiKey = json.optString("apiKey", "")
+                    autoSolveEnabled = json.optBoolean("autoSolve", true)
+                }
+            } catch (_: Exception) {}
+        }
+
+        fun extractSolverError(json: org.json.JSONObject, raw: String): String {
+            val desc = json.optString("errorDescription")
+            if (desc.isNotEmpty()) return desc
+            val code = json.optString("errorCode")
+            if (code.isNotEmpty()) return code
+            val msg = json.optString("message", json.optString("msg", json.optString("error", "")))
+            if (msg.isNotEmpty()) return msg
+            val status = json.optString("status")
+            if (status.isNotEmpty() && status != "processing") return status
+            return if (raw.length > 120) raw.take(120) + "..." else raw
+        }
+
+        fun executeSolver(siteKey: String, pageUrl: String) {
+            if (solverApiKey.isEmpty()) {
+                bridge.showToast("Configure NoCaptchaAI API key in settings first.")
+                return
+            }
+            if (isSolvingCaptcha) return
+
+            isSolvingCaptcha = true
+            bridge.showToast("🤖 Solving CAPTCHA with NoCaptchaAI...")
+            bridge.log("SOLVER", "Creating task for sitekey: $siteKey on $pageUrl")
+
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val createPayload = org.json.JSONObject().apply {
+                        put("clientKey", solverApiKey)
+                        put("task", org.json.JSONObject().apply {
+                            put("type", "ReCaptchaV2TaskProxyLess")
+                            put("websiteURL", pageUrl)
+                            put("websiteKey", siteKey)
+                        })
+                    }
+
+                    // 1. Dispatch Task Creation
+                    var responseStr = bridge.httpPost("https://api.nocaptchaai.com/createTask", createPayload.toString())
+                    if (responseStr == null) {
+                        responseStr = bridge.httpPost("https://api.nocaptchaai.com/solve", createPayload.toString())
+                    }
+
+                    if (responseStr != null) {
+                        bridge.log("SOLVER", "Task Creation Response: $responseStr")
+                        val respObj = org.json.JSONObject(responseStr)
+
+                        var solutionToken = respObj.optJSONObject("solution")?.optString("gRecaptchaResponse")
+                            ?: respObj.optString("token", "")
+
+                        val taskId = respObj.optString("taskId", "")
+
+                        // 2. Poll getTaskResult if taskId returned asynchronously
+                        if (solutionToken.isEmpty() && taskId.isNotEmpty()) {
+                            bridge.log("SOLVER", "Task registered with ID: $taskId. Polling for solution...")
+                            val pollPayload = org.json.JSONObject().apply {
+                                put("clientKey", solverApiKey)
+                                put("taskId", taskId)
+                            }.toString()
+
+                            var attempts = 0
+                            while (attempts < 15 && solutionToken.isEmpty()) {
+                                delay(2000)
+                                attempts++
+                                val pollRespStr = bridge.httpPost("https://api.nocaptchaai.com/getTaskResult", pollPayload)
+                                if (pollRespStr != null) {
+                                    val pollObj = org.json.JSONObject(pollRespStr)
+                                    val status = pollObj.optString("status", "")
+                                    bridge.log("SOLVER", "Poll #$attempts status: $status")
+
+                                    if (status == "ready" || status == "solved") {
+                                        solutionToken = pollObj.optJSONObject("solution")?.optString("gRecaptchaResponse")
+                                            ?: pollObj.optString("token", "")
+                                        break
+                                    } else if (status == "failed" || pollObj.optInt("errorId", 0) != 0) {
+                                        val err = extractSolverError(pollObj, pollRespStr)
+                                        withContext(Dispatchers.Main) {
+                                            bridge.showToast("Solver failed: $err")
+                                            bridge.log("SOLVER_ERR", "Polling Error: $pollRespStr")
+                                        }
+                                        return@launch
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Inject Solution Token into DOM
+                        if (solutionToken.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                val injectionScript = """
+                                    javascript:(function() {
+                                        const token = '$solutionToken';
+                                        const textareas = document.querySelectorAll('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
+                                        textareas.forEach(t => { t.value = token; t.innerHTML = token; });
+                                        try {
+                                            if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {
+                                                Object.values(window.___grecaptcha_cfg.clients).forEach(client => {
+                                                    for (const key in client) {
+                                                        if (client[key] && typeof client[key].callback === 'function') {
+                                                            client[key].callback(token);
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        } catch(e) {}
+                                    })();
+                                """.trimIndent()
+                                webViewInstance?.evaluateJavascript(injectionScript, null)
+                                bridge.showToast("✅ CAPTCHA Solved & Injected!")
+                                bridge.log("SOLVER", "Successfully injected response token into DOM.")
+                            }
+                        } else {
+                            val errMsg = extractSolverError(respObj, responseStr)
+                            withContext(Dispatchers.Main) {
+                                bridge.showToast("Solver returned: $errMsg")
+                                bridge.log("SOLVER_ERR", "API Response: $responseStr")
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            bridge.showToast("Failed to reach solver API endpoint.")
+                            bridge.log("SOLVER_ERR", "HTTP POST to solver endpoint returned null.")
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        bridge.showToast("Solver error: ${e.message}")
+                        bridge.log("SOLVER_ERR", "Exception: ${e.message}")
+                    }
+                } finally {
+                    isSolvingCaptcha = false
+                }
+            }
+        }
+
+        fun scanAndSolveCaptcha() {
+            val detectorScript = """
+                (function() {
+                    const el = document.querySelector('[data-sitekey]');
+                    if (el) return el.getAttribute('data-sitekey');
+                    const iframe = document.querySelector('iframe[src*="recaptcha"], iframe[src*="turnstile"]');
+                    if (iframe) {
+                        const m = iframe.src.match(/k=([^&]+)/) || iframe.src.match(/sitekey=([^&]+)/);
+                        if (m) return m[1];
+                    }
+                    return '';
+                })();
+            """.trimIndent()
+
+            webViewInstance?.evaluateJavascript(detectorScript) { siteKeyRaw ->
+                val siteKey = siteKeyRaw?.replace("\"", "")?.trim() ?: ""
+                if (siteKey.isNotEmpty()) {
+                    executeSolver(siteKey, currentUrl)
+                } else {
+                    bridge.showToast("No active CAPTCHA widget found on page.")
+                }
+            }
+        }
+
         fun captureThumbnail(): Bitmap? {
             val wv = webViewInstance ?: return null
             if (wv.width <= 0 || wv.height <= 0) return null
@@ -151,6 +319,44 @@ class OmniBrowser : PluginEntry() {
             } catch (_: Exception) {
                 null
             }
+        }
+
+        fun captureDomSnapshot() {
+            webViewInstance?.evaluateJavascript("(function() { return document.documentElement.outerHTML; })();") { html ->
+                if (!html.isNullOrEmpty()) {
+                    val rawHtml = if (html.startsWith("\"") && html.endsWith("\"")) {
+                        try {
+                            org.json.JSONObject("{\"h\":$html}").getString("h")
+                        } catch (_: Exception) { html }
+                    } else html
+
+                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                    val filename = "snapshots/DOM_Dump_$timestamp.html"
+                    bridge.saveFile(filename, rawHtml.toByteArray(Charsets.UTF_8))
+                    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot to: $filename (${rawHtml.length} bytes)")
+                    bridge.showToast("DOM Snapshot Saved to $filename")
+                } else {
+                    bridge.showToast("Could not capture page DOM.")
+                }
+            }
+        }
+
+        fun navigateTo(rawInput: String) {
+            val input = rawInput.trim()
+            if (input.isEmpty()) return
+
+            val target = when {
+                input == "about:blank" -> "about:blank"
+                input.startsWith("http://") || input.startsWith("https://") -> input
+                input.contains(".") && !input.contains(" ") -> "https://$input"
+                else -> "https://www.google.com/search?q=${URLEncoder.encode(input, "UTF-8")}"
+            }
+
+            urlInputText = if (target == "about:blank") "" else target
+            currentUrl = target
+            tabs = tabs.map { if (it.id == activeTabId) it.copy(url = target) else it }
+            webViewInstance?.loadUrl(target)
+            focusManager.clearFocus()
         }
 
         fun createConfiguredWebView(tabId: String, initialUrl: String): WebView {
@@ -572,222 +778,6 @@ class OmniBrowser : PluginEntry() {
             isTabSwitcherOpen = false
 
             attachTabWebView(newId)
-        }
-        var mobileUA by remember { mutableStateOf("") }
-        var showSolverDialog by remember { mutableStateOf(false) }
-        var solverApiKey by remember { mutableStateOf("") }
-        var autoSolveEnabled by remember { mutableStateOf(true) }
-        var isSolvingCaptcha by remember { mutableStateOf(false) }
-        val coroutineScope = rememberCoroutineScope()
-
-        // Load persisted solver configuration
-        LaunchedEffect(Unit) {
-            try {
-                val savedBytes = bridge.readFile("config/solver.json")
-                if (savedBytes != null) {
-                    val json = org.json.JSONObject(String(savedBytes, Charsets.UTF_8))
-                    solverApiKey = json.optString("apiKey", "")
-                    autoSolveEnabled = json.optBoolean("autoSolve", true)
-                }
-            } catch (_: Exception) {}
-        }
-
-        val desktopUA = remember {
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-        }
-
-        fun navigateTo(rawInput: String) {
-            val input = rawInput.trim()
-            if (input.isEmpty()) return
-
-            val target = when {
-                input == "about:blank" -> "about:blank"
-                input.startsWith("http://") || input.startsWith("https://") -> input
-                input.contains(".") && !input.contains(" ") -> "https://$input"
-                else -> "https://www.google.com/search?q=${URLEncoder.encode(input, "UTF-8")}"
-            }
-
-            urlInputText = if (target == "about:blank") "" else target
-            currentUrl = target
-            tabs = tabs.map { if (it.id == activeTabId) it.copy(url = target) else it }
-            webViewInstance?.loadUrl(target)
-            focusManager.clearFocus()
-        }
-
-        fun captureDomSnapshot() {
-            webViewInstance?.evaluateJavascript("(function() { return document.documentElement.outerHTML; })();") { html ->
-                if (!html.isNullOrEmpty()) {
-                    val rawHtml = if (html.startsWith("\"") && html.endsWith("\"")) {
-                        try {
-                            org.json.JSONObject("{\"h\":$html}").getString("h")
-                        } catch (_: Exception) { html }
-                    } else html
-
-                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    val filename = "snapshots/DOM_Dump_$timestamp.html"
-                    bridge.saveFile(filename, rawHtml.toByteArray(Charsets.UTF_8))
-                    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot to: $filename (${rawHtml.length} bytes)")
-                    bridge.showToast("DOM Snapshot Saved to $filename")
-                } else {
-                    bridge.showToast("Could not capture page DOM.")
-                }
-            }
-        }
-
-        fun extractSolverError(json: org.json.JSONObject, raw: String): String {
-            val desc = json.optString("errorDescription")
-            if (desc.isNotEmpty()) return desc
-            val code = json.optString("errorCode")
-            if (code.isNotEmpty()) return code
-            val msg = json.optString("message", json.optString("msg", json.optString("error", "")))
-            if (msg.isNotEmpty()) return msg
-            val status = json.optString("status")
-            if (status.isNotEmpty() && status != "processing") return status
-            return if (raw.length > 120) raw.take(120) + "..." else raw
-        }
-
-        fun executeSolver(siteKey: String, pageUrl: String) {
-            if (solverApiKey.isEmpty()) {
-                bridge.showToast("Configure NoCaptchaAI API key in settings first.")
-                return
-            }
-            if (isSolvingCaptcha) return
-
-            isSolvingCaptcha = true
-            bridge.showToast("🤖 Solving CAPTCHA with NoCaptchaAI...")
-            bridge.log("SOLVER", "Creating task for sitekey: $siteKey on $pageUrl")
-
-            coroutineScope.launch(Dispatchers.IO) {
-                try {
-                    val createPayload = org.json.JSONObject().apply {
-                        put("clientKey", solverApiKey)
-                        put("task", org.json.JSONObject().apply {
-                            put("type", "ReCaptchaV2TaskProxyLess")
-                            put("websiteURL", pageUrl)
-                            put("websiteKey", siteKey)
-                        })
-                    }
-
-                    // 1. Dispatch Task Creation
-                    var responseStr = bridge.httpPost("https://api.nocaptchaai.com/createTask", createPayload.toString())
-                    if (responseStr == null) {
-                        responseStr = bridge.httpPost("https://api.nocaptchaai.com/solve", createPayload.toString())
-                    }
-
-                    if (responseStr != null) {
-                        bridge.log("SOLVER", "Task Creation Response: $responseStr")
-                        val respObj = org.json.JSONObject(responseStr)
-
-                        var solutionToken = respObj.optJSONObject("solution")?.optString("gRecaptchaResponse")
-                            ?: respObj.optString("token", "")
-
-                        val taskId = respObj.optString("taskId", "")
-
-                        // 2. Poll getTaskResult if taskId returned asynchronously
-                        if (solutionToken.isEmpty() && taskId.isNotEmpty()) {
-                            bridge.log("SOLVER", "Task registered with ID: $taskId. Polling for solution...")
-                            val pollPayload = org.json.JSONObject().apply {
-                                put("clientKey", solverApiKey)
-                                put("taskId", taskId)
-                            }.toString()
-
-                            var attempts = 0
-                            while (attempts < 15 && solutionToken.isEmpty()) {
-                                delay(2000)
-                                attempts++
-                                val pollRespStr = bridge.httpPost("https://api.nocaptchaai.com/getTaskResult", pollPayload)
-                                if (pollRespStr != null) {
-                                    val pollObj = org.json.JSONObject(pollRespStr)
-                                    val status = pollObj.optString("status", "")
-                                    bridge.log("SOLVER", "Poll #$attempts status: $status")
-
-                                    if (status == "ready" || status == "solved") {
-                                        solutionToken = pollObj.optJSONObject("solution")?.optString("gRecaptchaResponse")
-                                            ?: pollObj.optString("token", "")
-                                        break
-                                    } else if (status == "failed" || pollObj.optInt("errorId", 0) != 0) {
-                                        val err = extractSolverError(pollObj, pollRespStr)
-                                        withContext(Dispatchers.Main) {
-                                            bridge.showToast("Solver failed: $err")
-                                            bridge.log("SOLVER_ERR", "Polling Error: $pollRespStr")
-                                        }
-                                        return@launch
-                                    }
-                                }
-                            }
-                        }
-
-                        // 3. Inject Solution Token into DOM
-                        if (solutionToken.isNotEmpty()) {
-                            withContext(Dispatchers.Main) {
-                                val injectionScript = """
-                                    javascript:(function() {
-                                        const token = '$solutionToken';
-                                        const textareas = document.querySelectorAll('textarea[name="g-recaptcha-response"], #g-recaptcha-response');
-                                        textareas.forEach(t => { t.value = token; t.innerHTML = token; });
-                                        try {
-                                            if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {
-                                                Object.values(window.___grecaptcha_cfg.clients).forEach(client => {
-                                                    for (const key in client) {
-                                                        if (client[key] && typeof client[key].callback === 'function') {
-                                                            client[key].callback(token);
-                                                        }
-                                                    }
-                                                });
-                                            }
-                                        } catch(e) {}
-                                    })();
-                                """.trimIndent()
-                                webViewInstance?.evaluateJavascript(injectionScript, null)
-                                bridge.showToast("✅ CAPTCHA Solved & Injected!")
-                                bridge.log("SOLVER", "Successfully injected response token into DOM.")
-                            }
-                        } else {
-                            val errMsg = extractSolverError(respObj, responseStr)
-                            withContext(Dispatchers.Main) {
-                                bridge.showToast("Solver returned: $errMsg")
-                                bridge.log("SOLVER_ERR", "API Response: $responseStr")
-                            }
-                        }
-                    } else {
-                        withContext(Dispatchers.Main) {
-                            bridge.showToast("Failed to reach solver API endpoint.")
-                            bridge.log("SOLVER_ERR", "HTTP POST to solver endpoint returned null.")
-                        }
-                    }
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        bridge.showToast("Solver error: ${e.message}")
-                        bridge.log("SOLVER_ERR", "Exception: ${e.message}")
-                    }
-                } finally {
-                    isSolvingCaptcha = false
-                }
-            }
-        }
-
-        fun scanAndSolveCaptcha() {
-            val detectorScript = """
-                (function() {
-                    const el = document.querySelector('[data-sitekey]');
-                    if (el) return el.getAttribute('data-sitekey');
-                    const iframe = document.querySelector('iframe[src*="recaptcha"], iframe[src*="turnstile"]');
-                    if (iframe) {
-                        const m = iframe.src.match(/k=([^&]+)/) || iframe.src.match(/sitekey=([^&]+)/);
-                        if (m) return m[1];
-                    }
-                    return '';
-                })();
-            """.trimIndent()
-
-            webViewInstance?.evaluateJavascript(detectorScript) { siteKeyRaw ->
-                val siteKey = siteKeyRaw?.replace("\"", "")?.trim() ?: ""
-                if (siteKey.isNotEmpty()) {
-                    executeSolver(siteKey, currentUrl)
-                } else {
-                    bridge.showToast("No active CAPTCHA widget found on page.")
-                }
-            }
         }
 
         val shortcuts = remember {
