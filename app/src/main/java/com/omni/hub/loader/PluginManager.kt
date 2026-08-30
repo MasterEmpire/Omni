@@ -91,6 +91,9 @@ object PluginManager {
         val targetBaseDir = context.getDir("plugins", Context.MODE_PRIVATE)
         File(targetBaseDir, pluginId).deleteRecursively()
 
+        val dataBaseDir = context.getDir("plugins_data", Context.MODE_PRIVATE)
+        File(dataBaseDir, pluginId).deleteRecursively()
+
         val updated = getInstalledPlugins(context).filter { it.id != pluginId }
         saveRegistry(context, updated)
     }
