@@ -356,6 +356,6 @@ class HostBridgeImpl(
     }
 
     override fun log(tag: String, message: String) {
-        android.util.Log.d("OmniHub:[$tag]", message)
+        OmniLogger.log(tag, message)
     }
 }
