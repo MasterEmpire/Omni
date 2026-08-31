@@ -2662,7 +2662,9 @@ class OmniBrowser : PluginEntry() {
                                 isAddingShortcut = false
                                 editingProfile = null
                                 coroutineScope.launch {
-                                    delay(150) // Allow UI 150ms to recompose and clear the menu before capturing snapshot
+                                    // 400ms guarantees the Compose render pass and hardware buffer swap 
+                                    // are fully completed before the task manager takes the bitmap snapshot.
+                                    delay(400) 
                                     bridge.close()
                                 }
                             }
