@@ -1760,170 +1760,17 @@ class OmniBrowser : PluginEntry() {
                             )
                         }
 
-                        Spacer(Modifier.width(2.dp))
+                                                Spacer(Modifier.width(2.dp))
 
-                        Box {
-                            IconButton(
-                                onClick = { showMenu = true },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color(0xFF9AA0A6))
-                            }
-
-                            DropdownMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false },
-                                modifier = Modifier.background(Color(0xFF282C34))
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceAround,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    IconButton(
-                                        onClick = {
-                                            showMenu = false
-                                            if (canGoBack) webViewInstance?.goBack()
-                                            else if (currentUrl != "about:blank") navigateTo("about:blank")
-                                        },
-                                        enabled = canGoBack || currentUrl != "about:blank"
-                                    ) {
-                                        Icon(
-                                            Icons.Default.ArrowBack,
-                                            contentDescription = "Back",
-                                            tint = if (canGoBack || currentUrl != "about:blank") Color(0xFFE8EAED) else Color(0xFF5F6368)
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = {
-                                            showMenu = false
-                                            webViewInstance?.goForward()
-                                        },
-                                        enabled = canGoForward
-                                    ) {
-                                        Icon(
-                                            Icons.Default.ArrowForward,
-                                            contentDescription = "Forward",
-                                            tint = if (canGoForward) Color(0xFFE8EAED) else Color(0xFF5F6368)
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = {
-                                            showMenu = false
-                                            webViewInstance?.reload()
-                                        }
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Refresh,
-                                            contentDescription = "Reload",
-                                            tint = Color(0xFFE8EAED)
-                                        )
-                                    }
-                                }
-
-                                HorizontalDivider(color = Color(0xFF3C4043))
-
-                                DropdownMenuItem(
-                                    text = { Text("💻 Open Local IDE", color = Color(0xFF58A6FF), fontWeight = FontWeight.Bold) },
-                                    onClick = {
-                                        showMenu = false
-                                        val ideFile = File(bridge.getPluginDir(), "ide/index.html")
-                                        val localIdeShortcut = shortcuts.find { it.title.contains("IDE", ignoreCase = true) || it.url.contains("ide/index.html") }
-                                        val configuredSourcePath = localIdeShortcut?.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
-
-                                        val targetIdeUrl = if (ideFile.exists() && ideFile.length() > 0) {
-                                            "file://${ideFile.absolutePath}"
-                                        } else {
-                                            val (success, resultPath) = syncLocalFileToVault(configuredSourcePath)
-                                            if (success) {
-                                                bridge.showToast("✅ Synced Local IDE from disk!")
-                                                resultPath
-                                            } else {
-                                                ideInternalPath
-                                            }
-                                        }
-                                        navigateTo(targetIdeUrl)
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text("+ New Tab", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold) },
-                                    onClick = {
-                                        showMenu = false
-                                        createNewTab()
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text("Close Tab", color = Color(0xFFE8EAED)) },
-                                    onClick = {
-                                        showMenu = false
-                                        closeTab(activeTabId)
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text(if (isDesktopMode) "✓ Desktop Site" else "Desktop Site", color = Color(0xFFE8EAED)) },
-                                    onClick = {
-                                        showMenu = false
-                                        isDesktopMode = !isDesktopMode
-                                        webViewInstance?.settings?.userAgentString = if (isDesktopMode) desktopUA else mobileUA
-                                        webViewInstance?.reload()
-                                        bridge.showToast(if (isDesktopMode) "Desktop Mode Enabled" else "Mobile Mode Enabled")
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text("Copy URL", color = Color(0xFFE8EAED)) },
-                                    onClick = {
-                                        showMenu = false
-                                        if (currentUrl != "about:blank") {
-                                            bridge.copyToClipboard(currentUrl)
-                                        }
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text("🛠️ Eruda DevTools (Console)", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold) },
-                                    onClick = {
-                                        showMenu = false
-                                        injectErudaDevTools()
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text("Capture DOM Snapshot", color = Color(0xFF8AB4F8)) },
-                                    onClick = {
-                                        showMenu = false
-                                        captureDomSnapshot()
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text("⚙️ Settings & Backup", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold) },
-                                    onClick = {
-                                        showMenu = false
-                                        showSettingsDialog = true
-                                    }
-                                )
-
-                                HorizontalDivider(color = Color(0xFF3C4043))
-
-                                                                    DropdownMenuItem(
-                                        text = { Text("Exit Omni Chrome", color = Color(0xFFF28B82), fontWeight = FontWeight.Bold) },
-                                        onClick = {
-                                            showMenu = false
-                                            coroutineScope.launch {
-                                                delay(60)
-                                                bridge.close()
-                                            }
-                                        }
-                                    )
-                            }
+                        IconButton(
+                            onClick = { showMenu = !showMenu },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "Menu",
+                                tint = if (showMenu) profColor else Color(0xFF9AA0A6)
+                            )
                         }
                     }
                 }
@@ -2596,6 +2443,176 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 )
+            }
+
+            // --- In-Layout Browser Menu Overlay (Zero WindowManager Popups) ---
+            if (showMenu) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(19f)
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null
+                        ) { showMenu = false }
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .padding(top = 52.dp, end = 8.dp)
+                        .zIndex(20f),
+                    contentAlignment = Alignment.TopEnd
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF282C34),
+                        tonalElevation = 8.dp,
+                        shadowElevation = 10.dp,
+                        border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                        modifier = Modifier.width(250.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceAround,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        showMenu = false
+                                        if (canGoBack) webViewInstance?.goBack()
+                                        else if (currentUrl != "about:blank") navigateTo("about:blank")
+                                    },
+                                    enabled = canGoBack || currentUrl != "about:blank"
+                                ) {
+                                    Icon(
+                                        Icons.Default.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = if (canGoBack || currentUrl != "about:blank") Color(0xFFE8EAED) else Color(0xFF5F6368)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        showMenu = false
+                                        webViewInstance?.goForward()
+                                    },
+                                    enabled = canGoForward
+                                ) {
+                                    Icon(
+                                        Icons.Default.ArrowForward,
+                                        contentDescription = "Forward",
+                                        tint = if (canGoForward) Color(0xFFE8EAED) else Color(0xFF5F6368)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        showMenu = false
+                                        webViewInstance?.reload()
+                                    }
+                                ) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Reload",
+                                        tint = Color(0xFFE8EAED)
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
+
+                            @Composable
+                            fun InLayoutMenuItem(
+                                title: String,
+                                color: Color = Color(0xFFE8EAED),
+                                isBold: Boolean = false,
+                                onClick: () -> Unit
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            showMenu = false
+                                            onClick()
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = title,
+                                        color = color,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+
+                            InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) {
+                                val ideFile = File(bridge.getPluginDir(), "ide/index.html")
+                                val localIdeShortcut = shortcuts.find { it.title.contains("IDE", ignoreCase = true) || it.url.contains("ide/index.html") }
+                                val configuredSourcePath = localIdeShortcut?.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
+
+                                val targetIdeUrl = if (ideFile.exists() && ideFile.length() > 0) {
+                                    "file://${ideFile.absolutePath}"
+                                } else {
+                                    val (success, resultPath) = syncLocalFileToVault(configuredSourcePath)
+                                    if (success) {
+                                        bridge.showToast("✅ Synced Local IDE from disk!")
+                                        resultPath
+                                    } else {
+                                        ideInternalPath
+                                    }
+                                }
+                                navigateTo(targetIdeUrl)
+                            }
+
+                            InLayoutMenuItem("+ New Tab", color = Color(0xFF8AB4F8), isBold = true) {
+                                createNewTab()
+                            }
+
+                            InLayoutMenuItem("Close Tab") {
+                                closeTab(activeTabId)
+                            }
+
+                            InLayoutMenuItem(if (isDesktopMode) "✓ Desktop Site" else "Desktop Site") {
+                                isDesktopMode = !isDesktopMode
+                                webViewInstance?.settings?.userAgentString = if (isDesktopMode) desktopUA else mobileUA
+                                webViewInstance?.reload()
+                                bridge.showToast(if (isDesktopMode) "Desktop Mode Enabled" else "Mobile Mode Enabled")
+                            }
+
+                            InLayoutMenuItem("Copy URL") {
+                                if (currentUrl != "about:blank") {
+                                    bridge.copyToClipboard(currentUrl)
+                                }
+                            }
+
+                            InLayoutMenuItem("🛠️ Eruda DevTools (Console)", color = Color(0xFF8AB4F8), isBold = true) {
+                                injectErudaDevTools()
+                            }
+
+                            InLayoutMenuItem("Capture DOM Snapshot", color = Color(0xFF8AB4F8)) {
+                                captureDomSnapshot()
+                            }
+
+                            InLayoutMenuItem("⚙️ Settings & Backup", color = Color(0xFF8AB4F8), isBold = true) {
+                                showSettingsDialog = true
+                            }
+
+                            HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
+
+                            InLayoutMenuItem("Exit Omni Chrome", color = Color(0xFFF28B82), isBold = true) {
+                                bridge.close()
+                            }
+                        }
+                    }
+                }
             }
 
             if (isTabSwitcherOpen) {
