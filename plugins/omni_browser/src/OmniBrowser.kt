@@ -1556,9 +1556,13 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
-        DisposableEffect(isTabSwitcherOpen, showSettingsDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance) {
+        DisposableEffect(isTabSwitcherOpen, showSettingsDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance, showMenu) {
             bridge.setOnBackPressedHandler {
                 when {
+                    showMenu -> {
+                        showMenu = false
+                        true
+                    }
                     editingShortcut != null -> {
                         editingShortcut = null
                         true
@@ -1909,13 +1913,16 @@ class OmniBrowser : PluginEntry() {
 
                                 HorizontalDivider(color = Color(0xFF3C4043))
 
-                                DropdownMenuItem(
-                                    text = { Text("Exit Omni Chrome", color = Color(0xFFF28B82), fontWeight = FontWeight.Bold) },
-                                    onClick = {
-                                        showMenu = false
-                                        bridge.close()
-                                    }
-                                )
+                                                                    DropdownMenuItem(
+                                        text = { Text("Exit Omni Chrome", color = Color(0xFFF28B82), fontWeight = FontWeight.Bold) },
+                                        onClick = {
+                                            showMenu = false
+                                            coroutineScope.launch {
+                                                delay(60)
+                                                bridge.close()
+                                            }
+                                        }
+                                    )
                             }
                         }
                     }
