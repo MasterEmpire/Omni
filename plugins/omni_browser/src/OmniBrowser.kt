@@ -282,36 +282,61 @@ class OmniBrowser : PluginEntry() {
 
                 window.__omniBlobMap = window.__omniBlobMap || new Map();
 
-                const origCreate = URL.createObjectURL;
-                if (origCreate) {
-                    URL.createObjectURL = function(obj) {
-                        const url = origCreate.apply(this, arguments);
-                        if (obj instanceof Blob) {
-                            window.__omniBlobMap.set(url, obj);
-                            if (window.__omniBlobMap.size > 200) {
-                                const firstKey = window.__omniBlobMap.keys().next().value;
-                                window.__omniBlobMap.delete(firstKey);
+                function hookCreateObjectURL(target) {
+                    if (!target || !target.createObjectURL || target.createObjectURL.__omniHooked) return;
+                    const orig = target.createObjectURL;
+                    const hooked = function(blob) {
+                        const url = orig.apply(this, arguments);
+                        try {
+                            if (blob instanceof Blob) {
+                                window.__omniBlobMap = window.__omniBlobMap || new Map();
+                                window.__omniBlobMap.set(url, blob);
+                                if (window.__omniBlobMap.size > 300) {
+                                    const firstKey = window.__omniBlobMap.keys().next().value;
+                                    window.__omniBlobMap.delete(firstKey);
+                                }
+                                if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                                    window.OmniBlobDownloader.log('BLOB_MAP', 'Vaulted Blob in RAM: ' + url + ' (' + blob.size + 'b, type: ' + blob.type + ')');
+                                }
                             }
-                        }
+                        } catch(e) {}
                         return url;
                     };
+                    hooked.__omniHooked = true;
+                    try {
+                        target.createObjectURL = hooked;
+                    } catch(e) {
+                        try {
+                            Object.defineProperty(target, 'createObjectURL', {
+                                value: hooked,
+                                writable: true,
+                                configurable: true
+                            });
+                        } catch(_) {}
+                    }
                 }
 
+                try { hookCreateObjectURL(window.URL); } catch(_) {}
+                try { hookCreateObjectURL(URL); } catch(_) {}
+                try { if (window.webkitURL) hookCreateObjectURL(window.webkitURL); } catch(_) {}
+
                 const origRevoke = URL.revokeObjectURL;
-                if (origRevoke) {
-                    URL.revokeObjectURL = function(url) {
+                if (origRevoke && !origRevoke.__omniHooked) {
+                    const hookedRevoke = function(url) {
                         setTimeout(function() {
                             try { origRevoke.call(URL, url); } catch(e) {}
                             if (window.__omniBlobMap) {
                                 window.__omniBlobMap.delete(url);
                             }
-                        }, 15000);
+                        }, 30000);
                     };
+                    hookedRevoke.__omniHooked = true;
+                    try { URL.revokeObjectURL = hookedRevoke; } catch(_) {}
                 }
 
                 function extractAndShipBlob(blobObj, mimeType, filename) {
                     if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
-                        window.OmniBlobDownloader.log('BLOB_CLICK', 'Intercepted anchor click for: ' + filename + ' (size: ' + blobObj.size + 'b)');
+                        window.OmniBlobDownloader.log('BLOB_CLICK', 'Intercepted anchor click for: ' + filename + ' (' + blobObj.size + 'b). Processing via RAM...');
                     }
                     const reader = new FileReader();
                     reader.onloadend = function() {
@@ -325,6 +350,24 @@ class OmniBrowser : PluginEntry() {
                         }
                     };
                     reader.readAsDataURL(blobObj);
+                }
+
+                // Hook programmatic click on HTMLAnchorElement
+                const origAnchorClick = HTMLAnchorElement.prototype.click;
+                if (origAnchorClick && !origAnchorClick.__omniHooked) {
+                    HTMLAnchorElement.prototype.click = function() {
+                        try {
+                            const href = this.href || '';
+                            const downloadName = this.getAttribute('download') || this.download || '';
+                            if (href.startsWith('blob:') && window.__omniBlobMap && window.__omniBlobMap.has(href)) {
+                                const blob = window.__omniBlobMap.get(href);
+                                extractAndShipBlob(blob, blob.type, downloadName || 'download');
+                                return;
+                            }
+                        } catch(e) {}
+                        return origAnchorClick.apply(this, arguments);
+                    };
+                    HTMLAnchorElement.prototype.click.__omniHooked = true;
                 }
 
                 document.addEventListener('click', function(e) {
@@ -864,12 +907,15 @@ class OmniBrowser : PluginEntry() {
                             const targetMime = '$safeMime';
 
                             if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
-                                window.OmniBlobDownloader.log('BLOB_EXTRACT', 'Extracting blob: ' + blobUrl);
+                                window.OmniBlobDownloader.log('BLOB_EXTRACT', 'Initiating CSP-safe extraction for: ' + blobUrl);
                             }
 
-                            // 1. First check if blob is still stored in memory map
+                            // 1. Primary Strategy: In-Memory Blob Vault (Zero network, 100% CSP-Immune)
                             if (window.__omniBlobMap && window.__omniBlobMap.has(blobUrl)) {
                                 const blobObj = window.__omniBlobMap.get(blobUrl);
+                                if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                                    window.OmniBlobDownloader.log('BLOB_VAULT', 'Found Blob in RAM (' + blobObj.size + ' bytes). Reading via FileReader...');
+                                }
                                 const reader = new FileReader();
                                 reader.onloadend = function() {
                                     if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
@@ -885,31 +931,67 @@ class OmniBrowser : PluginEntry() {
                                 return;
                             }
 
-                            // 2. Fallback to native fetch()
-                            fetch(blobUrl)
-                                .then(function(res) {
-                                    if (!res.ok && res.status !== 0) throw new Error('Fetch HTTP status: ' + res.status);
-                                    return res.blob();
-                                })
-                                .then(function(blob) {
-                                    const reader = new FileReader();
-                                    reader.onloadend = function() {
-                                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
-                                            window.OmniBlobDownloader.processBlob(reader.result, targetMime || blob.type || 'application/octet-stream', targetName);
+                            // 2. Secondary Strategy: CSP-Safe Hidden IFrame Extraction (Bypasses connect-src entirely)
+                            if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                                window.OmniBlobDownloader.log('BLOB_FALLBACK', 'Blob not in RAM map. Launching CSP-immune iframe extractor...');
+                            }
+
+                            try {
+                                const iframe = document.createElement('iframe');
+                                iframe.style.display = 'none';
+                                iframe.style.width = '0px';
+                                iframe.style.height = '0px';
+                                iframe.src = blobUrl;
+
+                                let resolved = false;
+
+                                iframe.onload = function() {
+                                    if (resolved) return;
+                                    resolved = true;
+                                    try {
+                                        const iDoc = iframe.contentDocument || iframe.contentWindow.document;
+                                        if (iDoc) {
+                                            const text = iDoc.body ? (iDoc.body.innerText || iDoc.body.textContent || '') : '';
+                                            if (text && text.length > 0) {
+                                                const base64Text = btoa(unescape(encodeURIComponent(text)));
+                                                const dataUrl = 'data:' + (targetMime || 'text/plain') + ';base64,' + base64Text;
+                                                if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                                    window.OmniBlobDownloader.processBlob(dataUrl, targetMime || 'text/plain', targetName);
+                                                }
+                                                setTimeout(function() { try { document.body.removeChild(iframe); } catch(_) {} }, 1000);
+                                                return;
+                                            }
                                         }
-                                    };
-                                    reader.onerror = function(e) {
-                                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
-                                            window.OmniBlobDownloader.processBlob('ERROR', '', 'Fetch FileReader error: ' + (e ? e.toString() : 'unknown'));
+                                    } catch(e) {
+                                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                                            window.OmniBlobDownloader.log('IFRAME_WARN', 'Iframe DOM read exception: ' + e.toString());
                                         }
-                                    };
-                                    reader.readAsDataURL(blob);
-                                })
-                                .catch(function(err) {
-                                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
-                                        window.OmniBlobDownloader.processBlob('ERROR', '', 'Blob extraction failed: ' + err.toString());
                                     }
-                                });
+                                };
+
+                                iframe.onerror = function(err) {
+                                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                                        window.OmniBlobDownloader.log('IFRAME_ERR', 'Iframe failed to load blob URL: ' + (err ? err.toString() : 'unknown'));
+                                    }
+                                };
+
+                                document.body.appendChild(iframe);
+
+                                setTimeout(function() {
+                                    if (!resolved) {
+                                        resolved = true;
+                                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                            window.OmniBlobDownloader.processBlob('ERROR', '', 'Extraction timed out (Blob created before vault hook)');
+                                        }
+                                        try { document.body.removeChild(iframe); } catch(_) {}
+                                    }
+                                }, 6000);
+
+                            } catch (err) {
+                                if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                    window.OmniBlobDownloader.processBlob('ERROR', '', 'Extractor exception: ' + err.toString());
+                                }
+                            }
                         })();
                     """.trimIndent()
                     val targetView = view ?: webViewInstance
