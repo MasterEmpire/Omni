@@ -27,3 +27,10 @@
 # WebKit & Multi-Profile Support
 -keep class androidx.webkit.** { *; }
 -dontwarn androidx.webkit.**
+
+# WebKit Javascript Interface Bridge & Reflection
+-keepattributes *Annotation*
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class com.omni.plugin.browser.OmniBlobBridge { *; }
