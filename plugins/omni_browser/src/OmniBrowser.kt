@@ -815,7 +815,6 @@ class OmniBrowser : PluginEntry() {
                 val sessionBytes = bridge.readFile("config/session.json")
                 if (sessionBytes != null) {
                     val sObj = org.json.JSONObject(String(sessionBytes, Charsets.UTF_8))
-                    val savedActiveId = sObj.optString("activeTabId", "")
                     val arr = sObj.optJSONArray("tabs")
                     if (arr != null && arr.length() > 0) {
                         val loadedTabs = mutableListOf<BrowserTab>()
@@ -832,13 +831,20 @@ class OmniBrowser : PluginEntry() {
                             )
                         }
                         if (loadedTabs.isNotEmpty()) {
-                            tabs = loadedTabs
-                            val targetId = if (savedActiveId.isNotEmpty() && loadedTabs.any { it.id == savedActiveId }) savedActiveId else loadedTabs.first().id
-                            activeTabId = targetId
-                            val currentActive = loadedTabs.first { it.id == targetId }
-                            currentUrl = currentActive.url
-                            urlInputText = if (currentActive.url == "about:blank") "" else currentActive.url
-                            pageTitle = currentActive.title
+                            val homeTabId = "tab_home_${System.currentTimeMillis()}"
+                            val homeTab = BrowserTab(
+                                id = homeTabId,
+                                title = "New Tab",
+                                url = "about:blank",
+                                profileId = "default"
+                            )
+                            val nonBlankTabs = loadedTabs.filter { it.url != "about:blank" }
+                            tabs = listOf(homeTab) + nonBlankTabs
+                            activeTabId = homeTabId
+                            currentUrl = "about:blank"
+                            urlInputText = ""
+                            pageTitle = "New Tab"
+                            attachTabWebViewHandler?.invoke(homeTabId)
                         }
                     }
                 }
@@ -1276,6 +1282,11 @@ class OmniBrowser : PluginEntry() {
 
             if (isNewInstance) {
                 pruneHotPool(targetTabId)
+            }
+
+            // Hydrate cold/restored webviews that have an active URL
+            if (targetTab.url.isNotEmpty() && targetTab.url != "about:blank" && (targetWv.url == null || targetWv.url == "about:blank")) {
+                targetWv.loadUrl(targetTab.url)
             }
 
             container.addView(targetWv)
@@ -2513,7 +2524,14 @@ class OmniBrowser : PluginEntry() {
                                 IconButton(
                                     onClick = {
                                         showMenu = false
-                                        webViewInstance?.reload()
+                                        if (webViewInstance != null && currentUrl != "about:blank") {
+                                            val wvUrl = webViewInstance?.url
+                                            if (wvUrl == null || wvUrl == "about:blank" || wvUrl.isEmpty()) {
+                                                webViewInstance?.loadUrl(currentUrl)
+                                            } else {
+                                                webViewInstance?.reload()
+                                            }
+                                        }
                                     }
                                 ) {
                                     Icon(
