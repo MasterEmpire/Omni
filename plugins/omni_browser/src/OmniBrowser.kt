@@ -2918,7 +2918,7 @@ fun TabSwitcherScreen(
                             Spacer(Modifier.width(6.dp))
 
                             Text(
-                                text = if (tab.url == "about:blank") "New Tab" else tab.title.ifEmpty { "Web Page" },
+                                text = if (tab.url == "about:blank" || tab.title == "about:blank") "New Tab" else tab.title.ifEmpty { "Web Page" },
                                 color = Color(0xFFE8EAED),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -2944,7 +2944,7 @@ fun TabSwitcherScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
-                                .background(Color(0xFF1F2227)),
+                                .background(Color(0xFF16181D)),
                             contentAlignment = Alignment.Center
                         ) {
                             if (tab.thumbnail != null && tab.url != "about:blank") {
@@ -2954,18 +2954,56 @@ fun TabSwitcherScreen(
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
+                            } else if (tab.url == "about:blank") {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFF1F2227))
+                                        .padding(8.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color(tabProfile.colorValue).copy(alpha = 0.2f),
+                                        border = BorderStroke(1.dp, Color(tabProfile.colorValue).copy(alpha = 0.6f)),
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("🌐", fontSize = 16.sp)
+                                        }
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = "Speed Dial",
+                                        color = Color(0xFFE8EAED),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        listOf(0xFF4285F4, 0xFFEA4335, 0xFF34A853, 0xFF58A6FF).forEach { col ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(Color(col).copy(alpha = 0.8f))
+                                            )
+                                        }
+                                    }
+                                }
                             } else {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier.padding(12.dp)
                                 ) {
                                     Text(
-                                        text = if (tab.url == "about:blank") "🌐" else "📄",
+                                        text = "📄",
                                         fontSize = 24.sp
                                     )
                                     Spacer(Modifier.height(8.dp))
                                     Text(
-                                        text = if (tab.url == "about:blank") "about:blank" else tab.url.replace("https://", "").replace("http://", "").take(25),
+                                        text = tab.url.replace("https://", "").replace("http://", "").take(25),
                                         color = Color(0xFF9AA0A6),
                                         fontSize = 10.sp,
                                         maxLines = 2,
