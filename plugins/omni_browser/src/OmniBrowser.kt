@@ -1116,6 +1116,14 @@ class OmniBrowser : PluginEntry() {
                 else -> "https://www.google.com/search?q=${URLEncoder.encode(input, "UTF-8")}"
             }
 
+            if (isHomeOverlayOpen && currentUrl != "about:blank") {
+                isHomeOverlayOpen = false
+                createNewTab(target)
+                focusManager.clearFocus()
+                return
+            }
+
+            isHomeOverlayOpen = false
             urlInputText = if (target == "about:blank") "" else target
             currentUrl = target
             tabs = tabs.map { if (it.id == activeTabId) it.copy(url = target) else it }
@@ -1283,7 +1291,6 @@ class OmniBrowser : PluginEntry() {
         }
 
         // Intercept hardware and gesture back navigation
-        // Intercept hardware and gesture back navigation
         DisposableEffect(isTabSwitcherOpen, showSolverDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance) {
             bridge.setOnBackPressedHandler {
                 when {
@@ -1307,6 +1314,11 @@ class OmniBrowser : PluginEntry() {
                         isTabSwitcherOpen = false
                         true
                     }
+                    isHomeOverlayOpen -> {
+                        isHomeOverlayOpen = false
+                        true
+                    }
+                    webViewInstance?.canGoBack() == true -> {
                         webViewInstance?.goBack()
                         true
                     }
@@ -1344,12 +1356,20 @@ class OmniBrowser : PluginEntry() {
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Home Button
+                        // Home Button (Non-Destructive Toggle)
                         IconButton(
-                            onClick = { navigateTo("about:blank") },
+                            onClick = {
+                                if (currentUrl != "about:blank") {
+                                    isHomeOverlayOpen = !isHomeOverlayOpen
+                                }
+                            },
                             modifier = Modifier.size(38.dp)
                         ) {
-                            Icon(Icons.Default.Home, contentDescription = "Home", tint = Color(0xFF9AA0A6))
+                            Icon(
+                                Icons.Default.Home,
+                                contentDescription = "Home",
+                                tint = if (isHomeOverlayOpen || currentUrl == "about:blank") Color(0xFF8AB4F8) else Color(0xFF9AA0A6)
+                            )
                         }
 
                         val activeTab = tabs.find { it.id == activeTabId }
@@ -1681,16 +1701,37 @@ class OmniBrowser : PluginEntry() {
                         modifier = Modifier.fillMaxSize()
                     )
 
-                    // Speed-Dial Homepage Overlay (Shown on about:blank)
-                    if (currentUrl == "about:blank") {
+                    // Speed-Dial Homepage Overlay (Shown on about:blank or non-destructive Home tap)
+                    if (currentUrl == "about:blank" || isHomeOverlayOpen) {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(Color(0xFF1F2227))
-                            .padding(24.dp),
+                                .padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Spacer(Modifier.height(40.dp))
+                            if (isHomeOverlayOpen && currentUrl != "about:blank") {
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = Color(0xFF282C34),
+                                    border = BorderStroke(1.dp, Color(0xFF8AB4F8).copy(alpha = 0.5f)),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .clickable { isHomeOverlayOpen = false }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(Icons.Default.ArrowBack, contentDescription = null, tint = Color(0xFF8AB4F8), modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Return to Live Page", color = Color(0xFF8AB4F8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Spacer(Modifier.height(16.dp))
+                            } else {
+                                Spacer(Modifier.height(40.dp))
+                            }
 
                             // Chrome Logo Aesthetic
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1713,13 +1754,12 @@ class OmniBrowser : PluginEntry() {
                             }
 
                             Text(
-                                "Fast, Stealthy, Dynamic Browsing",
+                                if (isHomeOverlayOpen && currentUrl != "about:blank") "Live page suspended safely in background" else "Fast, Stealthy, Dynamic Browsing",
                                 fontSize = 13.sp,
                                 color = Color(0xFF9AA0A6),
                                 modifier = Modifier.padding(top = 6.dp, bottom = 32.dp)
                             )
 
-                            // Shortcuts Grid
                             // Shortcuts Grid with Favicons & Long-Press Management
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(4),
@@ -2322,21 +2362,36 @@ class OmniBrowser : PluginEntry() {
                     confirmButton = {
                         Button(
                             onClick = {
-                                val formattedUrl = if (!newUrl.startsWith("http://") && !newUrl.startsWith("https://")) "https://${newUrl.trim()}" else newUrl.trim()
-                                val title = newName.trim().ifEmpty { extractDomain(formattedUrl) }
+                                val trimmedUrl = newUrl.trim()
+                                val isLocalPath = trimmedUrl.startsWith("/storage/") || trimmedUrl.startsWith("file:///storage/") || trimmedUrl.startsWith("/")
+                                val (finalUrl, srcPath) = if (isLocalPath) {
+                                    val cleanSrc = trimmedUrl.removePrefix("file://").trim()
+                                    val (success, vaultedPath) = syncLocalFileToVault(cleanSrc)
+                                    if (success) {
+                                        bridge.showToast("✅ Vaulted local HTML to offline sandbox")
+                                        Pair(vaultedPath, cleanSrc)
+                                    } else {
+                                        bridge.showToast("⚠️ $vaultedPath")
+                                        Pair(if (trimmedUrl.startsWith("file://")) trimmedUrl else "file://$trimmedUrl", cleanSrc)
+                                    }
+                                } else {
+                                    Pair(if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://") && !trimmedUrl.startsWith("file://")) "https://$trimmedUrl" else trimmedUrl, null)
+                                }
+                                val title = newName.trim().ifEmpty { if (isLocalPath) "Local App" else extractDomain(finalUrl) }
                                 val newItem = ShortcutItem(
                                     title = title,
-                                    url = formattedUrl,
-                                    iconText = title.take(1).uppercase(),
-                                    colorValue = 0xFF8AB4F8
+                                    url = finalUrl,
+                                    iconText = if (isLocalPath) "💻" else title.take(1).uppercase(),
+                                    colorValue = 0xFF58A6FF,
+                                    localSourcePath = srcPath
                                 )
                                 val updated = shortcuts + newItem
                                 shortcuts = updated
                                 saveShortcutsToDisk(updated)
-                                fetchFavicon(extractDomain(formattedUrl))
+                                fetchFavicon(extractDomain(finalUrl))
                                 isAddingShortcut = false
                             },
-                            enabled = newUrl.length > 8,
+                            enabled = newUrl.length >= 3,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
                         ) {
                             Text("Add", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
