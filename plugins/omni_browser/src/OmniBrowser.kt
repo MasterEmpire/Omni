@@ -189,10 +189,19 @@ class OmniBrowser : PluginEntry() {
         var webViewInstance: WebView? by remember { mutableStateOf(null) }
 
         var mobileUA by remember { mutableStateOf("") }
-        var showSolverDialog by remember { mutableStateOf(false) }
+        var showSettingsDialog by remember { mutableStateOf(false) }
         var solverApiKey by remember { mutableStateOf("") }
         var autoSolveEnabled by remember { mutableStateOf(true) }
         var isSolvingCaptcha by remember { mutableStateOf(false) }
+
+        var restoreTrigger by remember { mutableStateOf<((Uri) -> Unit)?>(null) }
+        val backupPickerLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri ->
+            if (uri != null) {
+                restoreTrigger?.invoke(uri)
+            }
+        }
 
         var activeFileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
         val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -236,6 +245,24 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
+        fun autoMirrorVaultToDocuments() {
+            try {
+                val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                val vaultDir = File(docsDir, ".omni_vault").apply { mkdirs() }
+                
+                fun mirrorFile(relPath: String, outName: String) {
+                    val src = File(bridge.getPluginDir(), relPath)
+                    if (src.exists() && src.isFile) {
+                        src.copyTo(File(vaultDir, outName), overwrite = true)
+                    }
+                }
+                mirrorFile("config/profiles.json", "profiles.json")
+                mirrorFile("config/shortcuts.json", "shortcuts.json")
+                mirrorFile("config/session.json", "session.json")
+                mirrorFile("config/solver.json", "solver.json")
+            } catch (_: Exception) {}
+        }
+
         fun saveShortcutsToDisk(list: List<ShortcutItem>) {
             try {
                 val arr = org.json.JSONArray()
@@ -253,6 +280,7 @@ class OmniBrowser : PluginEntry() {
                     arr.put(obj)
                 }
                 bridge.saveFile("config/shortcuts.json", arr.toString().toByteArray(Charsets.UTF_8))
+                autoMirrorVaultToDocuments()
             } catch (_: Exception) {}
         }
 
@@ -268,6 +296,7 @@ class OmniBrowser : PluginEntry() {
                     arr.put(obj)
                 }
                 bridge.saveFile("config/profiles.json", arr.toString().toByteArray(Charsets.UTF_8))
+                autoMirrorVaultToDocuments()
             } catch (_: Exception) {}
         }
 
@@ -288,8 +317,159 @@ class OmniBrowser : PluginEntry() {
                 }
                 json.put("tabs", arr)
                 bridge.saveFile("config/session.json", json.toString().toByteArray(Charsets.UTF_8))
+                autoMirrorVaultToDocuments()
             } catch (_: Exception) {}
         }
+
+        fun exportFullBackup() {
+            try {
+                CookieManager.getInstance().flush()
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val backupFilename = "OmniBrowser_Backup_$timestamp.zip"
+                val tempZipFile = File(context.cacheDir, backupFilename)
+
+                java.util.zip.ZipOutputStream(FileOutputStream(tempZipFile)).use { zos ->
+                    fun addFileToZip(relativePath: String, entryName: String) {
+                        val file = File(bridge.getPluginDir(), relativePath)
+                        if (file.exists() && file.isFile) {
+                            zos.putNextEntry(java.util.zip.ZipEntry(entryName))
+                            file.inputStream().use { it.copyTo(zos) }
+                            zos.closeEntry()
+                        }
+                    }
+
+                    addFileToZip("config/profiles.json", "profiles.json")
+                    addFileToZip("config/shortcuts.json", "shortcuts.json")
+                    addFileToZip("config/session.json", "session.json")
+                    addFileToZip("config/solver.json", "solver.json")
+                    addFileToZip("ide/index.html", "ide_index.html")
+                }
+
+                val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                val targetDir = File(docsDir, "OmniBackups").apply { mkdirs() }
+                val targetFile = File(targetDir, backupFilename)
+                tempZipFile.copyTo(targetFile, overwrite = true)
+                tempZipFile.delete()
+
+                bridge.log("BACKUP", "Created backup: ${targetFile.absolutePath} (${targetFile.length()} bytes)")
+                bridge.showToast("✅ Backup saved to Documents/OmniBackups/$backupFilename")
+
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(Intent.EXTRA_STREAM, Uri.parse("file://${targetFile.absolutePath}"))
+                    putExtra(Intent.EXTRA_SUBJECT, "Omni Chrome Backup ($timestamp)")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    context.startActivity(Intent.createChooser(shareIntent, "Share Omni Chrome Backup").apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    })
+                } catch (_: Exception) {}
+
+            } catch (e: Exception) {
+                bridge.showToast("Backup failed: ${e.message}")
+                bridge.log("BACKUP_ERR", "Export error: ${e.message}")
+            }
+        }
+
+        fun restoreFromBackup(uri: Uri) {
+            try {
+                val tempFile = File(context.cacheDir, "import_${System.currentTimeMillis()}.zip")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(tempFile).use { output -> input.copyTo(output) }
+                } ?: throw IllegalArgumentException("Cannot read backup file.")
+
+                var profCount = 0
+                var tabCount = 0
+
+                java.util.zip.ZipInputStream(tempFile.inputStream()).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val bytes = zis.readBytes()
+                        when (entry.name) {
+                            "profiles.json" -> {
+                                bridge.saveFile("config/profiles.json", bytes)
+                                val arr = org.json.JSONArray(String(bytes, Charsets.UTF_8))
+                                val loaded = mutableListOf<BrowserProfile>()
+                                for (i in 0 until arr.length()) {
+                                    val obj = arr.getJSONObject(i)
+                                    loaded.add(BrowserProfile(obj.getString("id"), obj.getString("name"), obj.getLong("colorValue")))
+                                }
+                                if (loaded.isNotEmpty()) {
+                                    profiles = loaded
+                                    profCount = loaded.size
+                                }
+                            }
+                            "shortcuts.json" -> {
+                                bridge.saveFile("config/shortcuts.json", bytes)
+                                val arr = org.json.JSONArray(String(bytes, Charsets.UTF_8))
+                                val loaded = mutableListOf<ShortcutItem>()
+                                for (i in 0 until arr.length()) {
+                                    val obj = arr.getJSONObject(i)
+                                    loaded.add(
+                                        ShortcutItem(
+                                            id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                                            title = obj.getString("title"),
+                                            url = obj.getString("url"),
+                                            iconText = obj.optString("iconText", ""),
+                                            colorValue = obj.optLong("colorValue", 0xFF4285F4),
+                                            localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() }
+                                        )
+                                    )
+                                }
+                                if (loaded.isNotEmpty()) shortcuts = loaded
+                            }
+                            "session.json" -> {
+                                bridge.saveFile("config/session.json", bytes)
+                                val sObj = org.json.JSONObject(String(bytes, Charsets.UTF_8))
+                                val savedActiveId = sObj.optString("activeTabId", "")
+                                val arr = sObj.optJSONArray("tabs")
+                                if (arr != null && arr.length() > 0) {
+                                    val loadedTabs = mutableListOf<BrowserTab>()
+                                    for (i in 0 until arr.length()) {
+                                        val tObj = arr.getJSONObject(i)
+                                        loadedTabs.add(
+                                            BrowserTab(
+                                                id = tObj.getString("id"),
+                                                title = tObj.optString("title", "New Tab"),
+                                                url = tObj.optString("url", "about:blank"),
+                                                lastAccessedTime = tObj.optLong("lastAccessedTime", System.currentTimeMillis()),
+                                                profileId = tObj.optString("profileId", "default")
+                                            )
+                                        )
+                                    }
+                                    if (loadedTabs.isNotEmpty()) {
+                                        tabs = loadedTabs
+                                        tabCount = loadedTabs.size
+                                        val targetId = if (savedActiveId.isNotEmpty() && loadedTabs.any { it.id == savedActiveId }) savedActiveId else loadedTabs.first().id
+                                        activeTabId = targetId
+                                        attachTabWebView(targetId)
+                                    }
+                                }
+                            }
+                            "solver.json" -> {
+                                bridge.saveFile("config/solver.json", bytes)
+                                val json = org.json.JSONObject(String(bytes, Charsets.UTF_8))
+                                solverApiKey = json.optString("apiKey", "")
+                                autoSolveEnabled = json.optBoolean("autoSolve", true)
+                            }
+                            "ide_index.html" -> {
+                                bridge.saveFile("ide/index.html", bytes)
+                            }
+                        }
+                        entry = zis.nextEntry
+                    }
+                }
+                tempFile.delete()
+                autoMirrorVaultToDocuments()
+                bridge.showToast("✅ Restored $profCount profiles & $tabCount tabs!")
+            } catch (e: Exception) {
+                bridge.showToast("Restore failed: ${e.message}")
+                bridge.log("RESTORE_ERR", "Restore error: ${e.message}")
+            }
+        }
+
+        restoreTrigger = { uri -> restoreFromBackup(uri) }
 
         fun saveBase64ToDownloads(base64Data: String, mimeType: String, rawFilename: String) {
             try {
@@ -476,8 +656,28 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
-        // Load persisted solver and profile configurations
+        // Load persisted solver and profile configurations (with Auto-Vault Resurrection)
         LaunchedEffect(Unit) {
+            // Check persistent documents vault if private storage is uninitialized
+            try {
+                val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                val vaultDir = File(docsDir, ".omni_vault")
+                if (vaultDir.exists()) {
+                    fun restoreIfMissing(relPath: String, vaultName: String) {
+                        if (bridge.readFile(relPath) == null) {
+                            val vFile = File(vaultDir, vaultName)
+                            if (vFile.exists() && vFile.isFile) {
+                                bridge.saveFile(relPath, vFile.readBytes())
+                            }
+                        }
+                    }
+                    restoreIfMissing("config/profiles.json", "profiles.json")
+                    restoreIfMissing("config/shortcuts.json", "shortcuts.json")
+                    restoreIfMissing("config/session.json", "session.json")
+                    restoreIfMissing("config/solver.json", "solver.json")
+                }
+            } catch (_: Exception) {}
+
             try {
                 val savedBytes = bridge.readFile("config/solver.json")
                 if (savedBytes != null) {
@@ -1291,7 +1491,7 @@ class OmniBrowser : PluginEntry() {
         }
 
         // Intercept hardware and gesture back navigation
-        DisposableEffect(isTabSwitcherOpen, showSolverDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance) {
+        DisposableEffect(isTabSwitcherOpen, showSettingsDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance) {
             bridge.setOnBackPressedHandler {
                 when {
                     editingShortcut != null -> {
@@ -1306,8 +1506,8 @@ class OmniBrowser : PluginEntry() {
                         editingProfile = null
                         true
                     }
-                    showSolverDialog -> {
-                        showSolverDialog = false
+                    showSettingsDialog -> {
+                        showSettingsDialog = false
                         true
                     }
                     isTabSwitcherOpen -> {
@@ -1632,22 +1832,6 @@ class OmniBrowser : PluginEntry() {
                                 )
 
                                 DropdownMenuItem(
-                                    text = { Text("🤖 Auto-Solve CAPTCHA", color = Color(0xFF81C995), fontWeight = FontWeight.Bold) },
-                                    onClick = {
-                                        showMenu = false
-                                        scanAndSolveCaptcha()
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text("⚙️ Solver Settings", color = Color(0xFF8AB4F8)) },
-                                    onClick = {
-                                        showMenu = false
-                                        showSolverDialog = true
-                                    }
-                                )
-
-                                DropdownMenuItem(
                                     text = { Text("🛠️ Eruda DevTools (Console)", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold) },
                                     onClick = {
                                         showMenu = false
@@ -1664,12 +1848,10 @@ class OmniBrowser : PluginEntry() {
                                 )
 
                                 DropdownMenuItem(
-                                    text = { Text("Clear Cookies & Cache", color = Color(0xFFF28B82)) },
+                                    text = { Text("⚙️ Settings & Backup", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold) },
                                     onClick = {
                                         showMenu = false
-                                        CookieManager.getInstance().removeAllCookies(null)
-                                        webViewInstance?.clearCache(true)
-                                        bridge.showToast("Cookies and Cache cleared.")
+                                        showSettingsDialog = true
                                     }
                                 )
 
@@ -1913,28 +2095,58 @@ class OmniBrowser : PluginEntry() {
                 }
             }
 
-            // --- Solver Settings Dialog ---
-            if (showSolverDialog) {
+            // --- Browser Settings & Backup Dialog ---
+            if (showSettingsDialog) {
                 var tempKey by remember { mutableStateOf(solverApiKey) }
                 var tempAuto by remember { mutableStateOf(autoSolveEnabled) }
 
                 AlertDialog(
-                    onDismissRequest = { showSolverDialog = false },
+                    onDismissRequest = { showSettingsDialog = false },
                     containerColor = Color(0xFF282C34),
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🤖", fontSize = 20.sp)
+                            Text("⚙️", fontSize = 20.sp)
                             Spacer(Modifier.width(8.dp))
-                            Text("NoCaptchaAI Settings", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text("Settings & Backup", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         }
                     },
                     text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(
-                                "Enter your NoCaptchaAI client key to enable automated background CAPTCHA resolution.",
-                                color = Color(0xFF9AA0A6),
-                                fontSize = 12.sp
-                            )
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            // Section 1: Backup & Restore
+                            Text("Session & Profile Backup Vault", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Backs up all 10 profiles, tabs, custom shortcuts, solver keys, and local IDE vaults. Auto-mirrored to Documents/.omni_vault/.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        exportFullBackup()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("📦 Export", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        backupPickerLauncher.launch("application/zip")
+                                    },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8)),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("📥 Restore", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            HorizontalDivider(color = Color(0xFF3C4043))
+
+                            // Section 2: CAPTCHA Solver
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("NoCaptchaAI Solver", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                TextButton(onClick = { scanAndSolveCaptcha() }) {
+                                    Text("Solve Now", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
 
                             OutlinedTextField(
                                 value = tempKey,
@@ -1955,12 +2167,26 @@ class OmniBrowser : PluginEntry() {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Auto-Solve on Page Load", color = Color(0xFFE8EAED), fontSize = 13.sp)
+                                Text("Auto-Solve on Page Load", color = Color(0xFFE8EAED), fontSize = 12.sp)
                                 Switch(
                                     checked = tempAuto,
                                     onCheckedChange = { tempAuto = it },
                                     colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
                                 )
+                            }
+
+                            HorizontalDivider(color = Color(0xFF3C4043))
+
+                            // Section 3: Cache Management
+                            TextButton(
+                                onClick = {
+                                    CookieManager.getInstance().removeAllCookies(null)
+                                    webViewInstance?.clearCache(true)
+                                    bridge.showToast("Cookies and Cache cleared.")
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Clear Cookies & Cache", color = Color(0xFFF28B82), fontSize = 12.sp)
                             }
                         }
                     },
@@ -1974,8 +2200,9 @@ class OmniBrowser : PluginEntry() {
                                     put("autoSolve", autoSolveEnabled)
                                 }
                                 bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
-                                bridge.showToast("Solver settings saved!")
-                                showSolverDialog = false
+                                autoMirrorVaultToDocuments()
+                                bridge.showToast("Settings saved!")
+                                showSettingsDialog = false
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
                         ) {
@@ -1983,8 +2210,8 @@ class OmniBrowser : PluginEntry() {
                         }
                     },
                     dismissButton = {
-                        TextButton(onClick = { showSolverDialog = false }) {
-                            Text("Cancel", color = Color(0xFF9AA0A6))
+                        TextButton(onClick = { showSettingsDialog = false }) {
+                            Text("Close", color = Color(0xFF9AA0A6))
                         }
                     }
                 )
