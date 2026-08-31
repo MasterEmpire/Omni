@@ -2693,7 +2693,7 @@ class OmniBrowser : PluginEntry() {
 
                         log('Waiting for AI Studio UI to mount...');
                         let mountAttempts = 0;
-                        while (!document.querySelector('textarea[formcontrolname="promptText"]') && mountAttempts < 30) {
+                        while (!document.querySelector('textarea[formcontrolname="promptText"]') && mountAttempts < 35) {
                             await delay(1000);
                             mountAttempts++;
                         }
@@ -2706,12 +2706,12 @@ class OmniBrowser : PluginEntry() {
 
                         log('Configuring Model and Thinking Settings...');
 
-                        // 2. Configure Thinking Level if option exists
+                        // 2. Configure Thinking Level if present
                         try {
                             const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
                             if (thinkingSelect && THINKING_LEVEL !== 'Default') {
                                 thinkingSelect.click();
-                                await delay(400);
+                                await delay(500);
                                 const options = Array.from(document.querySelectorAll('mat-option'));
                                 const match = options.find(o => o.textContent.trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
                                 if (match) match.click();
@@ -2727,11 +2727,12 @@ class OmniBrowser : PluginEntry() {
                                 const sysCard = document.querySelector('ms-system-instructions-panel .system-instructions-card, ms-system-instructions-panel button');
                                 if (sysCard) {
                                     sysCard.click();
-                                    await delay(500);
+                                    await delay(600);
                                     const sysTa = document.querySelector('ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
                                     if (sysTa) {
                                         sysTa.focus();
-                                        sysTa.value = SYS_PROMPT;
+                                        const nativeProtoSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                                        nativeProtoSetter.call(sysTa, SYS_PROMPT);
                                         sysTa.dispatchEvent(new Event('input', { bubbles: true }));
                                         sysTa.dispatchEvent(new Event('change', { bubbles: true }));
                                         await delay(300);
@@ -2740,26 +2741,41 @@ class OmniBrowser : PluginEntry() {
                             } catch(e) {}
                         }
 
-                        // 4. Inject Prompt with Angular Reactive Events
-                        log('Injecting user prompt...');
+                        // Purge any lingering CDK backdrops
+                        document.querySelectorAll('.cdk-overlay-backdrop').forEach(b => {
+                            try { b.click(); } catch(_) {}
+                        });
+                        await delay(200);
+
+                        // 4. Inject Prompt with Prototype Setter (Bypasses Angular FormControl blocking)
+                        log('Injecting prompt into Angular engine...');
                         promptArea.focus();
-                        promptArea.value = PROMPT;
+                        try {
+                            const nativeProtoSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                            nativeProtoSetter.call(promptArea, PROMPT);
+                        } catch(e) {
+                            promptArea.value = PROMPT;
+                        }
+
                         promptArea.dispatchEvent(new Event('input', { bubbles: true }));
                         promptArea.dispatchEvent(new Event('change', { bubbles: true }));
                         promptArea.dispatchEvent(new Event('compositionend', { bubbles: true }));
                         await delay(500);
 
-                        // 5. Submit Execution
+                        // 5. Submit Execution (Multi-vector trigger)
                         log('Submitting prompt to Gemini...');
                         const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[type="submit"]');
-                        if (!runBtn) {
-                            if (window.OmniAutomator) window.OmniAutomator.onError('Could not find Run button.');
-                            return;
-                        }
-                        runBtn.click();
+                        
+                        // Fire synthetic Ctrl+Enter directly on the textarea
+                        promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true }));
+                        promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true }));
 
-                        // 6. Polling & Content-Stability Loop (Immune to early spinner stops)
-                        log('Streaming response from AI Studio...');
+                        if (runBtn) {
+                            runBtn.click();
+                        }
+
+                        // 6. Robust Content-Stability Scraper Loop
+                        log('Listening for response stream...');
                         let lastOutput = '';
                         let lastThoughts = '';
                         let stabilityTicks = 0;
@@ -2770,7 +2786,8 @@ class OmniBrowser : PluginEntry() {
                             await delay(1000);
                             totalTicks++;
 
-                            const errorBanner = document.querySelector('.model-error, .error-icon');
+                            // Check errors & policy violations
+                            const errorBanner = document.querySelector('.model-error, .error-icon, ms-chat-turn .error');
                             if (errorBanner) {
                                 const errTxt = errorBanner.textContent.trim();
                                 if (errTxt.length > 0) {
@@ -2779,31 +2796,51 @@ class OmniBrowser : PluginEntry() {
                                 }
                             }
 
-                            // Extract thoughts
+                            // A. Extract Model Thoughts (Hierarchy-accurate selectors)
                             let currentThoughts = '';
-                            const thoughtNodes = document.querySelectorAll('ms-thought-chunk ms-text-chunk, ms-thought-chunk .cmark-node');
+                            const thoughtNodes = document.querySelectorAll(
+                                '.chat-turn-container.model ms-thought-chunk ms-text-chunk, ' +
+                                'div[data-turn-role="Model"] ms-thought-chunk ms-text-chunk, ' +
+                                'ms-thought-chunk .cmark-node'
+                            );
                             if (thoughtNodes.length > 0) {
-                                currentThoughts = Array.from(thoughtNodes).map(n => n.innerText || n.textContent || '').join('\n').trim();
+                                currentThoughts = Array.from(thoughtNodes).map(n => n.innerText || n.textContent || '').filter(Boolean).join('\n').trim();
                             }
 
-                            // Extract final text output
+                            // B. Extract Final Rendered Markdown
                             let currentOutput = '';
-                            const outputNodes = document.querySelectorAll('ms-chat-turn.model ms-text-chunk:not(ms-thought-chunk ms-text-chunk), ms-chat-turn[data-turn-role="Model"] ms-text-chunk:not(ms-thought-chunk ms-text-chunk)');
+                            const outputNodes = document.querySelectorAll(
+                                '.chat-turn-container.model ms-prompt-chunk > ms-text-chunk ms-cmark-node, ' +
+                                'div[data-turn-role="Model"] ms-prompt-chunk > ms-text-chunk ms-cmark-node, ' +
+                                '.chat-turn-container.model ms-text-chunk:not(ms-thought-chunk ms-text-chunk) ms-cmark-node, ' +
+                                'div[data-turn-role="Model"] ms-text-chunk:not(ms-thought-chunk ms-text-chunk) ms-cmark-node, ' +
+                                '.chat-turn-container.model .user-chunk ~ ms-prompt-chunk ms-cmark-node'
+                            );
+
                             if (outputNodes.length > 0) {
-                                currentOutput = Array.from(outputNodes).map(n => n.innerText || n.textContent || '').join('\n').trim();
+                                currentOutput = Array.from(outputNodes).map(n => n.innerText || n.textContent || '').filter(Boolean).join('\n').trim();
+                            } else {
+                                // Fallback generic selector inside model turn
+                                const genericModelNodes = document.querySelectorAll('.chat-turn-container.model ms-text-chunk:not(ms-thought-chunk ms-text-chunk)');
+                                if (genericModelNodes.length > 0) {
+                                    currentOutput = Array.from(genericModelNodes).map(n => n.innerText || n.textContent || '').filter(Boolean).join('\n').trim();
+                                }
                             }
 
                             if (currentOutput.length > 0 || currentThoughts.length > 0) {
                                 hasStartedReceiving = true;
                                 if (window.OmniAutomator) window.OmniAutomator.onProgress(currentThoughts, currentOutput);
+                            } else {
+                                const activeModelTurns = document.querySelectorAll('.chat-turn-container.model, div[data-turn-role="Model"]').length;
+                                log('Streaming... (Model turns: ' + activeModelTurns + ', wait ' + totalTicks + 's)');
                             }
 
                             if (hasStartedReceiving) {
                                 if (currentOutput === lastOutput && currentThoughts === lastThoughts && currentOutput.length > 0) {
                                     stabilityTicks++;
-                                    // 3 continuous stable seconds after receiving output signals full render completion
+                                    // Require 3 consecutive stable seconds after content is populated
                                     if (stabilityTicks >= 3) {
-                                        log('Output render complete!');
+                                        log('Output generation complete!');
                                         if (window.OmniAutomator) window.OmniAutomator.onComplete(currentThoughts, currentOutput);
                                         return;
                                     }
@@ -2818,7 +2855,7 @@ class OmniBrowser : PluginEntry() {
                         if (lastOutput.length > 0) {
                             if (window.OmniAutomator) window.OmniAutomator.onComplete(lastThoughts, lastOutput);
                         } else {
-                            if (window.OmniAutomator) window.OmniAutomator.onError('Operation timed out without receiving a response.');
+                            if (window.OmniAutomator) window.OmniAutomator.onError('Operation timed out. Try tapping "Dump Live DOM" below to inspect state.');
                         }
                     })();
                 """.trimIndent()
@@ -3144,7 +3181,7 @@ class OmniBrowser : PluginEntry() {
                                     item {
                                         androidx.compose.foundation.text.selection.SelectionContainer {
                                             Text(
-                                                text = if (automationResult.isNotEmpty()) automationResult else if (isAutomating) "Listening for response stream..." else "No output generated.",
+                                                text = if (automationResult.isNotEmpty()) automationResult else if (isAutomating) "Listening for response stream from AI Studio..." else "No output generated.",
                                                 color = Color(0xFFE8EAED),
                                                 fontSize = 12.sp,
                                                 lineHeight = 17.sp
@@ -3157,6 +3194,25 @@ class OmniBrowser : PluginEntry() {
                     },
                     confirmButton = {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Live Diagnostic DOM Dump Button
+                            OutlinedButton(
+                                onClick = {
+                                    headlessAutomationWv?.evaluateJavascript("document.documentElement.outerHTML") { rawHtml ->
+                                        if (!rawHtml.isNullOrEmpty()) {
+                                            val clean = if (rawHtml.startsWith("\"") && rawHtml.endsWith("\"")) {
+                                                try { org.json.JSONObject("{\"h\":$rawHtml}").getString("h") } catch (_: Exception) { rawHtml }
+                                            } else rawHtml
+                                            val filename = "Automator_Dump_${System.currentTimeMillis()}.html"
+                                            bridge.saveFile("snapshots/$filename", clean.toByteArray(Charsets.UTF_8))
+                                            bridge.showToast("Saved live snapshot to snapshots/$filename")
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8))
+                            ) {
+                                Text("🔍 Dump DOM", fontSize = 11.sp)
+                            }
+
                             if (automationResult.isNotEmpty()) {
                                 Button(
                                     onClick = {
