@@ -277,121 +277,205 @@ class OmniBrowser : PluginEntry() {
         val blobInterceptorScript = remember {
             """
             (function() {
-                if (window.__omniBlobHooked) return;
+                if (window.__omniBlobHooked && window.__omniIframeHooked) return;
                 window.__omniBlobHooked = true;
+                window.__omniIframeHooked = true;
 
                 window.__omniBlobMap = window.__omniBlobMap || new Map();
 
-                function hookCreateObjectURL(target) {
-                    if (!target || !target.createObjectURL || target.createObjectURL.__omniHooked) return;
-                    const orig = target.createObjectURL;
-                    const hooked = function(blob) {
-                        const url = orig.apply(this, arguments);
-                        try {
-                            if (blob instanceof Blob) {
-                                window.__omniBlobMap = window.__omniBlobMap || new Map();
-                                window.__omniBlobMap.set(url, blob);
-                                if (window.__omniBlobMap.size > 300) {
-                                    const firstKey = window.__omniBlobMap.keys().next().value;
-                                    window.__omniBlobMap.delete(firstKey);
-                                }
-                                if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
-                                    window.OmniBlobDownloader.log('BLOB_MAP', 'Vaulted Blob in RAM: ' + url + ' (' + blob.size + 'b, type: ' + blob.type + ')');
-                                }
-                            }
-                        } catch(e) {}
-                        return url;
-                    };
-                    hooked.__omniHooked = true;
+                function getTopBlobMap() {
                     try {
-                        target.createObjectURL = hooked;
-                    } catch(e) {
-                        try {
-                            Object.defineProperty(target, 'createObjectURL', {
-                                value: hooked,
-                                writable: true,
-                                configurable: true
-                            });
-                        } catch(_) {}
+                        if (window.top && window.top.__omniBlobMap) return window.top.__omniBlobMap;
+                    } catch(_) {}
+                    return window.__omniBlobMap;
+                }
+
+                function shipBlobToHost(dataUrl, mimeType, filename) {
+                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                        window.OmniBlobDownloader.processBlob(dataUrl, mimeType, filename);
+                        return;
                     }
+                    try {
+                        if (window.top && window.top !== window) {
+                            window.top.postMessage({
+                                type: '__OMNI_BLOB_SHIP__',
+                                dataUrl: dataUrl,
+                                mimeType: mimeType,
+                                filename: filename
+                            }, '*');
+                        }
+                    } catch(_) {}
                 }
 
-                try { hookCreateObjectURL(window.URL); } catch(_) {}
-                try { hookCreateObjectURL(URL); } catch(_) {}
-                try { if (window.webkitURL) hookCreateObjectURL(window.webkitURL); } catch(_) {}
-
-                const origRevoke = URL.revokeObjectURL;
-                if (origRevoke && !origRevoke.__omniHooked) {
-                    const hookedRevoke = function(url) {
-                        setTimeout(function() {
-                            try { origRevoke.call(URL, url); } catch(e) {}
-                            if (window.__omniBlobMap) {
-                                window.__omniBlobMap.delete(url);
+                // Top-level listener for sandboxed iframe postMessage
+                if (window === window.top) {
+                    window.addEventListener('message', function(ev) {
+                        if (ev.data && ev.data.type === '__OMNI_BLOB_SHIP__') {
+                            if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                                window.OmniBlobDownloader.log('BLOB_IFRAME_MSG', 'Received blob from sandboxed subframe: ' + ev.data.filename);
                             }
-                        }, 30000);
-                    };
-                    hookedRevoke.__omniHooked = true;
-                    try { URL.revokeObjectURL = hookedRevoke; } catch(_) {}
+                            shipBlobToHost(ev.data.dataUrl, ev.data.mimeType, ev.data.filename);
+                        }
+                    }, true);
                 }
 
-                function extractAndShipBlob(blobObj, mimeType, filename) {
-                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
-                        window.OmniBlobDownloader.log('BLOB_CLICK', 'Intercepted anchor click for: ' + filename + ' (' + blobObj.size + 'b). Processing via RAM...');
-                    }
-                    const reader = new FileReader();
-                    reader.onloadend = function() {
-                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
-                            window.OmniBlobDownloader.processBlob(reader.result, mimeType || blobObj.type || 'application/octet-stream', filename || 'download');
-                        }
-                    };
-                    reader.onerror = function() {
-                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
-                            window.OmniBlobDownloader.processBlob('ERROR', '', 'FileReader failed to read in-memory Blob');
-                        }
-                    };
-                    reader.readAsDataURL(blobObj);
-                }
+                function hookWindowScope(targetWin) {
+                    if (!targetWin) return;
+                    try {
+                        if (targetWin.__omniScopeHooked) return;
+                        targetWin.__omniScopeHooked = true;
+                    } catch(_) { return; }
 
-                // Hook programmatic click on HTMLAnchorElement
-                const origAnchorClick = HTMLAnchorElement.prototype.click;
-                if (origAnchorClick && !origAnchorClick.__omniHooked) {
-                    HTMLAnchorElement.prototype.click = function() {
+                    function hookCreateObjectURL(target) {
+                        if (!target || !target.createObjectURL || target.createObjectURL.__omniHooked) return;
+                        const orig = target.createObjectURL;
+                        const hooked = function(blob) {
+                            const url = orig.apply(this, arguments);
+                            try {
+                                if (blob instanceof Blob) {
+                                    const bMap = getTopBlobMap();
+                                    bMap.set(url, blob);
+                                    if (targetWin.__omniBlobMap) targetWin.__omniBlobMap.set(url, blob);
+                                    if (bMap.size > 400) {
+                                        const firstKey = bMap.keys().next().value;
+                                        bMap.delete(firstKey);
+                                    }
+                                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                                        window.OmniBlobDownloader.log('BLOB_MAP', 'Vaulted Blob in RAM: ' + url + ' (' + blob.size + 'b, type: ' + blob.type + ')');
+                                    }
+                                }
+                            } catch(e) {}
+                            return url;
+                        };
+                        hooked.__omniHooked = true;
                         try {
-                            const href = this.href || '';
-                            const downloadName = this.getAttribute('download') || this.download || '';
-                            if (href.startsWith('blob:') && window.__omniBlobMap && window.__omniBlobMap.has(href)) {
-                                const blob = window.__omniBlobMap.get(href);
-                                extractAndShipBlob(blob, blob.type, downloadName || 'download');
-                                return;
-                            }
-                        } catch(e) {}
-                        return origAnchorClick.apply(this, arguments);
-                    };
-                    HTMLAnchorElement.prototype.click.__omniHooked = true;
-                }
+                            target.createObjectURL = hooked;
+                        } catch(e) {
+                            try {
+                                Object.defineProperty(target, 'createObjectURL', {
+                                    value: hooked,
+                                    writable: true,
+                                    configurable: true
+                                });
+                            } catch(_) {}
+                        }
+                    }
 
-                document.addEventListener('click', function(e) {
-                    const anchor = e.target && (e.target.tagName === 'A' ? e.target : (e.target.closest ? e.target.closest('a') : null));
-                    if (!anchor) return;
+                    try { hookCreateObjectURL(targetWin.URL); } catch(_) {}
+                    try { if (targetWin.webkitURL) hookCreateObjectURL(targetWin.webkitURL); } catch(_) {}
 
-                    const href = anchor.href || '';
-                    const downloadName = anchor.getAttribute('download') || anchor.download || '';
+                    const origRevoke = targetWin.URL ? targetWin.URL.revokeObjectURL : null;
+                    if (origRevoke && !origRevoke.__omniHooked) {
+                        const hookedRevoke = function(url) {
+                            setTimeout(function() {
+                                try { origRevoke.call(targetWin.URL, url); } catch(e) {}
+                                try {
+                                    const bMap = getTopBlobMap();
+                                    bMap.delete(url);
+                                } catch(_) {}
+                            }, 30000);
+                        };
+                        hookedRevoke.__omniHooked = true;
+                        try { targetWin.URL.revokeObjectURL = hookedRevoke; } catch(_) {}
+                    }
 
-                    if (href.startsWith('blob:') || anchor.hasAttribute('download')) {
-                        if (href.startsWith('blob:') && window.__omniBlobMap && window.__omniBlobMap.has(href)) {
-                            const blob = window.__omniBlobMap.get(href);
-                            extractAndShipBlob(blob, blob.type, downloadName || 'download');
-                            e.preventDefault();
-                            e.stopPropagation();
-                        } else if (href.startsWith('data:')) {
+                    function extractAndShip(blobObj, mimeType, filename) {
+                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                            window.OmniBlobDownloader.log('BLOB_CLICK', 'Intercepted anchor click for: ' + filename + ' (' + blobObj.size + 'b). Processing via RAM...');
+                        }
+                        const reader = new targetWin.FileReader();
+                        reader.onloadend = function() {
+                            shipBlobToHost(reader.result, mimeType || blobObj.type || 'application/octet-stream', filename || 'download');
+                        };
+                        reader.onerror = function() {
                             if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
-                                window.OmniBlobDownloader.processBlob(href, '', downloadName || 'download');
+                                window.OmniBlobDownloader.processBlob('ERROR', '', 'FileReader failed to read in-memory Blob');
                             }
-                            e.preventDefault();
-                            e.stopPropagation();
+                        };
+                        reader.readAsDataURL(blobObj);
+                    }
+
+                    // Hook anchor clicks in this window scope
+                    if (targetWin.HTMLAnchorElement && targetWin.HTMLAnchorElement.prototype) {
+                        const origAnchorClick = targetWin.HTMLAnchorElement.prototype.click;
+                        if (origAnchorClick && !origAnchorClick.__omniHooked) {
+                            targetWin.HTMLAnchorElement.prototype.click = function() {
+                                try {
+                                    const href = this.href || '';
+                                    const downloadName = this.getAttribute('download') || this.download || '';
+                                    const bMap = getTopBlobMap();
+                                    if (href.startsWith('blob:') && bMap && bMap.has(href)) {
+                                        const blob = bMap.get(href);
+                                        extractAndShip(blob, blob.type, downloadName || 'download');
+                                        return;
+                                    }
+                                } catch(e) {}
+                                return origAnchorClick.apply(this, arguments);
+                            };
+                            targetWin.HTMLAnchorElement.prototype.click.__omniHooked = true;
                         }
                     }
-                }, true);
+
+                    try {
+                        targetWin.document.addEventListener('click', function(e) {
+                            const anchor = e.target && (e.target.tagName === 'A' ? e.target : (e.target.closest ? e.target.closest('a') : null));
+                            if (!anchor) return;
+
+                            const href = anchor.href || '';
+                            const downloadName = anchor.getAttribute('download') || anchor.download || '';
+                            const bMap = getTopBlobMap();
+
+                            if (href.startsWith('blob:') || anchor.hasAttribute('download')) {
+                                if (href.startsWith('blob:') && bMap && bMap.has(href)) {
+                                    const blob = bMap.get(href);
+                                    extractAndShip(blob, blob.type, downloadName || 'download');
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                } else if (href.startsWith('data:')) {
+                                    shipBlobToHost(href, '', downloadName || 'download');
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                }
+                            }
+                        }, true);
+                    } catch(_) {}
+                }
+
+                // 1. Hook Current Top Window
+                hookWindowScope(window);
+
+                // 2. Hook All Existing and Future IFrames (MakerSuite / AI Studio Sub-frames)
+                function scanAndHookIframes() {
+                    try {
+                        const iframes = document.querySelectorAll('iframe');
+                        iframes.forEach(function(ifr) {
+                            try {
+                                if (ifr.contentWindow) {
+                                    hookWindowScope(ifr.contentWindow);
+                                }
+                            } catch(_) {}
+                            if (!ifr.__omniLoadHooked) {
+                                ifr.__omniLoadHooked = true;
+                                ifr.addEventListener('load', function() {
+                                    try { if (ifr.contentWindow) hookWindowScope(ifr.contentWindow); } catch(_) {}
+                                });
+                            }
+                        });
+                    } catch(_) {}
+                }
+
+                scanAndHookIframes();
+
+                // Observe dynamic DOM insertions for sub-frames
+                try {
+                    const observer = new MutationObserver(function(mutations) {
+                        scanAndHookIframes();
+                    });
+                    observer.observe(document.documentElement || document.body, {
+                        childList: true,
+                        subtree: true
+                    });
+                } catch(_) {}
             })();
             """.trimIndent()
         }
