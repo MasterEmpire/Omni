@@ -2718,7 +2718,7 @@ class OmniBrowser : PluginEntry() {
                                 return;
                             }
 
-                            updateStatus('Waiting for AI Studio UI to mount...');
+                            updateStatus('Waiting for AI Studio UI and Session Handshake...');
                             let mountAttempts = 0;
                             let promptArea = null;
 
@@ -2730,11 +2730,15 @@ class OmniBrowser : PluginEntry() {
                                     'textarea[placeholder*="Start typing"], ' +
                                     'textarea'
                                 );
-                                if (promptArea) break;
+                                
+                                // Check if backend token placeholder has resolved (session ready)
+                                const isSessionLoading = document.querySelector('.loading-token-count-placeholder') !== null;
+                                if (promptArea && !isSessionLoading) break;
+
                                 await delay(1000);
                                 mountAttempts++;
                                 if (mountAttempts % 5 === 0) {
-                                    hostLog('MOUNT', 'Waiting for prompt area... (attempt ' + mountAttempts + '/45)');
+                                    hostLog('MOUNT', 'Waiting for UI & Session Handshake... (attempt ' + mountAttempts + '/45, sessionLoading=' + isSessionLoading + ')');
                                 }
                             }
 
@@ -2746,6 +2750,8 @@ class OmniBrowser : PluginEntry() {
                                 return;
                             }
 
+                            // Buffer 1.2s to ensure Google Cloud token handshake is 100% stable
+                            await delay(1200);
                             hostLog('DOM', 'Found prompt textarea: ' + promptArea.tagName + '.' + promptArea.className);
                             updateStatus('Configuring Model and Thinking Settings...');
 
@@ -2801,71 +2807,73 @@ class OmniBrowser : PluginEntry() {
                             await delay(200);
 
                             // 4. Inject Prompt using native insertion & Spacebar transition
-                            updateStatus('Injecting prompt into Angular engine...');
-                            promptArea.focus();
-                            promptArea.select();
+                            async function injectAndSubmitPrompt() {
+                                updateStatus('Injecting prompt into Angular engine...');
+                                promptArea.focus();
+                                promptArea.select();
 
-                            let insertedNatively = false;
-                            try {
-                                insertedNatively = document.execCommand('insertText', false, PROMPT);
-                            } catch(_) {}
+                                let insertedNatively = false;
+                                try {
+                                    insertedNatively = document.execCommand('insertText', false, PROMPT);
+                                } catch(_) {}
 
-                            if (!insertedNatively || promptArea.value !== PROMPT) {
-                                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-                                nativeSetter.call(promptArea, PROMPT);
-                                promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: PROMPT }));
+                                if (!insertedNatively || promptArea.value !== PROMPT) {
+                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                                    nativeSetter.call(promptArea, PROMPT);
+                                    promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: PROMPT }));
+                                    promptArea.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+
+                                // Keypress cycle to transition Angular's internal DraftManager
+                                promptArea.focus();
+                                promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
+                                promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: ' ' }));
+                                promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
+                                await delay(200);
+
+                                promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
+                                promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
+                                promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
                                 promptArea.dispatchEvent(new Event('change', { bubbles: true }));
+
+                                await delay(600);
+                                promptArea.focus();
+
+                                updateStatus('Submitting prompt to Gemini...');
+                                const runBtn = document.querySelector(
+                                    'ms-run-button button, ' +
+                                    'button.ctrl-enter-submits, ' +
+                                    'button[aria-label*="Run"], ' +
+                                    'button[data-test-id="run-button"], ' +
+                                    'button.run-button, ' +
+                                    'button[type="submit"]'
+                                );
+
+                                if (runBtn) {
+                                    hostLog('RUN', 'Located run button: disabled=' + runBtn.disabled + ', aria-disabled=' + runBtn.getAttribute('aria-disabled'));
+                                }
+
+                                // Dispatch synthetic Ctrl+Enter on prompt textarea
+                                promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
+                                promptArea.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
+                                promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
+
+                                if (runBtn && !runBtn.disabled && runBtn.getAttribute('aria-disabled') !== 'true') {
+                                    runBtn.click();
+                                    hostLog('RUN', 'Clicked Run button.');
+                                }
                             }
 
-                            // CRITICAL FIX: Simulate real keyboard spacebar + backspace to transition Angular's DraftManager
-                            // This eliminates the notorious Google AI Studio "No ID or name found in config / Permission Denied" bug!
-                            promptArea.focus();
-                            promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
-                            promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: ' ' }));
-                            promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
-                            await delay(200);
+                            await injectAndSubmitPrompt();
 
-                            promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
-                            promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
-                            promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
-                            promptArea.dispatchEvent(new Event('change', { bubbles: true }));
-
-                            // Give Angular 600ms to register the Draft Session config
-                            await delay(600);
-                            promptArea.focus();
-
-                            // 5. Submit Execution
-                            updateStatus('Submitting prompt to Gemini...');
-                            const runBtn = document.querySelector(
-                                'ms-run-button button, ' +
-                                'button.ctrl-enter-submits, ' +
-                                'button[aria-label*="Run"], ' +
-                                'button[data-test-id="run-button"], ' +
-                                'button.run-button, ' +
-                                'button[type="submit"]'
-                            );
-
-                            if (runBtn) {
-                                hostLog('RUN', 'Located run button: disabled=' + runBtn.disabled + ', aria-disabled=' + runBtn.getAttribute('aria-disabled'));
-                            }
-
-                            // Dispatch synthetic Ctrl+Enter on prompt textarea
-                            promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
-                            promptArea.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
-                            promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
-
-                            if (runBtn && !runBtn.disabled && runBtn.getAttribute('aria-disabled') !== 'true') {
-                                runBtn.click();
-                                hostLog('RUN', 'Clicked Run button.');
-                            }
-
-                            // 6. Robust Content-Stability Scraper Loop with Virtual-Scroll Auto-Scroll
+                            // 5. Robust Content Scraper Loop with Deduplication & Auto-Healing Retries
                             updateStatus('Listening for response stream...');
                             let lastOutput = '';
                             let lastThoughts = '';
                             let stabilityTicks = 0;
                             let hasStartedReceiving = false;
                             let totalTicks = 0;
+                            let retryCount = 0;
 
                             while (totalTicks < 180) {
                                 await delay(1000);
@@ -2879,7 +2887,7 @@ class OmniBrowser : PluginEntry() {
                                     }
                                 } catch(_) {}
 
-                                // A. Instant Error Trapping (Toasts, Callouts, Banners)
+                                // A. Error Trapping with Auto-Healing Self-Retry
                                 const errorNode = document.querySelector(
                                     'ms-callout.error-callout .message, ' +
                                     '.error-callout .message, ' +
@@ -2892,6 +2900,21 @@ class OmniBrowser : PluginEntry() {
                                 if (errorNode) {
                                     const errTxt = (errorNode.innerText || errorNode.textContent || '').trim();
                                     if (errTxt.length > 0 && !errTxt.toLowerCase().includes('saved')) {
+                                        if (retryCount < 2 && (errTxt.toLowerCase().includes('permission') || errTxt.toLowerCase().includes('failed to generate'))) {
+                                            retryCount++;
+                                            hostLog('RETRY', 'Encountered transient 403 (' + errTxt + '). Performing auto-healing retry #' + retryCount + '...');
+                                            
+                                            // Dismiss error toast
+                                            try {
+                                                const dismissBtn = document.querySelector('ms-callout .dismiss-button, button[aria-label="Dismiss"]');
+                                                if (dismissBtn) dismissBtn.click();
+                                            } catch(_) {}
+
+                                            await delay(1500);
+                                            await injectAndSubmitPrompt();
+                                            continue;
+                                        }
+
                                         hostLog('STUDIO_ERROR', 'Google AI Studio error: ' + errTxt);
                                         if (window.OmniAutomator) window.OmniAutomator.onError(errTxt);
                                         window.__omniAutomating = false;
@@ -2899,46 +2922,57 @@ class OmniBrowser : PluginEntry() {
                                     }
                                 }
 
-                                // B. Extract Model Thoughts
+                                // B. Extract Model Thoughts (Clean leaf selector to avoid duplication)
                                 let currentThoughts = '';
-                                const thoughtNodes = document.querySelectorAll(
-                                    'ms-thought-chunk ms-text-chunk, ' +
-                                    '.chat-turn-container.model ms-thought-chunk, ' +
-                                    'ms-thought-chunk .cmark-node, ' +
-                                    'ms-thought-chunk'
-                                );
-                                if (thoughtNodes.length > 0) {
-                                    currentThoughts = Array.from(thoughtNodes)
+                                const thoughtChunks = Array.from(document.querySelectorAll('ms-thought-chunk ms-text-chunk, ms-thought-chunk .cmark-node'));
+                                if (thoughtChunks.length > 0) {
+                                    currentThoughts = thoughtChunks
                                         .map(n => n.innerText || n.textContent || '')
                                         .filter(Boolean)
                                         .join('\n')
                                         .trim();
-                                }
-
-                                // C. Extract Rendered Markdown / Model Turn Content
-                                let currentOutput = '';
-                                const modelTurns = document.querySelectorAll(
-                                    'ms-chat-turn .chat-turn-container.model, ' +
-                                    'div[data-turn-role="Model"], ' +
-                                    '.model-prompt-container'
-                                );
-
-                                if (modelTurns.length > 0) {
-                                    const lastTurn = modelTurns[modelTurns.length - 1];
-                                    const textNodes = lastTurn.querySelectorAll(
-                                        'ms-cmark-node, ' +
-                                        'ms-text-chunk:not(ms-thought-chunk ms-text-chunk), ' +
-                                        '.turn-content, ' +
-                                        'p'
-                                    );
-                                    if (textNodes.length > 0) {
-                                        currentOutput = Array.from(textNodes)
+                                } else {
+                                    const rawThoughts = Array.from(document.querySelectorAll('ms-thought-chunk'));
+                                    if (rawThoughts.length > 0) {
+                                        currentThoughts = rawThoughts
                                             .map(n => n.innerText || n.textContent || '')
                                             .filter(Boolean)
                                             .join('\n')
                                             .trim();
+                                    }
+                                }
+
+                                // C. Extract Rendered Markdown with strict deduplication (Priority: leaf ms-cmark-nodes only)
+                                let currentOutput = '';
+                                const modelTurns = document.querySelectorAll('ms-chat-turn .chat-turn-container.model, div[data-turn-role="Model"]');
+
+                                if (modelTurns.length > 0) {
+                                    const lastTurn = modelTurns[modelTurns.length - 1];
+                                    
+                                    // 1st Priority: Leaf ms-cmark-node elements (avoids parent container duplication!)
+                                    const cmarkNodes = Array.from(lastTurn.querySelectorAll('ms-cmark-node'));
+                                    if (cmarkNodes.length > 0) {
+                                        currentOutput = cmarkNodes
+                                            .map(n => n.innerText || n.textContent || '')
+                                            .filter(Boolean)
+                                            .join('\n\n')
+                                            .trim();
                                     } else {
-                                        currentOutput = (lastTurn.innerText || lastTurn.textContent || '').trim();
+                                        // 2nd Priority: Prompt chunk text
+                                        const textChunks = Array.from(lastTurn.querySelectorAll('ms-prompt-chunk > ms-text-chunk:not(ms-thought-chunk ms-text-chunk)'));
+                                        if (textChunks.length > 0) {
+                                            currentOutput = textChunks
+                                                .map(n => n.innerText || n.textContent || '')
+                                                .filter(Boolean)
+                                                .join('\n\n')
+                                                .trim();
+                                        } else {
+                                            // 3rd Priority: Top level turn container
+                                            const turnRoot = lastTurn.querySelector('.turn-content');
+                                            if (turnRoot) {
+                                                currentOutput = (turnRoot.innerText || turnRoot.textContent || '').trim();
+                                            }
+                                        }
                                     }
                                 }
 
