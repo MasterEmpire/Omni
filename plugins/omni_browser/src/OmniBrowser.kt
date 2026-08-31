@@ -38,9 +38,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -2703,11 +2705,15 @@ class OmniBrowser : PluginEntry() {
                                     }
                                 }
                             } else {
-                                androidx.compose.foundation.lazy.LazyColumn(
+                                LazyColumn(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    items(completedFilesList) { file ->
+                                    items(
+                                        count = completedFilesList.size,
+                                        key = { idx -> completedFilesList[idx].absolutePath }
+                                    ) { idx ->
+                                        val file = completedFilesList[idx]
                                         Card(
                                             shape = RoundedCornerShape(10.dp),
                                             colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
