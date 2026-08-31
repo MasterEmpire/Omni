@@ -1342,140 +1342,167 @@ class OmniBrowser : PluginEntry() {
                     .statusBarsPadding()
                     .imePadding()
             ) {
+                val activeTab = tabs.find { it.id == activeTabId }
+                val activeProf = profiles.find { it.id == activeTab?.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF8AB4F8)
+                val profColor = remember(activeProf.colorValue) { Color(activeProf.colorValue) }
+
                 // --- Top Chrome Omnibox Header ---
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .zIndex(1f)
                         .graphicsLayer()
-                        .background(Color(0xFF1F2227))
+                        .background(Color(0xFF16181D))
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Home Button (Non-Destructive Toggle)
-                        IconButton(
-                            onClick = {
-                                if (currentUrl != "about:blank") {
-                                    isHomeOverlayOpen = !isHomeOverlayOpen
-                                }
-                            },
-                            modifier = Modifier.size(38.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Home,
-                                contentDescription = "Home",
-                                tint = if (isHomeOverlayOpen || currentUrl == "about:blank") Color(0xFF8AB4F8) else Color(0xFF9AA0A6)
-                            )
-                        }
-
-                        val activeTab = tabs.find { it.id == activeTabId }
-                        val activeProf = profiles.find { it.id == activeTab?.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF8AB4F8)
-
-                        // Chrome Address Pill with Account Color Glow
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // Bold Profile Accent Indicator Bar
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(22.dp))
-                                .background(Color(0xFF282C34))
-                                .border(1.dp, Color(activeProf.colorValue).copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+                                .fillMaxWidth()
+                                .height(3.5.dp)
+                                .background(profColor)
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 12.dp)
+                            // Home Button (Non-Destructive Toggle)
+                            IconButton(
+                                onClick = {
+                                    if (currentUrl != "about:blank") {
+                                        isHomeOverlayOpen = !isHomeOverlayOpen
+                                    }
+                                },
+                                modifier = Modifier.size(38.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
-                                    contentDescription = null,
-                                    tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else if (currentUrl.startsWith("http://")) Color(0xFFFDD663) else Color(0xFF9AA0A6),
-                                    modifier = Modifier.size(16.dp)
+                                    Icons.Default.Home,
+                                    contentDescription = "Home",
+                                    tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFF9AA0A6)
                                 )
+                            }
 
-                                Spacer(Modifier.width(8.dp))
+                            // Chrome Address Pill with High-Contrast Profile Glow
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(profColor.copy(alpha = 0.15f))
+                                    .border(2.dp, profColor, RoundedCornerShape(22.dp))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 12.dp)
+                                ) {
+                                    // Profile Color Dot
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(profColor)
+                                    )
 
-                                BasicTextField(
-                                    value = urlInputText,
-                                    onValueChange = { urlInputText = it },
-                                    singleLine = true,
-                                    maxLines = 1,
-                                    cursorBrush = SolidColor(Color(0xFF8AB4F8)),
-                                    textStyle = TextStyle(
-                                        color = Color(0xFFE8EAED),
-                                        fontSize = 14.sp,
-                                        lineHeight = 18.sp,
-                                        platformStyle = PlatformTextStyle(
-                                            includeFontPadding = false
-                                        )
-                                    ),
-                                    keyboardOptions = KeyboardOptions(
-                                        keyboardType = KeyboardType.Uri,
-                                        imeAction = ImeAction.Go
-                                    ),
-                                    keyboardActions = KeyboardActions(
-                                        onGo = { navigateTo(urlInputText) }
-                                    ),
-                                    decorationBox = { innerTextField ->
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.CenterStart
-                                        ) {
-                                            if (urlInputText.isEmpty()) {
-                                                Text(
-                                                    text = "Search or type URL",
-                                                    color = Color(0xFF80868B),
-                                                    fontSize = 14.sp,
-                                                    style = TextStyle(
-                                                        platformStyle = PlatformTextStyle(
-                                                            includeFontPadding = false
+                                    Spacer(Modifier.width(8.dp))
+
+                                    Icon(
+                                        imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else if (currentUrl.startsWith("http://")) Color(0xFFFDD663) else profColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+
+                                    Spacer(Modifier.width(8.dp))
+
+                                    BasicTextField(
+                                        value = urlInputText,
+                                        onValueChange = { urlInputText = it },
+                                        singleLine = true,
+                                        maxLines = 1,
+                                        cursorBrush = SolidColor(profColor),
+                                        textStyle = TextStyle(
+                                            color = Color(0xFFE8EAED),
+                                            fontSize = 14.sp,
+                                            lineHeight = 18.sp,
+                                            platformStyle = PlatformTextStyle(
+                                                includeFontPadding = false
+                                            )
+                                        ),
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Uri,
+                                            imeAction = ImeAction.Go
+                                        ),
+                                        keyboardActions = KeyboardActions(
+                                            onGo = { navigateTo(urlInputText) }
+                                        ),
+                                        decorationBox = { innerTextField ->
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.CenterStart
+                                            ) {
+                                                if (urlInputText.isEmpty()) {
+                                                    Text(
+                                                        text = "Search or type URL",
+                                                        color = Color(0xFF9AA0A6),
+                                                        fontSize = 14.sp,
+                                                        style = TextStyle(
+                                                            platformStyle = PlatformTextStyle(
+                                                                includeFontPadding = false
+                                                            )
                                                         )
                                                     )
-                                                )
+                                                }
+                                                innerTextField()
                                             }
-                                            innerTextField()
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .wrapContentHeight(Alignment.CenterVertically)
-                                )
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .wrapContentHeight(Alignment.CenterVertically)
+                                    )
 
-                                if (urlInputText.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = { urlInputText = "" },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
+                                    if (urlInputText.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { urlInputText = "" },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(6.dp))
 
-                        // Tab Counter Badge
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .border(1.5.dp, Color(0xFF9AA0A6), RoundedCornerShape(6.dp))
-                                .clickable {
-                                    val thumb = captureThumbnail()
-                                    val bundle = Bundle()
-                                    webViewInstance?.saveState(bundle)
-                                    tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
-                                    CookieManager.getInstance().flush()
-                                    isTabSwitcherOpen = true
-                                }
-                        ) {
-                            Text("${tabs.size}", color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            // Tab Counter Badge with Profile Color Theme
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(profColor.copy(alpha = 0.2f))
+                                    .border(2.dp, profColor, RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        val thumb = captureThumbnail()
+                                        val bundle = Bundle()
+                                        webViewInstance?.saveState(bundle)
+                                        tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
+                                        CookieManager.getInstance().flush()
+                                        isTabSwitcherOpen = true
+                                    }
+                            ) {
+                                Text(
+                                    "${tabs.size}",
+                                    color = profColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
                         }
 
                         Spacer(Modifier.width(4.dp))
@@ -1668,11 +1695,11 @@ class OmniBrowser : PluginEntry() {
                 ) {
                     LinearProgressIndicator(
                         progress = { loadProgress },
-                        color = Color(0xFF8AB4F8),
+                        color = profColor,
                         trackColor = Color(0xFF282C34),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(2.5.dp)
+                            .height(3.dp)
                     )
                 }
 
@@ -1733,24 +1760,39 @@ class OmniBrowser : PluginEntry() {
                                 Spacer(Modifier.height(40.dp))
                             }
 
-                            // Chrome Logo Aesthetic
+                            // Chrome Logo & Active Profile Banner
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
                                     shape = CircleShape,
-                                    color = Color(0xFF8AB4F8),
-                                    modifier = Modifier.size(36.dp)
+                                    color = profColor,
+                                    modifier = Modifier.size(40.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Text("🌐", fontSize = 18.sp)
+                                        Text("🌐", fontSize = 20.sp)
                                     }
                                 }
                                 Spacer(Modifier.width(12.dp))
-                                Text(
-                                    "Omni Chrome",
-                                    fontSize = 28.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFE8EAED)
-                                )
+                                Column {
+                                    Text(
+                                        "Omni Chrome",
+                                        fontSize = 26.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFE8EAED)
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = profColor.copy(alpha = 0.2f),
+                                        border = BorderStroke(1.dp, profColor.copy(alpha = 0.7f))
+                                    ) {
+                                        Text(
+                                            "Profile: ${activeProf.name}",
+                                            color = profColor,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
 
                             Text(
