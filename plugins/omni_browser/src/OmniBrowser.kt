@@ -2686,6 +2686,16 @@ fun TabSwitcherScreen(
     var profileMenuExpanded by remember { mutableStateOf(false) }
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF8AB4F8)
 
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+
+    LaunchedEffect(Unit) {
+        val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
+        val targetIndex = if (activeIndex >= 0) activeIndex else (tabs.size - 1).coerceAtLeast(0)
+        if (targetIndex > 0) {
+            gridState.scrollToItem(targetIndex)
+        }
+    }
+
     Column(
         modifier = modifier
             .background(Color(0xFF1F2227))
@@ -2869,6 +2879,7 @@ fun TabSwitcherScreen(
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
+            state = gridState,
             contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
