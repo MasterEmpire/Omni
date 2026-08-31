@@ -1619,158 +1619,149 @@ class OmniBrowser : PluginEntry() {
                         .graphicsLayer()
                         .background(Color(0xFF16181D))
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (currentUrl != "about:blank") {
+                                    isHomeOverlayOpen = !isHomeOverlayOpen
+                                }
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Home,
+                                contentDescription = "Home",
+                                tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFF9AA0A6)
+                            )
+                        }
+
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(3.5.dp)
-                                .background(profColor)
-                        )
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .weight(1f)
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(profColor.copy(alpha = 0.15f))
+                                .border(1.5.dp, profColor, RoundedCornerShape(20.dp))
                         ) {
-                            IconButton(
-                                onClick = {
-                                    if (currentUrl != "about:blank") {
-                                        isHomeOverlayOpen = !isHomeOverlayOpen
-                                    }
-                                },
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Home,
-                                    contentDescription = "Home",
-                                    tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFF9AA0A6)
-                                )
-                            }
-
-                            Box(
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(22.dp))
-                                    .background(profColor.copy(alpha = 0.15f))
-                                    .border(2.dp, profColor, RoundedCornerShape(22.dp))
+                                    .fillMaxSize()
+                                    .padding(horizontal = 10.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
+                                Box(
                                     modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 12.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(profColor)
-                                    )
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(profColor)
+                                )
 
-                                    Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(6.dp))
 
-                                    Icon(
-                                        imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
-                                        contentDescription = null,
-                                        tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else if (currentUrl.startsWith("http://")) Color(0xFFFDD663) else profColor,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                Icon(
+                                    imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else if (currentUrl.startsWith("http://")) Color(0xFFFDD663) else profColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
 
-                                    Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(6.dp))
 
-                                    BasicTextField(
-                                        value = urlInputText,
-                                        onValueChange = { urlInputText = it },
-                                        singleLine = true,
-                                        maxLines = 1,
-                                        cursorBrush = SolidColor(profColor),
-                                        textStyle = TextStyle(
-                                            color = Color(0xFFE8EAED),
-                                            fontSize = 14.sp,
-                                            lineHeight = 18.sp,
-                                            platformStyle = PlatformTextStyle(
-                                                includeFontPadding = false
-                                            )
-                                        ),
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.Uri,
-                                            imeAction = ImeAction.Go
-                                        ),
-                                        keyboardActions = KeyboardActions(
-                                            onGo = { navigateTo(urlInputText) }
-                                        ),
-                                        decorationBox = { innerTextField ->
-                                            Box(
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentAlignment = Alignment.CenterStart
-                                            ) {
-                                                if (urlInputText.isEmpty()) {
-                                                    Text(
-                                                        text = "Search or type URL",
-                                                        color = Color(0xFF9AA0A6),
-                                                        fontSize = 14.sp,
-                                                        style = TextStyle(
-                                                            platformStyle = PlatformTextStyle(
-                                                                includeFontPadding = false
-                                                            )
+                                BasicTextField(
+                                    value = urlInputText,
+                                    onValueChange = { urlInputText = it },
+                                    singleLine = true,
+                                    maxLines = 1,
+                                    cursorBrush = SolidColor(profColor),
+                                    textStyle = TextStyle(
+                                        color = Color(0xFFE8EAED),
+                                        fontSize = 13.sp,
+                                        lineHeight = 16.sp,
+                                        platformStyle = PlatformTextStyle(
+                                            includeFontPadding = false
+                                        )
+                                    ),
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Uri,
+                                        imeAction = ImeAction.Go
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onGo = { navigateTo(urlInputText) }
+                                    ),
+                                    decorationBox = { innerTextField ->
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            if (urlInputText.isEmpty()) {
+                                                Text(
+                                                    text = "Search or type URL",
+                                                    color = Color(0xFF9AA0A6),
+                                                    fontSize = 13.sp,
+                                                    style = TextStyle(
+                                                        platformStyle = PlatformTextStyle(
+                                                            includeFontPadding = false
                                                         )
                                                     )
-                                                }
-                                                innerTextField()
+                                                )
                                             }
-                                        },
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .wrapContentHeight(Alignment.CenterVertically)
-                                    )
-
-                                    if (urlInputText.isNotEmpty()) {
-                                        IconButton(
-                                            onClick = { urlInputText = "" },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
+                                            innerTextField()
                                         }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .wrapContentHeight(Alignment.CenterVertically)
+                                )
+
+                                if (urlInputText.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { urlInputText = "" },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
                                     }
                                 }
                             }
-
-                            Spacer(Modifier.width(6.dp))
-
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(profColor.copy(alpha = 0.2f))
-                                    .border(2.dp, profColor, RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        val thumb = captureThumbnail()
-                                        val bundle = Bundle()
-                                        webViewInstance?.saveState(bundle)
-                                        tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
-                                        CookieManager.getInstance().flush()
-                                        isTabSwitcherOpen = true
-                                    }
-                            ) {
-                                Text(
-                                    "${tabs.size}",
-                                    color = profColor,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
                         }
 
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(6.dp))
+
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(profColor.copy(alpha = 0.2f))
+                                .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    val thumb = captureThumbnail()
+                                    val bundle = Bundle()
+                                    webViewInstance?.saveState(bundle)
+                                    tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
+                                    CookieManager.getInstance().flush()
+                                    isTabSwitcherOpen = true
+                                }
+                        ) {
+                            Text(
+                                "${tabs.size}",
+                                color = profColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+
+                        Spacer(Modifier.width(2.dp))
 
                         Box {
                             IconButton(
                                 onClick = { showMenu = true },
-                                modifier = Modifier.size(38.dp)
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color(0xFF9AA0A6))
                             }
