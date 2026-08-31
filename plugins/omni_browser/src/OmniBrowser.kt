@@ -249,20 +249,85 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
-        fun syncLocalFileToVault(sourcePath: String, targetSubPath: String = "ide/index.html"): Pair<Boolean, String> {
-            val cleanPath = sourcePath.removePrefix("file://").trim()
-            val srcFile = File(cleanPath)
-            if (!srcFile.exists() || !srcFile.isFile) {
-                return Pair(false, "Source file not found: $cleanPath")
+        fun normalizeLocalFilePath(rawPath: String): String {
+            var path = rawPath.trim()
+            try {
+                path = Uri.decode(path)
+            } catch (_: Exception) {}
+
+            while (path.startsWith("file://")) {
+                path = path.removePrefix("file://")
             }
-            return try {
-                val bytes = srcFile.readBytes()
-                val savedAbsPath = bridge.saveFile(targetSubPath, bytes)
-                val kb = String.format(Locale.US, "%.1f", bytes.size / 1024.0)
-                bridge.log("IDE_SYNC", "Vaulted $cleanPath -> $savedAbsPath ($kb KB)")
-                Pair(true, "file://$savedAbsPath")
+            while (path.startsWith("file:/")) {
+                path = path.removePrefix("file:/")
+            }
+            if (path.startsWith("/sdcard/")) {
+                path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+            } else if (path.startsWith("sdcard/")) {
+                path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+            }
+            if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+                path = "/$path"
+            }
+            return path.trim()
+        }
+
+        fun isLocalFilePath(input: String): Boolean {
+            val clean = input.trim().lowercase()
+            return clean.startsWith("/") ||
+                   clean.startsWith("file:") ||
+                   clean.startsWith("content:") ||
+                   clean.startsWith("sdcard/") ||
+                   clean.startsWith("storage/") ||
+                   clean.endsWith(".html") ||
+                   clean.endsWith(".htm")
+        }
+
+        fun syncLocalFileToVault(sourcePath: String, targetSubPath: String = "ide/index.html"): Pair<Boolean, String> {
+            val cleanInput = sourcePath.trim()
+            bridge.log("IDE_SYNC", "Attempting sync for source: $cleanInput")
+
+            try {
+                var bytes: ByteArray? = null
+                if (cleanInput.startsWith("content://")) {
+                    val uri = Uri.parse(cleanInput)
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        bytes = input.readBytes()
+                    }
+                } else {
+                    val cleanPath = normalizeLocalFilePath(cleanInput)
+                    val srcFile = File(cleanPath)
+                    if (srcFile.exists() && srcFile.isFile) {
+                        bytes = srcFile.readBytes()
+                    } else {
+                        try {
+                            val uri = Uri.parse(if (cleanInput.startsWith("file://")) cleanInput else "file://$cleanPath")
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                bytes = input.readBytes()
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    if (bytes == null && !srcFile.exists()) {
+                        val errMsg = "File not found at: $cleanPath"
+                        bridge.log("IDE_SYNC_ERR", errMsg)
+                        return Pair(false, errMsg)
+                    }
+                }
+
+                if (bytes != null && bytes!!.isNotEmpty()) {
+                    val savedAbsPath = bridge.saveFile(targetSubPath, bytes!!)
+                    val kb = String.format(Locale.US, "%.1f", bytes!!.size / 1024.0)
+                    bridge.log("IDE_SYNC", "✅ Vaulted $cleanInput -> $savedAbsPath ($kb KB)")
+                    return Pair(true, "file://$savedAbsPath")
+                } else {
+                    val errMsg = "File is empty or unreadable"
+                    bridge.log("IDE_SYNC_ERR", "$errMsg: $cleanInput")
+                    return Pair(false, errMsg)
+                }
             } catch (e: Exception) {
-                Pair(false, "Sync failed: ${e.message}")
+                val errMsg = "Sync error: ${e.message}"
+                bridge.log("IDE_SYNC_ERR", "$errMsg on $cleanInput")
+                return Pair(false, errMsg)
             }
         }
 
@@ -1772,12 +1837,15 @@ class OmniBrowser : PluginEntry() {
                                     onClick = {
                                         showMenu = false
                                         val ideFile = File(bridge.getPluginDir(), "ide/index.html")
-                                        val targetIdeUrl = if (ideFile.exists()) {
+                                        val localIdeShortcut = shortcuts.find { it.title.contains("IDE", ignoreCase = true) || it.url.contains("ide/index.html") }
+                                        val configuredSourcePath = localIdeShortcut?.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
+
+                                        val targetIdeUrl = if (ideFile.exists() && ideFile.length() > 0) {
                                             "file://${ideFile.absolutePath}"
                                         } else {
-                                            val (success, resultPath) = syncLocalFileToVault("/storage/emulated/0/Download/F/index.html")
+                                            val (success, resultPath) = syncLocalFileToVault(configuredSourcePath)
                                             if (success) {
-                                                bridge.showToast("✅ Synced Local IDE from Download/F/index.html")
+                                                bridge.showToast("✅ Synced Local IDE from disk!")
                                                 resultPath
                                             } else {
                                                 ideInternalPath
@@ -2206,7 +2274,7 @@ class OmniBrowser : PluginEntry() {
             if (editingShortcut != null) {
                 val targetItem = editingShortcut!!
                 var editName by remember(targetItem) { mutableStateOf(targetItem.title) }
-                var editUrl by remember(targetItem) { mutableStateOf(targetItem.url) }
+                var editUrl by remember(targetItem) { mutableStateOf(targetItem.localSourcePath ?: targetItem.url) }
                 val previewDomain = remember(editUrl) { extractDomain(editUrl) }
 
                 LaunchedEffect(previewDomain) {
@@ -2255,8 +2323,26 @@ class OmniBrowser : PluginEntry() {
                             OutlinedTextField(
                                 value = editUrl,
                                 onValueChange = { editUrl = it },
-                                label = { Text("URL") },
+                                label = { Text("URL or Local File Path") },
                                 singleLine = true,
+                                trailingIcon = {
+                                    IconButton(onClick = {
+                                        bridge.pickFiles("*/*", false) { uris ->
+                                            val picked = uris.firstOrNull()
+                                            if (picked != null) {
+                                                val pathStr = picked.path
+                                                val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
+                                                    pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
+                                                } else {
+                                                    picked.toString()
+                                                }
+                                                editUrl = directPath
+                                            }
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Add, contentDescription = "Browse File", tint = Color(0xFF8AB4F8))
+                                    }
+                                },
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color(0xFFE8EAED),
                                     unfocusedTextColor = Color(0xFFE8EAED),
@@ -2284,35 +2370,28 @@ class OmniBrowser : PluginEntry() {
                             Button(
                                 onClick = {
                                     val trimmedUrl = editUrl.trim()
-                                    val isLocalPath = trimmedUrl.startsWith("/storage/") || trimmedUrl.startsWith("file:///storage/") || trimmedUrl.startsWith("/")
-                                    val sourcePath = if (isLocalPath) trimmedUrl.removePrefix("file://") else targetItem.localSourcePath
-                                    
-                                    val finalUrl = if (isLocalPath) {
-                                        val (success, vaultedPath) = syncLocalFileToVault(sourcePath ?: trimmedUrl)
+                                    val isLocal = isLocalFilePath(trimmedUrl)
+
+                                    val (finalUrl, srcPath) = if (isLocal) {
+                                        val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl)
                                         if (success) {
-                                            bridge.showToast("✅ Synced IDE to vault from disk!")
-                                            vaultedPath
+                                            bridge.showToast("✅ Synced local file to vault!")
+                                            Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
                                         } else {
-                                            bridge.showToast("⚠️ $vaultedPath")
-                                            if (!trimmedUrl.startsWith("file://") && !trimmedUrl.startsWith("http")) "file://$trimmedUrl" else trimmedUrl
-                                        }
-                                    } else if (targetItem.localSourcePath != null && trimmedUrl.startsWith("file://")) {
-                                        val (success, vaultedPath) = syncLocalFileToVault(targetItem.localSourcePath)
-                                        if (success) {
-                                            bridge.showToast("✅ Re-synced IDE from disk!")
-                                            vaultedPath
-                                        } else {
-                                            trimmedUrl
+                                            bridge.showToast("⚠️ $vaultedPath (See Diagnostics)")
+                                            val cleanNorm = normalizeLocalFilePath(trimmedUrl)
+                                            Pair("file://$cleanNorm", cleanNorm)
                                         }
                                     } else {
-                                        if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://") && !trimmedUrl.startsWith("file://")) "https://$trimmedUrl" else trimmedUrl
+                                        val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
+                                        Pair(webUrl, null)
                                     }
 
                                     val updated = shortcuts.map {
                                         if (it.id == targetItem.id) it.copy(
                                             title = editName.trim().ifEmpty { targetItem.title },
                                             url = finalUrl,
-                                            localSourcePath = sourcePath
+                                            localSourcePath = srcPath
                                         ) else it
                                     }
                                     shortcuts = updated
@@ -2370,7 +2449,7 @@ class OmniBrowser : PluginEntry() {
                             OutlinedTextField(
                                 value = newName,
                                 onValueChange = { newName = it },
-                                label = { Text("Name (e.g. GitHub)") },
+                                label = { Text("Name (e.g. GitHub or Local IDE)") },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color(0xFFE8EAED),
@@ -2384,8 +2463,29 @@ class OmniBrowser : PluginEntry() {
                             OutlinedTextField(
                                 value = newUrl,
                                 onValueChange = { newUrl = it },
-                                label = { Text("URL") },
+                                label = { Text("URL or File Path") },
                                 singleLine = true,
+                                trailingIcon = {
+                                    IconButton(onClick = {
+                                        bridge.pickFiles("*/*", false) { uris ->
+                                            val picked = uris.firstOrNull()
+                                            if (picked != null) {
+                                                val pathStr = picked.path
+                                                val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
+                                                    pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
+                                                } else {
+                                                    picked.toString()
+                                                }
+                                                newUrl = directPath
+                                                if (newName.isEmpty()) {
+                                                    newName = directPath.substringAfterLast("/").substringBeforeLast(".")
+                                                }
+                                            }
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Add, contentDescription = "Browse File", tint = Color(0xFF8AB4F8))
+                                    }
+                                },
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color(0xFFE8EAED),
                                     unfocusedTextColor = Color(0xFFE8EAED),
@@ -2400,25 +2500,26 @@ class OmniBrowser : PluginEntry() {
                         Button(
                             onClick = {
                                 val trimmedUrl = newUrl.trim()
-                                val isLocalPath = trimmedUrl.startsWith("/storage/") || trimmedUrl.startsWith("file:///storage/") || trimmedUrl.startsWith("/")
-                                val (finalUrl, srcPath) = if (isLocalPath) {
-                                    val cleanSrc = trimmedUrl.removePrefix("file://").trim()
-                                    val (success, vaultedPath) = syncLocalFileToVault(cleanSrc)
+                                val isLocal = isLocalFilePath(trimmedUrl)
+                                val (finalUrl, srcPath) = if (isLocal) {
+                                    val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl)
                                     if (success) {
                                         bridge.showToast("✅ Vaulted local HTML to offline sandbox")
-                                        Pair(vaultedPath, cleanSrc)
+                                        Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
                                     } else {
-                                        bridge.showToast("⚠️ $vaultedPath")
-                                        Pair(if (trimmedUrl.startsWith("file://")) trimmedUrl else "file://$trimmedUrl", cleanSrc)
+                                        bridge.showToast("⚠️ $vaultedPath (See Diagnostics)")
+                                        val cleanNorm = normalizeLocalFilePath(trimmedUrl)
+                                        Pair("file://$cleanNorm", cleanNorm)
                                     }
                                 } else {
-                                    Pair(if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://") && !trimmedUrl.startsWith("file://")) "https://$trimmedUrl" else trimmedUrl, null)
+                                    val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
+                                    Pair(webUrl, null)
                                 }
-                                val title = newName.trim().ifEmpty { if (isLocalPath) "Local App" else extractDomain(finalUrl) }
+                                val title = newName.trim().ifEmpty { if (isLocal) "Local App" else extractDomain(finalUrl) }
                                 val newItem = ShortcutItem(
                                     title = title,
                                     url = finalUrl,
-                                    iconText = if (isLocalPath) "💻" else title.take(1).uppercase(),
+                                    iconText = if (isLocal) "💻" else title.take(1).uppercase(),
                                     colorValue = 0xFF58A6FF,
                                     localSourcePath = srcPath
                                 )
