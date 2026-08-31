@@ -369,6 +369,13 @@ class OmniBrowser : PluginEntry() {
                 mirrorFile("config/shortcuts.json", "shortcuts.json")
                 mirrorFile("config/session.json", "session.json")
                 mirrorFile("config/solver.json", "solver.json")
+
+                // Mirror all isolated local IDE vaults
+                val ideDir = File(bridge.getPluginDir(), "ide")
+                if (ideDir.exists() && ideDir.isDirectory) {
+                    val destIdeDir = File(vaultDir, "ide").apply { mkdirs() }
+                    ideDir.copyRecursively(destIdeDir, overwrite = true)
+                }
             } catch (_: Exception) {}
         }
 
@@ -451,7 +458,17 @@ class OmniBrowser : PluginEntry() {
                     addFileToZip("config/shortcuts.json", "shortcuts.json")
                     addFileToZip("config/session.json", "session.json")
                     addFileToZip("config/solver.json", "solver.json")
-                    addFileToZip("ide/index.html", "ide_index.html")
+
+                    // Recursively archive all multi-tenant local IDE vaults
+                    val ideDir = File(bridge.getPluginDir(), "ide")
+                    if (ideDir.exists() && ideDir.isDirectory) {
+                        ideDir.walkTopDown().filter { it.isFile }.forEach { f ->
+                            val relPath = "ide/" + f.relativeTo(ideDir).path.replace("\\", "/")
+                            zos.putNextEntry(java.util.zip.ZipEntry(relPath))
+                            f.inputStream().use { it.copyTo(zos) }
+                            zos.closeEntry()
+                        }
+                    }
                 }
 
                 val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
@@ -495,75 +512,79 @@ class OmniBrowser : PluginEntry() {
                     var entry = zis.nextEntry
                     while (entry != null) {
                         val bytes = zis.readBytes()
-                        when (entry.name) {
-                            "profiles.json" -> {
-                                bridge.saveFile("config/profiles.json", bytes)
-                                val arr = org.json.JSONArray(String(bytes, Charsets.UTF_8))
-                                val loaded = mutableListOf<BrowserProfile>()
-                                for (i in 0 until arr.length()) {
-                                    val obj = arr.getJSONObject(i)
-                                    loaded.add(BrowserProfile(obj.getString("id"), obj.getString("name"), obj.getLong("colorValue")))
-                                }
-                                if (loaded.isNotEmpty()) {
-                                    profiles = loaded
-                                    profCount = loaded.size
-                                }
-                            }
-                            "shortcuts.json" -> {
-                                bridge.saveFile("config/shortcuts.json", bytes)
-                                val arr = org.json.JSONArray(String(bytes, Charsets.UTF_8))
-                                val loaded = mutableListOf<ShortcutItem>()
-                                for (i in 0 until arr.length()) {
-                                    val obj = arr.getJSONObject(i)
-                                    loaded.add(
-                                        ShortcutItem(
-                                            id = obj.optString("id", java.util.UUID.randomUUID().toString()),
-                                            title = obj.getString("title"),
-                                            url = obj.getString("url"),
-                                            iconText = obj.optString("iconText", ""),
-                                            colorValue = obj.optLong("colorValue", 0xFF4285F4),
-                                            localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() }
-                                        )
-                                    )
-                                }
-                                if (loaded.isNotEmpty()) shortcuts = loaded
-                            }
-                            "session.json" -> {
-                                bridge.saveFile("config/session.json", bytes)
-                                val sObj = org.json.JSONObject(String(bytes, Charsets.UTF_8))
-                                val savedActiveId = sObj.optString("activeTabId", "")
-                                val arr = sObj.optJSONArray("tabs")
-                                if (arr != null && arr.length() > 0) {
-                                    val loadedTabs = mutableListOf<BrowserTab>()
+                        if (entry.name.startsWith("ide/")) {
+                            bridge.saveFile(entry.name, bytes)
+                        } else {
+                            when (entry.name) {
+                                "profiles.json" -> {
+                                    bridge.saveFile("config/profiles.json", bytes)
+                                    val arr = org.json.JSONArray(String(bytes, Charsets.UTF_8))
+                                    val loaded = mutableListOf<BrowserProfile>()
                                     for (i in 0 until arr.length()) {
-                                        val tObj = arr.getJSONObject(i)
-                                        loadedTabs.add(
-                                            BrowserTab(
-                                                id = tObj.getString("id"),
-                                                title = tObj.optString("title", "New Tab"),
-                                                url = tObj.optString("url", "about:blank"),
-                                                lastAccessedTime = tObj.optLong("lastAccessedTime", System.currentTimeMillis()),
-                                                profileId = tObj.optString("profileId", "default")
+                                        val obj = arr.getJSONObject(i)
+                                        loaded.add(BrowserProfile(obj.getString("id"), obj.getString("name"), obj.getLong("colorValue")))
+                                    }
+                                    if (loaded.isNotEmpty()) {
+                                        profiles = loaded
+                                        profCount = loaded.size
+                                    }
+                                }
+                                "shortcuts.json" -> {
+                                    bridge.saveFile("config/shortcuts.json", bytes)
+                                    val arr = org.json.JSONArray(String(bytes, Charsets.UTF_8))
+                                    val loaded = mutableListOf<ShortcutItem>()
+                                    for (i in 0 until arr.length()) {
+                                        val obj = arr.getJSONObject(i)
+                                        loaded.add(
+                                            ShortcutItem(
+                                                id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                                                title = obj.getString("title"),
+                                                url = obj.getString("url"),
+                                                iconText = obj.optString("iconText", ""),
+                                                colorValue = obj.optLong("colorValue", 0xFF4285F4),
+                                                localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() }
                                             )
                                         )
                                     }
-                                    if (loadedTabs.isNotEmpty()) {
-                                        tabs = loadedTabs
-                                        tabCount = loadedTabs.size
-                                        val targetId = if (savedActiveId.isNotEmpty() && loadedTabs.any { it.id == savedActiveId }) savedActiveId else loadedTabs.first().id
-                                        activeTabId = targetId
-                                        attachTabWebViewHandler?.invoke(targetId)
+                                    if (loaded.isNotEmpty()) shortcuts = loaded
+                                }
+                                "session.json" -> {
+                                    bridge.saveFile("config/session.json", bytes)
+                                    val sObj = org.json.JSONObject(String(bytes, Charsets.UTF_8))
+                                    val savedActiveId = sObj.optString("activeTabId", "")
+                                    val arr = sObj.optJSONArray("tabs")
+                                    if (arr != null && arr.length() > 0) {
+                                        val loadedTabs = mutableListOf<BrowserTab>()
+                                        for (i in 0 until arr.length()) {
+                                            val tObj = arr.getJSONObject(i)
+                                            loadedTabs.add(
+                                                BrowserTab(
+                                                    id = tObj.getString("id"),
+                                                    title = tObj.optString("title", "New Tab"),
+                                                    url = tObj.optString("url", "about:blank"),
+                                                    lastAccessedTime = tObj.optLong("lastAccessedTime", System.currentTimeMillis()),
+                                                    profileId = tObj.optString("profileId", "default")
+                                                )
+                                            )
+                                        }
+                                        if (loadedTabs.isNotEmpty()) {
+                                            tabs = loadedTabs
+                                            tabCount = loadedTabs.size
+                                            val targetId = if (savedActiveId.isNotEmpty() && loadedTabs.any { it.id == savedActiveId }) savedActiveId else loadedTabs.first().id
+                                            activeTabId = targetId
+                                            attachTabWebViewHandler?.invoke(targetId)
+                                        }
                                     }
                                 }
-                            }
-                            "solver.json" -> {
-                                bridge.saveFile("config/solver.json", bytes)
-                                val json = org.json.JSONObject(String(bytes, Charsets.UTF_8))
-                                solverApiKey = json.optString("apiKey", "")
-                                autoSolveEnabled = json.optBoolean("autoSolve", true)
-                            }
-                            "ide_index.html" -> {
-                                bridge.saveFile("ide/index.html", bytes)
+                                "solver.json" -> {
+                                    bridge.saveFile("config/solver.json", bytes)
+                                    val json = org.json.JSONObject(String(bytes, Charsets.UTF_8))
+                                    solverApiKey = json.optString("apiKey", "")
+                                    autoSolveEnabled = json.optBoolean("autoSolve", true)
+                                }
+                                "ide_index.html" -> {
+                                    bridge.saveFile("ide/index.html", bytes)
+                                }
                             }
                         }
                         entry = zis.nextEntry
@@ -571,7 +592,7 @@ class OmniBrowser : PluginEntry() {
                 }
                 tempFile.delete()
                 autoMirrorVaultToDocuments()
-                bridge.showToast("✅ Restored $profCount profiles & $tabCount tabs!")
+                bridge.showToast("✅ Restored $profCount profiles, $tabCount tabs & isolated IDEs!")
             } catch (e: Exception) {
                 bridge.showToast("Restore failed: ${e.message}")
                 bridge.log("RESTORE_ERR", "Restore error: ${e.message}")
@@ -783,6 +804,17 @@ class OmniBrowser : PluginEntry() {
                     restoreIfMissing("config/shortcuts.json", "shortcuts.json")
                     restoreIfMissing("config/session.json", "session.json")
                     restoreIfMissing("config/solver.json", "solver.json")
+
+                    // Resurrect multi-tenant IDE vaults from Documents
+                    val vaultIdeDir = File(vaultDir, "ide")
+                    if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
+                        vaultIdeDir.walkTopDown().filter { it.isFile }.forEach { f ->
+                            val relPath = "ide/" + f.relativeTo(vaultIdeDir).path.replace("\\", "/")
+                            if (bridge.readFile(relPath) == null) {
+                                bridge.saveFile(relPath, f.readBytes())
+                            }
+                        }
+                    }
                 }
             } catch (_: Exception) {}
 
@@ -2270,6 +2302,9 @@ class OmniBrowser : PluginEntry() {
                                     val updated = shortcuts.filter { it.id != targetItem.id }
                                     shortcuts = updated
                                     saveShortcutsToDisk(updated)
+                                    try {
+                                        File(bridge.getPluginDir(), "ide/vault_${targetItem.id}").deleteRecursively()
+                                    } catch (_: Exception) {}
                                     editingShortcut = null
                                     bridge.showToast("Shortcut deleted")
                                 }
@@ -2283,9 +2318,10 @@ class OmniBrowser : PluginEntry() {
                                     val isLocal = isLocalFilePath(trimmedUrl)
 
                                     val (finalUrl, srcPath) = if (isLocal) {
-                                        val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl)
+                                        val isolatedSubPath = "ide/vault_${targetItem.id}/index.html"
+                                        val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl, isolatedSubPath)
                                         if (success) {
-                                            bridge.showToast("✅ Synced local file to vault!")
+                                            bridge.showToast("✅ Synced to private vault slot!")
                                             Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
                                         } else {
                                             bridge.showToast("⚠️ $vaultedPath (See Diagnostics)")
@@ -2411,10 +2447,12 @@ class OmniBrowser : PluginEntry() {
                             onClick = {
                                 val trimmedUrl = newUrl.trim()
                                 val isLocal = isLocalFilePath(trimmedUrl)
+                                val newShortcutId = "sc_${System.currentTimeMillis()}"
                                 val (finalUrl, srcPath) = if (isLocal) {
-                                    val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl)
+                                    val isolatedSubPath = "ide/vault_$newShortcutId/index.html"
+                                    val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl, isolatedSubPath)
                                     if (success) {
-                                        bridge.showToast("✅ Vaulted local HTML to offline sandbox")
+                                        bridge.showToast("✅ Isolated vault created for local app")
                                         Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
                                     } else {
                                         bridge.showToast("⚠️ $vaultedPath (See Diagnostics)")
@@ -2427,6 +2465,7 @@ class OmniBrowser : PluginEntry() {
                                 }
                                 val title = newName.trim().ifEmpty { if (isLocal) "Local App" else extractDomain(finalUrl) }
                                 val newItem = ShortcutItem(
+                                    id = newShortcutId,
                                     title = title,
                                     url = finalUrl,
                                     iconText = if (isLocal) "💻" else title.take(1).uppercase(),
@@ -2623,22 +2662,34 @@ class OmniBrowser : PluginEntry() {
                             }
 
                             InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) {
-                                val ideFile = File(bridge.getPluginDir(), "ide/index.html")
-                                val localIdeShortcut = shortcuts.find { it.title.contains("IDE", ignoreCase = true) || it.url.contains("ide/index.html") }
-                                val configuredSourcePath = localIdeShortcut?.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
-
-                                val targetIdeUrl = if (ideFile.exists() && ideFile.length() > 0) {
-                                    "file://${ideFile.absolutePath}"
-                                } else {
-                                    val (success, resultPath) = syncLocalFileToVault(configuredSourcePath)
-                                    if (success) {
-                                        bridge.showToast("✅ Synced Local IDE from disk!")
-                                        resultPath
+                                val localIdeShortcuts = shortcuts.filter { it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true) }
+                                val target = localIdeShortcuts.firstOrNull()
+                                if (target != null) {
+                                    val src = target.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
+                                    val isolatedPath = "ide/vault_${target.id}/index.html"
+                                    val vFile = File(bridge.getPluginDir(), isolatedPath)
+                                    val targetUrl = if (vFile.exists() && vFile.length() > 0) {
+                                        "file://${vFile.absolutePath}"
                                     } else {
-                                        ideInternalPath
+                                        val (success, resPath) = syncLocalFileToVault(src, isolatedPath)
+                                        if (success) {
+                                            bridge.showToast("✅ Synced ${target.title} from disk!")
+                                            resPath
+                                        } else {
+                                            target.url
+                                        }
                                     }
+                                    navigateTo(targetUrl)
+                                } else {
+                                    val defaultFile = File(bridge.getPluginDir(), "ide/index.html")
+                                    val targetUrl = if (defaultFile.exists() && defaultFile.length() > 0) {
+                                        "file://${defaultFile.absolutePath}"
+                                    } else {
+                                        val (success, resPath) = syncLocalFileToVault("/storage/emulated/0/Download/F/index.html", "ide/index.html")
+                                        if (success) resPath else ideInternalPath
+                                    }
+                                    navigateTo(targetUrl)
                                 }
-                                navigateTo(targetIdeUrl)
                             }
 
                             InLayoutMenuItem("+ New Tab", color = Color(0xFF8AB4F8), isBold = true) {
