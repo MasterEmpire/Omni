@@ -614,7 +614,8 @@ class OmniBrowser : PluginEntry() {
                     mimeType.contains("html") -> "html"
                     else -> "bin"
                 }
-                val filename = if (rawFilename.isNotEmpty() && rawFilename != "null" && rawFilename != "blob") rawFilename else "download_${System.currentTimeMillis()}.$ext"
+                val sanitized = rawFilename.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                val filename = if (sanitized.isNotEmpty() && sanitized != "null" && sanitized != "blob") sanitized else "download_${System.currentTimeMillis()}.$ext"
 
                 var saved = false
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -629,6 +630,8 @@ class OmniBrowser : PluginEntry() {
                             os.write(bytes)
                         }
                         saved = true
+                    } else {
+                        throw Exception("MediaStore rejected file insertion (possibly invalid MIME type or filename).")
                     }
                 } else {
                     val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -643,7 +646,7 @@ class OmniBrowser : PluginEntry() {
                     bridge.log("DOWNLOAD", "Saved Blob download: $filename (${bytes.size} bytes)")
                 }
             } catch (e: Exception) {
-                bridge.showToast("Blob download failed: ${e.message}")
+                bridge.showToast("Blob save failed: ${e.message}")
                 bridge.log("DOWNLOAD_ERR", "Blob decode error: ${e.message}")
             }
         }
@@ -728,30 +731,45 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
-        fun triggerFileDownload(url: String, userAgent: String, contentDisposition: String, mimeType: String) {
+        fun triggerFileDownload(view: WebView?, url: String, userAgent: String, contentDisposition: String, mimeType: String) {
             if (url.startsWith("blob:") || url.startsWith("data:")) {
                 val suggestedName = URLUtil.guessFileName(url, contentDisposition, mimeType)
                 if (url.startsWith("data:")) {
                     saveBase64ToDownloads(url, mimeType, suggestedName)
                 } else {
+                    val safeName = suggestedName.replace("'", "").replace("\"", "")
+                    val safeMime = mimeType.replace("'", "").replace("\"", "")
                     val blobScript = """
                         (function() {
-                            var xhr = new XMLHttpRequest();
-                            xhr.open('GET', '$url', true);
-                            xhr.responseType = 'blob';
-                            xhr.onload = function() {
-                                if (this.status === 200 || this.status === 0) {
-                                    var reader = new FileReader();
-                                    reader.readAsDataURL(this.response);
-                                    reader.onloadend = function() {
-                                        window.OmniBlobDownloader.processBlob(reader.result, '$mimeType', '$suggestedName');
-                                    };
-                                }
-                            };
-                            xhr.send();
+                            try {
+                                var xhr = new XMLHttpRequest();
+                                xhr.open('GET', '$url', true);
+                                xhr.responseType = 'blob';
+                                xhr.onload = function() {
+                                    if (this.status === 200 || this.status === 0) {
+                                        var reader = new FileReader();
+                                        reader.onloadend = function() {
+                                            window.OmniBlobDownloader.processBlob(reader.result, '$safeMime', '$safeName');
+                                        };
+                                        reader.onerror = function() {
+                                            window.OmniBlobDownloader.processBlob('ERROR', '', 'FileReader failed to read Blob');
+                                        };
+                                        reader.readAsDataURL(this.response);
+                                    } else {
+                                        window.OmniBlobDownloader.processBlob('ERROR', '', 'XHR Status: ' + this.status);
+                                    }
+                                };
+                                xhr.onerror = function() {
+                                    window.OmniBlobDownloader.processBlob('ERROR', '', 'Blob URL revoked or network error');
+                                };
+                                xhr.send();
+                            } catch (e) {
+                                window.OmniBlobDownloader.processBlob('ERROR', '', 'JS Exception: ' + e.toString());
+                            }
                         })();
                     """.trimIndent()
-                    webViewInstance?.evaluateJavascript(blobScript, null)
+                    val targetView = view ?: webViewInstance
+                    targetView?.evaluateJavascript(blobScript, null)
                     bridge.showToast("Extracting Blob download...")
                 }
                 return
@@ -1127,14 +1145,19 @@ class OmniBrowser : PluginEntry() {
                 }
 
                 setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-                    triggerFileDownload(url, userAgent, contentDisposition, mimeType)
+                    triggerFileDownload(webView, url, userAgent, contentDisposition, mimeType)
                 }
 
                 addJavascriptInterface(object {
                     @JavascriptInterface
                     fun processBlob(base64Data: String, mimeType: String, filename: String) {
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            saveBase64ToDownloads(base64Data, mimeType, filename)
+                            if (base64Data == "ERROR") {
+                                bridge.showToast("Blob extract failed: $filename")
+                                bridge.log("DOWNLOAD_ERR", "Blob extraction error: $filename")
+                            } else {
+                                saveBase64ToDownloads(base64Data, mimeType, filename)
+                            }
                         }
                     }
                 }, "OmniBlobDownloader")
@@ -1225,7 +1248,7 @@ class OmniBrowser : PluginEntry() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         val url = request?.url?.toString() ?: return false
                         if (url.startsWith("blob:") || url.startsWith("data:")) {
-                            triggerFileDownload(url, view?.settings?.userAgentString ?: "", "", "")
+                            triggerFileDownload(view, url, view?.settings?.userAgentString ?: "", "", "")
                             return true
                         }
                         return handleExternalUri(url, view)
