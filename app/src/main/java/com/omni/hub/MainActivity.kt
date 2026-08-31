@@ -303,10 +303,15 @@ fun DashboardScreen(context: Context) {
                                                     downloadingIds = downloadingIds + module.id
                                                     scope.launch {
                                                         try {
+                                                            // Kill running/suspended memory sessions before overwriting
+                                                            PluginTaskEngine.stopTask(context, module.id)
+                                                            OmniTaskManager.activeSessions.find { it.pluginId == module.id }?.let { session ->
+                                                                OmniTaskManager.killTask(context, session.taskId)
+                                                            }
                                                             PluginManager.installPluginFromUrl(context, module.downloadUrl, module.name, module.entryClass)
                                                             plugins = PluginManager.getInstalledPlugins(context)
                                                             refreshRunningStates()
-                                                            Toast.makeText(context, "${module.name} Installed!", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, if (isInstalled) "${module.name} Updated!" else "${module.name} Installed!", Toast.LENGTH_SHORT).show()
                                                         } catch (e: Exception) {
                                                             Toast.makeText(context, "Install failed: ${e.message}", Toast.LENGTH_SHORT).show()
                                                         } finally {
