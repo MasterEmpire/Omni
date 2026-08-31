@@ -2800,26 +2800,41 @@ class OmniBrowser : PluginEntry() {
                             });
                             await delay(200);
 
-                            // 4. Inject Prompt with Angular FormControl sequence
+                            // 4. Inject Prompt using native insertion & Spacebar transition
                             updateStatus('Injecting prompt into Angular engine...');
                             promptArea.focus();
+                            promptArea.select();
+
+                            let insertedNatively = false;
                             try {
-                                const nativeProtoSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                                nativeProtoSetter.call(promptArea, PROMPT);
-                            } catch(e) {
-                                promptArea.value = PROMPT;
+                                insertedNatively = document.execCommand('insertText', false, PROMPT);
+                            } catch(_) {}
+
+                            if (!insertedNatively || promptArea.value !== PROMPT) {
+                                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                                nativeSetter.call(promptArea, PROMPT);
+                                promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: PROMPT }));
+                                promptArea.dispatchEvent(new Event('change', { bubbles: true }));
                             }
 
-                            promptArea.dispatchEvent(new Event('focus', { bubbles: true }));
-                            promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: PROMPT }));
+                            // CRITICAL FIX: Simulate real keyboard spacebar + backspace to transition Angular's DraftManager
+                            // This eliminates the notorious Google AI Studio "No ID or name found in config / Permission Denied" bug!
+                            promptArea.focus();
+                            promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
+                            promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: ' ' }));
+                            promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
+                            await delay(200);
+
+                            promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
+                            promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
+                            promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
                             promptArea.dispatchEvent(new Event('change', { bubbles: true }));
-                            promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
-                            promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
-                            promptArea.dispatchEvent(new Event('blur', { bubbles: true }));
-                            await delay(500);
+
+                            // Give Angular 600ms to register the Draft Session config
+                            await delay(600);
                             promptArea.focus();
 
-                            // 5. Submit Execution (Multi-vector trigger)
+                            // 5. Submit Execution
                             updateStatus('Submitting prompt to Gemini...');
                             const runBtn = document.querySelector(
                                 'ms-run-button button, ' +
@@ -2832,8 +2847,6 @@ class OmniBrowser : PluginEntry() {
 
                             if (runBtn) {
                                 hostLog('RUN', 'Located run button: disabled=' + runBtn.disabled + ', aria-disabled=' + runBtn.getAttribute('aria-disabled'));
-                            } else {
-                                hostLog('RUN_WARN', 'Run button not found via querySelector. Will rely on synthetic Ctrl+Enter.');
                             }
 
                             // Dispatch synthetic Ctrl+Enter on prompt textarea
