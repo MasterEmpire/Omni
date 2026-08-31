@@ -121,6 +121,21 @@ data class BrowserTab(
     val profileId: String = "default"
 )
 
+class OmniBlobBridge(
+    private val onBlobReceived: (base64Data: String, mimeType: String, filename: String) -> Unit,
+    private val onLog: (tag: String, message: String) -> Unit
+) {
+    @JavascriptInterface
+    fun processBlob(base64Data: String, mimeType: String, filename: String) {
+        onBlobReceived(base64Data, mimeType, filename)
+    }
+
+    @JavascriptInterface
+    fun log(tag: String, message: String) {
+        onLog(tag, message)
+    }
+}
+
 class OmniBrowser : PluginEntry() {
 
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
@@ -265,39 +280,64 @@ class OmniBrowser : PluginEntry() {
                 if (window.__omniBlobHooked) return;
                 window.__omniBlobHooked = true;
 
-                const blobMap = new Map();
+                window.__omniBlobMap = window.__omniBlobMap || new Map();
+
                 const origCreate = URL.createObjectURL;
                 if (origCreate) {
                     URL.createObjectURL = function(obj) {
                         const url = origCreate.apply(this, arguments);
                         if (obj instanceof Blob) {
-                            blobMap.set(url, obj);
-                            if (blobMap.size > 100) {
-                                const first = blobMap.keys().next().value;
-                                blobMap.delete(first);
+                            window.__omniBlobMap.set(url, obj);
+                            if (window.__omniBlobMap.size > 200) {
+                                const firstKey = window.__omniBlobMap.keys().next().value;
+                                window.__omniBlobMap.delete(firstKey);
                             }
                         }
                         return url;
                     };
                 }
 
+                const origRevoke = URL.revokeObjectURL;
+                if (origRevoke) {
+                    URL.revokeObjectURL = function(url) {
+                        setTimeout(function() {
+                            try { origRevoke.call(URL, url); } catch(e) {}
+                            if (window.__omniBlobMap) {
+                                window.__omniBlobMap.delete(url);
+                            }
+                        }, 15000);
+                    };
+                }
+
+                function extractAndShipBlob(blobObj, mimeType, filename) {
+                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                        window.OmniBlobDownloader.log('BLOB_CLICK', 'Intercepted anchor click for: ' + filename + ' (size: ' + blobObj.size + 'b)');
+                    }
+                    const reader = new FileReader();
+                    reader.onloadend = function() {
+                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                            window.OmniBlobDownloader.processBlob(reader.result, mimeType || blobObj.type || 'application/octet-stream', filename || 'download');
+                        }
+                    };
+                    reader.onerror = function() {
+                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                            window.OmniBlobDownloader.processBlob('ERROR', '', 'FileReader failed to read in-memory Blob');
+                        }
+                    };
+                    reader.readAsDataURL(blobObj);
+                }
+
                 document.addEventListener('click', function(e) {
-                    const anchor = e.target && (e.target.tagName === 'A' ? e.target : e.target.closest ? e.target.closest('a') : null);
+                    const anchor = e.target && (e.target.tagName === 'A' ? e.target : (e.target.closest ? e.target.closest('a') : null));
                     if (!anchor) return;
 
                     const href = anchor.href || '';
                     const downloadName = anchor.getAttribute('download') || anchor.download || '';
 
                     if (href.startsWith('blob:') || anchor.hasAttribute('download')) {
-                        if (href.startsWith('blob:') && blobMap.has(href)) {
-                            const blob = blobMap.get(href);
-                            const reader = new FileReader();
-                            reader.onloadend = function() {
-                                if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
-                                    window.OmniBlobDownloader.processBlob(reader.result, blob.type || 'application/octet-stream', downloadName || 'download');
-                                }
-                            };
-                            reader.readAsDataURL(blob);
+                        if (href.startsWith('blob:') && window.__omniBlobMap && window.__omniBlobMap.has(href)) {
+                            const blob = window.__omniBlobMap.get(href);
+                            extractAndShipBlob(blob, blob.type, downloadName || 'download');
                             e.preventDefault();
                             e.stopPropagation();
                         } else if (href.startsWith('data:')) {
@@ -656,9 +696,12 @@ class OmniBrowser : PluginEntry() {
         restoreTrigger = { uri -> restoreFromBackup(uri) }
 
         fun saveBase64ToDownloads(base64Data: String, mimeType: String, rawFilename: String) {
+            bridge.log("DOWNLOAD", "Processing Base64 payload (mime: '$mimeType', rawFilename: '$rawFilename', len: ${base64Data.length})")
             try {
                 val cleanBase64 = if (base64Data.contains(",")) base64Data.substringAfter(",") else base64Data
                 val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                bridge.log("DOWNLOAD", "Decoded ${bytes.size} bytes from payload.")
+
                 val ext = when {
                     mimeType.contains("pdf") -> "pdf"
                     mimeType.contains("png") -> "png"
@@ -666,42 +709,61 @@ class OmniBrowser : PluginEntry() {
                     mimeType.contains("zip") -> "zip"
                     mimeType.contains("json") -> "json"
                     mimeType.contains("html") -> "html"
+                    mimeType.contains("javascript") || mimeType.contains("js") -> "js"
+                    mimeType.contains("css") -> "css"
+                    mimeType.contains("text") -> "txt"
                     else -> "bin"
                 }
-                val sanitized = rawFilename.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-                val filename = if (sanitized.isNotEmpty() && sanitized != "null" && sanitized != "blob") sanitized else "download_${System.currentTimeMillis()}.$ext"
+
+                var filename = rawFilename.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                if (filename.isEmpty() || filename == "null" || filename == "blob" || filename == "download") {
+                    filename = "download_${System.currentTimeMillis()}.$ext"
+                } else if (!filename.contains(".")) {
+                    filename = "$filename.$ext"
+                }
 
                 var saved = false
+                var savedLocation = ""
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val contentValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                        put(MediaStore.MediaColumns.MIME_TYPE, mimeType.ifEmpty { "application/octet-stream" })
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/OmniDownloads")
-                    }
-                    val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                    if (uri != null) {
-                        context.contentResolver.openOutputStream(uri)?.use { os ->
-                            os.write(bytes)
+                    try {
+                        val contentValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                            put(MediaStore.MediaColumns.MIME_TYPE, mimeType.ifEmpty { "application/octet-stream" })
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/OmniDownloads")
                         }
-                        saved = true
-                    } else {
-                        throw Exception("MediaStore rejected file insertion (possibly invalid MIME type or filename).")
+                        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                        if (uri != null) {
+                            context.contentResolver.openOutputStream(uri)?.use { os ->
+                                os.write(bytes)
+                            }
+                            saved = true
+                            savedLocation = "Downloads/OmniDownloads/$filename (MediaStore)"
+                            bridge.log("DOWNLOAD", "Saved via MediaStore -> $uri ($savedLocation)")
+                        } else {
+                            bridge.log("DOWNLOAD_WARN", "MediaStore returned null URI. Falling back to direct filesystem write.")
+                        }
+                    } catch (e: Exception) {
+                        bridge.log("DOWNLOAD_WARN", "MediaStore insert failed: ${e.message}. Falling back to direct File write.")
                     }
-                } else {
-                    val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                    val targetDir = File(dir, "OmniDownloads").apply { mkdirs() }
-                    val file = File(targetDir, filename)
-                    FileOutputStream(file).use { it.write(bytes) }
-                    saved = true
                 }
 
-                if (saved) {
-                    bridge.showToast("Saved $filename to Downloads/OmniDownloads")
-                    bridge.log("DOWNLOAD", "Saved Blob download: $filename (${bytes.size} bytes)")
+                // Fallback / Direct File Writing
+                if (!saved) {
+                    val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val targetDir = File(publicDocs, "OmniDownloads").apply { if (!exists()) mkdirs() }
+                    val targetFile = File(targetDir, filename)
+                    FileOutputStream(targetFile).use { it.write(bytes) }
+                    saved = true
+                    savedLocation = targetFile.absolutePath
+                    bridge.log("DOWNLOAD", "Saved directly to File -> $savedLocation (${targetFile.length()} bytes)")
                 }
+
+                bridge.showToast("Saved $filename to Downloads/OmniDownloads")
+                bridge.log("DOWNLOAD_SUCCESS", "✅ Download complete: $filename (${bytes.size} bytes)")
             } catch (e: Exception) {
                 bridge.showToast("Blob save failed: ${e.message}")
-                bridge.log("DOWNLOAD_ERR", "Blob decode error: ${e.message}")
+                bridge.log("DOWNLOAD_ERR", "Failed saving base64 file: ${e.message}\n${e.stackTraceToString()}")
             }
         }
 
@@ -786,40 +848,68 @@ class OmniBrowser : PluginEntry() {
         }
 
         fun triggerFileDownload(view: WebView?, url: String, userAgent: String, contentDisposition: String, mimeType: String) {
+            bridge.log("DOWNLOAD", "triggerFileDownload invoked for: ${if (url.length > 40) url.take(40) + "..." else url} (mime: '$mimeType')")
+
             if (url.startsWith("blob:") || url.startsWith("data:")) {
                 val suggestedName = URLUtil.guessFileName(url, contentDisposition, mimeType)
                 if (url.startsWith("data:")) {
                     saveBase64ToDownloads(url, mimeType, suggestedName)
                 } else {
-                    val safeName = suggestedName.replace("'", "").replace("\"", "")
-                    val safeMime = mimeType.replace("'", "").replace("\"", "")
+                    val safeName = suggestedName.replace("'", "\\'").replace("\"", "\\\"")
+                    val safeMime = mimeType.replace("'", "\\'").replace("\"", "\\\"")
                     val blobScript = """
                         (function() {
-                            try {
-                                var xhr = new XMLHttpRequest();
-                                xhr.open('GET', '$url', true);
-                                xhr.responseType = 'blob';
-                                xhr.onload = function() {
-                                    if (this.status === 200 || this.status === 0) {
-                                        var reader = new FileReader();
-                                        reader.onloadend = function() {
-                                            window.OmniBlobDownloader.processBlob(reader.result, '$safeMime', '$safeName');
-                                        };
-                                        reader.onerror = function() {
-                                            window.OmniBlobDownloader.processBlob('ERROR', '', 'FileReader failed to read Blob');
-                                        };
-                                        reader.readAsDataURL(this.response);
-                                    } else {
-                                        window.OmniBlobDownloader.processBlob('ERROR', '', 'XHR Status: ' + this.status);
+                            const blobUrl = '$url';
+                            const targetName = '$safeName';
+                            const targetMime = '$safeMime';
+
+                            if (window.OmniBlobDownloader && window.OmniBlobDownloader.log) {
+                                window.OmniBlobDownloader.log('BLOB_EXTRACT', 'Extracting blob: ' + blobUrl);
+                            }
+
+                            // 1. First check if blob is still stored in memory map
+                            if (window.__omniBlobMap && window.__omniBlobMap.has(blobUrl)) {
+                                const blobObj = window.__omniBlobMap.get(blobUrl);
+                                const reader = new FileReader();
+                                reader.onloadend = function() {
+                                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                        window.OmniBlobDownloader.processBlob(reader.result, targetMime || blobObj.type || 'application/octet-stream', targetName);
                                     }
                                 };
-                                xhr.onerror = function() {
-                                    window.OmniBlobDownloader.processBlob('ERROR', '', 'Blob URL revoked or network error');
+                                reader.onerror = function(e) {
+                                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                        window.OmniBlobDownloader.processBlob('ERROR', '', 'FileReader error: ' + (e ? e.toString() : 'unknown'));
+                                    }
                                 };
-                                xhr.send();
-                            } catch (e) {
-                                window.OmniBlobDownloader.processBlob('ERROR', '', 'JS Exception: ' + e.toString());
+                                reader.readAsDataURL(blobObj);
+                                return;
                             }
+
+                            // 2. Fallback to native fetch()
+                            fetch(blobUrl)
+                                .then(function(res) {
+                                    if (!res.ok && res.status !== 0) throw new Error('Fetch HTTP status: ' + res.status);
+                                    return res.blob();
+                                })
+                                .then(function(blob) {
+                                    const reader = new FileReader();
+                                    reader.onloadend = function() {
+                                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                            window.OmniBlobDownloader.processBlob(reader.result, targetMime || blob.type || 'application/octet-stream', targetName);
+                                        }
+                                    };
+                                    reader.onerror = function(e) {
+                                        if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                            window.OmniBlobDownloader.processBlob('ERROR', '', 'Fetch FileReader error: ' + (e ? e.toString() : 'unknown'));
+                                        }
+                                    };
+                                    reader.readAsDataURL(blob);
+                                })
+                                .catch(function(err) {
+                                    if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                        window.OmniBlobDownloader.processBlob('ERROR', '', 'Blob extraction failed: ' + err.toString());
+                                    }
+                                });
                         })();
                     """.trimIndent()
                     val targetView = view ?: webViewInstance
@@ -1208,19 +1298,22 @@ class OmniBrowser : PluginEntry() {
                     triggerFileDownload(this, url, userAgent, contentDisposition, mimeType)
                 }
 
-                addJavascriptInterface(object {
-                    @JavascriptInterface
-                    fun processBlob(base64Data: String, mimeType: String, filename: String) {
+                val blobBridge = OmniBlobBridge(
+                    onBlobReceived = { base64Data, mime, filename ->
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
                             if (base64Data == "ERROR") {
                                 bridge.showToast("Blob extract failed: $filename")
                                 bridge.log("DOWNLOAD_ERR", "Blob extraction error: $filename")
                             } else {
-                                saveBase64ToDownloads(base64Data, mimeType, filename)
+                                saveBase64ToDownloads(base64Data, mime, filename)
                             }
                         }
+                    },
+                    onLog = { tag, msg ->
+                        bridge.log(tag, msg)
                     }
-                }, "OmniBlobDownloader")
+                )
+                addJavascriptInterface(blobBridge, "OmniBlobDownloader")
 
                 val rawUA = settings.userAgentString
                 val mobileUserAgent = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
