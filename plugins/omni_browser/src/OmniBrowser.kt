@@ -1684,15 +1684,19 @@ class OmniBrowser : PluginEntry() {
                         isHomeOverlayOpen = false
                         true
                     }
+                    currentUrl == "about:blank" -> {
+                        // Terminal Root: Already on Homepage. Return false to cleanly suspend to Dashboard.
+                        false
+                    }
                     webViewInstance?.canGoBack() == true -> {
                         webViewInstance?.goBack()
                         true
                     }
-                    currentUrl != "about:blank" -> {
+                    else -> {
+                        // Exhausted web page history: return to Homepage
                         navigateTo("about:blank")
                         true
                     }
-                    else -> false
                 }
             }
             onDispose {
