@@ -571,6 +571,100 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
+        fun sanitizeUrlForCopy(rawUrl: String): String {
+            if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+            return try {
+                val uri = Uri.parse(rawUrl)
+                val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+                val scheme = uri.scheme ?: "https"
+
+                // 1. Google Search Sanitizer (Preserve query & filters only)
+                if (host.contains("google.") && uri.path?.contains("/search") == true) {
+                    val q = uri.getQueryParameter("q")
+                    if (!q.isNullOrEmpty()) {
+                        val builder = Uri.Builder()
+                            .scheme(scheme)
+                            .authority(host)
+                            .path(uri.path)
+                            .appendQueryParameter("q", q)
+
+                        listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                            uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                        }
+                        return builder.build().toString()
+                    }
+                }
+
+                // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+                if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+                    val v = uri.getQueryParameter("v")
+                    if (!v.isNullOrEmpty()) {
+                        val builder = Uri.Builder()
+                            .scheme(scheme)
+                            .authority(host)
+                            .path(uri.path)
+                            .appendQueryParameter("v", v)
+                        listOf("t", "list", "index").forEach { param ->
+                            uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                        }
+                        return builder.build().toString()
+                    }
+                }
+
+                if (host == "youtu.be") {
+                    val videoId = uri.path?.removePrefix("/")
+                    if (!videoId.isNullOrEmpty()) {
+                        val builder = Uri.Builder()
+                            .scheme(scheme)
+                            .authority("youtu.be")
+                            .path("/$videoId")
+                        uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                        return builder.build().toString()
+                    }
+                }
+
+                // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+                if (host.contains("amazon.")) {
+                    val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+                    val match = asinRegex.find(uri.path ?: "")
+                    if (match != null) {
+                        val asin = match.groupValues[1]
+                        return "$scheme://$host/dp/$asin"
+                    }
+                }
+
+                // 4. Universal Marketing & Tracking Parameter Stripper
+                val trackingParams = setOf(
+                    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+                    "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+                    "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+                    "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+                    "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+                    "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+                )
+
+                val queryNames = uri.queryParameterNames
+                if (queryNames.isEmpty()) {
+                    return rawUrl
+                }
+
+                val builder = uri.buildUpon().clearQuery()
+                for (name in queryNames) {
+                    if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                        val values = uri.getQueryParameters(name)
+                        for (v in values) {
+                            builder.appendQueryParameter(name, v)
+                        }
+                    }
+                }
+
+                val result = builder.build().toString()
+                result.removeSuffix("?")
+            } catch (_: Exception) {
+                rawUrl
+            }
+        }
+
         fun normalizeLocalFilePath(rawPath: String): String {
             var path = rawPath.trim()
             try {
@@ -3409,9 +3503,10 @@ class OmniBrowser : PluginEntry() {
                                 bridge.showToast(if (isDesktopMode) "Desktop Mode Enabled" else "Mobile Mode Enabled")
                             }
 
-                            InLayoutMenuItem("Copy URL") {
+                            InLayoutMenuItem("Copy Clean URL") {
                                 if (currentUrl != "about:blank") {
-                                    bridge.copyToClipboard(currentUrl)
+                                    val cleanUrl = sanitizeUrlForCopy(currentUrl)
+                                    bridge.copyToClipboard(cleanUrl)
                                 }
                             }
 
