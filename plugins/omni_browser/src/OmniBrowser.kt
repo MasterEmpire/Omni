@@ -2663,6 +2663,8 @@ class OmniBrowser : PluginEntry() {
                 // Clean up any stale headless worker
                 try {
                     headlessAutomationWv?.stopLoading()
+                    headlessAutomationWv?.onPause()
+                    containerLayout?.removeView(headlessAutomationWv)
                     headlessAutomationWv?.destroy()
                 } catch (_: Exception) {}
 
@@ -2915,15 +2917,23 @@ class OmniBrowser : PluginEntry() {
                     }, "OmniAutomator")
 
                     webViewClient = object : WebViewClient() {
+                        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
+                            bridge.log("AI_STUDIO_NAV", "Started loading: $url")
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
+                            bridge.log("AI_STUDIO_NAV", "Finished loading: $url")
                             if (url != null && url.contains("aistudio.google.com")) {
+                                bridge.log("AI_STUDIO_INJECT", "Injecting automation script into $url")
                                 view?.evaluateJavascript(automationScript, null)
                             }
                         }
 
                         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                             super.onReceivedError(view, request, error)
+                            bridge.log("AI_STUDIO_ERR", "WebView Error: ${error?.description} on URL: ${request?.url}")
                             if (request?.isForMainFrame == true) {
                                 mainHandler.post {
                                     automationError = "Network error connecting to AI Studio (${error?.description})"
@@ -2935,7 +2945,17 @@ class OmniBrowser : PluginEntry() {
                 }
 
                 headlessAutomationWv = autoWv
-                autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
+                
+                // CRITICAL FIX: A completely detached WebView suspends JS execution and rendering.
+                // We must attach it to the view hierarchy off-screen to force Chromium to run.
+                mainHandler.post {
+                    containerLayout?.addView(autoWv, FrameLayout.LayoutParams(1, 1).apply {
+                        leftMargin = -10000
+                        topMargin = -10000
+                    })
+                    autoWv.onResume()
+                    autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
+                }
             }
 
             // Timer ticker during automation
@@ -3199,28 +3219,38 @@ class OmniBrowser : PluginEntry() {
                             OutlinedButton(
                                 onClick = {
                                     bridge.showToast("Dumping live DOM to Downloads/OmniSnapshots...")
-                                    val dumpScript = """
+                                    val script = """
                                         (function() {
                                             try {
                                                 var clone = document.documentElement.cloneNode(true);
                                                 var head = clone.querySelector('head');
                                                 if (head) {
-                                                    var base = document.createElement('base');
-                                                    base.href = window.location.href;
-                                                    head.insertBefore(base, head.firstChild);
+                                                    var existingBase = head.querySelector('base');
+                                                    if (!existingBase) {
+                                                        var base = document.createElement('base');
+                                                        base.href = window.location.href;
+                                                        head.insertBefore(base, head.firstChild);
+                                                    }
                                                 }
-                                                var fullHtml = '<!DOCTYPE html>\n' + clone.outerHTML;
-                                                if (window.OmniAutomator && window.OmniAutomator.onDomDump) {
-                                                    window.OmniAutomator.onDomDump(fullHtml);
-                                                }
+                                                return '<!DOCTYPE html>\n' + clone.outerHTML;
                                             } catch(e) {
-                                                if (window.OmniAutomator && window.OmniAutomator.onDomDump) {
-                                                    window.OmniAutomator.onDomDump(document.documentElement.outerHTML);
-                                                }
+                                                return document.documentElement.outerHTML;
                                             }
                                         })();
                                     """.trimIndent()
-                                    headlessAutomationWv?.evaluateJavascript(dumpScript, null)
+                                    
+                                    headlessAutomationWv?.evaluateJavascript(script) { html ->
+                                        if (!html.isNullOrEmpty() && html != "null") {
+                                            val rawHtml = if (html.startsWith("\"") && html.endsWith("\"")) {
+                                                try {
+                                                    org.json.JSONObject("{\"h\":$html}").getString("h")
+                                                } catch (_: Exception) { html }
+                                            } else html
+                                            saveHtmlSnapshot(rawHtml, "Automator_DOM")
+                                        } else {
+                                            bridge.showToast("Could not capture page DOM.")
+                                        }
+                                    }
                                 },
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8))
                             ) {
@@ -3244,6 +3274,8 @@ class OmniBrowser : PluginEntry() {
                                     showAutomationResultDialog = false
                                     try {
                                         headlessAutomationWv?.stopLoading()
+                                        headlessAutomationWv?.onPause()
+                                        containerLayout?.removeView(headlessAutomationWv)
                                         headlessAutomationWv?.destroy()
                                         headlessAutomationWv = null
                                     } catch (_: Exception) {}
