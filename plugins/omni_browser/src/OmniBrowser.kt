@@ -2677,6 +2677,11 @@ class OmniBrowser : PluginEntry() {
 
                 val automationScript = """
                     (async function() {
+                        if (window.__omniAutomating) {
+                            return;
+                        }
+                        window.__omniAutomating = true;
+
                         const PROMPT = $jsEscapedPrompt;
                         const SYS_PROMPT = $jsEscapedSysPrompt;
                         const THINKING_LEVEL = $jsEscapedThinking;
@@ -2684,181 +2689,291 @@ class OmniBrowser : PluginEntry() {
 
                         const delay = ms => new Promise(r => setTimeout(r, ms));
 
-                        function log(msg) {
-                            if (window.OmniAutomator) window.OmniAutomator.onStatus(msg);
-                        }
-
-                        // 1. Auth check
-                        if (window.location.href.includes('accounts.google.com') || window.location.href.includes('/signin/')) {
-                            if (window.OmniAutomator) window.OmniAutomator.onError('Account not logged in on this profile. Please log in to Google AI Studio first.');
-                            return;
-                        }
-
-                        log('Waiting for AI Studio UI to mount...');
-                        let mountAttempts = 0;
-                        while (!document.querySelector('textarea[formcontrolname="promptText"]') && mountAttempts < 35) {
-                            await delay(1000);
-                            mountAttempts++;
-                        }
-
-                        const promptArea = document.querySelector('textarea[formcontrolname="promptText"]');
-                        if (!promptArea) {
-                            if (window.OmniAutomator) window.OmniAutomator.onError('Failed to locate prompt textarea. DOM did not load in time.');
-                            return;
-                        }
-
-                        log('Configuring Model and Thinking Settings...');
-
-                        // 2. Configure Thinking Level if present
-                        try {
-                            const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
-                            if (thinkingSelect && THINKING_LEVEL !== 'Default') {
-                                thinkingSelect.click();
-                                await delay(500);
-                                const options = Array.from(document.querySelectorAll('mat-option'));
-                                const match = options.find(o => o.textContent.trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
-                                if (match) match.click();
-                                else document.body.click();
-                                await delay(300);
-                            }
-                        } catch(e) {}
-
-                        // 3. Configure System Instructions if provided
-                        if (SYS_PROMPT && SYS_PROMPT.length > 0) {
+                        function hostLog(tag, msg) {
                             try {
-                                log('Injecting System Instructions...');
-                                const sysCard = document.querySelector('ms-system-instructions-panel .system-instructions-card, ms-system-instructions-panel button');
-                                if (sysCard) {
-                                    sysCard.click();
-                                    await delay(600);
-                                    const sysTa = document.querySelector('ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
-                                    if (sysTa) {
-                                        sysTa.focus();
-                                        const nativeProtoSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                                        nativeProtoSetter.call(sysTa, SYS_PROMPT);
-                                        sysTa.dispatchEvent(new Event('input', { bubbles: true }));
-                                        sysTa.dispatchEvent(new Event('change', { bubbles: true }));
-                                        await delay(300);
-                                    }
+                                if (window.OmniAutomator && window.OmniAutomator.onLog) {
+                                    window.OmniAutomator.onLog(tag, String(msg));
                                 }
-                            } catch(e) {}
+                            } catch(_) {}
                         }
 
-                        // Purge any lingering CDK backdrops
-                        document.querySelectorAll('.cdk-overlay-backdrop').forEach(b => {
-                            try { b.click(); } catch(_) {}
-                        });
-                        await delay(200);
+                        function updateStatus(msg) {
+                            hostLog('STATUS', msg);
+                            try {
+                                if (window.OmniAutomator && window.OmniAutomator.onStatus) {
+                                    window.OmniAutomator.onStatus(String(msg));
+                                }
+                            } catch(_) {}
+                        }
 
-                        // 4. Inject Prompt with Prototype Setter (Bypasses Angular FormControl blocking)
-                        log('Injecting prompt into Angular engine...');
-                        promptArea.focus();
                         try {
-                            const nativeProtoSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                            nativeProtoSetter.call(promptArea, PROMPT);
-                        } catch(e) {
-                            promptArea.value = PROMPT;
-                        }
+                            hostLog('INIT', 'AI Studio Automator script launched. URL: ' + window.location.href);
 
-                        promptArea.dispatchEvent(new Event('input', { bubbles: true }));
-                        promptArea.dispatchEvent(new Event('change', { bubbles: true }));
-                        promptArea.dispatchEvent(new Event('compositionend', { bubbles: true }));
-                        await delay(500);
+                            // 1. Auth check
+                            if (window.location.href.includes('accounts.google.com') || window.location.href.includes('/signin/')) {
+                                const authErr = 'Account not logged in on this profile. Please log in to Google AI Studio first.';
+                                hostLog('AUTH_ERR', authErr);
+                                if (window.OmniAutomator) window.OmniAutomator.onError(authErr);
+                                window.__omniAutomating = false;
+                                return;
+                            }
 
-                        // 5. Submit Execution (Multi-vector trigger)
-                        log('Submitting prompt to Gemini...');
-                        const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[type="submit"]');
-                        
-                        // Fire synthetic Ctrl+Enter directly on the textarea
-                        promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true }));
-                        promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true }));
+                            updateStatus('Waiting for AI Studio UI to mount...');
+                            let mountAttempts = 0;
+                            let promptArea = null;
 
-                        if (runBtn) {
-                            runBtn.click();
-                        }
-
-                        // 6. Robust Content-Stability Scraper Loop
-                        log('Listening for response stream...');
-                        let lastOutput = '';
-                        let lastThoughts = '';
-                        let stabilityTicks = 0;
-                        let hasStartedReceiving = false;
-                        let totalTicks = 0;
-
-                        while (totalTicks < 180) {
-                            await delay(1000);
-                            totalTicks++;
-
-                            // Check errors & policy violations
-                            const errorBanner = document.querySelector('.model-error, .error-icon, ms-chat-turn .error');
-                            if (errorBanner) {
-                                const errTxt = errorBanner.textContent.trim();
-                                if (errTxt.length > 0) {
-                                    if (window.OmniAutomator) window.OmniAutomator.onError('AI Studio Error: ' + errTxt);
-                                    return;
+                            while (mountAttempts < 45) {
+                                promptArea = document.querySelector(
+                                    'textarea[formcontrolname="promptText"], ' +
+                                    'ms-autosize-textarea textarea, ' +
+                                    'textarea[aria-label*="Prompt"], ' +
+                                    'textarea[placeholder*="Start typing"], ' +
+                                    'textarea'
+                                );
+                                if (promptArea) break;
+                                await delay(1000);
+                                mountAttempts++;
+                                if (mountAttempts % 5 === 0) {
+                                    hostLog('MOUNT', 'Waiting for prompt area... (attempt ' + mountAttempts + '/45)');
                                 }
                             }
 
-                            // A. Extract Model Thoughts (Hierarchy-accurate selectors)
-                            let currentThoughts = '';
-                            const thoughtNodes = document.querySelectorAll(
-                                '.chat-turn-container.model ms-thought-chunk ms-text-chunk, ' +
-                                'div[data-turn-role="Model"] ms-thought-chunk ms-text-chunk, ' +
-                                'ms-thought-chunk .cmark-node'
-                            );
-                            if (thoughtNodes.length > 0) {
-                                currentThoughts = Array.from(thoughtNodes).map(n => n.innerText || n.textContent || '').filter(Boolean).join('\n').trim();
+                            if (!promptArea) {
+                                const err = 'Failed to locate prompt textarea after 45s. DOM did not load in time.';
+                                hostLog('MOUNT_ERR', err);
+                                if (window.OmniAutomator) window.OmniAutomator.onError(err);
+                                window.__omniAutomating = false;
+                                return;
                             }
 
-                            // B. Extract Final Rendered Markdown
-                            let currentOutput = '';
-                            const outputNodes = document.querySelectorAll(
-                                '.chat-turn-container.model ms-prompt-chunk > ms-text-chunk ms-cmark-node, ' +
-                                'div[data-turn-role="Model"] ms-prompt-chunk > ms-text-chunk ms-cmark-node, ' +
-                                '.chat-turn-container.model ms-text-chunk:not(ms-thought-chunk ms-text-chunk) ms-cmark-node, ' +
-                                'div[data-turn-role="Model"] ms-text-chunk:not(ms-thought-chunk ms-text-chunk) ms-cmark-node, ' +
-                                '.chat-turn-container.model .user-chunk ~ ms-prompt-chunk ms-cmark-node'
-                            );
+                            hostLog('DOM', 'Found prompt textarea: ' + promptArea.tagName + '.' + promptArea.className);
+                            updateStatus('Configuring Model and Thinking Settings...');
 
-                            if (outputNodes.length > 0) {
-                                currentOutput = Array.from(outputNodes).map(n => n.innerText || n.textContent || '').filter(Boolean).join('\n').trim();
-                            } else {
-                                // Fallback generic selector inside model turn
-                                const genericModelNodes = document.querySelectorAll('.chat-turn-container.model ms-text-chunk:not(ms-thought-chunk ms-text-chunk)');
-                                if (genericModelNodes.length > 0) {
-                                    currentOutput = Array.from(genericModelNodes).map(n => n.innerText || n.textContent || '').filter(Boolean).join('\n').trim();
+                            // 2. Configure Thinking Level if present
+                            try {
+                                const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
+                                if (thinkingSelect && THINKING_LEVEL !== 'Default') {
+                                    hostLog('SETTINGS', 'Selecting Thinking Level: ' + THINKING_LEVEL);
+                                    thinkingSelect.click();
+                                    await delay(500);
+                                    const options = Array.from(document.querySelectorAll('mat-option'));
+                                    const match = options.find(o => o.textContent.trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
+                                    if (match) {
+                                        match.click();
+                                        hostLog('SETTINGS', 'Applied Thinking Level: ' + match.textContent.trim());
+                                    } else {
+                                        document.body.click();
+                                    }
+                                    await delay(300);
+                                }
+                            } catch(e) {
+                                hostLog('SETTINGS_WARN', 'Thinking level setting failed: ' + e.message);
+                            }
+
+                            // 3. Configure System Instructions if provided
+                            if (SYS_PROMPT && SYS_PROMPT.length > 0) {
+                                try {
+                                    updateStatus('Injecting System Instructions...');
+                                    const sysCard = document.querySelector('ms-system-instructions-panel .system-instructions-card, ms-system-instructions-panel button');
+                                    if (sysCard) {
+                                        sysCard.click();
+                                        await delay(600);
+                                        const sysTa = document.querySelector('ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
+                                        if (sysTa) {
+                                            sysTa.focus();
+                                            const nativeProtoSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                                            nativeProtoSetter.call(sysTa, SYS_PROMPT);
+                                            sysTa.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+                                            sysTa.dispatchEvent(new Event('change', { bubbles: true }));
+                                            hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
+                                            await delay(300);
+                                        }
+                                    }
+                                } catch(e) {
+                                    hostLog('SYS_PROMPT_ERR', 'System instructions injection failed: ' + e.message);
                                 }
                             }
 
-                            if (currentOutput.length > 0 || currentThoughts.length > 0) {
-                                hasStartedReceiving = true;
-                                if (window.OmniAutomator) window.OmniAutomator.onProgress(currentThoughts, currentOutput);
-                            } else {
-                                const activeModelTurns = document.querySelectorAll('.chat-turn-container.model, div[data-turn-role="Model"]').length;
-                                log('Streaming... (Model turns: ' + activeModelTurns + ', wait ' + totalTicks + 's)');
+                            // Purge any lingering CDK backdrops
+                            document.querySelectorAll('.cdk-overlay-backdrop').forEach(b => {
+                                try { b.click(); } catch(_) {}
+                            });
+                            await delay(200);
+
+                            // 4. Inject Prompt with Angular FormControl sequence
+                            updateStatus('Injecting prompt into Angular engine...');
+                            promptArea.focus();
+                            try {
+                                const nativeProtoSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                                nativeProtoSetter.call(promptArea, PROMPT);
+                            } catch(e) {
+                                promptArea.value = PROMPT;
                             }
 
-                            if (hasStartedReceiving) {
-                                if (currentOutput === lastOutput && currentThoughts === lastThoughts && currentOutput.length > 0) {
-                                    stabilityTicks++;
-                                    // Require 3 consecutive stable seconds after content is populated
-                                    if (stabilityTicks >= 3) {
-                                        log('Output generation complete!');
-                                        if (window.OmniAutomator) window.OmniAutomator.onComplete(currentThoughts, currentOutput);
+                            promptArea.dispatchEvent(new Event('focus', { bubbles: true }));
+                            promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: PROMPT }));
+                            promptArea.dispatchEvent(new Event('change', { bubbles: true }));
+                            promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+                            promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
+                            promptArea.dispatchEvent(new Event('blur', { bubbles: true }));
+                            await delay(500);
+                            promptArea.focus();
+
+                            // 5. Submit Execution (Multi-vector trigger)
+                            updateStatus('Submitting prompt to Gemini...');
+                            const runBtn = document.querySelector(
+                                'ms-run-button button, ' +
+                                'button.ctrl-enter-submits, ' +
+                                'button[aria-label*="Run"], ' +
+                                'button[data-test-id="run-button"], ' +
+                                'button.run-button, ' +
+                                'button[type="submit"]'
+                            );
+
+                            if (runBtn) {
+                                hostLog('RUN', 'Located run button: disabled=' + runBtn.disabled + ', aria-disabled=' + runBtn.getAttribute('aria-disabled'));
+                            } else {
+                                hostLog('RUN_WARN', 'Run button not found via querySelector. Will rely on synthetic Ctrl+Enter.');
+                            }
+
+                            // Dispatch synthetic Ctrl+Enter on prompt textarea
+                            promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
+                            promptArea.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
+                            promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
+
+                            if (runBtn && !runBtn.disabled && runBtn.getAttribute('aria-disabled') !== 'true') {
+                                runBtn.click();
+                                hostLog('RUN', 'Clicked Run button.');
+                            }
+
+                            // 6. Robust Content-Stability Scraper Loop with Virtual-Scroll Auto-Scroll
+                            updateStatus('Listening for response stream...');
+                            let lastOutput = '';
+                            let lastThoughts = '';
+                            let stabilityTicks = 0;
+                            let hasStartedReceiving = false;
+                            let totalTicks = 0;
+
+                            while (totalTicks < 180) {
+                                await delay(1000);
+                                totalTicks++;
+
+                                // Auto-scroll virtual container so Angular renders all latest chunks
+                                try {
+                                    const scrollContainer = document.querySelector('ms-autoscroll-container, .chat-view-container, .chat-container');
+                                    if (scrollContainer) {
+                                        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+                                    }
+                                } catch(_) {}
+
+                                // A. Instant Error Trapping (Toasts, Callouts, Banners)
+                                const errorNode = document.querySelector(
+                                    'ms-callout.error-callout .message, ' +
+                                    '.error-callout .message, ' +
+                                    'ms-toast .message, ' +
+                                    '.model-error, ' +
+                                    '.toast .message, ' +
+                                    'ms-error-panel'
+                                );
+
+                                if (errorNode) {
+                                    const errTxt = (errorNode.innerText || errorNode.textContent || '').trim();
+                                    if (errTxt.length > 0 && !errTxt.toLowerCase().includes('saved')) {
+                                        hostLog('STUDIO_ERROR', 'Google AI Studio error: ' + errTxt);
+                                        if (window.OmniAutomator) window.OmniAutomator.onError(errTxt);
+                                        window.__omniAutomating = false;
                                         return;
                                     }
-                                } else {
-                                    stabilityTicks = 0;
-                                    lastOutput = currentOutput;
-                                    lastThoughts = currentThoughts;
+                                }
+
+                                // B. Extract Model Thoughts
+                                let currentThoughts = '';
+                                const thoughtNodes = document.querySelectorAll(
+                                    'ms-thought-chunk ms-text-chunk, ' +
+                                    '.chat-turn-container.model ms-thought-chunk, ' +
+                                    'ms-thought-chunk .cmark-node, ' +
+                                    'ms-thought-chunk'
+                                );
+                                if (thoughtNodes.length > 0) {
+                                    currentThoughts = Array.from(thoughtNodes)
+                                        .map(n => n.innerText || n.textContent || '')
+                                        .filter(Boolean)
+                                        .join('\n')
+                                        .trim();
+                                }
+
+                                // C. Extract Rendered Markdown / Model Turn Content
+                                let currentOutput = '';
+                                const modelTurns = document.querySelectorAll(
+                                    'ms-chat-turn .chat-turn-container.model, ' +
+                                    'div[data-turn-role="Model"], ' +
+                                    '.model-prompt-container'
+                                );
+
+                                if (modelTurns.length > 0) {
+                                    const lastTurn = modelTurns[modelTurns.length - 1];
+                                    const textNodes = lastTurn.querySelectorAll(
+                                        'ms-cmark-node, ' +
+                                        'ms-text-chunk:not(ms-thought-chunk ms-text-chunk), ' +
+                                        '.turn-content, ' +
+                                        'p'
+                                    );
+                                    if (textNodes.length > 0) {
+                                        currentOutput = Array.from(textNodes)
+                                            .map(n => n.innerText || n.textContent || '')
+                                            .filter(Boolean)
+                                            .join('\n')
+                                            .trim();
+                                    } else {
+                                        currentOutput = (lastTurn.innerText || lastTurn.textContent || '').trim();
+                                    }
+                                }
+
+                                const isSpinnerActive = document.querySelector('mat-spinner, ms-loading-indicator, .loading-dots, .streaming-active') !== null;
+                                const isResponseReadyAnnounced = document.querySelector('#cdk-live-announcer-0')?.textContent?.includes('Response ready') === true;
+                                const hasFeedbackButtons = document.querySelector('.response-feedback-button, .model-run-time-pill') !== null;
+
+                                if (currentOutput.length > 0 || currentThoughts.length > 0) {
+                                    hasStartedReceiving = true;
+                                    if (window.OmniAutomator) window.OmniAutomator.onProgress(currentThoughts, currentOutput);
+                                }
+
+                                if (totalTicks % 3 === 0) {
+                                    hostLog('STREAM_TICK', 'Tick ' + totalTicks + 's: modelTurns=' + modelTurns.length + ', outLen=' + currentOutput.length + ', spinner=' + isSpinnerActive + ', ready=' + isResponseReadyAnnounced);
+                                }
+
+                                if (hasStartedReceiving) {
+                                    if (currentOutput === lastOutput && currentThoughts === lastThoughts && currentOutput.length > 0) {
+                                        stabilityTicks++;
+                                        // Complete when text is stable and either spinner is gone, response announced ready, or feedback buttons mounted
+                                        if (stabilityTicks >= 2 && (!isSpinnerActive || isResponseReadyAnnounced || hasFeedbackButtons)) {
+                                            updateStatus('Output generation complete!');
+                                            hostLog('DONE', 'Final output captured: ' + currentOutput.length + ' characters.');
+                                            if (window.OmniAutomator) window.OmniAutomator.onComplete(currentThoughts, currentOutput);
+                                            window.__omniAutomating = false;
+                                            return;
+                                        }
+                                    } else {
+                                        stabilityTicks = 0;
+                                        lastOutput = currentOutput;
+                                        lastThoughts = currentThoughts;
+                                    }
                                 }
                             }
-                        }
 
-                        if (lastOutput.length > 0) {
-                            if (window.OmniAutomator) window.OmniAutomator.onComplete(lastThoughts, lastOutput);
-                        } else {
-                            if (window.OmniAutomator) window.OmniAutomator.onError('Operation timed out. Try tapping "Dump Live DOM" below to inspect state.');
+                            if (lastOutput.length > 0) {
+                                if (window.OmniAutomator) window.OmniAutomator.onComplete(lastThoughts, lastOutput);
+                            } else {
+                                const timeoutMsg = 'Operation timed out after 180s. Tap "Dump Live DOM" below to inspect page state.';
+                                hostLog('TIMEOUT', timeoutMsg);
+                                if (window.OmniAutomator) window.OmniAutomator.onError(timeoutMsg);
+                            }
+                            window.__omniAutomating = false;
+
+                        } catch (fatalErr) {
+                            hostLog('FATAL_ERR', (fatalErr.stack || fatalErr.message || String(fatalErr)));
+                            if (window.OmniAutomator) window.OmniAutomator.onError('Script error: ' + fatalErr.message);
+                            window.__omniAutomating = false;
                         }
                     })();
                 """.trimIndent()
@@ -2946,12 +3061,15 @@ class OmniBrowser : PluginEntry() {
 
                 headlessAutomationWv = autoWv
                 
-                // CRITICAL FIX: A completely detached WebView suspends JS execution and rendering.
-                // We must attach it to the view hierarchy off-screen to force Chromium to run.
+                // CRITICAL FIX: Give headless WebView full screen dimensions off-screen
+                // so Angular CDK Virtual Scroll does not recycle/unmount chat turn DOM elements!
                 mainHandler.post {
-                    containerLayout?.addView(autoWv, FrameLayout.LayoutParams(1, 1).apply {
-                        leftMargin = -10000
-                        topMargin = -10000
+                    containerLayout?.addView(autoWv, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    ).apply {
+                        translationX = -20000f
+                        alpha = 0.01f
                     })
                     autoWv.onResume()
                     autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
