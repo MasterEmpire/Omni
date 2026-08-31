@@ -59,6 +59,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.PlatformTextStyle
@@ -2493,10 +2495,9 @@ class OmniBrowser : PluginEntry() {
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(20f)
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null
-                        ) { showMenu = false }
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = { showMenu = false })
+                        }
                         .statusBarsPadding()
                         .padding(top = 52.dp, end = 8.dp),
                     contentAlignment = Alignment.TopEnd
@@ -2509,10 +2510,9 @@ class OmniBrowser : PluginEntry() {
                         border = BorderStroke(1.dp, Color(0xFF3C4043)),
                         modifier = Modifier
                             .width(250.dp)
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null
-                            ) { /* Consume taps inside menu so they do not dismiss */ }
+                            .pointerInput(Unit) {
+                                detectTapGestures(onTap = { /* Consume taps inside menu so they do not dismiss */ })
+                            }
                     ) {
                         Column(modifier = Modifier.padding(vertical = 6.dp)) {
                             Row(
@@ -2661,7 +2661,10 @@ class OmniBrowser : PluginEntry() {
                                 editingShortcut = null
                                 isAddingShortcut = false
                                 editingProfile = null
-                                bridge.close()
+                                coroutineScope.launch {
+                                    delay(150) // Allow UI 150ms to recompose and clear the menu before capturing snapshot
+                                    bridge.close()
+                                }
                             }
                         }
                     }
