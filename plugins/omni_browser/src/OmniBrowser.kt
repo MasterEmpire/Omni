@@ -2979,6 +2979,9 @@ class OmniBrowser : PluginEntry() {
                 """.trimIndent()
 
                 val autoWv = WebView(context).apply {
+                    translationX = -20000f
+                    alpha = 0.01f
+
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
@@ -2996,10 +2999,37 @@ class OmniBrowser : PluginEntry() {
                         } catch (_: Exception) {}
                     }
 
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                            val msg = consoleMessage?.message() ?: ""
+                            val lvl = consoleMessage?.messageLevel()?.name ?: "LOG"
+                            val line = consoleMessage?.lineNumber() ?: 0
+                            val src = consoleMessage?.sourceId() ?: ""
+                            val tag = when (consoleMessage?.messageLevel()) {
+                                ConsoleMessage.MessageLevel.ERROR -> "AI_STUDIO_ERR"
+                                ConsoleMessage.MessageLevel.WARNING -> "AI_STUDIO_WARN"
+                                else -> "AI_STUDIO_CONSOLE"
+                            }
+                            bridge.log(tag, "[$lvl] $msg (line $line in $src)")
+                            return true
+                        }
+
+                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                            if (newProgress % 25 == 0 || newProgress == 100) {
+                                bridge.log("AI_STUDIO_LOAD", "Headless load: $newProgress%")
+                            }
+                        }
+                    }
+
                     addJavascriptInterface(object {
                         @JavascriptInterface
                         fun onStatus(msg: String) {
                             mainHandler.post { automationStatus = msg }
+                        }
+
+                        @JavascriptInterface
+                        fun onLog(tag: String, msg: String) {
+                            bridge.log("AI_STUDIO_$tag", msg)
                         }
 
                         @JavascriptInterface
@@ -3061,16 +3091,12 @@ class OmniBrowser : PluginEntry() {
 
                 headlessAutomationWv = autoWv
                 
-                // CRITICAL FIX: Give headless WebView full screen dimensions off-screen
-                // so Angular CDK Virtual Scroll does not recycle/unmount chat turn DOM elements!
+                // Attach off-screen with MATCH_PARENT so Angular Virtual Scroll measures the full screen
                 mainHandler.post {
                     containerLayout?.addView(autoWv, FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                    ).apply {
-                        translationX = -20000f
-                        alpha = 0.01f
-                    })
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    ))
                     autoWv.onResume()
                     autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
                 }
