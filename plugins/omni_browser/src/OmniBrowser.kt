@@ -1145,7 +1145,7 @@ class OmniBrowser : PluginEntry() {
                 }
 
                 setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-                    triggerFileDownload(webView, url, userAgent, contentDisposition, mimeType)
+                    triggerFileDownload(this, url, userAgent, contentDisposition, mimeType)
                 }
 
                 addJavascriptInterface(object {
