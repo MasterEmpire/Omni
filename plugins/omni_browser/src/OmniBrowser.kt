@@ -262,6 +262,22 @@ class OmniBrowser : PluginEntry() {
         var autoSolveEnabled by remember { mutableStateOf(true) }
         var isSolvingCaptcha by remember { mutableStateOf(false) }
 
+        // --- AI Studio Automator State ---
+        var showAutomationDialog by remember { mutableStateOf(false) }
+        var showAutomationResultDialog by remember { mutableStateOf(false) }
+        var autoSelectedProfileId by remember { mutableStateOf("default") }
+        var autoSelectedModel by remember { mutableStateOf("Gemini 3.7 Flash") }
+        var autoThinkingLevel by remember { mutableStateOf("High") }
+        var autoSystemPrompt by remember { mutableStateOf("") }
+        var autoUserPrompt by remember { mutableStateOf("") }
+        var isAutomating by remember { mutableStateOf(false) }
+        var automationStatus by remember { mutableStateOf("Idle") }
+        var automationThoughts by remember { mutableStateOf("") }
+        var automationResult by remember { mutableStateOf("") }
+        var automationError by remember { mutableStateOf<String?>(null) }
+        var automationElapsedSec by remember { mutableIntStateOf(0) }
+        var headlessAutomationWv by remember { mutableStateOf<WebView?>(null) }
+
         var lastClosedTabsSnapshot by remember { mutableStateOf<List<BrowserTab>?>(null) }
         var lastActiveTabIdSnapshot by remember { mutableStateOf<String?>(null) }
         var undoMessage by remember { mutableStateOf("") }
@@ -2173,11 +2189,19 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
-        DisposableEffect(isTabSwitcherOpen, showSettingsDialog, showDownloadsDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance, showMenu) {
+        DisposableEffect(isTabSwitcherOpen, showSettingsDialog, showDownloadsDialog, showAutomationDialog, showAutomationResultDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance, showMenu) {
             bridge.setOnBackPressedHandler {
                 when {
                     showMenu -> {
                         showMenu = false
+                        true
+                    }
+                    showAutomationResultDialog -> {
+                        showAutomationResultDialog = false
+                        true
+                    }
+                    showAutomationDialog -> {
+                        showAutomationDialog = false
                         true
                     }
                     showDownloadsDialog -> {
@@ -2617,6 +2641,550 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 }
+            }
+
+            // --- Headless AI Studio Automation Engine ---
+            fun startAutomationRun() {
+                if (autoUserPrompt.trim().isEmpty()) {
+                    bridge.showToast("Please provide a prompt to run.")
+                    return
+                }
+
+                showAutomationDialog = false
+                showAutomationResultDialog = true
+                isAutomating = true
+                automationStatus = "Initializing Headless Session..."
+                automationThoughts = ""
+                automationResult = ""
+                automationError = null
+                automationElapsedSec = 0
+
+                // Clean up any stale headless worker
+                try {
+                    headlessAutomationWv?.stopLoading()
+                    headlessAutomationWv?.destroy()
+                } catch (_: Exception) {}
+
+                val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+                val jsEscapedPrompt = org.json.JSONObject.quote(autoUserPrompt.trim())
+                val jsEscapedSysPrompt = org.json.JSONObject.quote(autoSystemPrompt.trim())
+                val jsEscapedThinking = org.json.JSONObject.quote(autoThinkingLevel)
+                val jsEscapedModel = org.json.JSONObject.quote(autoSelectedModel)
+
+                val automationScript = """
+                    (async function() {
+                        const PROMPT = $jsEscapedPrompt;
+                        const SYS_PROMPT = $jsEscapedSysPrompt;
+                        const THINKING_LEVEL = $jsEscapedThinking;
+                        const TARGET_MODEL = $jsEscapedModel;
+
+                        const delay = ms => new Promise(r => setTimeout(r, ms));
+
+                        function log(msg) {
+                            if (window.OmniAutomator) window.OmniAutomator.onStatus(msg);
+                        }
+
+                        // 1. Auth check
+                        if (window.location.href.includes('accounts.google.com') || window.location.href.includes('/signin/')) {
+                            if (window.OmniAutomator) window.OmniAutomator.onError('Account not logged in on this profile. Please log in to Google AI Studio first.');
+                            return;
+                        }
+
+                        log('Waiting for AI Studio UI to mount...');
+                        let mountAttempts = 0;
+                        while (!document.querySelector('textarea[formcontrolname="promptText"]') && mountAttempts < 30) {
+                            await delay(1000);
+                            mountAttempts++;
+                        }
+
+                        const promptArea = document.querySelector('textarea[formcontrolname="promptText"]');
+                        if (!promptArea) {
+                            if (window.OmniAutomator) window.OmniAutomator.onError('Failed to locate prompt textarea. DOM did not load in time.');
+                            return;
+                        }
+
+                        log('Configuring Model and Thinking Settings...');
+
+                        // 2. Configure Thinking Level if option exists
+                        try {
+                            const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
+                            if (thinkingSelect && THINKING_LEVEL !== 'Default') {
+                                thinkingSelect.click();
+                                await delay(400);
+                                const options = Array.from(document.querySelectorAll('mat-option'));
+                                const match = options.find(o => o.textContent.trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
+                                if (match) match.click();
+                                else document.body.click();
+                                await delay(300);
+                            }
+                        } catch(e) {}
+
+                        // 3. Configure System Instructions if provided
+                        if (SYS_PROMPT && SYS_PROMPT.length > 0) {
+                            try {
+                                log('Injecting System Instructions...');
+                                const sysCard = document.querySelector('ms-system-instructions-panel .system-instructions-card, ms-system-instructions-panel button');
+                                if (sysCard) {
+                                    sysCard.click();
+                                    await delay(500);
+                                    const sysTa = document.querySelector('ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
+                                    if (sysTa) {
+                                        sysTa.focus();
+                                        sysTa.value = SYS_PROMPT;
+                                        sysTa.dispatchEvent(new Event('input', { bubbles: true }));
+                                        sysTa.dispatchEvent(new Event('change', { bubbles: true }));
+                                        await delay(300);
+                                    }
+                                }
+                            } catch(e) {}
+                        }
+
+                        // 4. Inject Prompt with Angular Reactive Events
+                        log('Injecting user prompt...');
+                        promptArea.focus();
+                        promptArea.value = PROMPT;
+                        promptArea.dispatchEvent(new Event('input', { bubbles: true }));
+                        promptArea.dispatchEvent(new Event('change', { bubbles: true }));
+                        promptArea.dispatchEvent(new Event('compositionend', { bubbles: true }));
+                        await delay(500);
+
+                        // 5. Submit Execution
+                        log('Submitting prompt to Gemini...');
+                        const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[type="submit"]');
+                        if (!runBtn) {
+                            if (window.OmniAutomator) window.OmniAutomator.onError('Could not find Run button.');
+                            return;
+                        }
+                        runBtn.click();
+
+                        // 6. Polling & Content-Stability Loop (Immune to early spinner stops)
+                        log('Streaming response from AI Studio...');
+                        let lastOutput = '';
+                        let lastThoughts = '';
+                        let stabilityTicks = 0;
+                        let hasStartedReceiving = false;
+                        let totalTicks = 0;
+
+                        while (totalTicks < 180) {
+                            await delay(1000);
+                            totalTicks++;
+
+                            const errorBanner = document.querySelector('.model-error, .error-icon');
+                            if (errorBanner) {
+                                const errTxt = errorBanner.textContent.trim();
+                                if (errTxt.length > 0) {
+                                    if (window.OmniAutomator) window.OmniAutomator.onError('AI Studio Error: ' + errTxt);
+                                    return;
+                                }
+                            }
+
+                            // Extract thoughts
+                            let currentThoughts = '';
+                            const thoughtNodes = document.querySelectorAll('ms-thought-chunk ms-text-chunk, ms-thought-chunk .cmark-node');
+                            if (thoughtNodes.length > 0) {
+                                currentThoughts = Array.from(thoughtNodes).map(n => n.innerText || n.textContent || '').join('\n').trim();
+                            }
+
+                            // Extract final text output
+                            let currentOutput = '';
+                            const outputNodes = document.querySelectorAll('ms-chat-turn.model ms-text-chunk:not(ms-thought-chunk ms-text-chunk), ms-chat-turn[data-turn-role="Model"] ms-text-chunk:not(ms-thought-chunk ms-text-chunk)');
+                            if (outputNodes.length > 0) {
+                                currentOutput = Array.from(outputNodes).map(n => n.innerText || n.textContent || '').join('\n').trim();
+                            }
+
+                            if (currentOutput.length > 0 || currentThoughts.length > 0) {
+                                hasStartedReceiving = true;
+                                if (window.OmniAutomator) window.OmniAutomator.onProgress(currentThoughts, currentOutput);
+                            }
+
+                            if (hasStartedReceiving) {
+                                if (currentOutput === lastOutput && currentThoughts === lastThoughts && currentOutput.length > 0) {
+                                    stabilityTicks++;
+                                    // 3 continuous stable seconds after receiving output signals full render completion
+                                    if (stabilityTicks >= 3) {
+                                        log('Output render complete!');
+                                        if (window.OmniAutomator) window.OmniAutomator.onComplete(currentThoughts, currentOutput);
+                                        return;
+                                    }
+                                } else {
+                                    stabilityTicks = 0;
+                                    lastOutput = currentOutput;
+                                    lastThoughts = currentThoughts;
+                                }
+                            }
+                        }
+
+                        if (lastOutput.length > 0) {
+                            if (window.OmniAutomator) window.OmniAutomator.onComplete(lastThoughts, lastOutput);
+                        } else {
+                            if (window.OmniAutomator) window.OmniAutomator.onError('Operation timed out without receiving a response.');
+                        }
+                    })();
+                """.trimIndent()
+
+                val autoWv = WebView(context).apply {
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        databaseEnabled = true
+                        allowFileAccess = true
+                        setSupportMultipleWindows(true)
+                        userAgentString = desktopUA
+                    }
+
+                    if (autoSelectedProfileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+                        try {
+                            val profileStore = ProfileStore.getInstance()
+                            profileStore.getOrCreateProfile(autoSelectedProfileId)
+                            WebViewCompat.setProfile(this, autoSelectedProfileId)
+                        } catch (_: Exception) {}
+                    }
+
+                    addJavascriptInterface(object {
+                        @JavascriptInterface
+                        fun onStatus(msg: String) {
+                            mainHandler.post { automationStatus = msg }
+                        }
+
+                        @JavascriptInterface
+                        fun onProgress(thoughts: String, output: String) {
+                            mainHandler.post {
+                                automationThoughts = thoughts
+                                automationResult = output
+                                automationStatus = "Streaming response..."
+                            }
+                        }
+
+                        @JavascriptInterface
+                        fun onComplete(thoughts: String, output: String) {
+                            mainHandler.post {
+                                automationThoughts = thoughts
+                                automationResult = output
+                                automationStatus = "Completed"
+                                isAutomating = false
+                            }
+                        }
+
+                        @JavascriptInterface
+                        fun onError(err: String) {
+                            mainHandler.post {
+                                automationError = err
+                                automationStatus = "Failed"
+                                isAutomating = false
+                            }
+                        }
+                    }, "OmniAutomator")
+
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            if (url != null && url.contains("aistudio.google.com")) {
+                                view?.evaluateJavascript(automationScript, null)
+                            }
+                        }
+
+                        override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                            super.onReceivedError(view, request, error)
+                            if (request?.isForMainFrame == true) {
+                                mainHandler.post {
+                                    automationError = "Network error connecting to AI Studio (${error?.description})"
+                                    isAutomating = false
+                                }
+                            }
+                        }
+                    }
+                }
+
+                headlessAutomationWv = autoWv
+                autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
+            }
+
+            // Timer ticker during automation
+            LaunchedEffect(isAutomating) {
+                while (isAutomating) {
+                    delay(1000)
+                    automationElapsedSec++
+                }
+            }
+
+            // --- Dialog 1: AI Studio Automation Order Sheet ---
+            if (showAutomationDialog) {
+                AlertDialog(
+                    onDismissRequest = { showAutomationDialog = false },
+                    containerColor = Color(0xFF282C34),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🤖", fontSize = 22.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("AI Studio Automator", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                    },
+                    text = {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)
+                        ) {
+                            Text("Configure and dispatch prompts directly to Google AI Studio headlessly using your active profile cookies.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
+
+                            // Profile Picker
+                            Column {
+                                Text("Target Profile (Account)", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    profiles.forEach { prof ->
+                                        val isSel = prof.id == autoSelectedProfileId
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSel) Color(prof.colorValue).copy(alpha = 0.25f) else Color(0xFF1F2227),
+                                            border = BorderStroke(1.dp, if (isSel) Color(prof.colorValue) else Color(0xFF3C4043)),
+                                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { autoSelectedProfileId = prof.id }
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                            ) {
+                                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(prof.colorValue)))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(prof.name, color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Thinking Level Picker
+                            Column {
+                                Text("Thinking Level", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(4.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("High", "Low", "Default").forEach { level ->
+                                        val isSel = autoThinkingLevel == level
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSel) Color(0xFF8AB4F8).copy(alpha = 0.25f) else Color(0xFF1F2227),
+                                            border = BorderStroke(1.dp, if (isSel) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+                                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { autoThinkingLevel = level }
+                                        ) {
+                                            Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                                Text(level, color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // System Prompt (Optional)
+                            OutlinedTextField(
+                                value = autoSystemPrompt,
+                                onValueChange = { autoSystemPrompt = it },
+                                label = { Text("System Instructions (Optional)") },
+                                placeholder = { Text("You are a specialized assistant...", color = Color(0xFF5F6368), fontSize = 12.sp) },
+                                maxLines = 4,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF3C4043)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // User Prompt
+                            OutlinedTextField(
+                                value = autoUserPrompt,
+                                onValueChange = { autoUserPrompt = it },
+                                label = { Text("User Prompt") },
+                                placeholder = { Text("Enter prompt to run headlessly...", color = Color(0xFF5F6368), fontSize = 12.sp) },
+                                minLines = 3,
+                                maxLines = 6,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFFE8EAED),
+                                    unfocusedTextColor = Color(0xFFE8EAED),
+                                    focusedBorderColor = Color(0xFF8AB4F8),
+                                    unfocusedBorderColor = Color(0xFF3C4043)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { startAutomationRun() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8)),
+                            enabled = autoUserPrompt.trim().isNotEmpty()
+                        ) {
+                            Text("⚡ Run Automation", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAutomationDialog = false }) {
+                            Text("Cancel", color = Color(0xFF9AA0A6))
+                        }
+                    }
+                )
+            }
+
+            // --- Dialog 2: Live Execution & Scraped Result Terminal ---
+            if (showAutomationResultDialog) {
+                var thoughtsExpanded by remember { mutableStateOf(false) }
+
+                AlertDialog(
+                    onDismissRequest = {
+                        if (!isAutomating) showAutomationResultDialog = false
+                    },
+                    containerColor = Color(0xFF282C34),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isAutomating) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF8AB4F8), strokeWidth = 2.dp)
+                                } else if (automationError != null) {
+                                    Text("❌", fontSize = 18.sp)
+                                } else {
+                                    Text("✅", fontSize = 18.sp)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (isAutomating) "Executing Prompt..." else if (automationError != null) "Execution Error" else "AI Studio Response",
+                                    color = Color(0xFFE8EAED),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                            }
+                            Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF1F2227)) {
+                                Text("${automationElapsedSec}s", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                    },
+                    text = {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)
+                        ) {
+                            // Status Banner
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (automationError != null) Color(0xFF4C1C1C) else Color(0xFF1F2227),
+                                border = BorderStroke(1.dp, if (automationError != null) Color(0xFFF28B82) else Color(0xFF3C4043)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = automationError ?: "Status: $automationStatus",
+                                    color = if (automationError != null) Color(0xFFF28B82) else Color(0xFF8AB4F8),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+
+                            // Expandable Thoughts Accordion
+                            if (automationThoughts.isNotEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF1F2227),
+                                    border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { thoughtsExpanded = !thoughtsExpanded }
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("🧠", fontSize = 14.sp)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Model Reasoning / Thoughts", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            Icon(
+                                                if (thoughtsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                                contentDescription = null,
+                                                tint = Color(0xFF9AA0A6),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+
+                                        if (thoughtsExpanded) {
+                                            Spacer(Modifier.height(6.dp))
+                                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                                Text(
+                                                    text = automationThoughts,
+                                                    color = Color(0xFF9AA0A6),
+                                                    fontSize = 11.sp,
+                                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                    lineHeight = 15.sp,
+                                                    modifier = Modifier.fillMaxWidth().heightIn(max = 140.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Final Scraped Output Terminal
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .background(Color(0xFF16181D), RoundedCornerShape(8.dp))
+                                    .border(1.dp, Color(0xFF3C4043), RoundedCornerShape(8.dp))
+                                    .padding(10.dp)
+                            ) {
+                                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                    item {
+                                        androidx.compose.foundation.text.selection.SelectionContainer {
+                                            Text(
+                                                text = if (automationResult.isNotEmpty()) automationResult else if (isAutomating) "Listening for response stream..." else "No output generated.",
+                                                color = Color(0xFFE8EAED),
+                                                fontSize = 12.sp,
+                                                lineHeight = 17.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (automationResult.isNotEmpty()) {
+                                Button(
+                                    onClick = {
+                                        bridge.copyToClipboard(automationResult)
+                                        bridge.showToast("Copied result to clipboard!")
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
+                                ) {
+                                    Text("📋 Copy", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    showAutomationResultDialog = false
+                                    try {
+                                        headlessAutomationWv?.stopLoading()
+                                        headlessAutomationWv?.destroy()
+                                        headlessAutomationWv = null
+                                    } catch (_: Exception) {}
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C4043))
+                            ) {
+                                Text(if (isAutomating) "Stop" else "Close", color = Color.White)
+                            }
+                        }
+                    }
+                )
             }
 
             // --- Downloads Manager Dialog ---
@@ -3446,6 +4014,10 @@ class OmniBrowser : PluginEntry() {
                                         fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
+                            }
+
+                            InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) {
+                                showAutomationDialog = true
                             }
 
                             InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) {
