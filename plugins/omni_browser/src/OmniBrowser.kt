@@ -259,6 +259,60 @@ class OmniBrowser : PluginEntry() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         }
 
+        val blobInterceptorScript = remember {
+            """
+            (function() {
+                if (window.__omniBlobHooked) return;
+                window.__omniBlobHooked = true;
+
+                const blobMap = new Map();
+                const origCreate = URL.createObjectURL;
+                if (origCreate) {
+                    URL.createObjectURL = function(obj) {
+                        const url = origCreate.apply(this, arguments);
+                        if (obj instanceof Blob) {
+                            blobMap.set(url, obj);
+                            if (blobMap.size > 100) {
+                                const first = blobMap.keys().next().value;
+                                blobMap.delete(first);
+                            }
+                        }
+                        return url;
+                    };
+                }
+
+                document.addEventListener('click', function(e) {
+                    const anchor = e.target && (e.target.tagName === 'A' ? e.target : e.target.closest ? e.target.closest('a') : null);
+                    if (!anchor) return;
+
+                    const href = anchor.href || '';
+                    const downloadName = anchor.getAttribute('download') || anchor.download || '';
+
+                    if (href.startsWith('blob:') || anchor.hasAttribute('download')) {
+                        if (href.startsWith('blob:') && blobMap.has(href)) {
+                            const blob = blobMap.get(href);
+                            const reader = new FileReader();
+                            reader.onloadend = function() {
+                                if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                    window.OmniBlobDownloader.processBlob(reader.result, blob.type || 'application/octet-stream', downloadName || 'download');
+                                }
+                            };
+                            reader.readAsDataURL(blob);
+                            e.preventDefault();
+                            e.stopPropagation();
+                        } else if (href.startsWith('data:')) {
+                            if (window.OmniBlobDownloader && window.OmniBlobDownloader.processBlob) {
+                                window.OmniBlobDownloader.processBlob(href, '', downloadName || 'download');
+                            }
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                    }
+                }, true);
+            })();
+            """.trimIndent()
+        }
+
         var createNewTabHandler: ((String) -> Unit)? = null
         var attachTabWebViewHandler: ((String) -> Unit)? = null
 
@@ -1128,6 +1182,12 @@ class OmniBrowser : PluginEntry() {
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
 
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                    try {
+                        WebViewCompat.addDocumentStartJavaScript(this, blobInterceptorScript, setOf("*"))
+                    } catch (_: Exception) {}
+                }
+
                 // Multi-Profile container binding & Cookie Isolation
                 if (profileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
                     try {
@@ -1276,11 +1336,13 @@ class OmniBrowser : PluginEntry() {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                         super.onPageStarted(view, url, favicon)
                         if (activeTabId == tabId) isLoading = true
+                        view?.evaluateJavascript(blobInterceptorScript, null)
                     }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         if (activeTabId == tabId) isLoading = false
+                        view?.evaluateJavascript(blobInterceptorScript, null)
                         CookieManager.getInstance().flush()
 
                         if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != null && url != "about:blank") {
