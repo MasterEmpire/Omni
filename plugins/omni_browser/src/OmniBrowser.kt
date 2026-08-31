@@ -86,7 +86,8 @@ data class ShortcutItem(
     val title: String,
     val url: String,
     val iconText: String = "",
-    val colorValue: Long = 0xFF4285F4
+    val colorValue: Long = 0xFF4285F4,
+    val localSourcePath: String? = null
 )
 
 data class BrowserProfile(
@@ -218,6 +219,23 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
+        fun syncLocalFileToVault(sourcePath: String, targetSubPath: String = "ide/index.html"): Pair<Boolean, String> {
+            val cleanPath = sourcePath.removePrefix("file://").trim()
+            val srcFile = File(cleanPath)
+            if (!srcFile.exists() || !srcFile.isFile) {
+                return Pair(false, "Source file not found: $cleanPath")
+            }
+            return try {
+                val bytes = srcFile.readBytes()
+                val savedAbsPath = bridge.saveFile(targetSubPath, bytes)
+                val kb = String.format(Locale.US, "%.1f", bytes.size / 1024.0)
+                bridge.log("IDE_SYNC", "Vaulted $cleanPath -> $savedAbsPath ($kb KB)")
+                Pair(true, "file://$savedAbsPath")
+            } catch (e: Exception) {
+                Pair(false, "Sync failed: ${e.message}")
+            }
+        }
+
         fun saveShortcutsToDisk(list: List<ShortcutItem>) {
             try {
                 val arr = org.json.JSONArray()
@@ -228,6 +246,9 @@ class OmniBrowser : PluginEntry() {
                         put("url", s.url)
                         put("iconText", s.iconText)
                         put("colorValue", s.colorValue)
+                        if (!s.localSourcePath.isNullOrEmpty()) {
+                            put("localSourcePath", s.localSourcePath)
+                        }
                     }
                     arr.put(obj)
                 }
@@ -479,7 +500,8 @@ class OmniBrowser : PluginEntry() {
                                 title = obj.getString("title"),
                                 url = obj.getString("url"),
                                 iconText = obj.optString("iconText", ""),
-                                colorValue = obj.optLong("colorValue", 0xFF4285F4)
+                                colorValue = obj.optLong("colorValue", 0xFF4285F4),
+                                localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() }
                             )
                         )
                     }
@@ -921,6 +943,10 @@ class OmniBrowser : PluginEntry() {
                     javaScriptEnabled = true
                     domStorageEnabled = true
                     databaseEnabled = true
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    allowFileAccessFromFileURLs = true
+                    allowUniversalAccessFromFileURLs = true
                     setSupportMultipleWindows(true)
                     javaScriptCanOpenWindowsAutomatically = true
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
@@ -1083,6 +1109,8 @@ class OmniBrowser : PluginEntry() {
             val target = when {
                 input == "about:blank" -> "about:blank"
                 input.startsWith("http://") || input.startsWith("https://") -> input
+                input.startsWith("file://") -> input
+                input.startsWith("/storage/") || input.startsWith("/") -> "file://$input"
                 input.startsWith("localhost") || input.startsWith("127.0.0.1") || input.startsWith("192.168.") || input.startsWith("10.") || input.startsWith("172.") -> "http://$input"
                 input.contains(".") && !input.contains(" ") -> "https://$input"
                 else -> "https://www.google.com/search?q=${URLEncoder.encode(input, "UTF-8")}"
@@ -1211,8 +1239,11 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
+        val ideInternalPath = remember { "file://${bridge.getPluginDir()}/ide/index.html" }
+
         val defaultShortcuts = remember {
             listOf(
+                ShortcutItem(title = "Local IDE", url = ideInternalPath, iconText = "💻", colorValue = 0xFF58A6FF, localSourcePath = "/storage/emulated/0/Download/F/index.html"),
                 ShortcutItem(title = "Google", url = "https://www.google.com", iconText = "G", colorValue = 0xFF4285F4),
                 ShortcutItem(title = "YouTube", url = "https://m.youtube.com", iconText = "▶", colorValue = 0xFFEA4335),
                 ShortcutItem(title = "Bot Test", url = "https://bot.sannysoft.com/", iconText = "🕵️", colorValue = 0xFF34A853),
@@ -1495,6 +1526,26 @@ class OmniBrowser : PluginEntry() {
                                 }
 
                                 HorizontalDivider(color = Color(0xFF3C4043))
+
+                                DropdownMenuItem(
+                                    text = { Text("💻 Open Local IDE", color = Color(0xFF58A6FF), fontWeight = FontWeight.Bold) },
+                                    onClick = {
+                                        showMenu = false
+                                        val ideFile = File(bridge.getPluginDir(), "ide/index.html")
+                                        val targetIdeUrl = if (ideFile.exists()) {
+                                            "file://${ideFile.absolutePath}"
+                                        } else {
+                                            val (success, resultPath) = syncLocalFileToVault("/storage/emulated/0/Download/F/index.html")
+                                            if (success) {
+                                                bridge.showToast("✅ Synced Local IDE from Download/F/index.html")
+                                                resultPath
+                                            } else {
+                                                ideInternalPath
+                                            }
+                                        }
+                                        navigateTo(targetIdeUrl)
+                                    }
+                                )
 
                                 DropdownMenuItem(
                                     text = { Text("+ New Tab", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold) },
@@ -1938,16 +1989,41 @@ class OmniBrowser : PluginEntry() {
 
                             Button(
                                 onClick = {
-                                    val formattedUrl = if (!editUrl.startsWith("http://") && !editUrl.startsWith("https://")) "https://${editUrl.trim()}" else editUrl.trim()
+                                    val trimmedUrl = editUrl.trim()
+                                    val isLocalPath = trimmedUrl.startsWith("/storage/") || trimmedUrl.startsWith("file:///storage/") || trimmedUrl.startsWith("/")
+                                    val sourcePath = if (isLocalPath) trimmedUrl.removePrefix("file://") else targetItem.localSourcePath
+                                    
+                                    val finalUrl = if (isLocalPath) {
+                                        val (success, vaultedPath) = syncLocalFileToVault(sourcePath ?: trimmedUrl)
+                                        if (success) {
+                                            bridge.showToast("✅ Synced IDE to vault from disk!")
+                                            vaultedPath
+                                        } else {
+                                            bridge.showToast("⚠️ $vaultedPath")
+                                            if (!trimmedUrl.startsWith("file://") && !trimmedUrl.startsWith("http")) "file://$trimmedUrl" else trimmedUrl
+                                        }
+                                    } else if (targetItem.localSourcePath != null && trimmedUrl.startsWith("file://")) {
+                                        val (success, vaultedPath) = syncLocalFileToVault(targetItem.localSourcePath)
+                                        if (success) {
+                                            bridge.showToast("✅ Re-synced IDE from disk!")
+                                            vaultedPath
+                                        } else {
+                                            trimmedUrl
+                                        }
+                                    } else {
+                                        if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://") && !trimmedUrl.startsWith("file://")) "https://$trimmedUrl" else trimmedUrl
+                                    }
+
                                     val updated = shortcuts.map {
                                         if (it.id == targetItem.id) it.copy(
                                             title = editName.trim().ifEmpty { targetItem.title },
-                                            url = formattedUrl
+                                            url = finalUrl,
+                                            localSourcePath = sourcePath
                                         ) else it
                                     }
                                     shortcuts = updated
                                     saveShortcutsToDisk(updated)
-                                    fetchFavicon(extractDomain(formattedUrl))
+                                    fetchFavicon(extractDomain(finalUrl))
                                     editingShortcut = null
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
@@ -2029,21 +2105,36 @@ class OmniBrowser : PluginEntry() {
                     confirmButton = {
                         Button(
                             onClick = {
-                                val formattedUrl = if (!newUrl.startsWith("http://") && !newUrl.startsWith("https://")) "https://${newUrl.trim()}" else newUrl.trim()
-                                val title = newName.trim().ifEmpty { extractDomain(formattedUrl) }
+                                val trimmedUrl = newUrl.trim()
+                                val isLocalPath = trimmedUrl.startsWith("/storage/") || trimmedUrl.startsWith("file:///storage/") || trimmedUrl.startsWith("/")
+                                val (finalUrl, srcPath) = if (isLocalPath) {
+                                    val cleanSrc = trimmedUrl.removePrefix("file://").trim()
+                                    val (success, vaultedPath) = syncLocalFileToVault(cleanSrc)
+                                    if (success) {
+                                        bridge.showToast("✅ Vaulted local HTML to offline sandbox")
+                                        Pair(vaultedPath, cleanSrc)
+                                    } else {
+                                        bridge.showToast("⚠️ $vaultedPath")
+                                        Pair(if (trimmedUrl.startsWith("file://")) trimmedUrl else "file://$trimmedUrl", cleanSrc)
+                                    }
+                                } else {
+                                    Pair(if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://") && !trimmedUrl.startsWith("file://")) "https://$trimmedUrl" else trimmedUrl, null)
+                                }
+                                val title = newName.trim().ifEmpty { if (isLocalPath) "Local App" else extractDomain(finalUrl) }
                                 val newItem = ShortcutItem(
                                     title = title,
-                                    url = formattedUrl,
-                                    iconText = title.take(1).uppercase(),
-                                    colorValue = 0xFF8AB4F8
+                                    url = finalUrl,
+                                    iconText = if (isLocalPath) "💻" else title.take(1).uppercase(),
+                                    colorValue = 0xFF58A6FF,
+                                    localSourcePath = srcPath
                                 )
                                 val updated = shortcuts + newItem
                                 shortcuts = updated
                                 saveShortcutsToDisk(updated)
-                                fetchFavicon(extractDomain(formattedUrl))
+                                fetchFavicon(extractDomain(finalUrl))
                                 isAddingShortcut = false
                             },
-                            enabled = newUrl.length > 8,
+                            enabled = newUrl.length >= 3,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
                         ) {
                             Text("Add", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
