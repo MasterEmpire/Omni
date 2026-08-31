@@ -2487,24 +2487,18 @@ class OmniBrowser : PluginEntry() {
                 )
             }
 
-            // --- In-Layout Browser Menu Overlay (Zero WindowManager Popups) ---
+            // --- In-Layout Browser Menu Overlay (Single Unified Scrim & Surface) ---
             if (showMenu) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .zIndex(19f)
+                        .zIndex(20f)
                         .clickable(
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                             indication = null
                         ) { showMenu = false }
-                )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
                         .statusBarsPadding()
-                        .padding(top = 52.dp, end = 8.dp)
-                        .zIndex(20f),
+                        .padding(top = 52.dp, end = 8.dp),
                     contentAlignment = Alignment.TopEnd
                 ) {
                     Surface(
@@ -2513,7 +2507,12 @@ class OmniBrowser : PluginEntry() {
                         tonalElevation = 8.dp,
                         shadowElevation = 10.dp,
                         border = BorderStroke(1.dp, Color(0xFF3C4043)),
-                        modifier = Modifier.width(250.dp)
+                        modifier = Modifier
+                            .width(250.dp)
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) { /* Consume taps inside menu so they do not dismiss */ }
                     ) {
                         Column(modifier = Modifier.padding(vertical = 6.dp)) {
                             Row(
@@ -2657,6 +2656,11 @@ class OmniBrowser : PluginEntry() {
                             HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
 
                             InLayoutMenuItem("Exit Omni Chrome", color = Color(0xFFF28B82), isBold = true) {
+                                showMenu = false
+                                showSettingsDialog = false
+                                editingShortcut = null
+                                isAddingShortcut = false
+                                editingProfile = null
                                 bridge.close()
                             }
                         }
