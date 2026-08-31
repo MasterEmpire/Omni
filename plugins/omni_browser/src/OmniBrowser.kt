@@ -136,6 +136,15 @@ class OmniBlobBridge(
     }
 }
 
+data class ActiveDownloadItem(
+    val downloadId: Long,
+    val filename: String,
+    val bytesDownloaded: Long,
+    val totalBytes: Long,
+    val progress: Float,
+    val status: Int
+)
+
 class OmniBrowser : PluginEntry() {
 
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
@@ -242,6 +251,11 @@ class OmniBrowser : PluginEntry() {
 
         var mobileUA by remember { mutableStateOf("") }
         var showSettingsDialog by remember { mutableStateOf(false) }
+        var showDownloadsDialog by remember { mutableStateOf(false) }
+        val trackedDownloadIds = remember { mutableStateListOf<Long>() }
+        var activeDownloadsList by remember { mutableStateOf<List<ActiveDownloadItem>>(emptyList()) }
+        var completedFilesList by remember { mutableStateOf<List<File>>(emptyList()) }
+
         var solverApiKey by remember { mutableStateOf("") }
         var autoSolveEnabled by remember { mutableStateOf(true) }
         var isSolvingCaptcha by remember { mutableStateOf(false) }
@@ -251,6 +265,68 @@ class OmniBrowser : PluginEntry() {
         var undoMessage by remember { mutableStateOf("") }
         var showUndoBanner by remember { mutableStateOf(false) }
         var undoJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+        fun refreshCompletedDownloads() {
+            try {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "OmniDownloads")
+                if (dir.exists() && dir.isDirectory) {
+                    completedFilesList = dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() } ?: emptyList()
+                } else {
+                    completedFilesList = emptyList()
+                }
+            } catch (_: Exception) {
+                completedFilesList = emptyList()
+            }
+        }
+
+        LaunchedEffect(trackedDownloadIds.size, showDownloadsDialog) {
+            while (trackedDownloadIds.isNotEmpty() || showDownloadsDialog) {
+                if (trackedDownloadIds.isNotEmpty()) {
+                    val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                    if (dm != null) {
+                        try {
+                            val query = DownloadManager.Query().setFilterById(*trackedDownloadIds.toLongArray())
+                            val cursor = dm.query(query)
+                            val updated = mutableListOf<ActiveDownloadItem>()
+                            val finishedIds = mutableListOf<Long>()
+
+                            if (cursor != null && cursor.moveToFirst()) {
+                                val idCol = cursor.getColumnIndex(DownloadManager.COLUMN_ID)
+                                val titleCol = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                                val bytesCol = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                                val totalCol = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                                val statusCol = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+
+                                do {
+                                    val dId = if (idCol >= 0) cursor.getLong(idCol) else -1L
+                                    val title = if (titleCol >= 0) cursor.getString(titleCol) ?: "Download" else "Download"
+                                    val bytes = if (bytesCol >= 0) cursor.getLong(bytesCol) else 0L
+                                    val total = if (totalCol >= 0) cursor.getLong(totalCol) else -1L
+                                    val status = if (statusCol >= 0) cursor.getInt(statusCol) else DownloadManager.STATUS_RUNNING
+                                    val prog = if (total > 0) (bytes.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+
+                                    if (status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED) {
+                                        finishedIds.add(dId)
+                                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                                            refreshCompletedDownloads()
+                                        }
+                                    } else {
+                                        updated.add(ActiveDownloadItem(dId, title, bytes, total, prog, status))
+                                    }
+                                } while (cursor.moveToNext())
+                                cursor.close()
+                            }
+                            activeDownloadsList = updated
+                            trackedDownloadIds.removeAll(finishedIds)
+                        } catch (_: Exception) {}
+                    }
+                }
+                if (showDownloadsDialog) {
+                    refreshCompletedDownloads()
+                }
+                delay(1000)
+            }
+        }
 
         var restoreTrigger by remember { mutableStateOf<((Uri) -> Unit)?>(null) }
         val backupPickerLauncher = rememberLauncherForActivityResult(
@@ -888,6 +964,7 @@ class OmniBrowser : PluginEntry() {
 
                 bridge.showToast("Saved $filename to Downloads/OmniDownloads")
                 bridge.log("DOWNLOAD_SUCCESS", "✅ Download complete: $filename (${bytes.size} bytes)")
+                refreshCompletedDownloads()
             } catch (e: Exception) {
                 bridge.showToast("Blob save failed: ${e.message}")
                 bridge.log("DOWNLOAD_ERR", "Failed saving base64 file: ${e.message}\n${e.stackTraceToString()}")
@@ -1105,9 +1182,12 @@ class OmniBrowser : PluginEntry() {
                 }
 
                 val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-                dm?.enqueue(request)
+                val dlId = dm?.enqueue(request)
+                if (dlId != null) {
+                    trackedDownloadIds.add(dlId)
+                }
                 bridge.showToast("Downloading $filename...")
-                bridge.log("DOWNLOAD", "Queued system download for $url ($filename)")
+                bridge.log("DOWNLOAD", "Queued system download for $url ($filename) [ID: $dlId]")
             } catch (e: Exception) {
                 bridge.showToast("Download error: ${e.message}")
                 bridge.log("DOWNLOAD_ERR", "Download queue exception: ${e.message}")
@@ -1997,11 +2077,15 @@ class OmniBrowser : PluginEntry() {
             }
         }
 
-        DisposableEffect(isTabSwitcherOpen, showSettingsDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance, showMenu) {
+        DisposableEffect(isTabSwitcherOpen, showSettingsDialog, showDownloadsDialog, editingProfile, editingShortcut, isAddingShortcut, isHomeOverlayOpen, canGoBack, currentUrl, webViewInstance, showMenu) {
             bridge.setOnBackPressedHandler {
                 when {
                     showMenu -> {
                         showMenu = false
+                        true
+                    }
+                    showDownloadsDialog -> {
+                        showDownloadsDialog = false
                         true
                     }
                     editingShortcut != null -> {
@@ -2029,7 +2113,6 @@ class OmniBrowser : PluginEntry() {
                         true
                     }
                     currentUrl == "about:blank" -> {
-                        // Terminal Root: Already on Homepage. Return false to cleanly suspend to Dashboard.
                         false
                     }
                     webViewInstance?.canGoBack() == true -> {
@@ -2037,7 +2120,6 @@ class OmniBrowser : PluginEntry() {
                         true
                     }
                     else -> {
-                        // Exhausted web page history: return to Homepage
                         navigateTo("about:blank")
                         true
                     }
@@ -2439,6 +2521,263 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 }
+            }
+
+            // --- Downloads Manager Dialog ---
+            if (showDownloadsDialog) {
+                fun formatBytes(bytes: Long): String {
+                    if (bytes <= 0) return "0 B"
+                    val kb = bytes / 1024.0
+                    val mb = kb / 1024.0
+                    val gb = mb / 1024.0
+                    return when {
+                        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+                        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+                        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+                        else -> "$bytes B"
+                    }
+                }
+
+                fun getFileEmoji(filename: String): String {
+                    val ext = filename.substringAfterLast('.', "").lowercase()
+                    return when (ext) {
+                        "zip", "tar", "gz", "rar", "7z" -> "📦"
+                        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+                        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+                        "mp4", "mkv", "webm", "mov" -> "🎬"
+                        "mp3", "wav", "m4a", "flac" -> "🎵"
+                        "pdf", "doc", "docx", "txt", "md" -> "📄"
+                        "apk" -> "🤖"
+                        else -> "📁"
+                    }
+                }
+
+                fun openDownloadedFile(file: File) {
+                    try {
+                        val ext = file.extension.lowercase()
+                        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(Uri.parse("file://${file.absolutePath}"), mime)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Open with...").apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                    } catch (e: Exception) {
+                        bridge.showToast("Could not open file: ${e.message}")
+                    }
+                }
+
+                fun shareDownloadedFile(file: File) {
+                    try {
+                        val ext = file.extension.lowercase()
+                        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = mime
+                            putExtra(Intent.EXTRA_STREAM, Uri.parse("file://${file.absolutePath}"))
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Share ${file.name}").apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                    } catch (e: Exception) {
+                        bridge.showToast("Share failed: ${e.message}")
+                    }
+                }
+
+                AlertDialog(
+                    onDismissRequest = { showDownloadsDialog = false },
+                    containerColor = Color(0xFF282C34),
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("📥", fontSize = 20.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Downloads", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            }
+                            if (completedFilesList.isNotEmpty()) {
+                                Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF1F2227)) {
+                                    Text(
+                                        "${completedFilesList.size} files",
+                                        color = Color(0xFF8AB4F8),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 440.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Section: Active Downloads
+                            if (activeDownloadsList.isNotEmpty()) {
+                                Text("ACTIVE DOWNLOADS", color = Color(0xFF81C995), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                activeDownloadsList.forEach { active ->
+                                    Card(
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    active.filename,
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                                                        dm?.remove(active.downloadId)
+                                                        trackedDownloadIds.remove(active.downloadId)
+                                                    },
+                                                    modifier = Modifier.size(22.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFFF28B82), modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(6.dp))
+                                            LinearProgressIndicator(
+                                                progress = { active.progress },
+                                                color = Color(0xFF81C995),
+                                                trackColor = Color(0xFF3C4043),
+                                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+                                            )
+                                            Spacer(Modifier.height(6.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    "${formatBytes(active.bytesDownloaded)} / ${if (active.totalBytes > 0) formatBytes(active.totalBytes) else "--"}",
+                                                    color = Color(0xFF9AA0A6),
+                                                    fontSize = 10.sp
+                                                )
+                                                Text(
+                                                    "${(active.progress * 100).toInt()}%",
+                                                    color = Color(0xFF81C995),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(color = Color(0xFF3C4043))
+                            }
+
+                            // Section: Completed Files Vault
+                            Text("SAVED FILES (OmniDownloads)", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+
+                            if (completedFilesList.isEmpty() && activeDownloadsList.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(140.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("📂", fontSize = 28.sp)
+                                        Spacer(Modifier.height(6.dp))
+                                        Text("No downloads yet", color = Color(0xFF9AA0A6), fontSize = 13.sp)
+                                    }
+                                }
+                            } else {
+                                androidx.compose.foundation.lazy.LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    items(completedFilesList) { file ->
+                                        Card(
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .clickable { openDownloadedFile(file) }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(getFileEmoji(file.name), fontSize = 20.sp)
+                                                Spacer(Modifier.width(10.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        file.name,
+                                                        color = Color(0xFFE8EAED),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Spacer(Modifier.height(2.dp))
+                                                    Text(
+                                                        "${formatBytes(file.length())} • ${SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(file.lastModified()))}",
+                                                        color = Color(0xFF9AA0A6),
+                                                        fontSize = 10.sp
+                                                    )
+                                                }
+
+                                                IconButton(
+                                                    onClick = { shareDownloadedFile(file) },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color(0xFF8AB4F8), modifier = Modifier.size(16.dp))
+                                                }
+
+                                                IconButton(
+                                                    onClick = {
+                                                        try {
+                                                            file.delete()
+                                                            refreshCompletedDownloads()
+                                                            bridge.showToast("Deleted ${file.name}")
+                                                        } catch (e: Exception) {
+                                                            bridge.showToast("Delete failed: ${e.message}")
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFF28B82), modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { showDownloadsDialog = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
+                        ) {
+                            Text("Close", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                )
             }
 
             // --- Browser Settings & Backup Dialog ---
@@ -3038,6 +3377,15 @@ class OmniBrowser : PluginEntry() {
                                     }
                                     navigateTo(targetUrl)
                                 }
+                            }
+
+                            InLayoutMenuItem(
+                                title = if (trackedDownloadIds.isNotEmpty()) "📥 Downloads (${trackedDownloadIds.size})" else "📥 Downloads",
+                                color = if (trackedDownloadIds.isNotEmpty()) Color(0xFF81C995) else Color(0xFF8AB4F8),
+                                isBold = true
+                            ) {
+                                refreshCompletedDownloads()
+                                showDownloadsDialog = true
                             }
 
                             InLayoutMenuItem("+ New Tab", color = Color(0xFF8AB4F8), isBold = true) {
