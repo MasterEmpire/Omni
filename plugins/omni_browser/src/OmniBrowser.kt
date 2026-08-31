@@ -28,6 +28,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -213,6 +215,12 @@ class OmniBrowser : PluginEntry() {
         var solverApiKey by remember { mutableStateOf("") }
         var autoSolveEnabled by remember { mutableStateOf(true) }
         var isSolvingCaptcha by remember { mutableStateOf(false) }
+
+        var lastClosedTabsSnapshot by remember { mutableStateOf<List<BrowserTab>?>(null) }
+        var lastActiveTabIdSnapshot by remember { mutableStateOf<String?>(null) }
+        var undoMessage by remember { mutableStateOf("") }
+        var showUndoBanner by remember { mutableStateOf(false) }
+        var undoJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
         var restoreTrigger by remember { mutableStateOf<((Uri) -> Unit)?>(null) }
         val backupPickerLauncher = rememberLauncherForActivityResult(
@@ -1350,6 +1358,18 @@ class OmniBrowser : PluginEntry() {
         }
 
         fun closeTab(targetId: String) {
+            val closedTab = tabs.find { it.id == targetId }
+            lastClosedTabsSnapshot = tabs
+            lastActiveTabIdSnapshot = activeTabId
+            val tabTitle = if (closedTab?.url == "about:blank") "New tab" else (closedTab?.title?.take(18) ?: "Tab")
+            undoMessage = "$tabTitle closed"
+            showUndoBanner = true
+            undoJob?.cancel()
+            undoJob = coroutineScope.launch {
+                delay(4000)
+                showUndoBanner = false
+            }
+
             webViewPool.remove(targetId)?.let { wv ->
                 wv.stopLoading()
                 wv.onPause()
@@ -1382,6 +1402,17 @@ class OmniBrowser : PluginEntry() {
         }
 
         fun closeAllTabs() {
+            val count = tabs.size
+            lastClosedTabsSnapshot = tabs
+            lastActiveTabIdSnapshot = activeTabId
+            undoMessage = "$count tabs closed"
+            showUndoBanner = true
+            undoJob?.cancel()
+            undoJob = coroutineScope.launch {
+                delay(4500)
+                showUndoBanner = false
+            }
+
             webViewPool.forEach { (_, wv) ->
                 wv.stopLoading()
                 wv.onPause()
@@ -2661,6 +2692,79 @@ class OmniBrowser : PluginEntry() {
                     onCloseSwitcher = { isTabSwitcherOpen = false },
                     modifier = Modifier.fillMaxSize().zIndex(10f)
                 )
+            }
+
+            // --- Floating Undo Toast / Snackbar Banner ---
+            AnimatedVisibility(
+                visible = showUndoBanner,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 20.dp)
+                    .zIndex(30f)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color(0xFF21262D),
+                    border = BorderStroke(1.dp, Color(0xFF30363D)),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .wrapContentWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = undoMessage,
+                            color = Color(0xFFE8EAED),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        TextButton(
+                            onClick = {
+                                val backup = lastClosedTabsSnapshot
+                                if (backup != null && backup.isNotEmpty()) {
+                                    tabs = backup
+                                    val targetId = if (backup.any { it.id == lastActiveTabIdSnapshot }) lastActiveTabIdSnapshot!! else backup.first().id
+                                    activeTabId = targetId
+                                    saveSessionToDisk(backup, targetId)
+                                    attachTabWebView(targetId)
+                                }
+                                showUndoBanner = false
+                                lastClosedTabsSnapshot = null
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                "UNDO",
+                                color = Color(0xFF58A6FF),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                showUndoBanner = false
+                                lastClosedTabsSnapshot = null
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Dismiss",
+                                tint = Color(0xFF8B949E),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
