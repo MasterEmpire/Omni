@@ -60,6 +60,13 @@ object PluginLoader {
             ?: throw IllegalArgumentException("Missing plugin.json manifest and no fallback entry class provided.")
         val finalName = manifest?.name ?: finalId
 
+        // Purge active in-memory tasks & background engines holding old bytecode in RAM
+        PluginTaskEngine.stopTask(context, finalId)
+        val activeSession = OmniTaskManager.activeSessions.find { it.pluginId == finalId }
+        if (activeSession != null) {
+            OmniTaskManager.killTask(context, activeSession.taskId)
+        }
+
         val targetBaseDir = context.getDir("plugins", Context.MODE_PRIVATE)
         val pluginDir = File(targetBaseDir, finalId)
 
@@ -87,7 +94,11 @@ object PluginLoader {
         OmniLogger.log("LOADER", "Initializing DexClassLoader with classpath: $combinedDexPath")
 
         val optDir = context.getDir("dex_opt", Context.MODE_PRIVATE)
-        if (!optDir.exists()) optDir.mkdirs()
+        if (!optDir.exists()) {
+            optDir.mkdirs()
+        } else {
+            optDir.listFiles()?.filter { it.name.startsWith(finalId) }?.forEach { it.delete() }
+        }
 
         val dataBaseDir = context.getDir("plugins_data", Context.MODE_PRIVATE)
         val dataDir = File(dataBaseDir, finalId).apply { if (!exists()) mkdirs() }
