@@ -2091,6 +2091,45 @@ class OmniBrowser : PluginEntry() {
             webViewInstance?.evaluateJavascript(erudaScript, null)
         }
 
+        fun saveHtmlSnapshot(rawHtml: String, prefix: String = "DOM_Dump"): String {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val filename = "${prefix}_$timestamp.html"
+            var savedToDownloads = false
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+                    }
+                    val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                    if (uri != null) {
+                        context.contentResolver.openOutputStream(uri)?.use { os ->
+                            os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                        }
+                        savedToDownloads = true
+                    }
+                } else {
+                    val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val targetDir = File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+                    val targetFile = File(targetDir, filename)
+                    FileOutputStream(targetFile).use { os ->
+                        os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                    }
+                    savedToDownloads = true
+                }
+            } catch (e: Exception) {
+                bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+            }
+
+            bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+            val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+            bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+            bridge.showToast("✅ Saved DOM to $locationMsg")
+            return locationMsg
+        }
+
         fun captureDomSnapshot() {
             val script = """
                 (function() {
@@ -2120,45 +2159,7 @@ class OmniBrowser : PluginEntry() {
                         } catch (_: Exception) { html }
                     } else html
 
-                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    val filename = "DOM_Dump_$timestamp.html"
-                    var savedToDownloads = false
-
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            val contentValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                                put(MediaStore.MediaColumns.MIME_TYPE, "text/html")
-                                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
-                            }
-                            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                            if (uri != null) {
-                                context.contentResolver.openOutputStream(uri)?.use { os ->
-                                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
-                                }
-                                savedToDownloads = true
-                            }
-                        } else {
-                            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                            val targetDir = File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
-                            val targetFile = File(targetDir, filename)
-                            FileOutputStream(targetFile).use { os ->
-                                os.write(rawHtml.toByteArray(Charsets.UTF_8))
-                            }
-                            savedToDownloads = true
-                        }
-                    } catch (e: Exception) {
-                        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
-                    }
-
-                    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
-                    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $filename (${rawHtml.length} bytes)")
-
-                    if (savedToDownloads) {
-                        bridge.showToast("Saved to Downloads/OmniSnapshots/$filename")
-                    } else {
-                        bridge.showToast("Saved to plugin sandbox: snapshots/$filename")
-                    }
+                    saveHtmlSnapshot(rawHtml, "DOM_Dump")
                 } else {
                     bridge.showToast("Could not capture page DOM.")
                 }
@@ -3194,19 +3195,32 @@ class OmniBrowser : PluginEntry() {
                     },
                     confirmButton = {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Live Diagnostic DOM Dump Button
+                            // Live Diagnostic DOM Dump Button (Direct MediaStore & External Downloads Hook)
                             OutlinedButton(
                                 onClick = {
-                                    headlessAutomationWv?.evaluateJavascript("document.documentElement.outerHTML") { rawHtml ->
-                                        if (!rawHtml.isNullOrEmpty()) {
-                                            val clean = if (rawHtml.startsWith("\"") && rawHtml.endsWith("\"")) {
-                                                try { org.json.JSONObject("{\"h\":$rawHtml}").getString("h") } catch (_: Exception) { rawHtml }
-                                            } else rawHtml
-                                            val filename = "Automator_Dump_${System.currentTimeMillis()}.html"
-                                            bridge.saveFile("snapshots/$filename", clean.toByteArray(Charsets.UTF_8))
-                                            bridge.showToast("Saved live snapshot to snapshots/$filename")
-                                        }
-                                    }
+                                    bridge.showToast("Dumping live DOM to Downloads/OmniSnapshots...")
+                                    val dumpScript = """
+                                        (function() {
+                                            try {
+                                                var clone = document.documentElement.cloneNode(true);
+                                                var head = clone.querySelector('head');
+                                                if (head) {
+                                                    var base = document.createElement('base');
+                                                    base.href = window.location.href;
+                                                    head.insertBefore(base, head.firstChild);
+                                                }
+                                                var fullHtml = '<!DOCTYPE html>\n' + clone.outerHTML;
+                                                if (window.OmniAutomator && window.OmniAutomator.onDomDump) {
+                                                    window.OmniAutomator.onDomDump(fullHtml);
+                                                }
+                                            } catch(e) {
+                                                if (window.OmniAutomator && window.OmniAutomator.onDomDump) {
+                                                    window.OmniAutomator.onDomDump(document.documentElement.outerHTML);
+                                                }
+                                            }
+                                        })();
+                                    """.trimIndent()
+                                    headlessAutomationWv?.evaluateJavascript(dumpScript, null)
                                 },
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8))
                             ) {
