@@ -209,8 +209,21 @@ class OmniBrowser : PluginEntry() {
         var showMenu by remember { mutableStateOf(false) }
 
         val webViewPool = remember { mutableMapOf<String, WebView>() }
+        val pendingPurgeWebViews = remember { mutableMapOf<String, WebView>() }
         var containerLayout: FrameLayout? by remember { mutableStateOf(null) }
         var webViewInstance: WebView? by remember { mutableStateOf(null) }
+
+        fun purgePendingWebViews() {
+            pendingPurgeWebViews.forEach { (_, wv) ->
+                try {
+                    wv.stopLoading()
+                    wv.onPause()
+                    containerLayout?.removeView(wv)
+                    wv.destroy()
+                } catch (_: Exception) {}
+            }
+            pendingPurgeWebViews.clear()
+        }
 
         var mobileUA by remember { mutableStateOf("") }
         var showSettingsDialog by remember { mutableStateOf(false) }
@@ -1360,6 +1373,8 @@ class OmniBrowser : PluginEntry() {
         }
 
         fun closeTab(targetId: String) {
+            purgePendingWebViews()
+
             val closedTab = tabs.find { it.id == targetId }
             lastClosedTabsSnapshot = tabs
             lastActiveTabIdSnapshot = activeTabId
@@ -1368,15 +1383,17 @@ class OmniBrowser : PluginEntry() {
             showUndoBanner = true
             undoJob?.cancel()
             undoJob = coroutineScope.launch {
-                delay(4000)
+                delay(4500)
                 showUndoBanner = false
+                purgePendingWebViews()
+                lastClosedTabsSnapshot = null
             }
 
+            // Move WebView to hot staging limbo instead of destroying it
             webViewPool.remove(targetId)?.let { wv ->
-                wv.stopLoading()
                 wv.onPause()
                 containerLayout?.removeView(wv)
-                wv.destroy()
+                pendingPurgeWebViews[targetId] = wv
             }
 
             val currentIdx = tabs.indexOfFirst { it.id == targetId }
@@ -1404,6 +1421,8 @@ class OmniBrowser : PluginEntry() {
         }
 
         fun closeAllTabs() {
+            purgePendingWebViews()
+
             val count = tabs.size
             lastClosedTabsSnapshot = tabs
             lastActiveTabIdSnapshot = activeTabId
@@ -1413,12 +1432,14 @@ class OmniBrowser : PluginEntry() {
             undoJob = coroutineScope.launch {
                 delay(4500)
                 showUndoBanner = false
+                purgePendingWebViews()
+                lastClosedTabsSnapshot = null
             }
 
-            webViewPool.forEach { (_, wv) ->
-                wv.stopLoading()
+            // Move all active WebViews into hot staging limbo
+            webViewPool.forEach { (id, wv) ->
                 wv.onPause()
-                wv.destroy()
+                pendingPurgeWebViews[id] = wv
             }
             webViewPool.clear()
             containerLayout?.removeAllViews()
@@ -2737,6 +2758,13 @@ class OmniBrowser : PluginEntry() {
 
                         TextButton(
                             onClick = {
+                                undoJob?.cancel()
+                                // Move all hot staged WebViews back to the active pool
+                                pendingPurgeWebViews.forEach { (id, wv) ->
+                                    webViewPool[id] = wv
+                                }
+                                pendingPurgeWebViews.clear()
+
                                 val backup = lastClosedTabsSnapshot
                                 if (backup != null && backup.isNotEmpty()) {
                                     tabs = backup
@@ -2760,7 +2788,9 @@ class OmniBrowser : PluginEntry() {
 
                         IconButton(
                             onClick = {
+                                undoJob?.cancel()
                                 showUndoBanner = false
+                                purgePendingWebViews()
                                 lastClosedTabsSnapshot = null
                             },
                             modifier = Modifier.size(24.dp)
