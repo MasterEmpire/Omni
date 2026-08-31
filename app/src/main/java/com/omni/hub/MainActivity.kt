@@ -586,8 +586,18 @@ fun DashboardScreen(context: Context) {
                         setViewTreeLifecycleOwner(context as? ComponentActivity)
                         setViewTreeViewModelStoreOwner(context as? ComponentActivity)
                         setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+                        requestFocus()
                     }
                     view
+                },
+                update = { view ->
+                    view.apply {
+                        setViewTreeLifecycleOwner(context as? ComponentActivity)
+                        setViewTreeViewModelStoreOwner(context as? ComponentActivity)
+                        setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
