@@ -100,7 +100,7 @@ class BrowserStateHolder(
     var showAutomationResultDialog by mutableStateOf(false)
     var autoSelectedProfileId by mutableStateOf("default")
     var autoSelectedModel by mutableStateOf("Gemini 3.7 Flash")
-    var autoThinkingLevel by mutableStateOf("High")
+    var autoThinkingLevel by mutableStateOf("Default")
     var autoSystemPrompt by mutableStateOf("")
     var autoUserPrompt by mutableStateOf("")
     var isAutomating by mutableStateOf(false)
