@@ -70,3 +70,11 @@ data class SystemInstructionPreset(
     val body: String,
     val updatedAt: Long = System.currentTimeMillis()
 )
+
+data class AutomationAttachment(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val name: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val base64Data: String
+)
