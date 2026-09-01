@@ -582,10 +582,13 @@ fun buildAiStudioAutomationScript(
                     );
                 }
 
-                // 1.5 Configure Temporary Chat (Must occur on clean new_chat before prompt submission)
-                if (TEMPORARY_CHAT && !isTemporaryChatActive()) {
-                    hostLog('TEMP_CHAT', 'Enabling Temporary Chat mode in Google AI Studio...');
-                    updateStatus('Activating Temporary Chat...');
+                // 1.5 Sync Temporary Chat Mode with User Preference (Bi-directional)
+                const currentTempState = isTemporaryChatActive();
+                if (TEMPORARY_CHAT !== currentTempState) {
+                    const actionLabel = TEMPORARY_CHAT ? 'Enabling Temporary Chat' : 'Disabling Temporary Chat (Restoring persistent mode)';
+                    hostLog('TEMP_CHAT', actionLabel + ' in Google AI Studio...');
+                    updateStatus(TEMPORARY_CHAT ? 'Activating Temporary Chat...' : 'Restoring persistent chat...');
+
                     const overflowBtn = document.querySelector('.overflow-menu-wrapper button, button[aria-label*="View more actions"]');
                     if (overflowBtn && isElementVisible(overflowBtn)) {
                         overflowBtn.click();
@@ -595,14 +598,14 @@ fun buildAiStudioAutomationScript(
                         if (tempChatOption) {
                             tempChatOption.click();
                             await randomDelay(1000, 1400);
-                            hostLog('TEMP_CHAT', 'Temporary Chat activated: ' + isTemporaryChatActive());
+                            hostLog('TEMP_CHAT', 'Temporary Chat state synchronized. Now active: ' + isTemporaryChatActive());
                         } else {
                             document.body.click();
                             await randomDelay(300, 500);
                         }
                     }
-                } else if (TEMPORARY_CHAT && isTemporaryChatActive()) {
-                    hostLog('TEMP_CHAT', 'Temporary Chat is already active. Skipping.');
+                } else {
+                    hostLog('TEMP_CHAT', 'Temporary Chat already matches desired state (' + TEMPORARY_CHAT + '). Skipping.');
                 }
 
                 // 2. Open Settings Drawer if System Prompt or Thinking Level is configured
