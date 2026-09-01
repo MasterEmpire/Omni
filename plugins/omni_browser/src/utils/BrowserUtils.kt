@@ -456,7 +456,8 @@ fun buildAiStudioAutomationScript(
     thinkingLevel: String,
     model: String,
     fallbackEnabled: Boolean = true,
-    temporaryChat: Boolean = false
+    temporaryChat: Boolean = false,
+    attachmentsJson: String = "[]"
 ): String {
     return """
         (async function() {
@@ -472,6 +473,7 @@ fun buildAiStudioAutomationScript(
             const TARGET_MODEL = $model;
             const FALLBACK_ENABLED = $fallbackEnabled;
             const TEMPORARY_CHAT = $temporaryChat;
+            const ATTACHMENTS = $attachmentsJson;
 
             const delay = (ms) => new Promise(r => setTimeout(r, ms));
             const randomDelay = (min, max) => delay(Math.floor(Math.random() * (max - min + 1) + min));
@@ -814,14 +816,66 @@ fun buildAiStudioAutomationScript(
                 }
 
                 if (promptArea) {
-                    if (promptArea.value.trim() !== PROMPT.trim()) {
-                        safeInjectText(promptArea, PROMPT);
-                        await randomDelay(800, 1400);
-                    } else {
-                        hostLog('PROMPT', 'Prompt text already present in textarea.');
+                    if (PROMPT && PROMPT.trim().length > 0) {
+                        if (promptArea.value.trim() !== PROMPT.trim()) {
+                            safeInjectText(promptArea, PROMPT);
+                            await randomDelay(800, 1400);
+                        } else {
+                            hostLog('PROMPT', 'Prompt text already present in textarea.');
+                        }
                     }
                 } else {
                     hostLog('PROMPT_ERR', 'Could not locate prompt textarea to inject text.');
+                }
+
+                // 3.5 Dispatch Multimodal File Attachments (Images, PDFs, Audio, etc.)
+                if (ATTACHMENTS && Array.isArray(ATTACHMENTS) && ATTACHMENTS.length > 0) {
+                    updateStatus('Attaching ' + ATTACHMENTS.length + ' file(s)...');
+                    hostLog('ATTACHMENTS', 'Injecting ' + ATTACHMENTS.length + ' file(s) into file input...');
+
+                    const fileInput = document.querySelector('input[data-test-upload-file-input], input[type="file"].file-input, input[type="file"]');
+                    if (fileInput) {
+                        const dt = new DataTransfer();
+                        for (const att of ATTACHMENTS) {
+                            try {
+                                const b64Clean = att.data.includes(',') ? att.data.split(',')[1] : att.data;
+                                const byteChars = atob(b64Clean);
+                                const byteNums = new Array(byteChars.length);
+                                for (let i = 0; i < byteChars.length; i++) {
+                                    byteNums[i] = byteChars.charCodeAt(i);
+                                }
+                                const byteArray = new Uint8Array(byteNums);
+                                const blob = new Blob([byteArray], { type: att.mime || 'application/octet-stream' });
+                                const file = new File([blob], att.name || 'file', { type: att.mime || 'application/octet-stream' });
+                                dt.items.add(file);
+                                hostLog('ATTACHMENTS', 'Prepared File: ' + file.name + ' (' + file.size + ' bytes)');
+                            } catch (e) {
+                                hostLog('ATTACHMENTS_ERR', 'Failed preparing ' + att.name + ': ' + e.message);
+                            }
+                        }
+
+                        if (dt.files.length > 0) {
+                            fileInput.files = dt.files;
+                            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            await randomDelay(1200, 1800);
+
+                            // Wait for media upload to settle
+                            updateStatus('Uploading files to Gemini...');
+                            let uploadWait = 0;
+                            while (uploadWait < 30) {
+                                const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress');
+                                if (!activeUploadIndicator) {
+                                    break;
+                                }
+                                await delay(500);
+                                uploadWait++;
+                            }
+                            await randomDelay(800, 1400);
+                            hostLog('ATTACHMENTS', 'Media attachments processed.');
+                        }
+                    } else {
+                        hostLog('ATTACHMENTS_WARN', 'input[type="file"] not found in AI Studio DOM.');
+                    }
                 }
 
                 // 4. Atomic Submit (Never double-fire or click a stoppable button)
