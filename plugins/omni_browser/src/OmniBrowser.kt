@@ -353,6 +353,13 @@ class OmniBrowser : PluginEntry() {
                     onThinkingLevelChange = { state.autoThinkingLevel = it },
                     temporaryChat = state.autoTemporaryChat,
                     onTemporaryChatChange = { state.autoTemporaryChat = it },
+                    attachments = state.autoAttachments,
+                    onPickFiles = {
+                        bridge.pickFiles("*/*", true) { uris ->
+                            state.attachFiles(uris)
+                        }
+                    },
+                    onRemoveAttachment = { state.removeAttachment(it) },
                     systemPresets = state.systemPresets,
                     systemPromptTitle = state.autoSystemPromptTitle,
                     onSystemPromptTitleChange = { state.autoSystemPromptTitle = it },
