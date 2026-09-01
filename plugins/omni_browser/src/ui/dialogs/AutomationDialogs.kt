@@ -92,8 +92,8 @@ fun AutomationOrderDialog(
                 Column {
                     Text("Thinking Level", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("High", "Low", "Default").forEach { level ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("Default", "High", "Low", "Minimal").forEach { level ->
                             val isSel = thinkingLevel == level
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
@@ -102,7 +102,7 @@ fun AutomationOrderDialog(
                                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onThinkingLevelChange(level) }
                             ) {
                                 Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
-                                    Text(level, color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(level, color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
