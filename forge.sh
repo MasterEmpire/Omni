@@ -101,6 +101,7 @@ echo "⚙️ Compiling Kotlin & Compose UI..."
 API_SOURCES=$(find app/src/main/java/com/omni/hub/api -name "*.kt" 2>/dev/null)
 
 $WORKDIR/kotlinc/bin/kotlinc \
+    -J-Xmx3072m \
     $SRC_TARGET \
     $API_SOURCES \
     -cp "$CP" \
