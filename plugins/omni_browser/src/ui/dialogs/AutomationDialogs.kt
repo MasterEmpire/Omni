@@ -13,8 +13,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -80,7 +82,10 @@ fun AutomationOrderDialog(
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(max = 540.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
                 Text("Configure and dispatch prompts directly to Google AI Studio headlessly using your active profile cookies.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
 
@@ -392,6 +397,7 @@ fun AutomationResultDialog(
     automationError: String?,
     automationElapsedSec: Int,
     automationWebView: WebView? = null,
+    onBackToStaging: () -> Unit = {},
     onDumpDom: () -> Unit,
     onCopyResult: () -> Unit,
     onCloseOrStop: () -> Unit
@@ -412,6 +418,18 @@ fun AutomationResultDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onBackToStaging,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Back to Staging",
+                            tint = Color(0xFF8AB4F8),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
                     if (isAutomating) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF8AB4F8), strokeWidth = 2.dp)
                     } else if (automationError != null) {
@@ -632,12 +650,21 @@ fun AutomationResultDialog(
             }
         },
         confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = onBackToStaging,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8))
+                ) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Staging", fontSize = 11.sp)
+                }
+
                 OutlinedButton(
                     onClick = onDumpDom,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8))
                 ) {
-                    Text("🔍 Dump DOM", fontSize = 11.sp)
+                    Text("🔍 DOM", fontSize = 11.sp)
                 }
 
                 if (automationResult.isNotEmpty()) {
@@ -645,7 +672,7 @@ fun AutomationResultDialog(
                         onClick = onCopyResult,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
                     ) {
-                        Text("📋 Copy", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("📋 Copy", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -653,7 +680,7 @@ fun AutomationResultDialog(
                     onClick = onCloseOrStop,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C4043))
                 ) {
-                    Text(if (isAutomating) "Stop" else "Close", color = Color.White)
+                    Text(if (isAutomating) "Stop" else "Close", color = Color.White, fontSize = 11.sp)
                 }
             }
         }
