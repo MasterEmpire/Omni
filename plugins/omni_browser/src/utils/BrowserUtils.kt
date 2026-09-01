@@ -488,6 +488,39 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                 return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden' && window.getComputedStyle(el).display !== 'none';
             }
 
+            function safeInjectText(el, text) {
+                try {
+                    if (window.getSelection) {
+                        window.getSelection().removeAllRanges();
+                    }
+                    el.focus();
+                    el.click();
+                    if (el.setSelectionRange) {
+                        el.setSelectionRange(0, el.value ? el.value.length : 0);
+                    }
+                    document.execCommand('insertText', false, text);
+
+                    // Dual sync check for Angular/Material forms
+                    if (!el.value || !el.value.includes(text.substring(0, Math.min(15, text.length)))) {
+                        const descriptor = Object.getOwnPropertyDescriptor(el, 'value') || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
+                        if (descriptor && descriptor.set) {
+                            descriptor.set.call(el, text);
+                        } else {
+                            el.value = text;
+                        }
+                    }
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    if (window.getSelection) {
+                        window.getSelection().removeAllRanges();
+                    }
+                } catch(e) {
+                    hostLog('INJECT_ERR', 'Error typing text: ' + e.message);
+                    el.value = text;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+
             try {
                 hostLog('INIT', 'AI Studio Automator script launched. URL: ' + window.location.href);
 
@@ -530,8 +563,7 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
 
                 if (needsSettings) {
                     let sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
-                    
-                    // If side panel is collapsed (mobile mode), open it via tune button
+
                     if (!isElementVisible(sysCard)) {
                         updateStatus('Opening Settings Drawer...');
                         const tuneBtn = document.querySelector('button.runsettings-toggle-button, button[aria-label*="Toggle run settings"], button[aria-label*="run settings"]');
@@ -576,7 +608,6 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                                 sysCard.click();
                                 await randomDelay(600, 1000);
 
-                                // Wait for sliding panel textarea
                                 let sysTa = null;
                                 for (let a = 0; a < 15; a++) {
                                     sysTa = document.querySelector('ms-sliding-right-panel textarea, ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
@@ -586,18 +617,10 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
 
                                 if (sysTa) {
                                     updateStatus('Typing System Instructions...');
-                                    sysTa.focus();
-                                    sysTa.click();
-                                    await randomDelay(200, 400);
-
-                                    document.execCommand('selectAll', false, null);
-                                    document.execCommand('insertText', false, SYS_PROMPT);
-                                    sysTa.dispatchEvent(new Event('input', { bubbles: true }));
-                                    sysTa.dispatchEvent(new Event('change', { bubbles: true }));
+                                    safeInjectText(sysTa, SYS_PROMPT);
                                     hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
                                     await randomDelay(400, 800);
 
-                                    // Click back button to close sliding panel
                                     const backBtn = document.querySelector('ms-sliding-right-panel .back-button, ms-sliding-right-panel button.back-button, ms-sliding-right-panel .panel-header button');
                                     if (backBtn) {
                                         hostLog('SYS_PROMPT', 'Closing sliding panel via back button...');
@@ -615,7 +638,7 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                         }
                     }
 
-                    // C. Close Settings Drawer to restore full chat viewport
+                    // C. Close Settings Drawer
                     if (openedSettingsDrawer) {
                         const closeSettingsBtn = document.querySelector('ms-run-settings button[aria-label*="Close run settings"], button.runsettings-toggle-button');
                         if (closeSettingsBtn) {
@@ -626,33 +649,30 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                     }
                 }
 
-                // Purge any lingering CDK backdrops
+                // Purge any lingering CDK backdrops & ambient selections
                 document.querySelectorAll('.cdk-overlay-backdrop').forEach(b => {
                     try { b.click(); } catch(_) {}
                 });
+                if (window.getSelection) {
+                    window.getSelection().removeAllRanges();
+                }
                 await randomDelay(200, 400);
 
-                // 3. Human-like Keyboard & Clipboard Insertion into User Prompt
+                // 3. Scoped Keyboard Insertion into User Prompt
                 updateStatus('Emulating human typing into prompt area...');
                 promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
                 if (promptArea) {
-                    promptArea.focus();
-                    promptArea.click();
-                    await randomDelay(300, 600);
-                    document.execCommand('selectAll', false, null);
-                    document.execCommand('insertText', false, PROMPT);
-                    promptArea.dispatchEvent(new Event('input', { bubbles: true }));
-                    promptArea.dispatchEvent(new Event('change', { bubbles: true }));
+                    safeInjectText(promptArea, PROMPT);
                     await randomDelay(600, 1200);
                 }
 
-                // 4. Human-like Touch Submission (Exact Cortex Protocol)
+                // 4. Human-like Touch Submission
                 updateStatus('Submitting prompt to Gemini...');
                 const submitBtn = document.querySelector('ms-run-button button[type="submit"], ms-run-button button.ctrl-enter-submits, button[aria-label*="Run"]');
                 if (submitBtn && !submitBtn.disabled) {
                     hostLog('RUN', 'Emulating physical screen touch on Submit button...');
                     submitBtn.dispatchEvent(new Event('touchstart', { bubbles: true }));
-                    await randomDelay(50, 150); // Finger dwell time
+                    await randomDelay(50, 150);
                     submitBtn.dispatchEvent(new Event('touchend', { bubbles: true }));
                     submitBtn.click();
                 } else {
@@ -672,7 +692,6 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                     await delay(600);
                     totalTicks++;
 
-                    // Sniff for errors
                     const errBanner = document.querySelector('ms-banner .error-banner-message');
                     const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error');
                     const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
@@ -685,7 +704,6 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                         return;
                     }
 
-                    // Extract Model Thoughts
                     let currentThoughts = '';
                     const thoughtChunks = Array.from(document.querySelectorAll('ms-thought-chunk ms-text-chunk, ms-thought-chunk .cmark-node'));
                     if (thoughtChunks.length > 0) {
@@ -693,7 +711,6 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                         lastThoughts = currentThoughts;
                     }
 
-                    // Extract Model Output
                     const models = document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model');
                     if (models.length > 0) {
                         const latest = models[models.length - 1];
@@ -705,7 +722,6 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                         if (window.OmniAutomator) window.OmniAutomator.onProgress(currentThoughts, currentOutput);
                     }
 
-                    // Check streaming spinner
                     const spinner = document.querySelector('ms-run-button .stoppable-spinner, mat-spinner, ms-loading-indicator');
                     if (!spinner && currentOutput.length > 0) {
                         const cLen = currentOutput.length;
