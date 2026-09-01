@@ -455,7 +455,8 @@ fun buildAiStudioAutomationScript(
     sysPrompt: String,
     thinkingLevel: String,
     model: String,
-    fallbackEnabled: Boolean = true
+    fallbackEnabled: Boolean = true,
+    temporaryChat: Boolean = false
 ): String {
     return """
         (async function() {
@@ -470,6 +471,7 @@ fun buildAiStudioAutomationScript(
             const THINKING_LEVEL = $thinkingLevel;
             const TARGET_MODEL = $model;
             const FALLBACK_ENABLED = $fallbackEnabled;
+            const TEMPORARY_CHAT = $temporaryChat;
 
             const delay = (ms) => new Promise(r => setTimeout(r, ms));
             const randomDelay = (min, max) => delay(Math.floor(Math.random() * (max - min + 1) + min));
@@ -571,6 +573,37 @@ fun buildAiStudioAutomationScript(
                 }
 
                 await randomDelay(1000, 1600);
+
+                function isTemporaryChatActive() {
+                    return !!(
+                        document.querySelector('ms-incognito-mode-indicator') ||
+                        document.querySelector('.incognito-container') ||
+                        (document.querySelector('.page-title')?.textContent || '').toLowerCase().includes('temporary chat')
+                    );
+                }
+
+                // 1.5 Configure Temporary Chat (Must occur on clean new_chat before prompt submission)
+                if (TEMPORARY_CHAT && !isTemporaryChatActive()) {
+                    hostLog('TEMP_CHAT', 'Enabling Temporary Chat mode in Google AI Studio...');
+                    updateStatus('Activating Temporary Chat...');
+                    const overflowBtn = document.querySelector('.overflow-menu-wrapper button, button[aria-label*="View more actions"]');
+                    if (overflowBtn && isElementVisible(overflowBtn)) {
+                        overflowBtn.click();
+                        await randomDelay(800, 1200);
+
+                        const tempChatOption = document.querySelector('button[data-test-incognito-toggle], button[aria-label*="temporary chat"]');
+                        if (tempChatOption) {
+                            tempChatOption.click();
+                            await randomDelay(1000, 1400);
+                            hostLog('TEMP_CHAT', 'Temporary Chat activated: ' + isTemporaryChatActive());
+                        } else {
+                            document.body.click();
+                            await randomDelay(300, 500);
+                        }
+                    }
+                } else if (TEMPORARY_CHAT && isTemporaryChatActive()) {
+                    hostLog('TEMP_CHAT', 'Temporary Chat is already active. Skipping.');
+                }
 
                 // 2. Open Settings Drawer if System Prompt or Thinking Level is configured
                 const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (SYS_TITLE && SYS_TITLE.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default');
