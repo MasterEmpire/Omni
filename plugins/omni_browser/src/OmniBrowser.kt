@@ -81,6 +81,7 @@ import com.omni.hub.api.PluginEntry
 import com.omni.plugin.browser.models.*
 import com.omni.plugin.browser.utils.*
 import com.omni.plugin.browser.ui.TabSwitcherScreen
+import com.omni.plugin.browser.ui.dialogs.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -2258,1025 +2259,247 @@ class OmniBrowser : PluginEntry() {
                 }
             }
 
-            // --- Dialog 1: AI Studio Automation Order Sheet ---
+            // --- Dialogs & Modals ---
             if (showAutomationDialog) {
-                AlertDialog(
-                    onDismissRequest = { showAutomationDialog = false },
-                    containerColor = Color(0xFF282C34),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🤖", fontSize = 22.sp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("AI Studio Automator", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                    },
-                    text = {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)
-                        ) {
-                            Text("Configure and dispatch prompts directly to Google AI Studio headlessly using your active profile cookies.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
-
-                            // Profile Picker
-                            Column {
-                                Text("Target Profile (Account)", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.height(4.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    profiles.forEach { prof ->
-                                        val isSel = prof.id == autoSelectedProfileId
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = if (isSel) Color(prof.colorValue).copy(alpha = 0.25f) else Color(0xFF1F2227),
-                                            border = BorderStroke(1.dp, if (isSel) Color(prof.colorValue) else Color(0xFF3C4043)),
-                                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { autoSelectedProfileId = prof.id }
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                                            ) {
-                                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(prof.colorValue)))
-                                                Spacer(Modifier.width(6.dp))
-                                                Text(prof.name, color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Thinking Level Picker
-                            Column {
-                                Text("Thinking Level", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.height(4.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    listOf("High", "Low", "Default").forEach { level ->
-                                        val isSel = autoThinkingLevel == level
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = if (isSel) Color(0xFF8AB4F8).copy(alpha = 0.25f) else Color(0xFF1F2227),
-                                            border = BorderStroke(1.dp, if (isSel) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
-                                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { autoThinkingLevel = level }
-                                        ) {
-                                            Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
-                                                Text(level, color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // System Prompt (Optional)
-                            OutlinedTextField(
-                                value = autoSystemPrompt,
-                                onValueChange = { autoSystemPrompt = it },
-                                label = { Text("System Instructions (Optional)") },
-                                placeholder = { Text("You are a specialized assistant...", color = Color(0xFF5F6368), fontSize = 12.sp) },
-                                maxLines = 4,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFFE8EAED),
-                                    unfocusedTextColor = Color(0xFFE8EAED),
-                                    focusedBorderColor = Color(0xFF8AB4F8),
-                                    unfocusedBorderColor = Color(0xFF3C4043)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            // User Prompt
-                            OutlinedTextField(
-                                value = autoUserPrompt,
-                                onValueChange = { autoUserPrompt = it },
-                                label = { Text("User Prompt") },
-                                placeholder = { Text("Enter prompt to run headlessly...", color = Color(0xFF5F6368), fontSize = 12.sp) },
-                                minLines = 3,
-                                maxLines = 6,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFFE8EAED),
-                                    unfocusedTextColor = Color(0xFFE8EAED),
-                                    focusedBorderColor = Color(0xFF8AB4F8),
-                                    unfocusedBorderColor = Color(0xFF3C4043)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = { startAutomationRun() },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8)),
-                            enabled = autoUserPrompt.trim().isNotEmpty()
-                        ) {
-                            Text("⚡ Run Automation", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showAutomationDialog = false }) {
-                            Text("Cancel", color = Color(0xFF9AA0A6))
-                        }
-                    }
+                AutomationOrderDialog(
+                    profiles = profiles,
+                    selectedProfileId = autoSelectedProfileId,
+                    onSelectProfileId = { autoSelectedProfileId = it },
+                    thinkingLevel = autoThinkingLevel,
+                    onThinkingLevelChange = { autoThinkingLevel = it },
+                    systemPrompt = autoSystemPrompt,
+                    onSystemPromptChange = { autoSystemPrompt = it },
+                    userPrompt = autoUserPrompt,
+                    onUserPromptChange = { autoUserPrompt = it },
+                    onDismiss = { showAutomationDialog = false },
+                    onRun = { startAutomationRun() }
                 )
             }
 
-            // --- Dialog 2: Live Execution & Scraped Result Terminal ---
             if (showAutomationResultDialog) {
-                var thoughtsExpanded by remember { mutableStateOf(false) }
-
-                AlertDialog(
-                    onDismissRequest = {
-                        if (!isAutomating) showAutomationResultDialog = false
-                    },
-                    containerColor = Color(0xFF282C34),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                    title = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (isAutomating) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF8AB4F8), strokeWidth = 2.dp)
-                                } else if (automationError != null) {
-                                    Text("❌", fontSize = 18.sp)
-                                } else {
-                                    Text("✅", fontSize = 18.sp)
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    if (isAutomating) "Executing Prompt..." else if (automationError != null) "Execution Error" else "AI Studio Response",
-                                    color = Color(0xFFE8EAED),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                )
-                            }
-                            Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF1F2227)) {
-                                Text("${automationElapsedSec}s", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                            }
-                        }
-                    },
-                    text = {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)
-                        ) {
-                            // Status Banner
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (automationError != null) Color(0xFF4C1C1C) else Color(0xFF1F2227),
-                                border = BorderStroke(1.dp, if (automationError != null) Color(0xFFF28B82) else Color(0xFF3C4043)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = automationError ?: "Status: $automationStatus",
-                                    color = if (automationError != null) Color(0xFFF28B82) else Color(0xFF8AB4F8),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(8.dp)
-                                )
-                            }
-
-                            // Expandable Thoughts Accordion
-                            if (automationThoughts.isNotEmpty()) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFF1F2227),
-                                    border = BorderStroke(1.dp, Color(0xFF3C4043)),
-                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { thoughtsExpanded = !thoughtsExpanded }
-                                ) {
-                                    Column(modifier = Modifier.padding(8.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text("🧠", fontSize = 14.sp)
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("Model Reasoning / Thoughts", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                            Icon(
-                                                if (thoughtsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                                contentDescription = null,
-                                                tint = Color(0xFF9AA0A6),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-
-                                        if (thoughtsExpanded) {
-                                            Spacer(Modifier.height(6.dp))
-                                            androidx.compose.foundation.text.selection.SelectionContainer {
-                                                Text(
-                                                    text = automationThoughts,
-                                                    color = Color(0xFF9AA0A6),
-                                                    fontSize = 11.sp,
-                                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                                    lineHeight = 15.sp,
-                                                    modifier = Modifier.fillMaxWidth().heightIn(max = 140.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Final Scraped Output Terminal
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                                    .background(Color(0xFF16181D), RoundedCornerShape(8.dp))
-                                    .border(1.dp, Color(0xFF3C4043), RoundedCornerShape(8.dp))
-                                    .padding(10.dp)
-                            ) {
-                                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                    item {
-                                        androidx.compose.foundation.text.selection.SelectionContainer {
-                                            Text(
-                                                text = if (automationResult.isNotEmpty()) automationResult else if (isAutomating) "Listening for response stream from AI Studio..." else "No output generated.",
-                                                color = Color(0xFFE8EAED),
-                                                fontSize = 12.sp,
-                                                lineHeight = 17.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    confirmButton = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Live Diagnostic DOM Dump Button (Direct MediaStore & External Downloads Hook)
-                            OutlinedButton(
-                                onClick = {
-                                    bridge.showToast("Dumping live DOM to Downloads/OmniSnapshots...")
-                                    val script = DOM_SNAPSHOT_SCRIPT
-                                    
-                                    headlessAutomationWv?.evaluateJavascript(script) { html ->
-                                        if (!html.isNullOrEmpty() && html != "null") {
-                                            val rawHtml = if (html.startsWith("\"") && html.endsWith("\"")) {
-                                                try {
-                                                    org.json.JSONObject("{\"h\":$html}").getString("h")
-                                                } catch (_: Exception) { html }
-                                            } else html
-                                            saveHtmlSnapshot(rawHtml, "Automator_DOM")
-                                        } else {
-                                            bridge.showToast("Could not capture page DOM.")
-                                        }
-                                    }
-                                },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8))
-                            ) {
-                                Text("🔍 Dump DOM", fontSize = 11.sp)
-                            }
-
-                            if (automationResult.isNotEmpty()) {
-                                Button(
-                                    onClick = {
-                                        bridge.copyToClipboard(automationResult)
-                                        bridge.showToast("Copied result to clipboard!")
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
-                                ) {
-                                    Text("📋 Copy", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-
-                            Button(
-                                onClick = {
-                                    showAutomationResultDialog = false
+                AutomationResultDialog(
+                    isAutomating = isAutomating,
+                    automationStatus = automationStatus,
+                    automationThoughts = automationThoughts,
+                    automationResult = automationResult,
+                    automationError = automationError,
+                    automationElapsedSec = automationElapsedSec,
+                    onDumpDom = {
+                        bridge.showToast("Dumping live DOM to Downloads/OmniSnapshots...")
+                        headlessAutomationWv?.evaluateJavascript(DOM_SNAPSHOT_SCRIPT) { html ->
+                            if (!html.isNullOrEmpty() && html != "null") {
+                                val rawHtml = if (html.startsWith("\"") && html.endsWith("\"")) {
                                     try {
-                                        headlessAutomationWv?.stopLoading()
-                                        headlessAutomationWv?.onPause()
-                                        containerLayout?.removeView(headlessAutomationWv)
-                                        headlessAutomationWv?.destroy()
-                                        headlessAutomationWv = null
-                                    } catch (_: Exception) {}
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C4043))
-                            ) {
-                                Text(if (isAutomating) "Stop" else "Close", color = Color.White)
-                            }
-                        }
-                    }
-                )
-            }
-
-            // --- Downloads Manager Dialog ---
-            if (showDownloadsDialog) {
-                fun formatBytes(bytes: Long): String {
-                    if (bytes <= 0) return "0 B"
-                    val kb = bytes / 1024.0
-                    val mb = kb / 1024.0
-                    val gb = mb / 1024.0
-                    return when {
-                        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
-                        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
-                        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
-                        else -> "$bytes B"
-                    }
-                }
-
-                fun getFileEmoji(filename: String): String {
-                    val ext = filename.substringAfterLast('.', "").lowercase()
-                    return when (ext) {
-                        "zip", "tar", "gz", "rar", "7z" -> "📦"
-                        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
-                        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
-                        "mp4", "mkv", "webm", "mov" -> "🎬"
-                        "mp3", "wav", "m4a", "flac" -> "🎵"
-                        "pdf", "doc", "docx", "txt", "md" -> "📄"
-                        "apk" -> "🤖"
-                        else -> "📁"
-                    }
-                }
-
-                fun openDownloadedFile(file: File) {
-                    try {
-                        val ext = file.extension.lowercase()
-                        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(Uri.parse("file://${file.absolutePath}"), mime)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(intent, "Open with...").apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        })
-                    } catch (e: Exception) {
-                        bridge.showToast("Could not open file: ${e.message}")
-                    }
-                }
-
-                fun shareDownloadedFile(file: File) {
-                    try {
-                        val ext = file.extension.lowercase()
-                        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
-                        val intent = Intent(Intent.ACTION_SEND).apply {
-                            type = mime
-                            putExtra(Intent.EXTRA_STREAM, Uri.parse("file://${file.absolutePath}"))
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(intent, "Share ${file.name}").apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        })
-                    } catch (e: Exception) {
-                        bridge.showToast("Share failed: ${e.message}")
-                    }
-                }
-
-                AlertDialog(
-                    onDismissRequest = { showDownloadsDialog = false },
-                    containerColor = Color(0xFF282C34),
-                    title = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("📥", fontSize = 20.sp)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Downloads", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            }
-                            if (completedFilesList.isNotEmpty()) {
-                                Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF1F2227)) {
-                                    Text(
-                                        "${completedFilesList.size} files",
-                                        color = Color(0xFF8AB4F8),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    text = {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 440.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            // Section: Active Downloads
-                            if (activeDownloadsList.isNotEmpty()) {
-                                Text("ACTIVE DOWNLOADS", color = Color(0xFF81C995), fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                activeDownloadsList.forEach { active ->
-                                    Card(
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Column(modifier = Modifier.padding(10.dp)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    active.filename,
-                                                    color = Color.White,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                IconButton(
-                                                    onClick = {
-                                                        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-                                                        dm?.remove(active.downloadId)
-                                                        trackedDownloadIds.remove(active.downloadId)
-                                                    },
-                                                    modifier = Modifier.size(22.dp)
-                                                ) {
-                                                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFFF28B82), modifier = Modifier.size(16.dp))
-                                                }
-                                            }
-                                            Spacer(Modifier.height(6.dp))
-                                            LinearProgressIndicator(
-                                                progress = { active.progress },
-                                                color = Color(0xFF81C995),
-                                                trackColor = Color(0xFF3C4043),
-                                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
-                                            )
-                                            Spacer(Modifier.height(6.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Text(
-                                                    "${formatBytes(active.bytesDownloaded)} / ${if (active.totalBytes > 0) formatBytes(active.totalBytes) else "--"}",
-                                                    color = Color(0xFF9AA0A6),
-                                                    fontSize = 10.sp
-                                                )
-                                                Text(
-                                                    "${(active.progress * 100).toInt()}%",
-                                                    color = Color(0xFF81C995),
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                HorizontalDivider(color = Color(0xFF3C4043))
-                            }
-
-                            // Section: Completed Files Vault
-                            Text("SAVED FILES (OmniDownloads)", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 11.sp)
-
-                            if (completedFilesList.isEmpty() && activeDownloadsList.isEmpty()) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(140.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("📂", fontSize = 28.sp)
-                                        Spacer(Modifier.height(6.dp))
-                                        Text("No downloads yet", color = Color(0xFF9AA0A6), fontSize = 13.sp)
-                                    }
-                                }
+                                        org.json.JSONObject("{\"h\":$html}").getString("h")
+                                    } catch (_: Exception) { html }
+                                } else html
+                                saveHtmlSnapshot(rawHtml, "Automator_DOM")
                             } else {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    items(
-                                        count = completedFilesList.size,
-                                        key = { idx -> completedFilesList[idx].absolutePath }
-                                    ) { idx ->
-                                        val file = completedFilesList[idx]
-                                        Card(
-                                            shape = RoundedCornerShape(10.dp),
-                                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .clickable { openDownloadedFile(file) }
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(getFileEmoji(file.name), fontSize = 20.sp)
-                                                Spacer(Modifier.width(10.dp))
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        file.name,
-                                                        color = Color(0xFFE8EAED),
-                                                        fontSize = 12.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Spacer(Modifier.height(2.dp))
-                                                    Text(
-                                                        "${formatBytes(file.length())} • ${SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(file.lastModified()))}",
-                                                        color = Color(0xFF9AA0A6),
-                                                        fontSize = 10.sp
-                                                    )
-                                                }
-
-                                                IconButton(
-                                                    onClick = { shareDownloadedFile(file) },
-                                                    modifier = Modifier.size(28.dp)
-                                                ) {
-                                                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color(0xFF8AB4F8), modifier = Modifier.size(16.dp))
-                                                }
-
-                                                IconButton(
-                                                    onClick = {
-                                                        try {
-                                                            file.delete()
-                                                            refreshCompletedDownloads()
-                                                            bridge.showToast("Deleted ${file.name}")
-                                                        } catch (e: Exception) {
-                                                            bridge.showToast("Delete failed: ${e.message}")
-                                                        }
-                                                    },
-                                                    modifier = Modifier.size(28.dp)
-                                                ) {
-                                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFF28B82), modifier = Modifier.size(16.dp))
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                bridge.showToast("Could not capture page DOM.")
                             }
                         }
                     },
-                    confirmButton = {
-                        Button(
-                            onClick = { showDownloadsDialog = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
-                        ) {
-                            Text("Close", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
-                        }
+                    onCopyResult = {
+                        bridge.copyToClipboard(automationResult)
+                        bridge.showToast("Copied result to clipboard!")
+                    },
+                    onCloseOrStop = {
+                        showAutomationResultDialog = false
+                        try {
+                            headlessAutomationWv?.stopLoading()
+                            headlessAutomationWv?.onPause()
+                            containerLayout?.removeView(headlessAutomationWv)
+                            headlessAutomationWv?.destroy()
+                            headlessAutomationWv = null
+                        } catch (_: Exception) {}
                     }
                 )
             }
 
-            // --- Browser Settings & Backup Dialog ---
+            if (showDownloadsDialog) {
+                DownloadsManagerDialog(
+                    bridge = bridge,
+                    activeDownloadsList = activeDownloadsList,
+                    completedFilesList = completedFilesList,
+                    onCancelDownload = { id ->
+                        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                        dm?.remove(id)
+                        trackedDownloadIds.remove(id)
+                    },
+                    onDeleteFile = { file ->
+                        try {
+                            file.delete()
+                            refreshCompletedDownloads()
+                            bridge.showToast("Deleted ${file.name}")
+                        } catch (e: Exception) {
+                            bridge.showToast("Delete failed: ${e.message}")
+                        }
+                    },
+                    onDismiss = { showDownloadsDialog = false }
+                )
+            }
+
             if (showSettingsDialog) {
-                var tempKey by remember { mutableStateOf(solverApiKey) }
-                var tempAuto by remember { mutableStateOf(autoSolveEnabled) }
-
-                AlertDialog(
-                    onDismissRequest = { showSettingsDialog = false },
-                    containerColor = Color(0xFF282C34),
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("⚙️", fontSize = 20.sp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Settings & Backup", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
+                SettingsBackupDialog(
+                    apiKey = solverApiKey,
+                    autoSolve = autoSolveEnabled,
+                    onExportBackup = { exportFullBackup() },
+                    onRestoreBackup = { backupPickerLauncher.launch("application/zip") },
+                    onSolveNow = { scanAndSolveCaptcha() },
+                    onClearCookiesAndCache = {
+                        CookieManager.getInstance().removeAllCookies(null)
+                        webViewInstance?.clearCache(true)
+                        bridge.showToast("Cookies and Cache cleared.")
                     },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Text("Session & Profile Backup Vault", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text("Backs up all 10 profiles, tabs, custom shortcuts, solver keys, and local IDE vaults. Auto-mirrored to Documents/.omni_vault/.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
-
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(
-                                    onClick = {
-                                        exportFullBackup()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("📦 Export", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        backupPickerLauncher.launch("application/zip")
-                                    },
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8)),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("📥 Restore", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-
-                            HorizontalDivider(color = Color(0xFF3C4043))
-
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Text("NoCaptchaAI Solver", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                TextButton(onClick = { scanAndSolveCaptcha() }) {
-                                    Text("Solve Now", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-
-                            OutlinedTextField(
-                                value = tempKey,
-                                onValueChange = { tempKey = it },
-                                label = { Text("NoCaptchaAI API Key") },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFFE8EAED),
-                                    unfocusedTextColor = Color(0xFFE8EAED),
-                                    focusedBorderColor = Color(0xFF8AB4F8),
-                                    unfocusedBorderColor = Color(0xFF5F6368)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Auto-Solve on Page Load", color = Color(0xFFE8EAED), fontSize = 12.sp)
-                                Switch(
-                                    checked = tempAuto,
-                                    onCheckedChange = { tempAuto = it },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
-                                )
-                            }
-
-                            HorizontalDivider(color = Color(0xFF3C4043))
-
-                            TextButton(
-                                onClick = {
-                                    CookieManager.getInstance().removeAllCookies(null)
-                                    webViewInstance?.clearCache(true)
-                                    bridge.showToast("Cookies and Cache cleared.")
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Clear Cookies & Cache", color = Color(0xFFF28B82), fontSize = 12.sp)
-                            }
+                    onSave = { key, auto ->
+                        solverApiKey = key
+                        autoSolveEnabled = auto
+                        val cfg = org.json.JSONObject().apply {
+                            put("apiKey", solverApiKey)
+                            put("autoSolve", autoSolveEnabled)
                         }
+                        bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
+                        autoMirrorVaultToDocuments()
+                        bridge.showToast("Settings saved!")
+                        showSettingsDialog = false
                     },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                solverApiKey = tempKey.trim()
-                                autoSolveEnabled = tempAuto
-                                val cfg = org.json.JSONObject().apply {
-                                    put("apiKey", solverApiKey)
-                                    put("autoSolve", autoSolveEnabled)
-                                }
-                                bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
-                                autoMirrorVaultToDocuments()
-                                bridge.showToast("Settings saved!")
-                                showSettingsDialog = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
-                        ) {
-                            Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showSettingsDialog = false }) {
-                            Text("Close", color = Color(0xFF9AA0A6))
-                        }
-                    }
+                    onDismiss = { showSettingsDialog = false }
                 )
             }
 
-            // --- Edit Shortcut Dialog ---
             if (editingShortcut != null) {
                 val targetItem = editingShortcut!!
-                var editName by remember(targetItem) { mutableStateOf(targetItem.title) }
-                var editUrl by remember(targetItem) { mutableStateOf(targetItem.localSourcePath ?: targetItem.url) }
-                val previewDomain = remember(editUrl) { extractDomain(editUrl) }
-
-                LaunchedEffect(previewDomain) {
-                    fetchFavicon(previewDomain)
-                }
-                val previewBmp = faviconCache[previewDomain]
-
-                AlertDialog(
-                    onDismissRequest = { editingShortcut = null },
-                    containerColor = Color(0xFF282C34),
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (previewBmp != null) {
-                                Image(
-                                    bitmap = previewBmp.asImageBitmap(),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(24.dp).clip(CircleShape)
-                                )
-                            } else {
-                                Surface(shape = CircleShape, color = Color(targetItem.colorValue), modifier = Modifier.size(24.dp)) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(editName.take(1).uppercase(), fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Text("Edit Shortcut", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                    },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            OutlinedTextField(
-                                value = editName,
-                                onValueChange = { editName = it },
-                                label = { Text("Name") },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFFE8EAED),
-                                    unfocusedTextColor = Color(0xFFE8EAED),
-                                    focusedBorderColor = Color(0xFF8AB4F8),
-                                    unfocusedBorderColor = Color(0xFF5F6368)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = editUrl,
-                                onValueChange = { editUrl = it },
-                                label = { Text("URL or Local File Path") },
-                                singleLine = true,
-                                trailingIcon = {
-                                    IconButton(onClick = {
-                                        bridge.pickFiles("*/*", false) { uris ->
-                                            val picked = uris.firstOrNull()
-                                            if (picked != null) {
-                                                val pathStr = picked.path
-                                                val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
-                                                    pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
-                                                } else {
-                                                    picked.toString()
-                                                }
-                                                editUrl = directPath
-                                            }
-                                        }
-                                    }) {
-                                        Icon(Icons.Default.Add, contentDescription = "Browse File", tint = Color(0xFF8AB4F8))
-                                    }
-                                },
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFFE8EAED),
-                                    unfocusedTextColor = Color(0xFFE8EAED),
-                                    focusedBorderColor = Color(0xFF8AB4F8),
-                                    unfocusedBorderColor = Color(0xFF5F6368)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(
-                                onClick = {
-                                    val updated = shortcuts.filter { it.id != targetItem.id }
-                                    shortcuts = updated
-                                    saveShortcutsToDisk(updated)
-                                    try {
-                                        File(bridge.getPluginDir(), "ide/vault_${targetItem.id}").deleteRecursively()
-                                    } catch (_: Exception) {}
-                                    editingShortcut = null
-                                    bridge.showToast("Shortcut deleted")
-                                }
-                            ) {
-                                Text("Delete", color = Color(0xFFF28B82), fontWeight = FontWeight.Bold)
-                            }
-
-                            Button(
-                                onClick = {
-                                    val trimmedUrl = editUrl.trim()
-                                    val isLocal = isLocalFilePath(trimmedUrl)
-
-                                    val (finalUrl, srcPath) = if (isLocal) {
-                                        val isolatedSubPath = "ide/vault_${targetItem.id}/index.html"
-                                        val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl, isolatedSubPath)
-                                        if (success) {
-                                            bridge.showToast("✅ Synced to private vault slot!")
-                                            Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
-                                        } else {
-                                            bridge.showToast("⚠️ $vaultedPath (See Diagnostics)")
-                                            val cleanNorm = normalizeLocalFilePath(trimmedUrl)
-                                            Pair("file://$cleanNorm", cleanNorm)
-                                        }
-                                    } else {
-                                        val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
-                                        Pair(webUrl, null)
-                                    }
-
-                                    val updated = shortcuts.map {
-                                        if (it.id == targetItem.id) it.copy(
-                                            title = editName.trim().ifEmpty { targetItem.title },
-                                            url = finalUrl,
-                                            localSourcePath = srcPath
-                                        ) else it
-                                    }
-                                    shortcuts = updated
-                                    saveShortcutsToDisk(updated)
-                                    fetchFavicon(extractDomain(finalUrl))
-                                    editingShortcut = null
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
-                            ) {
-                                Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { editingShortcut = null }) {
-                            Text("Cancel", color = Color(0xFF9AA0A6))
-                        }
-                    }
-                )
-            }
-
-            // --- Add Shortcut Dialog ---
-            if (isAddingShortcut) {
-                var newName by remember { mutableStateOf("") }
-                var newUrl by remember { mutableStateOf("https://") }
-                val previewDomain = remember(newUrl) { extractDomain(newUrl) }
-
-                LaunchedEffect(previewDomain) {
-                    if (previewDomain.isNotEmpty() && previewDomain != "https://") {
-                        fetchFavicon(previewDomain)
-                    }
-                }
-                val previewBmp = faviconCache[previewDomain]
-
-                AlertDialog(
-                    onDismissRequest = { isAddingShortcut = false },
-                    containerColor = Color(0xFF282C34),
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (previewBmp != null) {
-                                Image(
-                                    bitmap = previewBmp.asImageBitmap(),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(24.dp).clip(CircleShape)
-                                )
-                            } else {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF8AB4F8))
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Text("Add Shortcut", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                    },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            OutlinedTextField(
-                                value = newName,
-                                onValueChange = { newName = it },
-                                label = { Text("Name (e.g. GitHub or Local IDE)") },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFFE8EAED),
-                                    unfocusedTextColor = Color(0xFFE8EAED),
-                                    focusedBorderColor = Color(0xFF8AB4F8),
-                                    unfocusedBorderColor = Color(0xFF5F6368)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = newUrl,
-                                onValueChange = { newUrl = it },
-                                label = { Text("URL or File Path") },
-                                singleLine = true,
-                                trailingIcon = {
-                                    IconButton(onClick = {
-                                        bridge.pickFiles("*/*", false) { uris ->
-                                            val picked = uris.firstOrNull()
-                                            if (picked != null) {
-                                                val pathStr = picked.path
-                                                val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
-                                                    pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
-                                                } else {
-                                                    picked.toString()
-                                                }
-                                                newUrl = directPath
-                                                if (newName.isEmpty()) {
-                                                    newName = directPath.substringAfterLast("/").substringBeforeLast(".")
-                                                }
-                                            }
-                                        }
-                                    }) {
-                                        Icon(Icons.Default.Add, contentDescription = "Browse File", tint = Color(0xFF8AB4F8))
-                                    }
-                                },
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color(0xFFE8EAED),
-                                    unfocusedTextColor = Color(0xFFE8EAED),
-                                    focusedBorderColor = Color(0xFF8AB4F8),
-                                    unfocusedBorderColor = Color(0xFF5F6368)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                val trimmedUrl = newUrl.trim()
-                                val isLocal = isLocalFilePath(trimmedUrl)
-                                val newShortcutId = "sc_${System.currentTimeMillis()}"
-                                val (finalUrl, srcPath) = if (isLocal) {
-                                    val isolatedSubPath = "ide/vault_$newShortcutId/index.html"
-                                    val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl, isolatedSubPath)
-                                    if (success) {
-                                        bridge.showToast("✅ Isolated vault created for local app")
-                                        Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
-                                    } else {
-                                        bridge.showToast("⚠️ $vaultedPath (See Diagnostics)")
-                                        val cleanNorm = normalizeLocalFilePath(trimmedUrl)
-                                        Pair("file://$cleanNorm", cleanNorm)
-                                    }
+                EditShortcutDialog(
+                    shortcut = targetItem,
+                    faviconCache = faviconCache,
+                    onFetchFavicon = { fetchFavicon(it) },
+                    onPickFile = { onPicked ->
+                        bridge.pickFiles("*/*", false) { uris ->
+                            val picked = uris.firstOrNull()
+                            if (picked != null) {
+                                val pathStr = picked.path
+                                val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
+                                    pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
                                 } else {
-                                    val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
-                                    Pair(webUrl, null)
+                                    picked.toString()
                                 }
-                                val title = newName.trim().ifEmpty { if (isLocal) "Local App" else extractDomain(finalUrl) }
-                                val newItem = ShortcutItem(
-                                    id = newShortcutId,
-                                    title = title,
-                                    url = finalUrl,
-                                    iconText = if (isLocal) "💻" else title.take(1).uppercase(),
-                                    colorValue = 0xFF58A6FF,
-                                    localSourcePath = srcPath
-                                )
-                                val updated = shortcuts + newItem
-                                shortcuts = updated
-                                saveShortcutsToDisk(updated)
-                                fetchFavicon(extractDomain(finalUrl))
-                                isAddingShortcut = false
-                            },
-                            enabled = newUrl.length >= 3,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
-                        ) {
-                            Text("Add", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
+                                onPicked(directPath)
+                            }
                         }
                     },
-                    dismissButton = {
-                        TextButton(onClick = { isAddingShortcut = false }) {
-                            Text("Cancel", color = Color(0xFF9AA0A6))
+                    onDelete = {
+                        val updated = shortcuts.filter { it.id != targetItem.id }
+                        shortcuts = updated
+                        saveShortcutsToDisk(updated)
+                        try {
+                            File(bridge.getPluginDir(), "ide/vault_${targetItem.id}").deleteRecursively()
+                        } catch (_: Exception) {}
+                        editingShortcut = null
+                        bridge.showToast("Shortcut deleted")
+                    },
+                    onSave = { name, rawUrl ->
+                        val trimmedUrl = rawUrl.trim()
+                        val isLocal = isLocalFilePath(trimmedUrl)
+
+                        val (finalUrl, srcPath) = if (isLocal) {
+                            val isolatedSubPath = "ide/vault_${targetItem.id}/index.html"
+                            val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl, isolatedSubPath)
+                            if (success) {
+                                bridge.showToast("✅ Synced to private vault slot!")
+                                Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
+                            } else {
+                                bridge.showToast("⚠️ $vaultedPath (See Diagnostics)")
+                                val cleanNorm = normalizeLocalFilePath(trimmedUrl)
+                                Pair("file://$cleanNorm", cleanNorm)
+                            }
+                        } else {
+                            val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
+                            Pair(webUrl, null)
                         }
-                    }
+
+                        val updated = shortcuts.map {
+                            if (it.id == targetItem.id) it.copy(
+                                title = name.trim().ifEmpty { targetItem.title },
+                                url = finalUrl,
+                                localSourcePath = srcPath
+                            ) else it
+                        }
+                        shortcuts = updated
+                        saveShortcutsToDisk(updated)
+                        fetchFavicon(extractDomain(finalUrl))
+                        editingShortcut = null
+                    },
+                    onDismiss = { editingShortcut = null }
                 )
             }
 
-            // --- Rename Profile Dialog ---
+            if (isAddingShortcut) {
+                AddShortcutDialog(
+                    faviconCache = faviconCache,
+                    onFetchFavicon = { fetchFavicon(it) },
+                    onPickFile = { onPicked ->
+                        bridge.pickFiles("*/*", false) { uris ->
+                            val picked = uris.firstOrNull()
+                            if (picked != null) {
+                                val pathStr = picked.path
+                                val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
+                                    pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
+                                } else {
+                                    picked.toString()
+                                }
+                                onPicked(directPath)
+                            }
+                        }
+                    },
+                    onAdd = { name, rawUrl ->
+                        val trimmedUrl = rawUrl.trim()
+                        val isLocal = isLocalFilePath(trimmedUrl)
+                        val newShortcutId = "sc_${System.currentTimeMillis()}"
+                        val (finalUrl, srcPath) = if (isLocal) {
+                            val isolatedSubPath = "ide/vault_$newShortcutId/index.html"
+                            val (success, vaultedPath) = syncLocalFileToVault(trimmedUrl, isolatedSubPath)
+                            if (success) {
+                                bridge.showToast("✅ Isolated vault created for local app")
+                                Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
+                            } else {
+                                bridge.showToast("⚠️ $vaultedPath (See Diagnostics)")
+                                val cleanNorm = normalizeLocalFilePath(trimmedUrl)
+                                Pair("file://$cleanNorm", cleanNorm)
+                            }
+                        } else {
+                            val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
+                            Pair(webUrl, null)
+                        }
+                        val title = name.trim().ifEmpty { if (isLocal) "Local App" else extractDomain(finalUrl) }
+                        val newItem = ShortcutItem(
+                            id = newShortcutId,
+                            title = title,
+                            url = finalUrl,
+                            iconText = if (isLocal) "💻" else title.take(1).uppercase(),
+                            colorValue = 0xFF58A6FF,
+                            localSourcePath = srcPath
+                        )
+                        val updated = shortcuts + newItem
+                        shortcuts = updated
+                        saveShortcutsToDisk(updated)
+                        fetchFavicon(extractDomain(finalUrl))
+                        isAddingShortcut = false
+                    },
+                    onDismiss = { isAddingShortcut = false }
+                )
+            }
+
             if (editingProfile != null) {
                 val targetProf = editingProfile!!
-                var renameText by remember(targetProf) { mutableStateOf(targetProf.name) }
-
-                AlertDialog(
-                    onDismissRequest = { editingProfile = null },
-                    containerColor = Color(0xFF282C34),
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(12.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(targetProf.colorValue))
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Rename Profile", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
+                RenameProfileDialog(
+                    profile = targetProf,
+                    onSave = { newName ->
+                        val updated = profiles.map { if (it.id == targetProf.id) it.copy(name = newName) else it }
+                        profiles = updated
+                        saveProfilesToDisk(updated)
+                        editingProfile = null
                     },
-                    text = {
-                        OutlinedTextField(
-                            value = renameText,
-                            onValueChange = { renameText = it },
-                            label = { Text("Profile Display Name") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color(0xFFE8EAED),
-                                unfocusedTextColor = Color(0xFFE8EAED),
-                                focusedBorderColor = Color(targetProf.colorValue),
-                                unfocusedBorderColor = Color(0xFF5F6368)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                val newName = renameText.trim().ifEmpty { targetProf.name }
-                                val updated = profiles.map { if (it.id == targetProf.id) it.copy(name = newName) else it }
-                                profiles = updated
-                                saveProfilesToDisk(updated)
-                                editingProfile = null
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(targetProf.colorValue))
-                        ) {
-                            Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { editingProfile = null }) {
-                            Text("Cancel", color = Color(0xFF9AA0A6))
-                        }
-                    }
+                    onDismiss = { editingProfile = null }
                 )
             }
 
