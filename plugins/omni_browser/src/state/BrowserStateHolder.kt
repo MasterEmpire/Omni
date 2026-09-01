@@ -102,6 +102,7 @@ class BrowserStateHolder(
     var autoSelectedModel by mutableStateOf("Gemini 3.7 Flash")
     var autoThinkingLevel by mutableStateOf("Default")
     var autoTemporaryChat by mutableStateOf(false)
+    var autoAttachments by mutableStateOf<List<AutomationAttachment>>(emptyList())
     var systemPresets by mutableStateOf<List<SystemInstructionPreset>>(emptyList())
     var autoSystemPromptTitle by mutableStateOf("")
     var autoSystemPrompt by mutableStateOf("")
@@ -405,6 +406,55 @@ class BrowserStateHolder(
         autoSystemPrompt = preset.body
     }
 
+    fun attachFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        coroutineScope.launch(Dispatchers.IO) {
+            val newItems = mutableListOf<AutomationAttachment>()
+            for (uri in uris) {
+                try {
+                    var name = "attachment_${System.currentTimeMillis()}"
+                    var size = 0L
+                    var mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                        if (cursor.moveToFirst()) {
+                            if (nameIdx >= 0) name = cursor.getString(nameIdx) ?: name
+                            if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
+                        }
+                    }
+
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        if (size <= 0) size = bytes.size.toLong()
+                        val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        newItems.add(
+                            AutomationAttachment(
+                                name = name,
+                                mimeType = mime,
+                                sizeBytes = size,
+                                base64Data = b64
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    bridge.log("ATTACH_ERR", "Failed reading attachment: ${e.message}")
+                }
+            }
+            if (newItems.isNotEmpty()) {
+                withContext(Dispatchers.Main) {
+                    autoAttachments = autoAttachments + newItems
+                    bridge.showToast("Attached ${newItems.size} file(s)")
+                }
+            }
+        }
+    }
+
+    fun removeAttachment(id: String) {
+        autoAttachments = autoAttachments.filter { it.id != id }
+    }
+
     fun startAutomation() {
         if (autoUserPrompt.trim().isEmpty()) {
             bridge.showToast("Please provide a prompt to run.")
@@ -429,6 +479,7 @@ class BrowserStateHolder(
             model = autoSelectedModel,
             fallbackEnabled = autoFallbackToLocalPreset,
             temporaryChat = autoTemporaryChat,
+            attachments = autoAttachments,
             containerLayout = containerLayout,
             callback = this
         )
