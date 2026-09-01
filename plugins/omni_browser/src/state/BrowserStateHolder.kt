@@ -101,7 +101,10 @@ class BrowserStateHolder(
     var autoSelectedProfileId by mutableStateOf("default")
     var autoSelectedModel by mutableStateOf("Gemini 3.7 Flash")
     var autoThinkingLevel by mutableStateOf("Default")
+    var systemPresets by mutableStateOf<List<SystemInstructionPreset>>(emptyList())
+    var autoSystemPromptTitle by mutableStateOf("")
     var autoSystemPrompt by mutableStateOf("")
+    var autoFallbackToLocalPreset by mutableStateOf(true)
     var autoUserPrompt by mutableStateOf("")
     var isAutomating by mutableStateOf(false)
     var automationStatus by mutableStateOf("Idle")
@@ -134,6 +137,10 @@ class BrowserStateHolder(
 
         vaultManager.loadProfiles()?.let { loaded ->
             if (loaded.isNotEmpty()) profiles = loaded
+        }
+
+        vaultManager.loadSystemPresets()?.let { loaded ->
+            if (loaded.isNotEmpty()) systemPresets = loaded
         }
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId) ->
@@ -372,6 +379,31 @@ class BrowserStateHolder(
         }
     }
 
+    fun saveCurrentSystemPreset(title: String, body: String) {
+        val cleanTitle = title.trim().ifEmpty { "Preset ${systemPresets.size + 1}" }
+        val existing = systemPresets.find { it.title.equals(cleanTitle, ignoreCase = true) }
+        val updated = if (existing != null) {
+            systemPresets.map { if (it.id == existing.id) it.copy(body = body.trim(), updatedAt = System.currentTimeMillis()) else it }
+        } else {
+            systemPresets + SystemInstructionPreset(title = cleanTitle, body = body.trim())
+        }
+        systemPresets = updated
+        vaultManager.saveSystemPresets(updated)
+        bridge.showToast("💾 Saved preset '$cleanTitle'")
+    }
+
+    fun deleteSystemPreset(id: String) {
+        val updated = systemPresets.filter { it.id != id }
+        systemPresets = updated
+        vaultManager.saveSystemPresets(updated)
+        bridge.showToast("Deleted preset")
+    }
+
+    fun selectSystemPreset(preset: SystemInstructionPreset) {
+        autoSystemPromptTitle = preset.title
+        autoSystemPrompt = preset.body
+    }
+
     fun startAutomation() {
         if (autoUserPrompt.trim().isEmpty()) {
             bridge.showToast("Please provide a prompt to run.")
@@ -390,9 +422,11 @@ class BrowserStateHolder(
         automator.start(
             profileId = autoSelectedProfileId,
             userPrompt = autoUserPrompt,
+            systemPromptTitle = autoSystemPromptTitle,
             systemPrompt = autoSystemPrompt,
             thinkingLevel = autoThinkingLevel,
             model = autoSelectedModel,
+            fallbackEnabled = autoFallbackToLocalPreset,
             containerLayout = containerLayout,
             callback = this
         )
@@ -429,6 +463,7 @@ class BrowserStateHolder(
             result.shortcuts?.let { shortcuts = it }
             result.solverApiKey?.let { solverApiKey = it }
             result.autoSolveEnabled?.let { autoSolveEnabled = it }
+            result.systemPresets?.let { systemPresets = it }
             if (!result.tabs.isNullOrEmpty()) {
                 tabs = result.tabs
                 val targetId = if (!result.activeTabId.isNullOrEmpty() && result.tabs.any { it.id == result.activeTabId }) result.activeTabId else result.tabs.first().id
