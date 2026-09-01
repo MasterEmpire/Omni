@@ -610,47 +610,65 @@ fun buildAiStudioAutomationScript(
                     // B. Select or Inject System Instructions
                     if ((SYS_TITLE && SYS_TITLE.length > 0) || (SYS_PROMPT && SYS_PROMPT.length > 0)) {
                         try {
-                            updateStatus('Opening System Instructions panel...');
+                            updateStatus('Opening System Instructions dialog...');
                             sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
                             if (sysCard) {
-                                hostLog('SYS_PROMPT', 'Clicking System Instructions card...');
+                                hostLog('SYS_PROMPT', 'Clicking System Instructions card button...');
                                 sysCard.click();
                                 await randomDelay(600, 1000);
 
                                 let matchedExisting = false;
 
-                                // 1. Scan AI Studio for existing saved preset by title
-                                if (SYS_TITLE && SYS_TITLE.length > 0) {
-                                    const clickableItems = Array.from(document.querySelectorAll('ms-sliding-right-panel button, ms-system-instructions button, ms-sliding-right-panel .card-title, ms-sliding-right-panel .title, ms-sliding-right-panel [role="button"]'));
-                                    const match = clickableItems.find(el => el.textContent.trim().toLowerCase() === SYS_TITLE.toLowerCase());
-                                    if (match && isElementVisible(match)) {
-                                        hostLog('SYS_PROMPT', 'Found existing preset in AI Studio for title: ' + SYS_TITLE + '. Selecting...');
-                                        match.click();
-                                        matchedExisting = true;
-                                        await randomDelay(400, 800);
+                                // 1. Scan AI Studio mat-select dropdown for existing saved preset by title
+                                const sysSelect = document.querySelector('ms-system-instructions mat-select, .select-tooltip-wrapper mat-select');
+                                if (sysSelect) {
+                                    hostLog('SYS_PROMPT', 'Opening System Instructions preset dropdown...');
+                                    sysSelect.click();
+                                    await randomDelay(400, 700);
+
+                                    const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
+
+                                    if (SYS_TITLE && SYS_TITLE.length > 0) {
+                                        const match = options.find(opt => {
+                                            const txt = (opt.textContent || '').trim().toLowerCase();
+                                            return txt === SYS_TITLE.toLowerCase();
+                                        });
+                                        if (match) {
+                                            hostLog('SYS_PROMPT', 'Found existing preset in AI Studio for title: "' + SYS_TITLE + '". Selecting...');
+                                            match.click();
+                                            matchedExisting = true;
+                                            await randomDelay(400, 700);
+                                        }
+                                    }
+
+                                    // If not matched or creating new instruction
+                                    if (!matchedExisting) {
+                                        const createNewOpt = options.find(opt => (opt.textContent || '').includes('Create new instruction'));
+                                        if (createNewOpt) {
+                                            hostLog('SYS_PROMPT', 'Selecting "+ Create new instruction" option...');
+                                            createNewOpt.click();
+                                            await randomDelay(300, 500);
+                                        } else {
+                                            document.body.click();
+                                            await randomDelay(200, 400);
+                                        }
                                     }
                                 }
 
-                                // 2. If not found or new, create and inject title + body from local vault
+                                // 2. If new or not matched in studio, inject title + body from local vault
                                 if (!matchedExisting) {
                                     if (FALLBACK_ENABLED && SYS_PROMPT && SYS_PROMPT.length > 0) {
-                                        hostLog('SYS_PROMPT', 'Title "' + SYS_TITLE + '" not found in AI Studio. Creating new instruction from local vault...');
-                                        
-                                        const addBtn = document.querySelector('ms-sliding-right-panel button[aria-label*="Add"], ms-sliding-right-panel button.add-button, ms-system-instructions button[aria-label*="New"]');
-                                        if (addBtn && isElementVisible(addBtn)) {
-                                            addBtn.click();
-                                            await randomDelay(400, 700);
-                                        }
+                                        hostLog('SYS_PROMPT', 'Injecting custom title and instructions body into dialog...');
 
-                                        const titleInput = document.querySelector('ms-sliding-right-panel input[formcontrolname*="title"], ms-sliding-right-panel input[placeholder*="Title"], ms-sliding-right-panel input');
-                                        if (titleInput && isElementVisible(titleInput) && SYS_TITLE && SYS_TITLE.length > 0) {
+                                        const titleInput = document.querySelector('ms-system-instructions .title-row input, ms-system-instructions input[placeholder*="Title"], ms-system-instructions input');
+                                        if (titleInput && SYS_TITLE && SYS_TITLE.length > 0) {
                                             safeInjectText(titleInput, SYS_TITLE);
                                             await randomDelay(200, 400);
                                         }
 
                                         let sysTa = null;
                                         for (let a = 0; a < 15; a++) {
-                                            sysTa = document.querySelector('ms-sliding-right-panel textarea, ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
+                                            sysTa = document.querySelector('ms-system-instructions textarea, textarea.in-run-settings, textarea[aria-label*="System"], textarea[placeholder*="instructions"]');
                                             if (sysTa && isElementVisible(sysTa)) break;
                                             await delay(300);
                                         }
@@ -666,11 +684,23 @@ fun buildAiStudioAutomationScript(
                                     }
                                 }
 
-                                // Close sliding panel via back button to commit
-                                const backBtn = document.querySelector('ms-sliding-right-panel .back-button, ms-sliding-right-panel button.back-button, ms-sliding-right-panel .panel-header button');
-                                if (backBtn) {
-                                    hostLog('SYS_PROMPT', 'Closing sliding panel via back button...');
-                                    backBtn.click();
+                                // Wait for auto-save status
+                                let saveWait = 0;
+                                while (saveWait < 8) {
+                                    const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status');
+                                    if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) {
+                                        hostLog('SYS_PROMPT', 'System instructions saved status confirmed.');
+                                        break;
+                                    }
+                                    await delay(200);
+                                    saveWait++;
+                                }
+
+                                // 3. Close dialog via close button
+                                const closeBtn = document.querySelector('mat-dialog-container button[mat-dialog-close], mat-dialog-container button[aria-label*="Close"], button[data-test-close-button]');
+                                if (closeBtn) {
+                                    hostLog('SYS_PROMPT', 'Closing System Instructions dialog...');
+                                    closeBtn.click();
                                     await randomDelay(400, 700);
                                 }
                             } else {
