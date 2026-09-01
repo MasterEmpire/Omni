@@ -40,6 +40,7 @@ class AiStudioAutomator(
         thinkingLevel: String = "Default",
         model: String = "Gemini 3.7 Flash",
         fallbackEnabled: Boolean = true,
+        temporaryChat: Boolean = false,
         containerLayout: FrameLayout?,
         callback: AutomationCallback
     ) {
@@ -67,7 +68,8 @@ class AiStudioAutomator(
             sysPrompt = jsEscapedSysPrompt,
             thinkingLevel = jsEscapedThinking,
             model = jsEscapedModel,
-            fallbackEnabled = fallbackEnabled
+            fallbackEnabled = fallbackEnabled,
+            temporaryChat = temporaryChat
         )
 
         val autoWv = WebView(context).apply {
