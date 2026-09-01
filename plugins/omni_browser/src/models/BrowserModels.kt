@@ -63,3 +63,10 @@ data class ActiveDownloadItem(
     val progress: Float,
     val status: Int
 )
+
+data class SystemInstructionPreset(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val body: String,
+    val updatedAt: Long = System.currentTimeMillis()
+)
