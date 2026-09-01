@@ -41,6 +41,7 @@ class AiStudioAutomator(
         model: String = "Gemini 3.7 Flash",
         fallbackEnabled: Boolean = true,
         temporaryChat: Boolean = false,
+        attachments: List<com.omni.plugin.browser.models.AutomationAttachment> = emptyList(),
         containerLayout: FrameLayout?,
         callback: AutomationCallback
     ) {
@@ -62,6 +63,18 @@ class AiStudioAutomator(
         val jsEscapedThinking = JSONObject.quote(thinkingLevel)
         val jsEscapedModel = JSONObject.quote(model)
 
+        val attachmentsArray = org.json.JSONArray()
+        attachments.forEach { att ->
+            attachmentsArray.put(
+                JSONObject().apply {
+                    put("name", att.name)
+                    put("mime", att.mimeType)
+                    put("data", att.base64Data)
+                }
+            )
+        }
+        val jsAttachments = attachmentsArray.toString()
+
         val automationScript = buildAiStudioAutomationScript(
             prompt = jsEscapedPrompt,
             sysTitle = jsEscapedSysTitle,
@@ -69,7 +82,8 @@ class AiStudioAutomator(
             thinkingLevel = jsEscapedThinking,
             model = jsEscapedModel,
             fallbackEnabled = fallbackEnabled,
-            temporaryChat = temporaryChat
+            temporaryChat = temporaryChat,
+            attachmentsJson = jsAttachments
         )
 
         val autoWv = WebView(context).apply {
