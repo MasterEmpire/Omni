@@ -194,6 +194,7 @@ class AiStudioAutomator(
         try {
             headlessWv?.stopLoading()
             headlessWv?.onPause()
+            (headlessWv?.parent as? ViewGroup)?.removeView(headlessWv)
             containerLayout?.removeView(headlessWv)
             headlessWv?.destroy()
         } catch (_: Exception) {}
