@@ -351,6 +351,8 @@ class OmniBrowser : PluginEntry() {
                     onSelectProfileId = { state.autoSelectedProfileId = it },
                     thinkingLevel = state.autoThinkingLevel,
                     onThinkingLevelChange = { state.autoThinkingLevel = it },
+                    temporaryChat = state.autoTemporaryChat,
+                    onTemporaryChatChange = { state.autoTemporaryChat = it },
                     systemPresets = state.systemPresets,
                     systemPromptTitle = state.autoSystemPromptTitle,
                     onSystemPromptTitleChange = { state.autoSystemPromptTitle = it },
