@@ -34,8 +34,16 @@ fun AutomationOrderDialog(
     onSelectProfileId: (String) -> Unit,
     thinkingLevel: String,
     onThinkingLevelChange: (String) -> Unit,
+    systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>,
+    systemPromptTitle: String,
+    onSystemPromptTitleChange: (String) -> Unit,
     systemPrompt: String,
     onSystemPromptChange: (String) -> Unit,
+    fallbackEnabled: Boolean,
+    onFallbackEnabledChange: (Boolean) -> Unit,
+    onSavePreset: (String, String) -> Unit,
+    onDeletePreset: (String) -> Unit,
+    onSelectPreset: (com.omni.plugin.browser.models.SystemInstructionPreset) -> Unit,
     userPrompt: String,
     onUserPromptChange: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -54,8 +62,8 @@ fun AutomationOrderDialog(
         },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 540.dp)
             ) {
                 Text("Configure and dispatch prompts directly to Google AI Studio headlessly using your active profile cookies.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
 
@@ -77,7 +85,7 @@ fun AutomationOrderDialog(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                 ) {
                                     Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(prof.colorValue)))
                                     Spacer(Modifier.width(6.dp))
@@ -101,7 +109,7 @@ fun AutomationOrderDialog(
                                 border = BorderStroke(1.dp, if (isSel) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
                                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onThinkingLevelChange(level) }
                             ) {
-                                Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                Box(modifier = Modifier.padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
                                     Text(level, color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
@@ -109,21 +117,101 @@ fun AutomationOrderDialog(
                     }
                 }
 
-                // System Prompt (Optional)
-                OutlinedTextField(
-                    value = systemPrompt,
-                    onValueChange = onSystemPromptChange,
-                    label = { Text("System Instructions (Optional)") },
-                    placeholder = { Text("You are a specialized assistant...", color = Color(0xFF5F6368), fontSize = 12.sp) },
-                    maxLines = 4,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFFE8EAED),
-                        unfocusedTextColor = Color(0xFFE8EAED),
-                        focusedBorderColor = Color(0xFF8AB4F8),
-                        unfocusedBorderColor = Color(0xFF3C4043)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // System Instruction Presets Row
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("System Instructions Preset", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        if (systemPromptTitle.isNotEmpty() || systemPrompt.isNotEmpty()) {
+                            TextButton(
+                                onClick = { onSavePreset(systemPromptTitle, systemPrompt) },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                            ) {
+                                Text("💾 Save Preset", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (systemPresets.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (systemPromptTitle.isEmpty()) Color(0xFF8AB4F8).copy(alpha = 0.2f) else Color(0xFF1F2227),
+                                border = BorderStroke(1.dp, if (systemPromptTitle.isEmpty()) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+                                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                                    onSystemPromptTitleChange("")
+                                    onSystemPromptChange("")
+                                }
+                            ) {
+                                Text("➕ Custom", color = Color(0xFFE8EAED), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                            }
+
+                            systemPresets.take(3).forEach { preset ->
+                                val isSel = systemPromptTitle.equals(preset.title, ignoreCase = true)
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isSel) Color(0xFF8AB4F8).copy(alpha = 0.25f) else Color(0xFF1F2227),
+                                    border = BorderStroke(1.dp, if (isSel) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onSelectPreset(preset) }
+                                ) {
+                                    Text(preset.title.take(12), color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = systemPromptTitle,
+                        onValueChange = onSystemPromptTitleChange,
+                        label = { Text("Preset Title (e.g. Sarcastic Buddy)") },
+                        placeholder = { Text("Title matches existing in Studio or creates new", color = Color(0xFF5F6368), fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFFE8EAED),
+                            unfocusedTextColor = Color(0xFFE8EAED),
+                            focusedBorderColor = Color(0xFF8AB4F8),
+                            unfocusedBorderColor = Color(0xFF3C4043)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = systemPrompt,
+                        onValueChange = onSystemPromptChange,
+                        label = { Text("Instructions Body (Optional if title exists)") },
+                        placeholder = { Text("You are a specialized assistant...", color = Color(0xFF5F6368), fontSize = 11.sp) },
+                        maxLines = 3,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFFE8EAED),
+                            unfocusedTextColor = Color(0xFFE8EAED),
+                            focusedBorderColor = Color(0xFF8AB4F8),
+                            unfocusedBorderColor = Color(0xFF3C4043)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Auto-fallback to local vault if missing in Studio", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                        Switch(
+                            checked = fallbackEnabled,
+                            onCheckedChange = onFallbackEnabledChange,
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8)),
+                            modifier = Modifier.height(24.dp)
+                        )
+                    }
+                }
 
                 // User Prompt
                 OutlinedTextField(
@@ -131,8 +219,8 @@ fun AutomationOrderDialog(
                     onValueChange = onUserPromptChange,
                     label = { Text("User Prompt") },
                     placeholder = { Text("Enter prompt to run headlessly...", color = Color(0xFF5F6368), fontSize = 12.sp) },
-                    minLines = 3,
-                    maxLines = 6,
+                    minLines = 2,
+                    maxLines = 4,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color(0xFFE8EAED),
                         unfocusedTextColor = Color(0xFFE8EAED),
