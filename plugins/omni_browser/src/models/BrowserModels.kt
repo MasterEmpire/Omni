@@ -78,3 +78,10 @@ data class AutomationAttachment(
     val sizeBytes: Long,
     val base64Data: String
 )
+
+data class SequentialPromptStep(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val prompt: String = "",
+    val repeatCount: Int = 1,
+    val isInfinite: Boolean = false
+)
