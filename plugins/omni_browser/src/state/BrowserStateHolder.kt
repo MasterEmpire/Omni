@@ -108,6 +108,7 @@ class BrowserStateHolder(
     var autoSystemPrompt by mutableStateOf("")
     var autoFallbackToLocalPreset by mutableStateOf(true)
     var autoUserPrompt by mutableStateOf("")
+    var promptSteps by mutableStateOf(listOf(SequentialPromptStep(prompt = "")))
     var isAutomating by mutableStateOf(false)
     var automationStatus by mutableStateOf("Idle")
     var automationThoughts by mutableStateOf("")
@@ -455,16 +456,45 @@ class BrowserStateHolder(
         autoAttachments = autoAttachments.filter { it.id != id }
     }
 
+    fun addPromptStep() {
+        promptSteps = promptSteps + SequentialPromptStep(prompt = "")
+    }
+
+    fun updatePromptStep(id: String, prompt: String? = null, repeatCount: Int? = null, isInfinite: Boolean? = null) {
+        promptSteps = promptSteps.map { step ->
+            if (step.id == id) {
+                step.copy(
+                    prompt = prompt ?: step.prompt,
+                    repeatCount = repeatCount ?: step.repeatCount,
+                    isInfinite = isInfinite ?: step.isInfinite
+                )
+            } else step
+        }
+    }
+
+    fun removePromptStep(id: String) {
+        if (promptSteps.size > 1) {
+            promptSteps = promptSteps.filter { it.id != id }
+        }
+    }
+
     fun startAutomation() {
-        if (autoUserPrompt.trim().isEmpty()) {
-            bridge.showToast("Please provide a prompt to run.")
+        val validSteps = promptSteps.filter { it.prompt.trim().isNotEmpty() }
+        if (validSteps.isEmpty() && autoUserPrompt.trim().isEmpty() && autoAttachments.isEmpty()) {
+            bridge.showToast("Please provide at least one prompt or attachment to run.")
             return
+        }
+
+        val effectiveSteps = if (validSteps.isNotEmpty()) {
+            promptSteps
+        } else {
+            listOf(SequentialPromptStep(prompt = autoUserPrompt))
         }
 
         showAutomationDialog = false
         showAutomationResultDialog = true
         isAutomating = true
-        automationStatus = "Initializing Headless Session..."
+        automationStatus = "Initializing Sequential Session..."
         automationThoughts = ""
         automationResult = ""
         automationError = null
@@ -472,7 +502,7 @@ class BrowserStateHolder(
 
         automator.start(
             profileId = autoSelectedProfileId,
-            userPrompt = autoUserPrompt,
+            steps = effectiveSteps,
             systemPromptTitle = autoSystemPromptTitle,
             systemPrompt = autoSystemPrompt,
             thinkingLevel = autoThinkingLevel,
