@@ -368,6 +368,64 @@ class OmniBrowser : PluginEntry() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         }
 
+        val botBypassPolyfill = remember {
+            """
+            (function() {
+                try { delete Object.getPrototypeOf(navigator).webdriver; } catch(e) {}
+                try {
+                    if (!window.chrome) {
+                        window.chrome = { app: { isInstalled: false }, runtime: { connect: function(){}, sendMessage: function(){} }, csi: function(){}, loadTimes: function(){} };
+                        window.chrome.runtime.connect.toString = function() { return "function connect() { [native code] }"; };
+                        window.chrome.runtime.sendMessage.toString = function() { return "function sendMessage() { [native code] }"; };
+                    }
+                } catch(e) {}
+                try {
+                    const originalCreateElement = document.createElement;
+                    document.createElement = function(tagName) {
+                        const el = originalCreateElement.call(document, tagName);
+                        if (tagName.toLowerCase() === 'iframe') {
+                            el.addEventListener('load', function() {
+                                try { delete Object.getPrototypeOf(this.contentWindow.navigator).webdriver; } catch(e) {}
+                                try { this.contentWindow.chrome = window.chrome; } catch(e) {}
+                            });
+                        }
+                        return el;
+                    };
+                    document.createElement.toString = function() { return "function createElement() { [native code] }"; };
+                } catch(e) {}
+                try {
+                    if (navigator.plugins.length === 0) {
+                        const mockP = [
+                            { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                            { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Google Chrome PDF' },
+                            { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Chromium PDF' },
+                            { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Edge PDF' },
+                            { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'WebKit PDF' }
+                        ];
+                        const pArr = [];
+                        mockP.forEach(p => { const pl = Object.create(Plugin.prototype); Object.assign(pl, p); pArr.push(pl); });
+                        Object.setPrototypeOf(pArr, PluginArray.prototype);
+                        const pGetter = function() { return pArr; };
+                        pGetter.toString = function() { return "function get plugins() { [native code] }"; };
+                        Object.defineProperty(Object.getPrototypeOf(navigator), 'plugins', { get: pGetter, configurable: true });
+                        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                    }
+                } catch(e) {}
+                try {
+                    if (!window.Notification) window.Notification = { permission: 'default', requestPermission: function() { return Promise.resolve('default'); } };
+                    if (window.navigator.permissions) {
+                        const originalQuery = window.navigator.permissions.query;
+                        window.navigator.permissions.query = function(parameters) {
+                            if (parameters.name === 'notifications') return Promise.resolve({ state: window.Notification.permission });
+                            return originalQuery.call(navigator, parameters);
+                        };
+                        window.navigator.permissions.query.toString = function() { return "function query() { [native code] }"; };
+                    } 
+                } catch(e) {}
+            })();
+            """.trimIndent()
+        }
+
         val blobInterceptorScript = remember {
             """
             (function() {
@@ -1787,6 +1845,7 @@ class OmniBrowser : PluginEntry() {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                         super.onPageStarted(view, url, favicon)
                         if (activeTabId == tabId) isLoading = true
+                        view?.evaluateJavascript(botBypassPolyfill, null)
                         view?.evaluateJavascript(blobInterceptorScript, null)
                     }
 
@@ -2697,7 +2756,8 @@ class OmniBrowser : PluginEntry() {
                         const THINKING_LEVEL = $jsEscapedThinking;
                         const TARGET_MODEL = $jsEscapedModel;
 
-                        const delay = ms => new Promise(r => setTimeout(r, ms));
+                        const delay = (ms) => new Promise(r => setTimeout(r, ms));
+                        const randomDelay = (min, max) => delay(Math.floor(Math.random() * (max - min + 1) + min));
 
                         function hostLog(tag, msg) {
                             try {
@@ -2728,42 +2788,29 @@ class OmniBrowser : PluginEntry() {
                                 return;
                             }
 
-                            updateStatus('Waiting for AI Studio UI and Session Handshake...');
+                            updateStatus('Waiting for AI Studio UI...');
                             let mountAttempts = 0;
                             let promptArea = null;
 
-                            while (mountAttempts < 45) {
-                                promptArea = document.querySelector(
-                                    'textarea[formcontrolname="promptText"], ' +
-                                    'ms-autosize-textarea textarea, ' +
-                                    'textarea[aria-label*="Prompt"], ' +
-                                    'textarea[placeholder*="Start typing"], ' +
-                                    'textarea'
-                                );
-                                
-                                // Check if backend token placeholder has resolved (session ready)
-                                const isSessionLoading = document.querySelector('.loading-token-count-placeholder, mat-spinner') !== null;
-                                if (promptArea && !isSessionLoading && mountAttempts >= 3) break;
-
+                            while (mountAttempts < 30) {
+                                promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                                if (promptArea) break;
                                 await delay(1000);
                                 mountAttempts++;
                                 if (mountAttempts % 5 === 0) {
-                                    hostLog('MOUNT', 'Waiting for UI & Session Handshake... (attempt ' + mountAttempts + '/45, sessionLoading=' + isSessionLoading + ')');
+                                    hostLog('MOUNT', 'Polling UI (' + mountAttempts + '/30)...');
                                 }
                             }
 
                             if (!promptArea) {
-                                const err = 'Failed to locate prompt textarea after 45s. DOM did not load in time.';
+                                const err = 'Failed to locate prompt textarea after 30s.';
                                 hostLog('MOUNT_ERR', err);
                                 if (window.OmniAutomator) window.OmniAutomator.onError(err);
                                 window.__omniAutomating = false;
                                 return;
                             }
 
-                            // Buffer 1.2s to ensure Google Cloud token handshake is 100% stable
-                            await delay(1200);
-                            hostLog('DOM', 'Found prompt textarea: ' + promptArea.tagName + '.' + promptArea.className);
-                            updateStatus('Configuring Model and Thinking Settings...');
+                            await randomDelay(1000, 2000);
 
                             // 2. Configure Thinking Level if present
                             try {
@@ -2771,7 +2818,7 @@ class OmniBrowser : PluginEntry() {
                                 if (thinkingSelect && THINKING_LEVEL !== 'Default') {
                                     hostLog('SETTINGS', 'Selecting Thinking Level: ' + THINKING_LEVEL);
                                     thinkingSelect.click();
-                                    await delay(500);
+                                    await randomDelay(300, 600);
                                     const options = Array.from(document.querySelectorAll('mat-option'));
                                     const match = options.find(o => o.textContent.trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
                                     if (match) {
@@ -2780,7 +2827,7 @@ class OmniBrowser : PluginEntry() {
                                     } else {
                                         document.body.click();
                                     }
-                                    await delay(300);
+                                    await randomDelay(200, 400);
                                 }
                             } catch(e) {
                                 hostLog('SETTINGS_WARN', 'Thinking level setting failed: ' + e.message);
@@ -2793,16 +2840,16 @@ class OmniBrowser : PluginEntry() {
                                     const sysCard = document.querySelector('ms-system-instructions-panel .system-instructions-card, ms-system-instructions-panel button');
                                     if (sysCard) {
                                         sysCard.click();
-                                        await delay(600);
+                                        await randomDelay(400, 700);
                                         const sysTa = document.querySelector('ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
                                         if (sysTa) {
                                             sysTa.focus();
-                                            const nativeProtoSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                                            nativeProtoSetter.call(sysTa, SYS_PROMPT);
-                                            sysTa.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-                                            sysTa.dispatchEvent(new Event('change', { bubbles: true }));
+                                            sysTa.click();
+                                            await randomDelay(200, 400);
+                                            document.execCommand('insertText', false, SYS_PROMPT);
+                                            sysTa.dispatchEvent(new Event('input', { bubbles: true }));
                                             hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
-                                            await delay(300);
+                                            await randomDelay(300, 600);
                                         }
                                     }
                                 } catch(e) {
@@ -2814,214 +2861,99 @@ class OmniBrowser : PluginEntry() {
                             document.querySelectorAll('.cdk-overlay-backdrop').forEach(b => {
                                 try { b.click(); } catch(_) {}
                             });
-                            await delay(200);
+                            await randomDelay(200, 400);
 
-                            // 4. Inject Prompt and wait for Angular validation state
-                            async function injectAndSubmitPrompt() {
-                                updateStatus('Injecting prompt into Angular engine...');
-                                promptArea.focus();
-                                promptArea.select();
+                            // 4. Human-like Keyboard & Clipboard Insertion
+                            updateStatus('Emulating human typing into prompt area...');
+                            promptArea.focus();
+                            promptArea.click();
+                            await randomDelay(300, 600);
+                            document.execCommand('insertText', false, PROMPT);
+                            promptArea.dispatchEvent(new Event('input', { bubbles: true }));
+                            await randomDelay(800, 1500);
 
-                                let insertedNatively = false;
-                                try {
-                                    insertedNatively = document.execCommand('insertText', false, PROMPT);
-                                } catch(_) {}
-
-                                if (!insertedNatively || promptArea.value !== PROMPT) {
-                                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-                                    nativeSetter.call(promptArea, PROMPT);
-                                    promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: PROMPT }));
-                                    promptArea.dispatchEvent(new Event('change', { bubbles: true }));
-                                }
-
-                                // Keypress cycle to trigger Angular DraftManager input lifecycle
-                                promptArea.focus();
-                                promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
-                                promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: ' ' }));
-                                promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
-                                await delay(150);
-
-                                promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
-                                promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
-                                promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
-                                promptArea.dispatchEvent(new Event('change', { bubbles: true }));
-
-                                updateStatus('Waiting for form validation & token readiness...');
-                                
-                                // Wait until the run button is enabled by Angular (aria-disabled !== 'true')
-                                let runReadyAttempts = 0;
-                                let runBtn = null;
-                                while (runReadyAttempts < 15) {
-                                    runBtn = document.querySelector(
-                                        'ms-run-button button, ' +
-                                        'button.ctrl-enter-submits, ' +
-                                        'button[aria-label*="Run"], ' +
-                                        'button[data-test-id="run-button"], ' +
-                                        'button.run-button'
-                                    );
-                                    if (runBtn && !runBtn.disabled && runBtn.getAttribute('aria-disabled') !== 'true') {
-                                        break;
-                                    }
-                                    await delay(250);
-                                    runReadyAttempts++;
-                                }
-
-                                if (runBtn) {
-                                    hostLog('RUN', 'Run button ready: disabled=' + runBtn.disabled + ', aria-disabled=' + runBtn.getAttribute('aria-disabled'));
-                                }
-
-                                updateStatus('Submitting prompt to Gemini...');
-                                if (runBtn && !runBtn.disabled && runBtn.getAttribute('aria-disabled') !== 'true') {
-                                    runBtn.click();
-                                    hostLog('RUN', 'Clicked Run button.');
-                                } else {
-                                    promptArea.focus();
-                                    promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
-                                    promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
-                                }
+                            // 5. Human-like Touch Submission (Exact Cortex Protocol)
+                            updateStatus('Submitting prompt to Gemini...');
+                            const submitBtn = document.querySelector('ms-run-button button[type="submit"], ms-run-button button.ctrl-enter-submits, button[aria-label*="Run"]');
+                            if (submitBtn && !submitBtn.disabled) {
+                                hostLog('RUN', 'Emulating physical screen touch on Submit button...');
+                                submitBtn.dispatchEvent(new Event('touchstart', { bubbles: true }));
+                                await randomDelay(50, 150); // Finger dwell time
+                                submitBtn.dispatchEvent(new Event('touchend', { bubbles: true }));
+                                submitBtn.click();
+                            } else {
+                                hostLog('RUN_WARN', 'Submit button disabled or missing, attempting focus submission...');
+                                promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true }));
                             }
 
-                            await injectAndSubmitPrompt();
-
-                            // 5. Robust Content Scraper Loop with Clean Extraction & Smart Rerun
+                            // 6. Polling & Streaming Detection Loop
                             updateStatus('Listening for response stream...');
-                            let lastOutput = '';
-                            let lastThoughts = '';
-                            let stabilityTicks = 0;
-                            let hasStartedReceiving = false;
+                            let lastLen = 0;
+                            let stable = 0;
                             let totalTicks = 0;
-                            let retryCount = 0;
 
                             while (totalTicks < 180) {
-                                await delay(1000);
+                                await delay(600);
                                 totalTicks++;
 
-                                // Auto-scroll virtual container so Angular renders all latest chunks
-                                try {
-                                    const scrollContainer = document.querySelector('ms-autoscroll-container, .chat-view-container, .chat-container');
-                                    if (scrollContainer) {
-                                        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+                                // Sniff for errors
+                                const errBanner = document.querySelector('ms-banner .error-banner-message');
+                                const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error');
+                                const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
+                                const errTxt = (errBanner ? errBanner.innerText : "") + (turnErr ? turnErr.innerText : "") + (toast ? toast.innerText : "");
+
+                                if (errTxt && !errTxt.toLowerCase().includes('saved')) {
+                                    hostLog('STUDIO_ERROR', 'Google AI Studio error: ' + errTxt);
+                                    if (window.OmniAutomator) window.OmniAutomator.onError(errTxt);
+                                    window.__omniAutomating = false;
+                                    return;
+                                }
+
+                                // Extract Model Thoughts
+                                let currentThoughts = '';
+                                const thoughtChunks = Array.from(document.querySelectorAll('ms-thought-chunk ms-text-chunk, ms-thought-chunk .cmark-node'));
+                                if (thoughtChunks.length > 0) {
+                                    currentThoughts = thoughtChunks.map(n => n.innerText || n.textContent || '').filter(Boolean).join('\n').trim();
+                                }
+
+                                // Extract Model Output
+                                let currentOutput = '';
+                                const models = document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model');
+                                if (models.length > 0) {
+                                    const latest = models[models.length - 1];
+                                    const textArr = Array.from(latest.querySelectorAll('ms-text-chunk p, ms-text-chunk span, ms-cmark-node')).map(p => p.innerText || p.textContent || '');
+                                    currentOutput = textArr.join('\n').trim();
+                                }
+
+                                if (currentOutput.length > 0 || currentThoughts.length > 0) {
+                                    if (window.OmniAutomator) window.OmniAutomator.onProgress(currentThoughts, currentOutput);
+                                }
+
+                                // Check streaming spinner
+                                const spinner = document.querySelector('ms-run-button .stoppable-spinner, mat-spinner, ms-loading-indicator');
+                                if (!spinner && currentOutput.length > 0) {
+                                    const cLen = currentOutput.length;
+                                    if (cLen > 0 && cLen === lastLen) {
+                                        stable++;
+                                    } else {
+                                        stable = 0;
+                                        lastLen = cLen;
                                     }
-                                } catch(_) {}
 
-                                // A. Error Trapping with Smart Turn Rerun
-                                const errorNode = document.querySelector(
-                                    'ms-callout.error-callout .message, ' +
-                                    '.error-callout .message, ' +
-                                    'ms-toast .message, ' +
-                                    '.model-error, ' +
-                                    '.toast .message, ' +
-                                    'ms-error-panel'
-                                );
-
-                                if (errorNode) {
-                                    const errTxt = (errorNode.innerText || errorNode.textContent || '').trim();
-                                    if (errTxt.length > 0 && !errTxt.toLowerCase().includes('saved')) {
-                                        if (retryCount < 3 && (errTxt.toLowerCase().includes('permission') || errTxt.toLowerCase().includes('failed to generate') || errTxt.toLowerCase().includes('internal error'))) {
-                                            retryCount++;
-                                            hostLog('RETRY', 'Encountered error (' + errTxt + '). Buffering 3s for rate limiter, then retrying turn #' + retryCount + '...');
-                                            
-                                            // Dismiss error toast
-                                            try {
-                                                const dismissBtn = document.querySelector('ms-callout .dismiss-button, ms-toast .dismiss-button, button[aria-label="Dismiss"]');
-                                                if (dismissBtn) dismissBtn.click();
-                                            } catch(_) {}
-
-                                            await delay(3000);
-
-                                            // Prefer triggering the clean Rerun button directly on the turn
-                                            const rerunBtn = document.querySelector('button[name="rerun-button"], .rerun-button');
-                                            if (rerunBtn && !rerunBtn.disabled) {
-                                                hostLog('RETRY', 'Triggering turn rerun button directly.');
-                                                rerunBtn.click();
-                                            } else {
-                                                await injectAndSubmitPrompt();
-                                            }
-                                            continue;
-                                        }
-
-                                        hostLog('STUDIO_ERROR', 'Google AI Studio error: ' + errTxt);
-                                        if (window.OmniAutomator) window.OmniAutomator.onError(errTxt);
+                                    if (stable >= 3) {
+                                        updateStatus('Output generation complete!');
+                                        hostLog('DONE', 'Final output captured: ' + currentOutput.length + ' characters.');
+                                        if (window.OmniAutomator) window.OmniAutomator.onComplete(currentThoughts, currentOutput);
                                         window.__omniAutomating = false;
                                         return;
                                     }
                                 }
-
-                                // B. Extract Model Thoughts
-                                let currentThoughts = '';
-                                const thoughtNodes = Array.from(document.querySelectorAll('ms-thought-chunk ms-text-chunk .cmark-node:not(ms-cmark-node ms-cmark-node), ms-thought-chunk ms-text-chunk'));
-                                if (thoughtNodes.length > 0) {
-                                    currentThoughts = thoughtNodes
-                                        .map(n => n.innerText || n.textContent || '')
-                                        .filter(Boolean)
-                                        .join('\n')
-                                        .trim();
-                                }
-
-                                // C. Extract Rendered Markdown without Nested Duplication
-                                let currentOutput = '';
-                                const modelTurns = document.querySelectorAll('ms-chat-turn .chat-turn-container.model, div[data-turn-role="Model"]');
-
-                                if (modelTurns.length > 0) {
-                                    const lastTurn = modelTurns[modelTurns.length - 1];
-                                    
-                                    // Query top-level cmark nodes only (ignores nested child nodes)
-                                    const topCmarkNodes = Array.from(lastTurn.querySelectorAll('ms-prompt-chunk ms-text-chunk .cmark-node:not(ms-cmark-node ms-cmark-node)'));
-                                    if (topCmarkNodes.length > 0) {
-                                        currentOutput = topCmarkNodes
-                                            .map(n => n.innerText || n.textContent || '')
-                                            .filter(Boolean)
-                                            .join('\n\n')
-                                            .trim();
-                                    } else {
-                                        const cmarkSingle = lastTurn.querySelector('.cmark-node');
-                                        if (cmarkSingle) {
-                                            currentOutput = (cmarkSingle.innerText || cmarkSingle.textContent || '').trim();
-                                        } else {
-                                            const turnRoot = lastTurn.querySelector('.turn-content');
-                                            if (turnRoot) {
-                                                currentOutput = (turnRoot.innerText || turnRoot.textContent || '').trim();
-                                            }
-                                        }
-                                    }
-                                }
-
-                                const isSpinnerActive = document.querySelector('mat-spinner, ms-loading-indicator, .loading-dots, .streaming-active') !== null;
-                                const isResponseReadyAnnounced = document.querySelector('#cdk-live-announcer-0')?.textContent?.includes('Response ready') === true;
-                                const hasFeedbackButtons = document.querySelector('.response-feedback-button, .model-run-time-pill') !== null;
-
-                                if (currentOutput.length > 0 || currentThoughts.length > 0) {
-                                    hasStartedReceiving = true;
-                                    if (window.OmniAutomator) window.OmniAutomator.onProgress(currentThoughts, currentOutput);
-                                }
-
-                                if (totalTicks % 3 === 0) {
-                                    hostLog('STREAM_TICK', 'Tick ' + totalTicks + 's: modelTurns=' + modelTurns.length + ', outLen=' + currentOutput.length + ', spinner=' + isSpinnerActive + ', ready=' + isResponseReadyAnnounced);
-                                }
-
-                                if (hasStartedReceiving) {
-                                    if (currentOutput === lastOutput && currentThoughts === lastThoughts && currentOutput.length > 0) {
-                                        stabilityTicks++;
-                                        // Complete when text is stable and either spinner is gone, response announced ready, or feedback buttons mounted
-                                        if (stabilityTicks >= 2 && (!isSpinnerActive || isResponseReadyAnnounced || hasFeedbackButtons)) {
-                                            updateStatus('Output generation complete!');
-                                            hostLog('DONE', 'Final output captured: ' + currentOutput.length + ' characters.');
-                                            if (window.OmniAutomator) window.OmniAutomator.onComplete(currentThoughts, currentOutput);
-                                            window.__omniAutomating = false;
-                                            return;
-                                        }
-                                    } else {
-                                        stabilityTicks = 0;
-                                        lastOutput = currentOutput;
-                                        lastThoughts = currentThoughts;
-                                    }
-                                }
                             }
 
-                            if (lastOutput.length > 0) {
-                                if (window.OmniAutomator) window.OmniAutomator.onComplete(lastThoughts, lastOutput);
+                            if (lastLen > 0) {
+                                if (window.OmniAutomator) window.OmniAutomator.onComplete(lastThoughts, currentOutput);
                             } else {
-                                const timeoutMsg = 'Operation timed out after 180s. Tap "Dump Live DOM" below to inspect page state.';
+                                const timeoutMsg = 'Operation timed out after 180s.';
                                 hostLog('TIMEOUT', timeoutMsg);
                                 if (window.OmniAutomator) window.OmniAutomator.onError(timeoutMsg);
                             }
@@ -3036,8 +2968,8 @@ class OmniBrowser : PluginEntry() {
                 """.trimIndent()
 
                 val autoWv = WebView(context).apply {
-                    translationX = -20000f
-                    alpha = 0.01f
+                    translationX = 0f
+                    alpha = 1f
 
                     settings.apply {
                         javaScriptEnabled = true
@@ -3046,8 +2978,10 @@ class OmniBrowser : PluginEntry() {
                         allowFileAccess = true
                         allowContentAccess = true
                         setSupportMultipleWindows(true)
-                        userAgentString = desktopUA
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+
+                        val rawUA = userAgentString
+                        userAgentString = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
 
                         try {
                             val method = javaClass.getMethod("setRequestedWithHeaderOriginAllowList", Set::class.java)
@@ -3135,6 +3069,7 @@ class OmniBrowser : PluginEntry() {
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             super.onPageStarted(view, url, favicon)
                             bridge.log("AI_STUDIO_NAV", "Started loading: $url")
+                            view?.evaluateJavascript(botBypassPolyfill, null)
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
@@ -3158,12 +3093,6 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 }
-
-                headlessAutomationWv = autoWv
-                
-                // Attach off-screen with MATCH_PARENT so Angular Virtual Scroll measures the full screen
-                mainHandler.post {
-                    containerLayout?.addView(autoWv, FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     ))
