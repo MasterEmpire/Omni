@@ -823,11 +823,13 @@ fun buildAiStudioAutomationScript(
                     hostLog('RUN', 'Generation already active. Skipping duplicate submit.');
                 }
 
-                // 5. Polling & Streaming Detection Loop
+                // 5. Polling & Streaming Detection Loop with Auto-Retry
                 updateStatus('Listening for response stream...');
                 let lastLen = 0;
                 let stable = 0;
                 let totalTicks = 0;
+                let retryCount = 0;
+                const MAX_RETRIES = 3;
                 let lastThoughts = '';
                 let currentOutput = '';
 
@@ -835,16 +837,56 @@ fun buildAiStudioAutomationScript(
                     await delay(600);
                     totalTicks++;
 
-                    const errBanner = document.querySelector('ms-banner .error-banner-message');
-                    const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error');
+                    const errBanner = document.querySelector('ms-banner .error-banner-message, ms-global-banner');
+                    const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error, ms-chat-turn:last-of-type .model-error');
                     const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
-                    const errTxt = (errBanner ? errBanner.innerText : "") + (turnErr ? turnErr.innerText : "") + (toast ? toast.innerText : "");
+                    const errTxt = ((errBanner ? errBanner.innerText : "") + (turnErr ? turnErr.innerText : "") + (toast ? toast.innerText : "")).trim();
 
                     if (errTxt && !errTxt.toLowerCase().includes('saved')) {
-                        hostLog('STUDIO_ERROR', 'Google AI Studio error: ' + errTxt);
-                        if (window.OmniAutomator) window.OmniAutomator.onError(errTxt);
-                        window.__omniAutomating = false;
-                        return;
+                        const lowerErr = errTxt.toLowerCase();
+                        const isRetryable = lowerErr.includes('internal error') ||
+                                            lowerErr.includes('permission denied') ||
+                                            lowerErr.includes('overloaded') ||
+                                            lowerErr.includes('resource exhausted') ||
+                                            lowerErr.includes('quota') ||
+                                            lowerErr.includes('try again') ||
+                                            lowerErr.includes('server error');
+
+                        if (isRetryable && retryCount < MAX_RETRIES) {
+                            retryCount++;
+                            hostLog('RETRY', 'Transient error detected: "' + errTxt + '". Retrying attempt ' + retryCount + '/' + MAX_RETRIES + '...');
+                            updateStatus('Retrying turn (' + retryCount + '/' + MAX_RETRIES + ')...');
+
+                            // Backoff delay to allow connection to reset
+                            await delay(1800 + (retryCount * 600));
+
+                            // Find and click the rerun button on the bottom turn bubble
+                            const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
+                            const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
+                            const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"], button[aria-label*="rerun"]') : null;
+
+                            if (rerunBtn && isElementVisible(rerunBtn)) {
+                                hostLog('RETRY', 'Tapping rerun button on bottom turn bubble...');
+                                rerunBtn.click();
+                            } else {
+                                hostLog('RETRY_FALLBACK', 'Rerun button not found on last turn, attempting global Run button...');
+                                const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable)');
+                                if (submitBtn) submitBtn.click();
+                            }
+
+                            // Reset stream metrics and resume polling loop
+                            lastLen = 0;
+                            stable = 0;
+                            totalTicks = 0;
+                            currentOutput = '';
+                            await delay(1200);
+                            continue;
+                        } else {
+                            hostLog('STUDIO_ERROR', 'Fatal AI Studio error (' + (retryCount >= MAX_RETRIES ? 'Max retries reached' : 'Non-retryable') + '): ' + errTxt);
+                            if (window.OmniAutomator) window.OmniAutomator.onError(errTxt);
+                            window.__omniAutomating = false;
+                            return;
+                        }
                     }
 
                     let currentThoughts = '';
