@@ -43,6 +43,468 @@ private fun formatFileSize(bytes: Long): String {
 }
 
 @Composable
+private fun ProfilePickerSection(
+    profiles: List<BrowserProfile>,
+    selectedProfileId: String,
+    onSelectProfileId: (String) -> Unit
+) {
+    Column {
+        Text("Target Profile (Account)", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            profiles.forEach { prof ->
+                val isSel = prof.id == selectedProfileId
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSel) Color(prof.colorValue).copy(alpha = 0.25f) else Color(0xFF1F2227),
+                    border = BorderStroke(1.dp, if (isSel) Color(prof.colorValue) else Color(0xFF3C4043)),
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onSelectProfileId(prof.id) }
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(prof.colorValue)))
+                        Spacer(Modifier.width(6.dp))
+                        Text(prof.name, color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThinkingLevelSection(
+    thinkingLevel: String,
+    onThinkingLevelChange: (String) -> Unit
+) {
+    Column {
+        Text("Thinking Level", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("Default", "High", "Low", "Minimal").forEach { level ->
+                val isSel = thinkingLevel == level
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSel) Color(0xFF8AB4F8).copy(alpha = 0.25f) else Color(0xFF1F2227),
+                    border = BorderStroke(1.dp, if (isSel) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onThinkingLevelChange(level) }
+                ) {
+                    Box(modifier = Modifier.padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
+                        Text(level, color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemporaryChatSection(
+    temporaryChat: Boolean,
+    onTemporaryChatChange: (Boolean) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (temporaryChat) Color(0xFF8AB4F8).copy(alpha = 0.15f) else Color(0xFF1F2227),
+        border = BorderStroke(1.dp, if (temporaryChat) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onTemporaryChatChange(!temporaryChat) }
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🕵️", fontSize = 14.sp)
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text("Temporary Chat (Incognito)", color = if (temporaryChat) Color(0xFF8AB4F8) else Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Do not save prompt or responses to Google Drive", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                }
+            }
+            Switch(
+                checked = temporaryChat,
+                onCheckedChange = onTemporaryChatChange,
+                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8)),
+                modifier = Modifier.height(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AttachmentsSection(
+    attachments: List<AutomationAttachment>,
+    onPickFiles: () -> Unit,
+    onRemoveAttachment: (String) -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("📎 Attachments", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                if (attachments.isNotEmpty()) {
+                    Spacer(Modifier.width(6.dp))
+                    Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF1F2227)) {
+                        Text("${attachments.size}", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
+            }
+
+            TextButton(
+                onClick = onPickFiles,
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF8AB4F8))
+                Spacer(Modifier.width(4.dp))
+                Text("Add Files", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        if (attachments.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                attachments.forEach { fileItem ->
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF1F2227),
+                        border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+                        ) {
+                            Text(
+                                when {
+                                    fileItem.mimeType.startsWith("image/") -> "🖼️"
+                                    fileItem.mimeType.contains("pdf") -> "📄"
+                                    fileItem.mimeType.startsWith("video/") -> "🎬"
+                                    fileItem.mimeType.startsWith("audio/") -> "🎵"
+                                    else -> "📁"
+                                },
+                                fontSize = 13.sp
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Column {
+                                Text(
+                                    fileItem.name.take(16),
+                                    color = Color(0xFFE8EAED),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    formatFileSize(fileItem.sizeBytes),
+                                    color = Color(0xFF9AA0A6),
+                                    fontSize = 9.sp
+                                )
+                            }
+                            IconButton(
+                                onClick = { onRemoveAttachment(fileItem.id) },
+                                modifier = Modifier.size(22.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Remove",
+                                    tint = Color(0xFFF28B82),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SystemPresetsSection(
+    systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>,
+    systemPromptTitle: String,
+    onSystemPromptTitleChange: (String) -> Unit,
+    systemPrompt: String,
+    onSystemPromptChange: (String) -> Unit,
+    fallbackEnabled: Boolean,
+    onFallbackEnabledChange: (Boolean) -> Unit,
+    onSavePreset: (String, String) -> Unit,
+    onSelectPreset: (com.omni.plugin.browser.models.SystemInstructionPreset) -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("System Instructions Preset", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            if (systemPromptTitle.isNotEmpty() || systemPrompt.isNotEmpty()) {
+                TextButton(
+                    onClick = { onSavePreset(systemPromptTitle, systemPrompt) },
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                ) {
+                    Text("💾 Save Preset", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (systemPresets.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (systemPromptTitle.isEmpty()) Color(0xFF8AB4F8).copy(alpha = 0.2f) else Color(0xFF1F2227),
+                    border = BorderStroke(1.dp, if (systemPromptTitle.isEmpty()) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                        onSystemPromptTitleChange("")
+                        onSystemPromptChange("")
+                    }
+                ) {
+                    Text("➕ Custom", color = Color(0xFFE8EAED), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                }
+
+                systemPresets.take(3).forEach { preset ->
+                    val isSel = systemPromptTitle.equals(preset.title, ignoreCase = true)
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isSel) Color(0xFF8AB4F8).copy(alpha = 0.25f) else Color(0xFF1F2227),
+                        border = BorderStroke(1.dp, if (isSel) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onSelectPreset(preset) }
+                    ) {
+                        Text(preset.title.take(12), color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+        OutlinedTextField(
+            value = systemPromptTitle,
+            onValueChange = onSystemPromptTitleChange,
+            label = { Text("Preset Title (e.g. Sarcastic Buddy)") },
+            placeholder = { Text("Title matches existing in Studio or creates new", color = Color(0xFF5F6368), fontSize = 11.sp) },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color(0xFFE8EAED),
+                unfocusedTextColor = Color(0xFFE8EAED),
+                focusedBorderColor = Color(0xFF8AB4F8),
+                unfocusedBorderColor = Color(0xFF3C4043)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(4.dp))
+        OutlinedTextField(
+            value = systemPrompt,
+            onValueChange = onSystemPromptChange,
+            label = { Text("Instructions Body (Optional if title exists)") },
+            placeholder = { Text("You are a specialized assistant...", color = Color(0xFF5F6368), fontSize = 11.sp) },
+            maxLines = 3,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color(0xFFE8EAED),
+                unfocusedTextColor = Color(0xFFE8EAED),
+                focusedBorderColor = Color(0xFF8AB4F8),
+                unfocusedBorderColor = Color(0xFF3C4043)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Auto-fallback to local vault if missing in Studio", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+            Switch(
+                checked = fallbackEnabled,
+                onCheckedChange = onFallbackEnabledChange,
+                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8)),
+                modifier = Modifier.height(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun StepCardItem(
+    index: Int,
+    step: SequentialPromptStep,
+    canRemove: Boolean,
+    onUpdatePromptStep: (id: String, prompt: String?, repeatCount: Int?, isInfinite: Boolean?) -> Unit,
+    onRemovePromptStep: (id: String) -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
+        border = BorderStroke(1.dp, Color(0xFF3C4043)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF8AB4F8).copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, Color(0xFF8AB4F8))
+                ) {
+                    Text(
+                        "Step ${index + 1}",
+                        color = Color(0xFF8AB4F8),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Repeat:", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    Spacer(Modifier.width(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (step.isInfinite) Color(0xFFFDD663).copy(alpha = 0.2f) else Color(0xFF282C34),
+                        border = BorderStroke(1.dp, if (step.isInfinite) Color(0xFFFDD663) else Color(0xFF3C4043))
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!step.isInfinite) {
+                                Text(
+                                    "${step.repeatCount}x",
+                                    color = Color(0xFFE8EAED),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                                IconButton(
+                                    onClick = {
+                                        val next = (step.repeatCount % 10) + 1
+                                        onUpdatePromptStep(step.id, null, next, false)
+                                    },
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Text("+", color = Color(0xFF8AB4F8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text(
+                                    "∞ Loop",
+                                    color = Color(0xFFFDD663),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.width(4.dp))
+
+                    IconButton(
+                        onClick = { onUpdatePromptStep(step.id, null, null, !step.isInfinite) },
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Text(
+                            "∞",
+                            color = if (step.isInfinite) Color(0xFFFDD663) else Color(0xFF5F6368),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (canRemove) {
+                        IconButton(
+                            onClick = { onRemovePromptStep(step.id) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Remove Step",
+                                tint = Color(0xFFF28B82),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            OutlinedTextField(
+                value = step.prompt,
+                onValueChange = { onUpdatePromptStep(step.id, it, null, null) },
+                placeholder = { Text("Prompt for Step ${index + 1}...", color = Color(0xFF5F6368), fontSize = 11.sp) },
+                minLines = 2,
+                maxLines = 4,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color(0xFFE8EAED),
+                    unfocusedTextColor = Color(0xFFE8EAED),
+                    focusedBorderColor = Color(0xFF8AB4F8),
+                    unfocusedBorderColor = Color(0xFF3C4043)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun PromptChainSection(
+    promptSteps: List<SequentialPromptStep>,
+    onAddPromptStep: () -> Unit,
+    onUpdatePromptStep: (id: String, prompt: String?, repeatCount: Int?, isInfinite: Boolean?) -> Unit,
+    onRemovePromptStep: (id: String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🔄 Ordered Prompt Chain", color = Color(0xFF8AB4F8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(6.dp))
+                Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF1F2227)) {
+                    Text("${promptSteps.size} Step(s)", color = Color(0xFF8AB4F8), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+            }
+            TextButton(
+                onClick = onAddPromptStep,
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF81C995))
+                Spacer(Modifier.width(4.dp))
+                Text("+ Add Next Step", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        promptSteps.forEachIndexed { idx, step ->
+            StepCardItem(
+                index = idx,
+                step = step,
+                canRemove = promptSteps.size > 1,
+                onUpdatePromptStep = onUpdatePromptStep,
+                onRemovePromptStep = onRemovePromptStep
+            )
+        }
+    }
+}
+
+@Composable
 fun AutomationOrderDialog(
     profiles: List<BrowserProfile>,
     selectedProfileId: String,
@@ -94,420 +556,53 @@ fun AutomationOrderDialog(
             ) {
                 Text("Configure and dispatch prompts directly to Google AI Studio headlessly using your active profile cookies.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
 
-                // Profile Picker
-                Column {
-                    Text("Target Profile (Account)", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        profiles.forEach { prof ->
-                            val isSel = prof.id == selectedProfileId
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSel) Color(prof.colorValue).copy(alpha = 0.25f) else Color(0xFF1F2227),
-                                border = BorderStroke(1.dp, if (isSel) Color(prof.colorValue) else Color(0xFF3C4043)),
-                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onSelectProfileId(prof.id) }
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                                ) {
-                                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(prof.colorValue)))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(prof.name, color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
-                                }
-                            }
-                        }
-                    }
-                }
+                ProfilePickerSection(
+                    profiles = profiles,
+                    selectedProfileId = selectedProfileId,
+                    onSelectProfileId = onSelectProfileId
+                )
 
-                // Thinking Level Picker
-                Column {
-                    Text("Thinking Level", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Default", "High", "Low", "Minimal").forEach { level ->
-                            val isSel = thinkingLevel == level
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSel) Color(0xFF8AB4F8).copy(alpha = 0.25f) else Color(0xFF1F2227),
-                                border = BorderStroke(1.dp, if (isSel) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
-                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onThinkingLevelChange(level) }
-                            ) {
-                                Box(modifier = Modifier.padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
-                                    Text(level, color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
+                ThinkingLevelSection(
+                    thinkingLevel = thinkingLevel,
+                    onThinkingLevelChange = onThinkingLevelChange
+                )
 
-                // Temporary Chat Toggle
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (temporaryChat) Color(0xFF8AB4F8).copy(alpha = 0.15f) else Color(0xFF1F2227),
-                    border = BorderStroke(1.dp, if (temporaryChat) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onTemporaryChatChange(!temporaryChat) }
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🕵️", fontSize = 14.sp)
-                            Spacer(Modifier.width(8.dp))
-                            Column {
-                                Text("Temporary Chat (Incognito)", color = if (temporaryChat) Color(0xFF8AB4F8) else Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                Text("Do not save prompt or responses to Google Drive", color = Color(0xFF9AA0A6), fontSize = 10.sp)
-                            }
-                        }
-                        Switch(
-                            checked = temporaryChat,
-                            onCheckedChange = onTemporaryChatChange,
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8)),
-                            modifier = Modifier.height(24.dp)
-                        )
-                    }
-                }
+                TemporaryChatSection(
+                    temporaryChat = temporaryChat,
+                    onTemporaryChatChange = onTemporaryChatChange
+                )
 
-                // Multimodal Attachments Section
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("📎 Attachments", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            if (attachments.isNotEmpty()) {
-                                Spacer(Modifier.width(6.dp))
-                                Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF1F2227)) {
-                                    Text("${attachments.size}", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                                }
-                            }
-                        }
+                AttachmentsSection(
+                    attachments = attachments,
+                    onPickFiles = onPickFiles,
+                    onRemoveAttachment = onRemoveAttachment
+                )
 
-                        TextButton(
-                            onClick = onPickFiles,
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF8AB4F8))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Add Files", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
+                SystemPresetsSection(
+                    systemPresets = systemPresets,
+                    systemPromptTitle = systemPromptTitle,
+                    onSystemPromptTitleChange = onSystemPromptTitleChange,
+                    systemPrompt = systemPrompt,
+                    onSystemPromptChange = onSystemPromptChange,
+                    fallbackEnabled = fallbackEnabled,
+                    onFallbackEnabledChange = onFallbackEnabledChange,
+                    onSavePreset = onSavePreset,
+                    onSelectPreset = onSelectPreset
+                )
 
-                    if (attachments.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            attachments.forEach { fileItem ->
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFF1F2227),
-                                    border = BorderStroke(1.dp, Color(0xFF3C4043)),
-                                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
-                                    ) {
-                                        Text(
-                                            when {
-                                                fileItem.mimeType.startsWith("image/") -> "🖼️"
-                                                fileItem.mimeType.contains("pdf") -> "📄"
-                                                fileItem.mimeType.startsWith("video/") -> "🎬"
-                                                fileItem.mimeType.startsWith("audio/") -> "🎵"
-                                                else -> "📁"
-                                            },
-                                            fontSize = 13.sp
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Column {
-                                            Text(
-                                                fileItem.name.take(16),
-                                                color = Color(0xFFE8EAED),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 1
-                                            )
-                                            Text(
-                                                formatFileSize(fileItem.sizeBytes),
-                                                color = Color(0xFF9AA0A6),
-                                                fontSize = 9.sp
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = { onRemoveAttachment(fileItem.id) },
-                                            modifier = Modifier.size(22.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = "Remove",
-                                                tint = Color(0xFFF28B82),
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // System Instruction Presets Row
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("System Instructions Preset", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        if (systemPromptTitle.isNotEmpty() || systemPrompt.isNotEmpty()) {
-                            TextButton(
-                                onClick = { onSavePreset(systemPromptTitle, systemPrompt) },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                            ) {
-                                Text("💾 Save Preset", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    if (systemPresets.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (systemPromptTitle.isEmpty()) Color(0xFF8AB4F8).copy(alpha = 0.2f) else Color(0xFF1F2227),
-                                border = BorderStroke(1.dp, if (systemPromptTitle.isEmpty()) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
-                                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable {
-                                    onSystemPromptTitleChange("")
-                                    onSystemPromptChange("")
-                                }
-                            ) {
-                                Text("➕ Custom", color = Color(0xFFE8EAED), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
-                            }
-
-                            systemPresets.take(3).forEach { preset ->
-                                val isSel = systemPromptTitle.equals(preset.title, ignoreCase = true)
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = if (isSel) Color(0xFF8AB4F8).copy(alpha = 0.25f) else Color(0xFF1F2227),
-                                    border = BorderStroke(1.dp, if (isSel) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
-                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onSelectPreset(preset) }
-                                ) {
-                                    Text(preset.title.take(12), color = if (isSel) Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = systemPromptTitle,
-                        onValueChange = onSystemPromptTitleChange,
-                        label = { Text("Preset Title (e.g. Sarcastic Buddy)") },
-                        placeholder = { Text("Title matches existing in Studio or creates new", color = Color(0xFF5F6368), fontSize = 11.sp) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFFE8EAED),
-                            unfocusedTextColor = Color(0xFFE8EAED),
-                            focusedBorderColor = Color(0xFF8AB4F8),
-                            unfocusedBorderColor = Color(0xFF3C4043)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = systemPrompt,
-                        onValueChange = onSystemPromptChange,
-                        label = { Text("Instructions Body (Optional if title exists)") },
-                        placeholder = { Text("You are a specialized assistant...", color = Color(0xFF5F6368), fontSize = 11.sp) },
-                        maxLines = 3,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFFE8EAED),
-                            unfocusedTextColor = Color(0xFFE8EAED),
-                            focusedBorderColor = Color(0xFF8AB4F8),
-                            unfocusedBorderColor = Color(0xFF3C4043)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Auto-fallback to local vault if missing in Studio", color = Color(0xFF9AA0A6), fontSize = 10.sp)
-                        Switch(
-                            checked = fallbackEnabled,
-                            onCheckedChange = onFallbackEnabledChange,
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8)),
-                            modifier = Modifier.height(24.dp)
-                        )
-                    }
-                }
-
-                // Sequential Multi-Turn Prompt Chain
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔄 Ordered Prompt Chain", color = Color(0xFF8AB4F8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.width(6.dp))
-                            Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF1F2227)) {
-                                Text("${promptSteps.size} Step(s)", color = Color(0xFF8AB4F8), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                            }
-                        }
-                        TextButton(
-                            onClick = onAddPromptStep,
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF81C995))
-                            Spacer(Modifier.width(4.dp))
-                            Text("+ Add Next Step", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    promptSteps.forEachIndexed { idx, step ->
-                        Card(
-                            shape = RoundedCornerShape(10.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
-                            border = BorderStroke(1.dp, Color(0xFF3C4043)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = Color(0xFF8AB4F8).copy(alpha = 0.2f),
-                                            border = BorderStroke(1.dp, Color(0xFF8AB4F8))
-                                        ) {
-                                            Text(
-                                                "Step ${idx + 1}",
-                                                color = Color(0xFF8AB4F8),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        // Recurrence Stepper
-                                        Text("Repeat:", color = Color(0xFF9AA0A6), fontSize = 10.sp)
-                                        Spacer(Modifier.width(4.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (step.isInfinite) Color(0xFFFDD663).copy(alpha = 0.2f) else Color(0xFF282C34),
-                                            border = BorderStroke(1.dp, if (step.isInfinite) Color(0xFFFDD663) else Color(0xFF3C4043))
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                if (!step.isInfinite) {
-                                                    Text(
-                                                        "${step.repeatCount}x",
-                                                        color = Color(0xFFE8EAED),
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                    IconButton(
-                                                        onClick = {
-                                                            val next = (step.repeatCount % 10) + 1
-                                                            onUpdatePromptStep(step.id, null, next, false)
-                                                        },
-                                                        modifier = Modifier.size(20.dp)
-                                                    ) {
-                                                        Text("+", color = Color(0xFF8AB4F8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                                    }
-                                                } else {
-                                                    Text(
-                                                        "∞ Loop",
-                                                        color = Color(0xFFFDD663),
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Spacer(Modifier.width(4.dp))
-
-                                        // Infinity Toggle Button
-                                        IconButton(
-                                            onClick = { onUpdatePromptStep(step.id, null, null, !step.isInfinite) },
-                                            modifier = Modifier.size(26.dp)
-                                        ) {
-                                            Text(
-                                                "∞",
-                                                color = if (step.isInfinite) Color(0xFFFDD663) else Color(0xFF5F6368),
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-
-                                        if (promptSteps.size > 1) {
-                                            IconButton(
-                                                onClick = { onRemovePromptStep(step.id) },
-                                                modifier = Modifier.size(24.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Close,
-                                                    contentDescription = "Remove Step",
-                                                    tint = Color(0xFFF28B82),
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Spacer(Modifier.height(6.dp))
-
-                                OutlinedTextField(
-                                    value = step.prompt,
-                                    onValueChange = { onUpdatePromptStep(step.id, it, null, null) },
-                                    placeholder = { Text("Prompt for Step ${idx + 1}...", color = Color(0xFF5F6368), fontSize = 11.sp) },
-                                    minLines = 2,
-                                    maxLines = 4,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = Color(0xFFE8EAED),
-                                        unfocusedTextColor = Color(0xFFE8EAED),
-                                        focusedBorderColor = Color(0xFF8AB4F8),
-                                        unfocusedBorderColor = Color(0xFF3C4043)
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
-                    }
-                }
+                PromptChainSection(
+                    promptSteps = promptSteps,
+                    onAddPromptStep = onAddPromptStep,
+                    onUpdatePromptStep = onUpdatePromptStep,
+                    onRemovePromptStep = onRemovePromptStep
+                )
             }
         },
         confirmButton = {
             Button(
                 onClick = onRun,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8)),
-                enabled = userPrompt.trim().isNotEmpty() || attachments.isNotEmpty()
+                enabled = promptSteps.any { it.prompt.trim().isNotEmpty() } || userPrompt.trim().isNotEmpty() || attachments.isNotEmpty()
             ) {
                 Text("⚡ Run Automation", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
             }
