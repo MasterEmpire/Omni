@@ -34,7 +34,8 @@ class AiStudioAutomator(
     @SuppressLint("SetJavaScriptEnabled")
     fun start(
         profileId: String,
-        userPrompt: String,
+        steps: List<com.omni.plugin.browser.models.SequentialPromptStep> = emptyList(),
+        userPrompt: String = "",
         systemPromptTitle: String = "",
         systemPrompt: String = "",
         thinkingLevel: String = "Default",
@@ -57,7 +58,8 @@ class AiStudioAutomator(
         }
 
         val mainHandler = Handler(Looper.getMainLooper())
-        val jsEscapedPrompt = JSONObject.quote(userPrompt.trim())
+        val effectivePrompt = if (steps.isNotEmpty()) steps.first().prompt else userPrompt
+        val jsEscapedPrompt = JSONObject.quote(effectivePrompt.trim())
         val jsEscapedSysTitle = JSONObject.quote(systemPromptTitle.trim())
         val jsEscapedSysPrompt = JSONObject.quote(systemPrompt.trim())
         val jsEscapedThinking = JSONObject.quote(thinkingLevel)
@@ -75,6 +77,20 @@ class AiStudioAutomator(
         }
         val jsAttachments = attachmentsArray.toString()
 
+        val stepsArray = org.json.JSONArray()
+        val targetSteps = if (steps.isNotEmpty()) steps else listOf(com.omni.plugin.browser.models.SequentialPromptStep(prompt = userPrompt))
+        targetSteps.forEach { step ->
+            stepsArray.put(
+                JSONObject().apply {
+                    put("id", step.id)
+                    put("prompt", step.prompt.trim())
+                    put("repeatCount", step.repeatCount.coerceAtLeast(1))
+                    put("isInfinite", step.isInfinite)
+                }
+            )
+        }
+        val jsSteps = stepsArray.toString()
+
         val automationScript = buildAiStudioAutomationScript(
             prompt = jsEscapedPrompt,
             sysTitle = jsEscapedSysTitle,
@@ -83,7 +99,8 @@ class AiStudioAutomator(
             model = jsEscapedModel,
             fallbackEnabled = fallbackEnabled,
             temporaryChat = temporaryChat,
-            attachmentsJson = jsAttachments
+            attachmentsJson = jsAttachments,
+            stepsJson = jsSteps
         )
 
         val autoWv = WebView(context).apply {
