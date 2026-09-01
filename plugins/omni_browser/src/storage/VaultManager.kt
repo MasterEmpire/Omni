@@ -28,7 +28,8 @@ data class VaultRestoreData(
     val tabs: List<BrowserTab>? = null,
     val activeTabId: String? = null,
     val solverApiKey: String? = null,
-    val autoSolveEnabled: Boolean? = null
+    val autoSolveEnabled: Boolean? = null,
+    val systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
 )
 
 class VaultManager(
@@ -98,6 +99,7 @@ class VaultManager(
             mirrorFile("config/shortcuts.json", "shortcuts.json")
             mirrorFile("config/session.json", "session.json")
             mirrorFile("config/solver.json", "solver.json")
+            mirrorFile("config/system_presets.json", "system_presets.json")
 
             val ideDir = File(bridge.getPluginDir(), "ide")
             if (ideDir.exists() && ideDir.isDirectory) {
@@ -124,6 +126,7 @@ class VaultManager(
                 restoreIfMissing("config/shortcuts.json", "shortcuts.json")
                 restoreIfMissing("config/session.json", "session.json")
                 restoreIfMissing("config/solver.json", "solver.json")
+                restoreIfMissing("config/system_presets.json", "system_presets.json")
 
                 val vaultIdeDir = File(vaultDir, "ide")
                 if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
@@ -281,6 +284,45 @@ class VaultManager(
         }
     }
 
+    fun saveSystemPresets(list: List<com.omni.plugin.browser.models.SystemInstructionPreset>) {
+        try {
+            val arr = JSONArray()
+            list.forEach { p ->
+                val obj = JSONObject().apply {
+                    put("id", p.id)
+                    put("title", p.title)
+                    put("body", p.body)
+                    put("updatedAt", p.updatedAt)
+                }
+                arr.put(obj)
+            }
+            bridge.saveFile("config/system_presets.json", arr.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadSystemPresets(): List<com.omni.plugin.browser.models.SystemInstructionPreset>? {
+        return try {
+            val bytes = bridge.readFile("config/system_presets.json") ?: return null
+            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+            val list = mutableListOf<com.omni.plugin.browser.models.SystemInstructionPreset>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    com.omni.plugin.browser.models.SystemInstructionPreset(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        title = obj.getString("title"),
+                        body = obj.getString("body"),
+                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun exportFullBackup(): File {
         CookieManager.getInstance().flush()
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -301,6 +343,7 @@ class VaultManager(
             addFileToZip("config/shortcuts.json", "shortcuts.json")
             addFileToZip("config/session.json", "session.json")
             addFileToZip("config/solver.json", "solver.json")
+            addFileToZip("config/system_presets.json", "system_presets.json")
 
             val ideDir = File(bridge.getPluginDir(), "ide")
             if (ideDir.exists() && ideDir.isDirectory) {
@@ -335,6 +378,7 @@ class VaultManager(
         var loadedActiveTabId: String? = null
         var loadedApiKey: String? = null
         var loadedAutoSolve: Boolean? = null
+        var loadedSystemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
 
         ZipInputStream(tempFile.inputStream()).use { zis ->
             var entry = zis.nextEntry
@@ -401,6 +445,23 @@ class VaultManager(
                             loadedApiKey = json.optString("apiKey", "")
                             loadedAutoSolve = json.optBoolean("autoSolve", true)
                         }
+                        "system_presets.json" -> {
+                            bridge.saveFile("config/system_presets.json", bytes)
+                            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+                            val presets = mutableListOf<com.omni.plugin.browser.models.SystemInstructionPreset>()
+                            for (i in 0 until arr.length()) {
+                                val obj = arr.getJSONObject(i)
+                                presets.add(
+                                    com.omni.plugin.browser.models.SystemInstructionPreset(
+                                        id = obj.optString("id", UUID.randomUUID().toString()),
+                                        title = obj.getString("title"),
+                                        body = obj.getString("body"),
+                                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                                    )
+                                )
+                            }
+                            if (presets.isNotEmpty()) loadedSystemPresets = presets
+                        }
                         "ide_index.html" -> {
                             bridge.saveFile("ide/index.html", bytes)
                         }
@@ -418,7 +479,8 @@ class VaultManager(
             tabs = loadedTabs,
             activeTabId = loadedActiveTabId,
             solverApiKey = loadedApiKey,
-            autoSolveEnabled = loadedAutoSolve
+            autoSolveEnabled = loadedAutoSolve,
+            systemPresets = loadedSystemPresets
         )
     }
 }
