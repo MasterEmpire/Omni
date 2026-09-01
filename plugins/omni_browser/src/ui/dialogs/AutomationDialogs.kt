@@ -7,14 +7,19 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
+import com.omni.plugin.browser.models.AutomationAttachment
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +32,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.omni.plugin.browser.models.BrowserProfile
 
+private fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    return if (mb >= 1.0) String.format(java.util.Locale.US, "%.1f MB", mb) else String.format(java.util.Locale.US, "%.0f KB", kb)
+}
+
 @Composable
 fun AutomationOrderDialog(
     profiles: List<BrowserProfile>,
@@ -36,6 +48,9 @@ fun AutomationOrderDialog(
     onThinkingLevelChange: (String) -> Unit,
     temporaryChat: Boolean,
     onTemporaryChatChange: (Boolean) -> Unit,
+    attachments: List<AutomationAttachment>,
+    onPickFiles: () -> Unit,
+    onRemoveAttachment: (String) -> Unit,
     systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>,
     systemPromptTitle: String,
     onSystemPromptTitleChange: (String) -> Unit,
@@ -145,6 +160,95 @@ fun AutomationOrderDialog(
                             colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8)),
                             modifier = Modifier.height(24.dp)
                         )
+                    }
+                }
+
+                // Multimodal Attachments Section
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("📎 Attachments", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            if (attachments.isNotEmpty()) {
+                                Spacer(Modifier.width(6.dp))
+                                Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF1F2227)) {
+                                    Text("${attachments.size}", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                }
+                            }
+                        }
+
+                        TextButton(
+                            onClick = onPickFiles,
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF8AB4F8))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Add Files", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    if (attachments.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            attachments.forEach { fileItem ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF1F2227),
+                                    border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+                                    ) {
+                                        Text(
+                                            when {
+                                                fileItem.mimeType.startsWith("image/") -> "🖼️"
+                                                fileItem.mimeType.contains("pdf") -> "📄"
+                                                fileItem.mimeType.startsWith("video/") -> "🎬"
+                                                fileItem.mimeType.startsWith("audio/") -> "🎵"
+                                                else -> "📁"
+                                            },
+                                            fontSize = 13.sp
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Column {
+                                            Text(
+                                                fileItem.name.take(16),
+                                                color = Color(0xFFE8EAED),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1
+                                            )
+                                            Text(
+                                                formatFileSize(fileItem.sizeBytes),
+                                                color = Color(0xFF9AA0A6),
+                                                fontSize = 9.sp
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { onRemoveAttachment(fileItem.id) },
+                                            modifier = Modifier.size(22.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Remove",
+                                                tint = Color(0xFFF28B82),
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -266,7 +370,7 @@ fun AutomationOrderDialog(
             Button(
                 onClick = onRun,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8)),
-                enabled = userPrompt.trim().isNotEmpty()
+                enabled = userPrompt.trim().isNotEmpty() || attachments.isNotEmpty()
             ) {
                 Text("⚡ Run Automation", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
             }
