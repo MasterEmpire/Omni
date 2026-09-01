@@ -386,6 +386,10 @@ class OmniBrowser : PluginEntry() {
                     automationError = state.automationError,
                     automationElapsedSec = state.automationElapsedSec,
                     automationWebView = state.automator.headlessWv,
+                    onBackToStaging = {
+                        state.showAutomationResultDialog = false
+                        state.showAutomationDialog = true
+                    },
                     onDumpDom = {
                         bridge.showToast("Dumping live DOM to Downloads/OmniSnapshots...")
                         state.automator.dumpDom { rawHtml ->
