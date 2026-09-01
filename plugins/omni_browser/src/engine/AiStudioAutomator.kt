@@ -35,9 +35,11 @@ class AiStudioAutomator(
     fun start(
         profileId: String,
         userPrompt: String,
-        systemPrompt: String,
-        thinkingLevel: String,
-        model: String,
+        systemPromptTitle: String = "",
+        systemPrompt: String = "",
+        thinkingLevel: String = "Default",
+        model: String = "Gemini 3.7 Flash",
+        fallbackEnabled: Boolean = true,
         containerLayout: FrameLayout?,
         callback: AutomationCallback
     ) {
@@ -54,15 +56,18 @@ class AiStudioAutomator(
 
         val mainHandler = Handler(Looper.getMainLooper())
         val jsEscapedPrompt = JSONObject.quote(userPrompt.trim())
+        val jsEscapedSysTitle = JSONObject.quote(systemPromptTitle.trim())
         val jsEscapedSysPrompt = JSONObject.quote(systemPrompt.trim())
         val jsEscapedThinking = JSONObject.quote(thinkingLevel)
         val jsEscapedModel = JSONObject.quote(model)
 
         val automationScript = buildAiStudioAutomationScript(
             prompt = jsEscapedPrompt,
+            sysTitle = jsEscapedSysTitle,
             sysPrompt = jsEscapedSysPrompt,
             thinkingLevel = jsEscapedThinking,
-            model = jsEscapedModel
+            model = jsEscapedModel,
+            fallbackEnabled = fallbackEnabled
         )
 
         val autoWv = WebView(context).apply {
