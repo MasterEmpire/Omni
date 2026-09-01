@@ -813,3 +813,138 @@ fun isLocalFilePath(input: String): Boolean {
            clean.endsWith(".html") ||
            clean.endsWith(".htm")
 }
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}
