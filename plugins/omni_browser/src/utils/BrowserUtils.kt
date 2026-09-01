@@ -507,6 +507,14 @@ fun buildAiStudioAutomationScript(
                 return !!(stoppable || spinner);
             }
 
+            function isRunButtonReady(btn) {
+                if (!btn) return false;
+                if (btn.disabled || btn.hasAttribute('disabled')) return false;
+                if (btn.getAttribute('aria-disabled') === 'true') return false;
+                if (btn.classList.contains('disabled') || btn.classList.contains('mat-mdc-button-disabled') || btn.classList.contains('mdc-button--disabled')) return false;
+                return true;
+            }
+
             function safeInjectText(el, text) {
                 try {
                     el.focus();
@@ -859,55 +867,76 @@ fun buildAiStudioAutomationScript(
                             fileInput.dispatchEvent(new Event('change', { bubbles: true }));
                             await randomDelay(1200, 1800);
 
-                            // Wait for media upload to settle
-                            updateStatus('Uploading files to Gemini...');
+                            // Initial upload progress watcher
+                            updateStatus('Ingesting media into AI Studio...');
                             let uploadWait = 0;
-                            while (uploadWait < 30) {
-                                const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress');
+                            while (uploadWait < 40) {
+                                const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress, ms-prompt-box .loading');
                                 if (!activeUploadIndicator) {
                                     break;
                                 }
                                 await delay(500);
                                 uploadWait++;
                             }
-                            await randomDelay(800, 1400);
-                            hostLog('ATTACHMENTS', 'Media attachments processed.');
+                            await randomDelay(800, 1200);
+                            hostLog('ATTACHMENTS', 'Initial upload pass complete. Waiting for button activation...');
                         }
                     } else {
                         hostLog('ATTACHMENTS_WARN', 'input[type="file"] not found in AI Studio DOM.');
                     }
                 }
 
-                // 4. Atomic Submit (Never double-fire or click a stoppable button)
+                // 4. Ingestion Readiness & Atomic Submit Loop
                 if (!isGenerating()) {
-                    updateStatus('Submitting prompt to Gemini...');
-                    
-                    const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
-                    if (submitBtn && !submitBtn.classList.contains('stoppable')) {
-                        hostLog('RUN', 'Clicking Run button...');
-                        try {
-                            submitBtn.removeAttribute('disabled');
-                            submitBtn.setAttribute('aria-disabled', 'false');
-                            submitBtn.classList.remove('mat-mdc-button-disabled', 'mdc-button--disabled');
-                        } catch(_) {}
-                        submitBtn.click();
-                        await randomDelay(800, 1200);
+                    updateStatus('Waiting for Run button readiness...');
+                    let readyTicks = 0;
+                    let submitBtn = null;
+
+                    // Poll up to 45 seconds (90 * 500ms) for AI Studio to finish token/media validation
+                    while (readyTicks < 90) {
+                        if (isGenerating()) break;
+
+                        submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
+                        if (submitBtn && isRunButtonReady(submitBtn)) {
+                            hostLog('RUN_READY', 'Run button became active and enabled after ' + (readyTicks * 0.5) + 's.');
+                            break;
+                        }
+
+                        if (readyTicks % 4 === 0) {
+                            const elapsed = Math.round(readyTicks * 0.5);
+                            updateStatus('Ingesting files & calculating tokens (' + elapsed + 's)...');
+                            hostLog('INGEST_WAIT', 'Waiting for Run button readiness (' + elapsed + 's)...');
+                        }
+
+                        await delay(500);
+                        readyTicks++;
                     }
 
-                    // Fallback to Ctrl+Enter only if Run button click did not trigger generation
-                    if (!isGenerating() && promptArea) {
-                        hostLog('RUN', 'Run button did not trigger generation, dispatching Ctrl+Enter...');
-                        promptArea.focus();
-                        promptArea.dispatchEvent(new KeyboardEvent('keydown', {
-                            key: 'Enter',
-                            code: 'Enter',
-                            keyCode: 13,
-                            which: 13,
-                            ctrlKey: true,
-                            bubbles: true,
-                            cancelable: true
-                        }));
-                        await randomDelay(800, 1200);
+                    if (!isGenerating()) {
+                        submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
+                        
+                        updateStatus('Submitting prompt to Gemini...');
+                        if (submitBtn && isRunButtonReady(submitBtn)) {
+                            hostLog('RUN', 'Clicking enabled Run button...');
+                            submitBtn.click();
+                            await randomDelay(800, 1400);
+                        }
+
+                        // Fallback to Ctrl+Enter only if Run button click did not trigger generation
+                        if (!isGenerating() && promptArea) {
+                            hostLog('RUN', 'Attempting Ctrl+Enter submission fallback...');
+                            promptArea.focus();
+                            promptArea.dispatchEvent(new KeyboardEvent('keydown', {
+                                key: 'Enter',
+                                code: 'Enter',
+                                keyCode: 13,
+                                which: 13,
+                                ctrlKey: true,
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                            await randomDelay(800, 1200);
+                        }
                     }
                 } else {
                     hostLog('RUN', 'Generation already active. Skipping duplicate submit.');
