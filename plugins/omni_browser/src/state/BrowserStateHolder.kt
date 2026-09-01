@@ -101,6 +101,7 @@ class BrowserStateHolder(
     var autoSelectedProfileId by mutableStateOf("default")
     var autoSelectedModel by mutableStateOf("Gemini 3.7 Flash")
     var autoThinkingLevel by mutableStateOf("Default")
+    var autoTemporaryChat by mutableStateOf(false)
     var systemPresets by mutableStateOf<List<SystemInstructionPreset>>(emptyList())
     var autoSystemPromptTitle by mutableStateOf("")
     var autoSystemPrompt by mutableStateOf("")
@@ -427,6 +428,7 @@ class BrowserStateHolder(
             thinkingLevel = autoThinkingLevel,
             model = autoSelectedModel,
             fallbackEnabled = autoFallbackToLocalPreset,
+            temporaryChat = autoTemporaryChat,
             containerLayout = containerLayout,
             callback = this
         )
