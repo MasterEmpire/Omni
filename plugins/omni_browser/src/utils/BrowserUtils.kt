@@ -209,7 +209,7 @@ val BLOB_INTERCEPTOR_SCRIPT = """
 
                 const href = anchor.href || '';
                 const downloadName = anchor.getAttribute('download') || anchor.download || '';
-                val bMap = getTopBlobMap();
+                const bMap = getTopBlobMap();
 
                 if (href.startsWith('blob:') || anchor.hasAttribute('download')) {
                     if (href.startsWith('blob:') && bMap && bMap.has(href)) {
@@ -820,7 +820,6 @@ fun buildAiStudioAutomationScript(
 
                 await randomDelay(800, 1200);
 
-                // 3. Robust Keyboard & Reactive Form Insertion into User Prompt
                 // 3. Initial Attachments Dispatch (Turn 1 Only)
                 if (ATTACHMENTS && Array.isArray(ATTACHMENTS) && ATTACHMENTS.length > 0) {
                     updateStatus('Attaching ' + ATTACHMENTS.length + ' initial file(s)...');
@@ -882,11 +881,11 @@ fun buildAiStudioAutomationScript(
                         totalTurnsExecuted++;
 
                         const stepLabel = currentStep.isInfinite
-                            ? `Step ${stepNum}/${STEPS.length} (Loop ∞, Turn ${currentRepeat})`
-                            : `Step ${stepNum}/${STEPS.length} (Repeat ${currentRepeat}/${maxRepeats})`;
+                            ? 'Step ' + stepNum + '/' + STEPS.length + ' (Loop ∞, Turn ' + currentRepeat + ')'
+                            : 'Step ' + stepNum + '/' + STEPS.length + ' (Repeat ' + currentRepeat + '/' + maxRepeats + ')';
 
                         updateStatus(stepLabel + ' - Injecting prompt...');
-                        hostLog('CHAIN', `Executing ${stepLabel} [Total Turns: ${totalTurnsExecuted}]`);
+                        hostLog('CHAIN', 'Executing ' + stepLabel + ' [Total Turns: ' + totalTurnsExecuted + ']');
 
                         // Find the bottom-most active textarea
                         let activePromptArea = null;
@@ -917,13 +916,13 @@ fun buildAiStudioAutomationScript(
                             }
 
                             if (!isGenerating() && submitBtn && isRunButtonReady(submitBtn)) {
-                                hostLog('RUN', `Clicking Run button for ${stepLabel}...`);
+                                hostLog('RUN', 'Clicking Run button for ' + stepLabel + '...');
                                 submitBtn.click();
                                 await randomDelay(800, 1400);
                             }
 
                             if (!isGenerating() && activePromptArea) {
-                                hostLog('RUN', `Fallback Ctrl+Enter for ${stepLabel}...`);
+                                hostLog('RUN', 'Fallback Ctrl+Enter for ' + stepLabel + '...');
                                 activePromptArea.focus();
                                 activePromptArea.dispatchEvent(new KeyboardEvent('keydown', {
                                     key: 'Enter',
@@ -968,8 +967,8 @@ fun buildAiStudioAutomationScript(
 
                                 if (isRetryable && turnRetryCount < MAX_RETRIES) {
                                     turnRetryCount++;
-                                    hostLog('RETRY', `Transient error: "${errTxt}". Retrying attempt ${turnRetryCount}/${MAX_RETRIES}...`);
-                                    updateStatus(`${stepLabel} (Retry ${turnRetryCount}/${MAX_RETRIES})...`);
+                                    hostLog('RETRY', 'Transient error: "' + errTxt + '". Retrying attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
+                                    updateStatus(stepLabel + ' (Retry ' + turnRetryCount + '/' + MAX_RETRIES + ')...');
                                     await delay(1800 + (turnRetryCount * 600));
 
                                     const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
@@ -990,7 +989,7 @@ fun buildAiStudioAutomationScript(
                                     await delay(1200);
                                     continue;
                                 } else {
-                                    hostLog('STUDIO_ERROR', `Fatal error on ${stepLabel}: ${errTxt}`);
+                                    hostLog('STUDIO_ERROR', 'Fatal error on ' + stepLabel + ': ' + errTxt);
                                     if (window.OmniAutomator) window.OmniAutomator.onError(errTxt);
                                     window.__omniAutomating = false;
                                     return;
@@ -1025,7 +1024,7 @@ fun buildAiStudioAutomationScript(
                             }
 
                             const combinedDisplay = fullCumulativeOutput.length > 0
-                                ? `${fullCumulativeOutput}\n\n--- [Turn ${totalTurnsExecuted}: ${stepLabel}] ---\n${currentTurnOutput}`
+                                ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
                                 : currentTurnOutput;
 
                             if (currentTurnOutput.length > 0 || latestTurnThoughts.length > 0) {
@@ -1043,9 +1042,9 @@ fun buildAiStudioAutomationScript(
                                 }
 
                                 if (stable >= 3) {
-                                    hostLog('TURN_DONE', `Completed ${stepLabel} (${currentTurnOutput.length} chars).`);
+                                    hostLog('TURN_DONE', 'Completed ' + stepLabel + ' (' + currentTurnOutput.length + ' chars).');
                                     fullCumulativeOutput = fullCumulativeOutput.length > 0
-                                        ? `${fullCumulativeOutput}\n\n--- [Turn ${totalTurnsExecuted}: ${stepLabel}] ---\n${currentTurnOutput}`
+                                        ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
                                         : currentTurnOutput;
                                     break;
                                 }
@@ -1055,25 +1054,15 @@ fun buildAiStudioAutomationScript(
                         // Settle delay before triggering next turn in chain
                         const isLastRepeatOfLastStep = (stepIdx === STEPS.length - 1) && (currentRepeat >= maxRepeats);
                         if (!isLastRepeatOfLastStep) {
-                            updateStatus(`${stepLabel} completed. Preparing next turn...`);
+                            updateStatus(stepLabel + ' completed. Preparing next turn...');
                             await randomDelay(1800, 2600);
                         }
                     }
                 }
 
                 updateStatus('All sequence steps completed!');
-                hostLog('CHAIN_DONE', `Finished prompt chain. Total turns executed: ${totalTurnsExecuted}.`);
+                hostLog('CHAIN_DONE', 'Finished prompt chain. Total turns executed: ' + totalTurnsExecuted + '.');
                 if (window.OmniAutomator) window.OmniAutomator.onComplete(latestTurnThoughts, fullCumulativeOutput);
-                window.__omniAutomating = false;
-                }
-
-                if (lastLen > 0) {
-                    if (window.OmniAutomator) window.OmniAutomator.onComplete(lastThoughts, currentOutput);
-                } else {
-                    const timeoutMsg = 'Operation timed out after 180s.';
-                    hostLog('TIMEOUT', timeoutMsg);
-                    if (window.OmniAutomator) window.OmniAutomator.onError(timeoutMsg);
-                }
                 window.__omniAutomating = false;
 
             } catch (fatalErr) {
