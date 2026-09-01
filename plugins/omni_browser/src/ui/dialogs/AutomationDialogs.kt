@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import com.omni.plugin.browser.models.AutomationAttachment
+import com.omni.plugin.browser.models.SequentialPromptStep
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +64,10 @@ fun AutomationOrderDialog(
     onSavePreset: (String, String) -> Unit,
     onDeletePreset: (String) -> Unit,
     onSelectPreset: (com.omni.plugin.browser.models.SystemInstructionPreset) -> Unit,
+    promptSteps: List<SequentialPromptStep>,
+    onAddPromptStep: () -> Unit,
+    onUpdatePromptStep: (id: String, prompt: String?, repeatCount: Int?, isInfinite: Boolean?) -> Unit,
+    onRemovePromptStep: (id: String) -> Unit,
     userPrompt: String,
     onUserPromptChange: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -353,22 +358,149 @@ fun AutomationOrderDialog(
                     }
                 }
 
-                // User Prompt
-                OutlinedTextField(
-                    value = userPrompt,
-                    onValueChange = onUserPromptChange,
-                    label = { Text("User Prompt") },
-                    placeholder = { Text("Enter prompt to run headlessly...", color = Color(0xFF5F6368), fontSize = 12.sp) },
-                    minLines = 2,
-                    maxLines = 4,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFFE8EAED),
-                        unfocusedTextColor = Color(0xFFE8EAED),
-                        focusedBorderColor = Color(0xFF8AB4F8),
-                        unfocusedBorderColor = Color(0xFF3C4043)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // Sequential Multi-Turn Prompt Chain
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🔄 Ordered Prompt Chain", color = Color(0xFF8AB4F8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(6.dp))
+                            Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF1F2227)) {
+                                Text("${promptSteps.size} Step(s)", color = Color(0xFF8AB4F8), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                        TextButton(
+                            onClick = onAddPromptStep,
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF81C995))
+                            Spacer(Modifier.width(4.dp))
+                            Text("+ Add Next Step", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    promptSteps.forEachIndexed { idx, step ->
+                        Card(
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
+                            border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFF8AB4F8).copy(alpha = 0.2f),
+                                            border = BorderStroke(1.dp, Color(0xFF8AB4F8))
+                                        ) {
+                                            Text(
+                                                "Step ${idx + 1}",
+                                                color = Color(0xFF8AB4F8),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        // Recurrence Stepper
+                                        Text("Repeat:", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                                        Spacer(Modifier.width(4.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (step.isInfinite) Color(0xFFFDD663).copy(alpha = 0.2f) else Color(0xFF282C34),
+                                            border = BorderStroke(1.dp, if (step.isInfinite) Color(0xFFFDD663) else Color(0xFF3C4043))
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                if (!step.isInfinite) {
+                                                    Text(
+                                                        "${step.repeatCount}x",
+                                                        color = Color(0xFFE8EAED),
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                    IconButton(
+                                                        onClick = {
+                                                            val next = (step.repeatCount % 10) + 1
+                                                            onUpdatePromptStep(step.id, null, next, false)
+                                                        },
+                                                        modifier = Modifier.size(20.dp)
+                                                    ) {
+                                                        Text("+", color = Color(0xFF8AB4F8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                } else {
+                                                    Text(
+                                                        "∞ Loop",
+                                                        color = Color(0xFFFDD663),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(Modifier.width(4.dp))
+
+                                        // Infinity Toggle Button
+                                        IconButton(
+                                            onClick = { onUpdatePromptStep(step.id, null, null, !step.isInfinite) },
+                                            modifier = Modifier.size(26.dp)
+                                        ) {
+                                            Text(
+                                                "∞",
+                                                color = if (step.isInfinite) Color(0xFFFDD663) else Color(0xFF5F6368),
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        if (promptSteps.size > 1) {
+                                            IconButton(
+                                                onClick = { onRemovePromptStep(step.id) },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Remove Step",
+                                                    tint = Color(0xFFF28B82),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(Modifier.height(6.dp))
+
+                                OutlinedTextField(
+                                    value = step.prompt,
+                                    onValueChange = { onUpdatePromptStep(step.id, it, null, null) },
+                                    placeholder = { Text("Prompt for Step ${idx + 1}...", color = Color(0xFF5F6368), fontSize = 11.sp) },
+                                    minLines = 2,
+                                    maxLines = 4,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color(0xFFE8EAED),
+                                        unfocusedTextColor = Color(0xFFE8EAED),
+                                        focusedBorderColor = Color(0xFF8AB4F8),
+                                        unfocusedBorderColor = Color(0xFF3C4043)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
