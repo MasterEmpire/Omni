@@ -449,7 +449,14 @@ fun buildBlobExtractionScript(url: String, safeName: String, safeMime: String): 
     """.trimIndent()
 }
 
-fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLevel: String, model: String): String {
+fun buildAiStudioAutomationScript(
+    prompt: String,
+    sysTitle: String,
+    sysPrompt: String,
+    thinkingLevel: String,
+    model: String,
+    fallbackEnabled: Boolean = true
+): String {
     return """
         (async function() {
             if (window.__omniAutomating) {
@@ -458,9 +465,11 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
             window.__omniAutomating = true;
 
             const PROMPT = $prompt;
+            const SYS_TITLE = $sysTitle;
             const SYS_PROMPT = $sysPrompt;
             const THINKING_LEVEL = $thinkingLevel;
             const TARGET_MODEL = $model;
+            const FALLBACK_ENABLED = $fallbackEnabled;
 
             const delay = (ms) => new Promise(r => setTimeout(r, ms));
             const randomDelay = (min, max) => delay(Math.floor(Math.random() * (max - min + 1) + min));
@@ -598,8 +607,8 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                         }
                     }
 
-                    // B. Inject System Instructions if provided
-                    if (SYS_PROMPT && SYS_PROMPT.length > 0) {
+                    // B. Select or Inject System Instructions
+                    if ((SYS_TITLE && SYS_TITLE.length > 0) || (SYS_PROMPT && SYS_PROMPT.length > 0)) {
                         try {
                             updateStatus('Opening System Instructions panel...');
                             sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
@@ -608,33 +617,67 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                                 sysCard.click();
                                 await randomDelay(600, 1000);
 
-                                let sysTa = null;
-                                for (let a = 0; a < 15; a++) {
-                                    sysTa = document.querySelector('ms-sliding-right-panel textarea, ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
-                                    if (sysTa && isElementVisible(sysTa)) break;
-                                    await delay(300);
+                                let matchedExisting = false;
+
+                                // 1. Scan AI Studio for existing saved preset by title
+                                if (SYS_TITLE && SYS_TITLE.length > 0) {
+                                    const clickableItems = Array.from(document.querySelectorAll('ms-sliding-right-panel button, ms-system-instructions button, ms-sliding-right-panel .card-title, ms-sliding-right-panel .title, ms-sliding-right-panel [role="button"]'));
+                                    const match = clickableItems.find(el => el.textContent.trim().toLowerCase() === SYS_TITLE.toLowerCase());
+                                    if (match && isElementVisible(match)) {
+                                        hostLog('SYS_PROMPT', 'Found existing preset in AI Studio for title: ' + SYS_TITLE + '. Selecting...');
+                                        match.click();
+                                        matchedExisting = true;
+                                        await randomDelay(400, 800);
+                                    }
                                 }
 
-                                if (sysTa) {
-                                    updateStatus('Typing System Instructions...');
-                                    safeInjectText(sysTa, SYS_PROMPT);
-                                    hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
-                                    await randomDelay(400, 800);
+                                // 2. If not found or new, create and inject title + body from local vault
+                                if (!matchedExisting) {
+                                    if (FALLBACK_ENABLED && SYS_PROMPT && SYS_PROMPT.length > 0) {
+                                        hostLog('SYS_PROMPT', 'Title "' + SYS_TITLE + '" not found in AI Studio. Creating new instruction from local vault...');
+                                        
+                                        const addBtn = document.querySelector('ms-sliding-right-panel button[aria-label*="Add"], ms-sliding-right-panel button.add-button, ms-system-instructions button[aria-label*="New"]');
+                                        if (addBtn && isElementVisible(addBtn)) {
+                                            addBtn.click();
+                                            await randomDelay(400, 700);
+                                        }
 
-                                    const backBtn = document.querySelector('ms-sliding-right-panel .back-button, ms-sliding-right-panel button.back-button, ms-sliding-right-panel .panel-header button');
-                                    if (backBtn) {
-                                        hostLog('SYS_PROMPT', 'Closing sliding panel via back button...');
-                                        backBtn.click();
-                                        await randomDelay(400, 700);
+                                        const titleInput = document.querySelector('ms-sliding-right-panel input[formcontrolname*="title"], ms-sliding-right-panel input[placeholder*="Title"], ms-sliding-right-panel input');
+                                        if (titleInput && isElementVisible(titleInput) && SYS_TITLE && SYS_TITLE.length > 0) {
+                                            safeInjectText(titleInput, SYS_TITLE);
+                                            await randomDelay(200, 400);
+                                        }
+
+                                        let sysTa = null;
+                                        for (let a = 0; a < 15; a++) {
+                                            sysTa = document.querySelector('ms-sliding-right-panel textarea, ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
+                                            if (sysTa && isElementVisible(sysTa)) break;
+                                            await delay(300);
+                                        }
+
+                                        if (sysTa) {
+                                            updateStatus('Typing System Instructions...');
+                                            safeInjectText(sysTa, SYS_PROMPT);
+                                            hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
+                                            await randomDelay(400, 800);
+                                        }
+                                    } else {
+                                        hostLog('SYS_PROMPT_WARN', 'Preset title "' + SYS_TITLE + '" not in AI Studio and no fallback body provided.');
                                     }
-                                } else {
-                                    hostLog('SYS_PROMPT_WARN', 'Could not locate textarea inside sliding right panel.');
+                                }
+
+                                // Close sliding panel via back button to commit
+                                const backBtn = document.querySelector('ms-sliding-right-panel .back-button, ms-sliding-right-panel button.back-button, ms-sliding-right-panel .panel-header button');
+                                if (backBtn) {
+                                    hostLog('SYS_PROMPT', 'Closing sliding panel via back button...');
+                                    backBtn.click();
+                                    await randomDelay(400, 700);
                                 }
                             } else {
                                 hostLog('SYS_PROMPT_WARN', 'Could not find System Instructions card button.');
                             }
                         } catch(e) {
-                            hostLog('SYS_PROMPT_ERR', 'System instructions injection failed: ' + e.message);
+                            hostLog('SYS_PROMPT_ERR', 'System instructions step failed: ' + e.message);
                         }
                     }
 
