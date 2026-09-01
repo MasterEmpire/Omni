@@ -34,6 +34,8 @@ fun AutomationOrderDialog(
     onSelectProfileId: (String) -> Unit,
     thinkingLevel: String,
     onThinkingLevelChange: (String) -> Unit,
+    temporaryChat: Boolean,
+    onTemporaryChatChange: (Boolean) -> Unit,
     systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>,
     systemPromptTitle: String,
     onSystemPromptTitleChange: (String) -> Unit,
@@ -114,6 +116,35 @@ fun AutomationOrderDialog(
                                 }
                             }
                         }
+                    }
+                }
+
+                // Temporary Chat Toggle
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (temporaryChat) Color(0xFF8AB4F8).copy(alpha = 0.15f) else Color(0xFF1F2227),
+                    border = BorderStroke(1.dp, if (temporaryChat) Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onTemporaryChatChange(!temporaryChat) }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🕵️", fontSize = 14.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text("Temporary Chat (Incognito)", color = if (temporaryChat) Color(0xFF8AB4F8) else Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Do not save prompt or responses to Google Drive", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                            }
+                        }
+                        Switch(
+                            checked = temporaryChat,
+                            onCheckedChange = onTemporaryChatChange,
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8)),
+                            modifier = Modifier.height(24.dp)
+                        )
                     }
                 }
 
