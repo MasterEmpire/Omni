@@ -728,6 +728,7 @@ fun buildAiStudioAutomationScript(
                                 if (closeBtn) {
                                     hostLog('SYS_PROMPT', 'Closing System Instructions dialog...');
                                     closeBtn.click();
+                                    // Settle buffer for CDK modal dismiss and automatic mobile drawer cascade
                                     await randomDelay(1000, 1500);
                                 }
                             } else {
@@ -738,15 +739,30 @@ fun buildAiStudioAutomationScript(
                         }
                     }
 
-                    // C. Close Settings Drawer ONLY if expanded
-                    const openDrawer = document.querySelector('ms-run-settings.expanded, .content-container ms-run-settings:not(.collapsed)');
-                    if (openDrawer && isElementVisible(openDrawer)) {
-                        const closeSettingsBtn = openDrawer.querySelector('button[aria-label*="Close run settings"], button[aria-label*="Close"]');
-                        if (closeSettingsBtn) {
-                            hostLog('SETTINGS', 'Closing settings drawer...');
-                            closeSettingsBtn.click();
-                            await randomDelay(800, 1200);
+                    // C. Target-First Viewport Check: Check if prompt area is already visible/unblocked
+                    let promptReady = false;
+                    for (let w = 0; w < 6; w++) {
+                        const pa = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                        if (pa && isElementVisible(pa)) {
+                            promptReady = true;
+                            break;
                         }
+                        await delay(250);
+                    }
+
+                    // Only attempt manual drawer close if prompt area remains blocked by an open drawer
+                    if (!promptReady) {
+                        const openDrawer = document.querySelector('ms-run-settings.expanded, .content-container ms-run-settings:not(.collapsed)');
+                        if (openDrawer && isElementVisible(openDrawer)) {
+                            const closeSettingsBtn = openDrawer.querySelector('button[aria-label*="Close run settings"], button[aria-label*="Close"]');
+                            if (closeSettingsBtn && isElementVisible(closeSettingsBtn)) {
+                                hostLog('SETTINGS', 'Prompt still obscured. Manually closing settings drawer...');
+                                closeSettingsBtn.click();
+                                await randomDelay(800, 1200);
+                            }
+                        }
+                    } else {
+                        hostLog('SETTINGS', 'Settings drawer auto-collapsed with dialog. UI ready.');
                     }
                 }
 
