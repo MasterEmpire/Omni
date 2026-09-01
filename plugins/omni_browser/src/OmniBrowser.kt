@@ -2891,6 +2891,8 @@ class OmniBrowser : PluginEntry() {
                             let lastLen = 0;
                             let stable = 0;
                             let totalTicks = 0;
+                            let lastThoughts = '';
+                            let currentOutput = '';
 
                             while (totalTicks < 180) {
                                 await delay(600);
@@ -2914,10 +2916,10 @@ class OmniBrowser : PluginEntry() {
                                 const thoughtChunks = Array.from(document.querySelectorAll('ms-thought-chunk ms-text-chunk, ms-thought-chunk .cmark-node'));
                                 if (thoughtChunks.length > 0) {
                                     currentThoughts = thoughtChunks.map(n => n.innerText || n.textContent || '').filter(Boolean).join('\n').trim();
+                                    lastThoughts = currentThoughts;
                                 }
 
                                 // Extract Model Output
-                                let currentOutput = '';
                                 const models = document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model');
                                 if (models.length > 0) {
                                     const latest = models[models.length - 1];
@@ -3093,12 +3095,17 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 }
+
+                headlessAutomationWv = autoWv
+                containerLayout?.addView(
+                    autoWv,
+                    ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
-                    ))
-                    autoWv.onResume()
-                    autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
-                }
+                    )
+                )
+                autoWv.onResume()
+                autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
             }
 
             // Timer ticker during automation
