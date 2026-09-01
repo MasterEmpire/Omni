@@ -499,33 +499,33 @@ fun buildAiStudioAutomationScript(
 
             function safeInjectText(el, text) {
                 try {
-                    if (window.getSelection) {
-                        window.getSelection().removeAllRanges();
-                    }
                     el.focus();
                     el.click();
-                    if (el.setSelectionRange) {
-                        el.setSelectionRange(0, el.value ? el.value.length : 0);
-                    }
-                    document.execCommand('insertText', false, text);
 
-                    // Dual sync check for Angular/Material forms
-                    if (!el.value || !el.value.includes(text.substring(0, Math.min(15, text.length)))) {
-                        const descriptor = Object.getOwnPropertyDescriptor(el, 'value') || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
-                        if (descriptor && descriptor.set) {
-                            descriptor.set.call(el, text);
-                        } else {
-                            el.value = text;
-                        }
+                    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+                    if (descriptor && descriptor.set) {
+                        descriptor.set.call(el, text);
+                    } else {
+                        el.value = text;
                     }
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                    if (window.getSelection) {
-                        window.getSelection().removeAllRanges();
-                    }
+
+                    el.dispatchEvent(new Event('focus', { bubbles: true }));
+                    el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                    try {
+                        el.dispatchEvent(new InputEvent('input', {
+                            bubbles: true,
+                            cancelable: true,
+                            inputType: 'insertText',
+                            data: text
+                        }));
+                    } catch(_) {}
+                    el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+                    el.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
                 } catch(e) {
                     hostLog('INJECT_ERR', 'Error typing text: ' + e.message);
-                    el.value = text;
+                    try { el.value = text; } catch(_) {}
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
@@ -567,7 +567,7 @@ fun buildAiStudioAutomationScript(
                 await randomDelay(800, 1500);
 
                 // 2. Open Settings Drawer if System Prompt or Thinking Level is configured
-                const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default');
+                const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (SYS_TITLE && SYS_TITLE.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default');
                 let openedSettingsDrawer = false;
 
                 if (needsSettings) {
@@ -692,35 +692,57 @@ fun buildAiStudioAutomationScript(
                     }
                 }
 
-                // Purge any lingering CDK backdrops & ambient selections
-                document.querySelectorAll('.cdk-overlay-backdrop').forEach(b => {
-                    try { b.click(); } catch(_) {}
-                });
-                if (window.getSelection) {
-                    window.getSelection().removeAllRanges();
-                }
-                await randomDelay(200, 400);
+                await randomDelay(400, 800);
 
-                // 3. Scoped Keyboard Insertion into User Prompt
-                updateStatus('Emulating human typing into prompt area...');
-                promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                // 3. Robust Keyboard & Reactive Form Insertion into User Prompt
+                updateStatus('Injecting user prompt into AI Studio...');
+                promptArea = null;
+                for (let a = 0; a < 20; a++) {
+                    promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                    if (promptArea && isElementVisible(promptArea)) break;
+                    await delay(300);
+                }
+
                 if (promptArea) {
                     safeInjectText(promptArea, PROMPT);
-                    await randomDelay(600, 1200);
+                    await randomDelay(400, 800);
+                } else {
+                    hostLog('PROMPT_ERR', 'Could not locate prompt textarea to inject text.');
                 }
 
-                // 4. Human-like Touch Submission
+                // 4. Force Submit via Ctrl+Enter and Button Touch Click
                 updateStatus('Submitting prompt to Gemini...');
-                const submitBtn = document.querySelector('ms-run-button button[type="submit"], ms-run-button button.ctrl-enter-submits, button[aria-label*="Run"]');
-                if (submitBtn && !submitBtn.disabled) {
-                    hostLog('RUN', 'Emulating physical screen touch on Submit button...');
+                
+                // A. Direct Ctrl+Enter on promptArea
+                if (promptArea) {
+                    promptArea.dispatchEvent(new KeyboardEvent('keydown', {
+                        key: 'Enter',
+                        code: 'Enter',
+                        keyCode: 13,
+                        which: 13,
+                        ctrlKey: true,
+                        bubbles: true,
+                        cancelable: true
+                    }));
+                    await randomDelay(200, 400);
+                }
+
+                // B. Force click on Run button
+                const submitBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[type="submit"], button[aria-label*="Run"]');
+                if (submitBtn) {
+                    hostLog('RUN', 'Dispatching touch & click events on Submit button...');
+                    try {
+                        submitBtn.removeAttribute('disabled');
+                        submitBtn.setAttribute('aria-disabled', 'false');
+                        submitBtn.classList.remove('mat-mdc-button-disabled', 'mdc-button--disabled');
+                    } catch(_) {}
+
                     submitBtn.dispatchEvent(new Event('touchstart', { bubbles: true }));
                     await randomDelay(50, 150);
                     submitBtn.dispatchEvent(new Event('touchend', { bubbles: true }));
                     submitBtn.click();
                 } else {
-                    hostLog('RUN_WARN', 'Submit button disabled or missing, attempting focus submission...');
-                    promptArea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true }));
+                    hostLog('RUN_WARN', 'Submit button not found, relied on Ctrl+Enter.');
                 }
 
                 // 5. Polling & Streaming Detection Loop
