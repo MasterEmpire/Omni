@@ -80,7 +80,7 @@ import com.omni.hub.api.HostBridge
 import com.omni.hub.api.PluginEntry
 import com.omni.plugin.browser.models.*
 import com.omni.plugin.browser.utils.*
-import com.omni.plugin.browser.ui.TabSwitcherScreen
+import com.omni.plugin.browser.ui.*
 import com.omni.plugin.browser.ui.dialogs.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -1684,164 +1684,30 @@ class OmniBrowser : PluginEntry() {
                 val profColor = remember(activeProf.colorValue) { Color(activeProf.colorValue) }
 
                 // --- Top Chrome Omnibox Header ---
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .zIndex(1f)
-                        .graphicsLayer()
-                        .background(Color(0xFF16181D))
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 6.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = {
-                                if (currentUrl != "about:blank") {
-                                    isHomeOverlayOpen = !isHomeOverlayOpen
-                                }
-                            },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Home,
-                                contentDescription = "Home",
-                                tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFF9AA0A6)
-                            )
+                OmniBrowserTopBar(
+                    currentUrl = currentUrl,
+                    urlInputText = urlInputText,
+                    onUrlTextChange = { urlInputText = it },
+                    onNavigate = { navigateTo(it) },
+                    profColor = profColor,
+                    tabCount = tabs.size,
+                    isHomeOverlayOpen = isHomeOverlayOpen,
+                    onHomeClick = {
+                        if (currentUrl != "about:blank") {
+                            isHomeOverlayOpen = !isHomeOverlayOpen
                         }
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(profColor.copy(alpha = 0.15f))
-                                .border(1.5.dp, profColor, RoundedCornerShape(20.dp))
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 10.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(profColor)
-                                )
-
-                                Spacer(Modifier.width(6.dp))
-
-                                Icon(
-                                    imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
-                                    contentDescription = null,
-                                    tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else if (currentUrl.startsWith("http://")) Color(0xFFFDD663) else profColor,
-                                    modifier = Modifier.size(16.dp)
-                                )
-
-                                Spacer(Modifier.width(6.dp))
-
-                                BasicTextField(
-                                    value = urlInputText,
-                                    onValueChange = { urlInputText = it },
-                                    singleLine = true,
-                                    maxLines = 1,
-                                    cursorBrush = SolidColor(profColor),
-                                    textStyle = TextStyle(
-                                        color = Color(0xFFE8EAED),
-                                        fontSize = 13.sp,
-                                        lineHeight = 16.sp,
-                                        platformStyle = PlatformTextStyle(
-                                            includeFontPadding = false
-                                        )
-                                    ),
-                                    keyboardOptions = KeyboardOptions(
-                                        keyboardType = KeyboardType.Uri,
-                                        imeAction = ImeAction.Go
-                                    ),
-                                    keyboardActions = KeyboardActions(
-                                        onGo = { navigateTo(urlInputText) }
-                                    ),
-                                    decorationBox = { innerTextField ->
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.CenterStart
-                                        ) {
-                                            if (urlInputText.isEmpty()) {
-                                                Text(
-                                                    text = "Search or type URL",
-                                                    color = Color(0xFF9AA0A6),
-                                                    fontSize = 13.sp,
-                                                    style = TextStyle(
-                                                        platformStyle = PlatformTextStyle(
-                                                            includeFontPadding = false
-                                                        )
-                                                    )
-                                                )
-                                            }
-                                            innerTextField()
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .wrapContentHeight(Alignment.CenterVertically)
-                                )
-
-                                if (urlInputText.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = { urlInputText = "" },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.width(6.dp))
-
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(profColor.copy(alpha = 0.2f))
-                                .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
-                                .clickable {
-                                    val thumb = captureThumbnail()
-                                    val bundle = Bundle()
-                                    webViewInstance?.saveState(bundle)
-                                    tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
-                                    CookieManager.getInstance().flush()
-                                    isTabSwitcherOpen = true
-                                }
-                        ) {
-                            Text(
-                                "${tabs.size}",
-                                color = profColor,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-
-                                                Spacer(Modifier.width(2.dp))
-
-                        IconButton(
-                            onClick = { showMenu = !showMenu },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.MoreVert,
-                                contentDescription = "Menu",
-                                tint = if (showMenu) profColor else Color(0xFF9AA0A6)
-                            )
-                        }
-                    }
-                }
+                    },
+                    onTabSwitcherClick = {
+                        val thumb = captureThumbnail()
+                        val bundle = Bundle()
+                        webViewInstance?.saveState(bundle)
+                        tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
+                        CookieManager.getInstance().flush()
+                        isTabSwitcherOpen = true
+                    },
+                    showMenu = showMenu,
+                    onMenuToggle = { showMenu = !showMenu }
+                )
 
                 // --- Loading Progress Bar ---
                 AnimatedVisibility(
@@ -1884,182 +1750,29 @@ class OmniBrowser : PluginEntry() {
                     )
 
                     if (currentUrl == "about:blank" || isHomeOverlayOpen) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color(0xFF1F2227))
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            if (isHomeOverlayOpen && currentUrl != "about:blank") {
-                                Surface(
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = Color(0xFF282C34),
-                                    border = BorderStroke(1.dp, Color(0xFF8AB4F8).copy(alpha = 0.5f)),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .clickable { isHomeOverlayOpen = false }
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                                    ) {
-                                        Icon(Icons.Default.ArrowBack, contentDescription = null, tint = Color(0xFF8AB4F8), modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Return to Live Page", color = Color(0xFF8AB4F8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
+                        SpeedDialView(
+                            currentUrl = currentUrl,
+                            isHomeOverlayOpen = isHomeOverlayOpen,
+                            activeProfile = activeProf,
+                            profColor = profColor,
+                            shortcuts = shortcuts,
+                            faviconCache = faviconCache,
+                            onFetchFavicon = { fetchFavicon(it) },
+                            onReturnToLivePage = { isHomeOverlayOpen = false },
+                            onShortcutClick = { item ->
+                                if (isHomeOverlayOpen && currentUrl != "about:blank") {
+                                    isHomeOverlayOpen = false
+                                    createNewTab(item.url)
+                                } else {
+                                    navigateTo(item.url)
                                 }
-                                Spacer(Modifier.height(16.dp))
-                            } else {
-                                Spacer(Modifier.height(40.dp))
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = profColor,
-                                    modifier = Modifier.size(40.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text("🌐", fontSize = 20.sp)
-                                    }
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        "Omni Chrome",
-                                        fontSize = 26.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFE8EAED)
-                                    )
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = profColor.copy(alpha = 0.2f),
-                                        border = BorderStroke(1.dp, profColor.copy(alpha = 0.7f))
-                                    ) {
-                                        Text(
-                                            "Profile: ${activeProf.name}",
-                                            color = profColor,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Text(
-                                if (isHomeOverlayOpen && currentUrl != "about:blank") "Live page suspended safely in background" else "Fast, Stealthy, Dynamic Browsing",
-                                fontSize = 13.sp,
-                                color = Color(0xFF9AA0A6),
-                                modifier = Modifier.padding(top = 6.dp, bottom = 32.dp)
-                            )
-
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(4),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                items(shortcuts, key = { it.id }) { item ->
-                                    val domain = remember(item.url) { extractDomain(item.url) }
-                                    LaunchedEffect(domain) {
-                                        fetchFavicon(domain)
-                                    }
-                                    val iconBmp = faviconCache[domain]
-
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .combinedClickable(
-                                                onClick = {
-                                                    if (isHomeOverlayOpen && currentUrl != "about:blank") {
-                                                        isHomeOverlayOpen = false
-                                                        createNewTab(item.url)
-                                                    } else {
-                                                        navigateTo(item.url)
-                                                    }
-                                                },
-                                                onLongClick = {
-                                                    bridge.vibrate(40L)
-                                                    editingShortcut = item
-                                                }
-                                            )
-                                            .padding(8.dp)
-                                    ) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = Color(0xFF282C34),
-                                            modifier = Modifier.size(48.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                if (iconBmp != null) {
-                                                    Image(
-                                                        bitmap = iconBmp.asImageBitmap(),
-                                                        contentDescription = item.title,
-                                                        modifier = Modifier
-                                                            .size(26.dp)
-                                                            .clip(CircleShape),
-                                                        contentScale = ContentScale.Fit
-                                                    )
-                                                } else {
-                                                    Text(
-                                                        text = item.iconText.ifEmpty { item.title.take(1).uppercase() },
-                                                        fontSize = 18.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(item.colorValue)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Spacer(Modifier.height(8.dp))
-                                        Text(
-                                            item.title,
-                                            fontSize = 11.sp,
-                                            color = Color(0xFFE8EAED),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                }
-
-                                item {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .clickable { isAddingShortcut = true }
-                                            .padding(8.dp)
-                                    ) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = Color(0xFF282C34),
-                                            border = BorderStroke(1.dp, Color(0xFF5F6368)),
-                                            modifier = Modifier.size(48.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    Icons.Default.Add,
-                                                    contentDescription = "Add Shortcut",
-                                                    tint = Color(0xFF8AB4F8),
-                                                    modifier = Modifier.size(22.dp)
-                                                )
-                                            }
-                                        }
-                                        Spacer(Modifier.height(8.dp))
-                                        Text(
-                                            "Add",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF8AB4F8),
-                                            maxLines = 1,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                            },
+                            onShortcutLongClick = { item ->
+                                bridge.vibrate(40L)
+                                editingShortcut = item
+                            },
+                            onAddShortcutClick = { isAddingShortcut = true }
+                        )
                     }
                 }
             }
@@ -2503,215 +2216,94 @@ class OmniBrowser : PluginEntry() {
                 )
             }
 
-            // --- In-Layout Browser Menu Overlay (Single Unified Scrim & Surface) ---
-            if (showMenu) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .zIndex(20f)
-                        .pointerInput(Unit) {
-                            detectTapGestures(onTap = { showMenu = false })
-                        }
-                        .statusBarsPadding()
-                        .padding(top = 52.dp, end = 8.dp),
-                    contentAlignment = Alignment.TopEnd
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF282C34),
-                        tonalElevation = 8.dp,
-                        shadowElevation = 10.dp,
-                        border = BorderStroke(1.dp, Color(0xFF3C4043)),
-                        modifier = Modifier
-                            .width(250.dp)
-                            .pointerInput(Unit) {
-                                detectTapGestures(onTap = { /* Consume taps inside menu so they do not dismiss */ })
-                            }
-                    ) {
-                        Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                                horizontalArrangement = Arrangement.SpaceAround,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(
-                                    onClick = {
-                                        showMenu = false
-                                        if (canGoBack) webViewInstance?.goBack()
-                                        else if (currentUrl != "about:blank") navigateTo("about:blank")
-                                    },
-                                    enabled = canGoBack || currentUrl != "about:blank"
-                                ) {
-                                    Icon(
-                                        Icons.Default.ArrowBack,
-                                        contentDescription = "Back",
-                                        tint = if (canGoBack || currentUrl != "about:blank") Color(0xFFE8EAED) else Color(0xFF5F6368)
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = {
-                                        showMenu = false
-                                        webViewInstance?.goForward()
-                                    },
-                                    enabled = canGoForward
-                                ) {
-                                    Icon(
-                                        Icons.Default.ArrowForward,
-                                        contentDescription = "Forward",
-                                        tint = if (canGoForward) Color(0xFFE8EAED) else Color(0xFF5F6368)
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = {
-                                        showMenu = false
-                                        if (webViewInstance != null && currentUrl != "about:blank") {
-                                            val wvUrl = webViewInstance?.url
-                                            if (wvUrl == null || wvUrl == "about:blank" || wvUrl.isEmpty()) {
-                                                webViewInstance?.loadUrl(currentUrl)
-                                            } else {
-                                                webViewInstance?.reload()
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = "Reload",
-                                        tint = Color(0xFFE8EAED)
-                                    )
-                                }
-                            }
-
-                            HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
-
-                            @Composable
-                            fun InLayoutMenuItem(
-                                title: String,
-                                color: Color = Color(0xFFE8EAED),
-                                isBold: Boolean = false,
-                                onClick: () -> Unit
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable {
-                                            showMenu = false
-                                            onClick()
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = title,
-                                        color = color,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                }
-                            }
-
-                            InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) {
-                                showAutomationDialog = true
-                            }
-
-                            InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) {
-                                val localIdeShortcuts = shortcuts.filter { it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true) }
-                                val target = localIdeShortcuts.firstOrNull()
-                                if (target != null) {
-                                    val src = target.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
-                                    val isolatedPath = "ide/vault_${target.id}/index.html"
-                                    val vFile = File(bridge.getPluginDir(), isolatedPath)
-                                    val targetUrl = if (vFile.exists() && vFile.length() > 0) {
-                                        "file://${vFile.absolutePath}"
-                                    } else {
-                                        val (success, resPath) = syncLocalFileToVault(src, isolatedPath)
-                                        if (success) {
-                                            bridge.showToast("✅ Synced ${target.title} from disk!")
-                                            resPath
-                                        } else {
-                                            target.url
-                                        }
-                                    }
-                                    navigateTo(targetUrl)
-                                } else {
-                                    val defaultFile = File(bridge.getPluginDir(), "ide/index.html")
-                                    val targetUrl = if (defaultFile.exists() && defaultFile.length() > 0) {
-                                        "file://${defaultFile.absolutePath}"
-                                    } else {
-                                        val (success, resPath) = syncLocalFileToVault("/storage/emulated/0/Download/F/index.html", "ide/index.html")
-                                        if (success) resPath else ideInternalPath
-                                    }
-                                    navigateTo(targetUrl)
-                                }
-                            }
-
-                            InLayoutMenuItem(
-                                title = if (trackedDownloadIds.isNotEmpty()) "📥 Downloads (${trackedDownloadIds.size})" else "📥 Downloads",
-                                color = if (trackedDownloadIds.isNotEmpty()) Color(0xFF81C995) else Color(0xFF8AB4F8),
-                                isBold = true
-                            ) {
-                                refreshCompletedDownloads()
-                                showDownloadsDialog = true
-                            }
-
-                            InLayoutMenuItem("+ New Tab", color = Color(0xFF8AB4F8), isBold = true) {
-                                createNewTab()
-                            }
-
-                            InLayoutMenuItem("Close Tab") {
-                                closeTab(activeTabId)
-                            }
-
-                            InLayoutMenuItem(if (isDesktopMode) "✓ Desktop Site" else "Desktop Site") {
-                                isDesktopMode = !isDesktopMode
-                                webViewInstance?.settings?.userAgentString = if (isDesktopMode) desktopUA else mobileUA
-                                webViewInstance?.reload()
-                                bridge.showToast(if (isDesktopMode) "Desktop Mode Enabled" else "Mobile Mode Enabled")
-                            }
-
-                            InLayoutMenuItem("Copy Clean URL") {
-                                if (currentUrl != "about:blank") {
-                                    val cleanUrl = sanitizeUrlForCopy(currentUrl)
-                                    bridge.copyToClipboard(cleanUrl)
-                                }
-                            }
-
-                            InLayoutMenuItem("🛠️ Eruda DevTools (Console)", color = Color(0xFF8AB4F8), isBold = true) {
-                                injectErudaDevTools()
-                            }
-
-                            InLayoutMenuItem("Capture DOM Snapshot", color = Color(0xFF8AB4F8)) {
-                                captureDomSnapshot()
-                            }
-
-                            InLayoutMenuItem("⚙️ Settings & Backup", color = Color(0xFF8AB4F8), isBold = true) {
-                                showSettingsDialog = true
-                            }
-
-                            HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
-
-                            InLayoutMenuItem("Exit Omni Chrome", color = Color(0xFFF28B82), isBold = true) {
-                                showMenu = false
-                                showSettingsDialog = false
-                                editingShortcut = null
-                                isAddingShortcut = false
-                                editingProfile = null
-                                coroutineScope.launch {
-                                    // 400ms guarantees the Compose render pass and hardware buffer swap 
-                                    // are fully completed before the task manager takes the bitmap snapshot.
-                                    delay(400) 
-                                    bridge.close()
-                                }
-                            }
+            // --- In-Layout Browser Menu Overlay ---
+            BrowserMenuOverlay(
+                showMenu = showMenu,
+                onDismiss = { showMenu = false },
+                canGoBack = canGoBack,
+                canGoForward = canGoForward,
+                currentUrl = currentUrl,
+                onBackClick = {
+                    if (canGoBack) webViewInstance?.goBack()
+                    else if (currentUrl != "about:blank") navigateTo("about:blank")
+                },
+                onForwardClick = { webViewInstance?.goForward() },
+                onReloadClick = {
+                    if (webViewInstance != null && currentUrl != "about:blank") {
+                        val wvUrl = webViewInstance?.url
+                        if (wvUrl == null || wvUrl == "about:blank" || wvUrl.isEmpty()) {
+                            webViewInstance?.loadUrl(currentUrl)
+                        } else {
+                            webViewInstance?.reload()
                         }
                     }
+                },
+                onOpenAutomation = { showAutomationDialog = true },
+                onOpenLocalIde = {
+                    val localIdeShortcuts = shortcuts.filter { it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true) }
+                    val target = localIdeShortcuts.firstOrNull()
+                    if (target != null) {
+                        val src = target.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
+                        val isolatedPath = "ide/vault_${target.id}/index.html"
+                        val vFile = File(bridge.getPluginDir(), isolatedPath)
+                        val targetUrl = if (vFile.exists() && vFile.length() > 0) {
+                            "file://${vFile.absolutePath}"
+                        } else {
+                            val (success, resPath) = syncLocalFileToVault(src, isolatedPath)
+                            if (success) {
+                                bridge.showToast("✅ Synced ${target.title} from disk!")
+                                resPath
+                            } else {
+                                target.url
+                            }
+                        }
+                        navigateTo(targetUrl)
+                    } else {
+                        val defaultFile = File(bridge.getPluginDir(), "ide/index.html")
+                        val targetUrl = if (defaultFile.exists() && defaultFile.length() > 0) {
+                            "file://${defaultFile.absolutePath}"
+                        } else {
+                            val (success, resPath) = syncLocalFileToVault("/storage/emulated/0/Download/F/index.html", "ide/index.html")
+                            if (success) resPath else ideInternalPath
+                        }
+                        navigateTo(targetUrl)
+                    }
+                },
+                activeDownloadsCount = trackedDownloadIds.size,
+                onOpenDownloads = {
+                    refreshCompletedDownloads()
+                    showDownloadsDialog = true
+                },
+                onNewTab = { createNewTab() },
+                onCloseTab = { closeTab(activeTabId) },
+                isDesktopMode = isDesktopMode,
+                onToggleDesktopMode = {
+                    isDesktopMode = !isDesktopMode
+                    webViewInstance?.settings?.userAgentString = if (isDesktopMode) desktopUA else mobileUA
+                    webViewInstance?.reload()
+                    bridge.showToast(if (isDesktopMode) "Desktop Mode Enabled" else "Mobile Mode Enabled")
+                },
+                onCopyCleanUrl = {
+                    if (currentUrl != "about:blank") {
+                        val cleanUrl = sanitizeUrlForCopy(currentUrl)
+                        bridge.copyToClipboard(cleanUrl)
+                    }
+                },
+                onInjectEruda = { injectErudaDevTools() },
+                onCaptureDomSnapshot = { captureDomSnapshot() },
+                onOpenSettings = { showSettingsDialog = true },
+                onExitBrowser = {
+                    showMenu = false
+                    showSettingsDialog = false
+                    editingShortcut = null
+                    isAddingShortcut = false
+                    editingProfile = null
+                    coroutineScope.launch {
+                        delay(400)
+                        bridge.close()
+                    }
                 }
-            }
+            )
 
             if (isTabSwitcherOpen) {
                 TabSwitcherScreen(
@@ -2744,86 +2336,39 @@ class OmniBrowser : PluginEntry() {
             }
 
             // --- Floating Undo Toast / Snackbar Banner ---
-            AnimatedVisibility(
+            UndoBanner(
                 visible = showUndoBanner,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
-                exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+                message = undoMessage,
+                onUndo = {
+                    undoJob?.cancel()
+                    pendingPurgeWebViews.forEach { (id, wv) ->
+                        webViewPool[id] = wv
+                    }
+                    pendingPurgeWebViews.clear()
+
+                    val backup = lastClosedTabsSnapshot
+                    if (backup != null && backup.isNotEmpty()) {
+                        tabs = backup
+                        val targetId = if (backup.any { it.id == lastActiveTabIdSnapshot }) lastActiveTabIdSnapshot!! else backup.first().id
+                        activeTabId = targetId
+                        saveSessionToDisk(backup, targetId)
+                        attachTabWebView(targetId)
+                    }
+                    showUndoBanner = false
+                    lastClosedTabsSnapshot = null
+                },
+                onDismiss = {
+                    undoJob?.cancel()
+                    showUndoBanner = false
+                    purgePendingWebViews()
+                    lastClosedTabsSnapshot = null
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(bottom = 20.dp)
                     .zIndex(30f)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = Color(0xFF21262D),
-                    border = BorderStroke(1.dp, Color(0xFF30363D)),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .wrapContentWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = undoMessage,
-                            color = Color(0xFFE8EAED),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        TextButton(
-                            onClick = {
-                                undoJob?.cancel()
-                                // Move all hot staged WebViews back to the active pool
-                                pendingPurgeWebViews.forEach { (id, wv) ->
-                                    webViewPool[id] = wv
-                                }
-                                pendingPurgeWebViews.clear()
-
-                                val backup = lastClosedTabsSnapshot
-                                if (backup != null && backup.isNotEmpty()) {
-                                    tabs = backup
-                                    val targetId = if (backup.any { it.id == lastActiveTabIdSnapshot }) lastActiveTabIdSnapshot!! else backup.first().id
-                                    activeTabId = targetId
-                                    saveSessionToDisk(backup, targetId)
-                                    attachTabWebView(targetId)
-                                }
-                                showUndoBanner = false
-                                lastClosedTabsSnapshot = null
-                            },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                "UNDO",
-                                color = Color(0xFF58A6FF),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                        }
-
-                        IconButton(
-                            onClick = {
-                                undoJob?.cancel()
-                                showUndoBanner = false
-                                purgePendingWebViews()
-                                lastClosedTabsSnapshot = null
-                            },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Dismiss",
-                                tint = Color(0xFF8B949E),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-            }
+            )
         }
     }
 }
