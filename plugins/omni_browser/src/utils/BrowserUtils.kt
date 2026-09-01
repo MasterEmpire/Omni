@@ -482,6 +482,12 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                 } catch(_) {}
             }
 
+            function isElementVisible(el) {
+                if (!el) return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden' && window.getComputedStyle(el).display !== 'none';
+            }
+
             try {
                 hostLog('INIT', 'AI Studio Automator script launched. URL: ' + window.location.href);
 
@@ -516,50 +522,107 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                     return;
                 }
 
-                await randomDelay(1000, 2000);
+                await randomDelay(800, 1500);
 
-                // 2. Configure Thinking Level if present
-                try {
-                    const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
-                    if (thinkingSelect && THINKING_LEVEL !== 'Default') {
-                        hostLog('SETTINGS', 'Selecting Thinking Level: ' + THINKING_LEVEL);
-                        thinkingSelect.click();
-                        await randomDelay(300, 600);
-                        const options = Array.from(document.querySelectorAll('mat-option'));
-                        const match = options.find(o => o.textContent.trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
-                        if (match) {
-                            match.click();
-                            hostLog('SETTINGS', 'Applied Thinking Level: ' + match.textContent.trim());
-                        } else {
-                            document.body.click();
+                // 2. Open Settings Drawer if System Prompt or Thinking Level is configured
+                const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default');
+                let openedSettingsDrawer = false;
+
+                if (needsSettings) {
+                    let sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
+                    
+                    // If side panel is collapsed (mobile mode), open it via tune button
+                    if (!isElementVisible(sysCard)) {
+                        updateStatus('Opening Settings Drawer...');
+                        const tuneBtn = document.querySelector('button.runsettings-toggle-button, button[aria-label*="Toggle run settings"], button[aria-label*="run settings"]');
+                        if (tuneBtn) {
+                            hostLog('SETTINGS', 'Clicking run settings toggle button (tune icon)...');
+                            tuneBtn.click();
+                            openedSettingsDrawer = true;
+                            await randomDelay(600, 1000);
                         }
-                        await randomDelay(200, 400);
                     }
-                } catch(e) {
-                    hostLog('SETTINGS_WARN', 'Thinking level setting failed: ' + e.message);
-                }
 
-                // 3. Configure System Instructions if provided
-                if (SYS_PROMPT && SYS_PROMPT.length > 0) {
-                    try {
-                        updateStatus('Injecting System Instructions...');
-                        const sysCard = document.querySelector('ms-system-instructions-panel .system-instructions-card, ms-system-instructions-panel button');
-                        if (sysCard) {
-                            sysCard.click();
-                            await randomDelay(400, 700);
-                            const sysTa = document.querySelector('ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
-                            if (sysTa) {
-                                sysTa.focus();
-                                sysTa.click();
-                                await randomDelay(200, 400);
-                                document.execCommand('insertText', false, SYS_PROMPT);
-                                sysTa.dispatchEvent(new Event('input', { bubbles: true }));
-                                hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
-                                await randomDelay(300, 600);
+                    // A. Configure Thinking Level if present
+                    if (THINKING_LEVEL && THINKING_LEVEL !== 'Default') {
+                        try {
+                            const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
+                            if (thinkingSelect) {
+                                hostLog('SETTINGS', 'Selecting Thinking Level: ' + THINKING_LEVEL);
+                                thinkingSelect.click();
+                                await randomDelay(400, 700);
+                                const options = Array.from(document.querySelectorAll('mat-option'));
+                                const match = options.find(o => o.textContent.trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
+                                if (match) {
+                                    match.click();
+                                    hostLog('SETTINGS', 'Applied Thinking Level: ' + match.textContent.trim());
+                                } else {
+                                    document.body.click();
+                                }
+                                await randomDelay(300, 500);
                             }
+                        } catch(e) {
+                            hostLog('SETTINGS_WARN', 'Thinking level setting failed: ' + e.message);
                         }
-                    } catch(e) {
-                        hostLog('SYS_PROMPT_ERR', 'System instructions injection failed: ' + e.message);
+                    }
+
+                    // B. Inject System Instructions if provided
+                    if (SYS_PROMPT && SYS_PROMPT.length > 0) {
+                        try {
+                            updateStatus('Opening System Instructions panel...');
+                            sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
+                            if (sysCard) {
+                                hostLog('SYS_PROMPT', 'Clicking System Instructions card...');
+                                sysCard.click();
+                                await randomDelay(600, 1000);
+
+                                // Wait for sliding panel textarea
+                                let sysTa = null;
+                                for (let a = 0; a < 15; a++) {
+                                    sysTa = document.querySelector('ms-sliding-right-panel textarea, ms-system-instructions textarea, textarea[aria-label*="System"], textarea[placeholder*="System"]');
+                                    if (sysTa && isElementVisible(sysTa)) break;
+                                    await delay(300);
+                                }
+
+                                if (sysTa) {
+                                    updateStatus('Typing System Instructions...');
+                                    sysTa.focus();
+                                    sysTa.click();
+                                    await randomDelay(200, 400);
+
+                                    document.execCommand('selectAll', false, null);
+                                    document.execCommand('insertText', false, SYS_PROMPT);
+                                    sysTa.dispatchEvent(new Event('input', { bubbles: true }));
+                                    sysTa.dispatchEvent(new Event('change', { bubbles: true }));
+                                    hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
+                                    await randomDelay(400, 800);
+
+                                    // Click back button to close sliding panel
+                                    const backBtn = document.querySelector('ms-sliding-right-panel .back-button, ms-sliding-right-panel button.back-button, ms-sliding-right-panel .panel-header button');
+                                    if (backBtn) {
+                                        hostLog('SYS_PROMPT', 'Closing sliding panel via back button...');
+                                        backBtn.click();
+                                        await randomDelay(400, 700);
+                                    }
+                                } else {
+                                    hostLog('SYS_PROMPT_WARN', 'Could not locate textarea inside sliding right panel.');
+                                }
+                            } else {
+                                hostLog('SYS_PROMPT_WARN', 'Could not find System Instructions card button.');
+                            }
+                        } catch(e) {
+                            hostLog('SYS_PROMPT_ERR', 'System instructions injection failed: ' + e.message);
+                        }
+                    }
+
+                    // C. Close Settings Drawer to restore full chat viewport
+                    if (openedSettingsDrawer) {
+                        const closeSettingsBtn = document.querySelector('ms-run-settings button[aria-label*="Close run settings"], button.runsettings-toggle-button');
+                        if (closeSettingsBtn) {
+                            hostLog('SETTINGS', 'Closing settings drawer...');
+                            closeSettingsBtn.click();
+                            await randomDelay(400, 700);
+                        }
                     }
                 }
 
@@ -569,16 +632,21 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                 });
                 await randomDelay(200, 400);
 
-                // 4. Human-like Keyboard & Clipboard Insertion
+                // 3. Human-like Keyboard & Clipboard Insertion into User Prompt
                 updateStatus('Emulating human typing into prompt area...');
-                promptArea.focus();
-                promptArea.click();
-                await randomDelay(300, 600);
-                document.execCommand('insertText', false, PROMPT);
-                promptArea.dispatchEvent(new Event('input', { bubbles: true }));
-                await randomDelay(800, 1500);
+                promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                if (promptArea) {
+                    promptArea.focus();
+                    promptArea.click();
+                    await randomDelay(300, 600);
+                    document.execCommand('selectAll', false, null);
+                    document.execCommand('insertText', false, PROMPT);
+                    promptArea.dispatchEvent(new Event('input', { bubbles: true }));
+                    promptArea.dispatchEvent(new Event('change', { bubbles: true }));
+                    await randomDelay(600, 1200);
+                }
 
-                // 5. Human-like Touch Submission (Exact Cortex Protocol)
+                // 4. Human-like Touch Submission (Exact Cortex Protocol)
                 updateStatus('Submitting prompt to Gemini...');
                 const submitBtn = document.querySelector('ms-run-button button[type="submit"], ms-run-button button.ctrl-enter-submits, button[aria-label*="Run"]');
                 if (submitBtn && !submitBtn.disabled) {
@@ -589,10 +657,10 @@ fun buildAiStudioAutomationScript(prompt: String, sysPrompt: String, thinkingLev
                     submitBtn.click();
                 } else {
                     hostLog('RUN_WARN', 'Submit button disabled or missing, attempting focus submission...');
-                    promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true }));
+                    promptArea?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true }));
                 }
 
-                // 6. Polling & Streaming Detection Loop
+                // 5. Polling & Streaming Detection Loop
                 updateStatus('Listening for response stream...');
                 let lastLen = 0;
                 let stable = 0;
