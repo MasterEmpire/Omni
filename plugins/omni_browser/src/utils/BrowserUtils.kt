@@ -497,6 +497,12 @@ fun buildAiStudioAutomationScript(
                 return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden' && window.getComputedStyle(el).display !== 'none';
             }
 
+            function isGenerating() {
+                const stoppable = document.querySelector('.run-button.stoppable, ms-run-button .stoppable-spinner, ms-run-button .stoppable-stop');
+                const spinner = document.querySelector('ms-run-button .stoppable-spinner, mat-spinner, ms-loading-indicator');
+                return !!(stoppable || spinner);
+            }
+
             function safeInjectText(el, text) {
                 try {
                     el.focus();
@@ -564,11 +570,10 @@ fun buildAiStudioAutomationScript(
                     return;
                 }
 
-                await randomDelay(800, 1500);
+                await randomDelay(1000, 1600);
 
                 // 2. Open Settings Drawer if System Prompt or Thinking Level is configured
                 const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (SYS_TITLE && SYS_TITLE.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default');
-                let openedSettingsDrawer = false;
 
                 if (needsSettings) {
                     let sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
@@ -576,11 +581,10 @@ fun buildAiStudioAutomationScript(
                     if (!isElementVisible(sysCard)) {
                         updateStatus('Opening Settings Drawer...');
                         const tuneBtn = document.querySelector('button.runsettings-toggle-button, button[aria-label*="Toggle run settings"], button[aria-label*="run settings"]');
-                        if (tuneBtn) {
+                        if (tuneBtn && isElementVisible(tuneBtn)) {
                             hostLog('SETTINGS', 'Clicking run settings toggle button (tune icon)...');
                             tuneBtn.click();
-                            openedSettingsDrawer = true;
-                            await randomDelay(600, 1000);
+                            await randomDelay(1000, 1500);
                         }
                     }
 
@@ -589,18 +593,24 @@ fun buildAiStudioAutomationScript(
                         try {
                             const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
                             if (thinkingSelect) {
-                                hostLog('SETTINGS', 'Selecting Thinking Level: ' + THINKING_LEVEL);
-                                thinkingSelect.click();
-                                await randomDelay(400, 700);
-                                const options = Array.from(document.querySelectorAll('mat-option'));
-                                const match = options.find(o => o.textContent.trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
-                                if (match) {
-                                    match.click();
-                                    hostLog('SETTINGS', 'Applied Thinking Level: ' + match.textContent.trim());
+                                const currentThinkingVal = (thinkingSelect.textContent || '').trim().toLowerCase();
+                                if (currentThinkingVal.includes(THINKING_LEVEL.toLowerCase())) {
+                                    hostLog('SETTINGS', 'Thinking Level already set to "' + THINKING_LEVEL + '". Skipping.');
                                 } else {
-                                    document.body.click();
+                                    hostLog('SETTINGS', 'Opening Thinking Level dropdown...');
+                                    thinkingSelect.click();
+                                    await randomDelay(800, 1200);
+
+                                    const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
+                                    const match = options.find(o => (o.textContent || '').trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
+                                    if (match) {
+                                        match.click();
+                                        hostLog('SETTINGS', 'Applied Thinking Level: ' + (match.textContent || '').trim());
+                                    } else {
+                                        document.body.click();
+                                    }
+                                    await randomDelay(600, 1000);
                                 }
-                                await randomDelay(300, 500);
                             }
                         } catch(e) {
                             hostLog('SETTINGS_WARN', 'Thinking level setting failed: ' + e.message);
@@ -610,47 +620,59 @@ fun buildAiStudioAutomationScript(
                     // B. Select or Inject System Instructions
                     if ((SYS_TITLE && SYS_TITLE.length > 0) || (SYS_PROMPT && SYS_PROMPT.length > 0)) {
                         try {
-                            updateStatus('Opening System Instructions dialog...');
+                            updateStatus('Checking System Instructions...');
                             sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
-                            if (sysCard) {
-                                hostLog('SYS_PROMPT', 'Clicking System Instructions card button...');
+                            
+                            const cardSub = (sysCard ? (sysCard.querySelector('.subtitle')?.textContent || '') : '').trim();
+                            const alreadyMatches = (SYS_TITLE && cardSub.toLowerCase().includes(SYS_TITLE.toLowerCase())) ||
+                                                   (SYS_PROMPT && cardSub.length > 15 && SYS_PROMPT.startsWith(cardSub.slice(0, 15)));
+
+                            if (alreadyMatches && !FALLBACK_ENABLED) {
+                                hostLog('SYS_PROMPT', 'System instructions already match active card preview. Skipping dialog.');
+                            } else if (sysCard) {
+                                hostLog('SYS_PROMPT', 'Opening System Instructions dialog...');
                                 sysCard.click();
-                                await randomDelay(600, 1000);
+                                await randomDelay(1200, 1800);
 
                                 let matchedExisting = false;
 
                                 // 1. Scan AI Studio mat-select dropdown for existing saved preset by title
                                 const sysSelect = document.querySelector('ms-system-instructions mat-select, .select-tooltip-wrapper mat-select');
                                 if (sysSelect) {
-                                    hostLog('SYS_PROMPT', 'Opening System Instructions preset dropdown...');
-                                    sysSelect.click();
-                                    await randomDelay(400, 700);
+                                    const currentPresetText = (sysSelect.textContent || '').trim().toLowerCase();
+                                    if (SYS_TITLE && currentPresetText === SYS_TITLE.toLowerCase()) {
+                                        hostLog('SYS_PROMPT', 'Preset "' + SYS_TITLE + '" already active in dropdown.');
+                                        matchedExisting = true;
+                                    } else {
+                                        hostLog('SYS_PROMPT', 'Opening System Instructions preset dropdown...');
+                                        sysSelect.click();
+                                        await randomDelay(800, 1200);
 
-                                    const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
+                                        const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
 
-                                    if (SYS_TITLE && SYS_TITLE.length > 0) {
-                                        const match = options.find(opt => {
-                                            const txt = (opt.textContent || '').trim().toLowerCase();
-                                            return txt === SYS_TITLE.toLowerCase();
-                                        });
-                                        if (match) {
-                                            hostLog('SYS_PROMPT', 'Found existing preset in AI Studio for title: "' + SYS_TITLE + '". Selecting...');
-                                            match.click();
-                                            matchedExisting = true;
-                                            await randomDelay(400, 700);
+                                        if (SYS_TITLE && SYS_TITLE.length > 0) {
+                                            const match = options.find(opt => {
+                                                const txt = (opt.textContent || '').trim().toLowerCase();
+                                                return txt === SYS_TITLE.toLowerCase();
+                                            });
+                                            if (match) {
+                                                hostLog('SYS_PROMPT', 'Found existing preset in AI Studio for title: "' + SYS_TITLE + '". Selecting...');
+                                                match.click();
+                                                matchedExisting = true;
+                                                await randomDelay(800, 1200);
+                                            }
                                         }
-                                    }
 
-                                    // If not matched or creating new instruction
-                                    if (!matchedExisting) {
-                                        const createNewOpt = options.find(opt => (opt.textContent || '').includes('Create new instruction'));
-                                        if (createNewOpt) {
-                                            hostLog('SYS_PROMPT', 'Selecting "+ Create new instruction" option...');
-                                            createNewOpt.click();
-                                            await randomDelay(300, 500);
-                                        } else {
-                                            document.body.click();
-                                            await randomDelay(200, 400);
+                                        if (!matchedExisting) {
+                                            const createNewOpt = options.find(opt => (opt.textContent || '').includes('Create new instruction'));
+                                            if (createNewOpt) {
+                                                hostLog('SYS_PROMPT', 'Selecting "+ Create new instruction" option...');
+                                                createNewOpt.click();
+                                                await randomDelay(800, 1200);
+                                            } else {
+                                                document.body.click();
+                                                await randomDelay(400, 600);
+                                            }
                                         }
                                     }
                                 }
@@ -662,22 +684,26 @@ fun buildAiStudioAutomationScript(
 
                                         const titleInput = document.querySelector('ms-system-instructions .title-row input, ms-system-instructions input[placeholder*="Title"], ms-system-instructions input');
                                         if (titleInput && SYS_TITLE && SYS_TITLE.length > 0) {
-                                            safeInjectText(titleInput, SYS_TITLE);
-                                            await randomDelay(200, 400);
+                                            if (titleInput.value !== SYS_TITLE) {
+                                                safeInjectText(titleInput, SYS_TITLE);
+                                                await randomDelay(400, 700);
+                                            }
                                         }
 
                                         let sysTa = null;
                                         for (let a = 0; a < 15; a++) {
                                             sysTa = document.querySelector('ms-system-instructions textarea, textarea.in-run-settings, textarea[aria-label*="System"], textarea[placeholder*="instructions"]');
                                             if (sysTa && isElementVisible(sysTa)) break;
-                                            await delay(300);
+                                            await delay(400);
                                         }
 
                                         if (sysTa) {
-                                            updateStatus('Typing System Instructions...');
-                                            safeInjectText(sysTa, SYS_PROMPT);
-                                            hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
-                                            await randomDelay(400, 800);
+                                            if (sysTa.value !== SYS_PROMPT) {
+                                                updateStatus('Typing System Instructions...');
+                                                safeInjectText(sysTa, SYS_PROMPT);
+                                                hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
+                                                await randomDelay(800, 1400);
+                                            }
                                         }
                                     } else {
                                         hostLog('SYS_PROMPT_WARN', 'Preset title "' + SYS_TITLE + '" not in AI Studio and no fallback body provided.');
@@ -686,22 +712,23 @@ fun buildAiStudioAutomationScript(
 
                                 // Wait for auto-save status
                                 let saveWait = 0;
-                                while (saveWait < 8) {
+                                while (saveWait < 12) {
                                     const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status');
                                     if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) {
                                         hostLog('SYS_PROMPT', 'System instructions saved status confirmed.');
                                         break;
                                     }
-                                    await delay(200);
+                                    await delay(300);
                                     saveWait++;
                                 }
+                                await randomDelay(500, 800);
 
                                 // 3. Close dialog via close button
                                 const closeBtn = document.querySelector('mat-dialog-container button[mat-dialog-close], mat-dialog-container button[aria-label*="Close"], button[data-test-close-button]');
                                 if (closeBtn) {
                                     hostLog('SYS_PROMPT', 'Closing System Instructions dialog...');
                                     closeBtn.click();
-                                    await randomDelay(400, 700);
+                                    await randomDelay(1000, 1500);
                                 }
                             } else {
                                 hostLog('SYS_PROMPT_WARN', 'Could not find System Instructions card button.');
@@ -711,18 +738,19 @@ fun buildAiStudioAutomationScript(
                         }
                     }
 
-                    // C. Close Settings Drawer
-                    if (openedSettingsDrawer) {
-                        const closeSettingsBtn = document.querySelector('ms-run-settings button[aria-label*="Close run settings"], button.runsettings-toggle-button');
+                    // C. Close Settings Drawer ONLY if expanded
+                    const openDrawer = document.querySelector('ms-run-settings.expanded, .content-container ms-run-settings:not(.collapsed)');
+                    if (openDrawer && isElementVisible(openDrawer)) {
+                        const closeSettingsBtn = openDrawer.querySelector('button[aria-label*="Close run settings"], button[aria-label*="Close"]');
                         if (closeSettingsBtn) {
                             hostLog('SETTINGS', 'Closing settings drawer...');
                             closeSettingsBtn.click();
-                            await randomDelay(400, 700);
+                            await randomDelay(800, 1200);
                         }
                     }
                 }
 
-                await randomDelay(400, 800);
+                await randomDelay(800, 1200);
 
                 // 3. Robust Keyboard & Reactive Form Insertion into User Prompt
                 updateStatus('Injecting user prompt into AI Studio...');
@@ -730,49 +758,53 @@ fun buildAiStudioAutomationScript(
                 for (let a = 0; a < 20; a++) {
                     promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
                     if (promptArea && isElementVisible(promptArea)) break;
-                    await delay(300);
+                    await delay(400);
                 }
 
                 if (promptArea) {
-                    safeInjectText(promptArea, PROMPT);
-                    await randomDelay(400, 800);
+                    if (promptArea.value.trim() !== PROMPT.trim()) {
+                        safeInjectText(promptArea, PROMPT);
+                        await randomDelay(800, 1400);
+                    } else {
+                        hostLog('PROMPT', 'Prompt text already present in textarea.');
+                    }
                 } else {
                     hostLog('PROMPT_ERR', 'Could not locate prompt textarea to inject text.');
                 }
 
-                // 4. Force Submit via Ctrl+Enter and Button Touch Click
-                updateStatus('Submitting prompt to Gemini...');
-                
-                // A. Direct Ctrl+Enter on promptArea
-                if (promptArea) {
-                    promptArea.dispatchEvent(new KeyboardEvent('keydown', {
-                        key: 'Enter',
-                        code: 'Enter',
-                        keyCode: 13,
-                        which: 13,
-                        ctrlKey: true,
-                        bubbles: true,
-                        cancelable: true
-                    }));
-                    await randomDelay(200, 400);
-                }
+                // 4. Atomic Submit (Never double-fire or click a stoppable button)
+                if (!isGenerating()) {
+                    updateStatus('Submitting prompt to Gemini...');
+                    
+                    const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
+                    if (submitBtn && !submitBtn.classList.contains('stoppable')) {
+                        hostLog('RUN', 'Clicking Run button...');
+                        try {
+                            submitBtn.removeAttribute('disabled');
+                            submitBtn.setAttribute('aria-disabled', 'false');
+                            submitBtn.classList.remove('mat-mdc-button-disabled', 'mdc-button--disabled');
+                        } catch(_) {}
+                        submitBtn.click();
+                        await randomDelay(800, 1200);
+                    }
 
-                // B. Force click on Run button
-                const submitBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[type="submit"], button[aria-label*="Run"]');
-                if (submitBtn) {
-                    hostLog('RUN', 'Dispatching touch & click events on Submit button...');
-                    try {
-                        submitBtn.removeAttribute('disabled');
-                        submitBtn.setAttribute('aria-disabled', 'false');
-                        submitBtn.classList.remove('mat-mdc-button-disabled', 'mdc-button--disabled');
-                    } catch(_) {}
-
-                    submitBtn.dispatchEvent(new Event('touchstart', { bubbles: true }));
-                    await randomDelay(50, 150);
-                    submitBtn.dispatchEvent(new Event('touchend', { bubbles: true }));
-                    submitBtn.click();
+                    // Fallback to Ctrl+Enter only if Run button click did not trigger generation
+                    if (!isGenerating() && promptArea) {
+                        hostLog('RUN', 'Run button did not trigger generation, dispatching Ctrl+Enter...');
+                        promptArea.focus();
+                        promptArea.dispatchEvent(new KeyboardEvent('keydown', {
+                            key: 'Enter',
+                            code: 'Enter',
+                            keyCode: 13,
+                            which: 13,
+                            ctrlKey: true,
+                            bubbles: true,
+                            cancelable: true
+                        }));
+                        await randomDelay(800, 1200);
+                    }
                 } else {
-                    hostLog('RUN_WARN', 'Submit button not found, relied on Ctrl+Enter.');
+                    hostLog('RUN', 'Generation already active. Skipping duplicate submit.');
                 }
 
                 // 5. Polling & Streaming Detection Loop
