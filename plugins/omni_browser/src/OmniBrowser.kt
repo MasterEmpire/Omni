@@ -2816,7 +2816,7 @@ class OmniBrowser : PluginEntry() {
                             });
                             await delay(200);
 
-                            // 4. Inject Prompt using native insertion & Spacebar transition
+                            // 4. Inject Prompt and wait for Angular validation state
                             async function injectAndSubmitPrompt() {
                                 updateStatus('Injecting prompt into Angular engine...');
                                 promptArea.focus();
@@ -2834,49 +2834,56 @@ class OmniBrowser : PluginEntry() {
                                     promptArea.dispatchEvent(new Event('change', { bubbles: true }));
                                 }
 
-                                // Keypress cycle to transition Angular's internal DraftManager
+                                // Keypress cycle to trigger Angular DraftManager input lifecycle
                                 promptArea.focus();
                                 promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
                                 promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: ' ' }));
                                 promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', keyCode: 32, which: 32, bubbles: true, composed: true }));
-                                await delay(200);
+                                await delay(150);
 
                                 promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
                                 promptArea.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
                                 promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, composed: true }));
                                 promptArea.dispatchEvent(new Event('change', { bubbles: true }));
 
-                                await delay(600);
-                                promptArea.focus();
-
-                                updateStatus('Submitting prompt to Gemini...');
-                                const runBtn = document.querySelector(
-                                    'ms-run-button button, ' +
-                                    'button.ctrl-enter-submits, ' +
-                                    'button[aria-label*="Run"], ' +
-                                    'button[data-test-id="run-button"], ' +
-                                    'button.run-button, ' +
-                                    'button[type="submit"]'
-                                );
-
-                                if (runBtn) {
-                                    hostLog('RUN', 'Located run button: disabled=' + runBtn.disabled + ', aria-disabled=' + runBtn.getAttribute('aria-disabled'));
+                                updateStatus('Waiting for form validation & token readiness...');
+                                
+                                // Wait until the run button is enabled by Angular (aria-disabled !== 'true')
+                                let runReadyAttempts = 0;
+                                let runBtn = null;
+                                while (runReadyAttempts < 15) {
+                                    runBtn = document.querySelector(
+                                        'ms-run-button button, ' +
+                                        'button.ctrl-enter-submits, ' +
+                                        'button[aria-label*="Run"], ' +
+                                        'button[data-test-id="run-button"], ' +
+                                        'button.run-button'
+                                    );
+                                    if (runBtn && !runBtn.disabled && runBtn.getAttribute('aria-disabled') !== 'true') {
+                                        break;
+                                    }
+                                    await delay(250);
+                                    runReadyAttempts++;
                                 }
 
-                                // Dispatch synthetic Ctrl+Enter on prompt textarea
-                                promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
-                                promptArea.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
-                                promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
+                                if (runBtn) {
+                                    hostLog('RUN', 'Run button ready: disabled=' + runBtn.disabled + ', aria-disabled=' + runBtn.getAttribute('aria-disabled'));
+                                }
 
+                                updateStatus('Submitting prompt to Gemini...');
                                 if (runBtn && !runBtn.disabled && runBtn.getAttribute('aria-disabled') !== 'true') {
                                     runBtn.click();
                                     hostLog('RUN', 'Clicked Run button.');
+                                } else {
+                                    promptArea.focus();
+                                    promptArea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
+                                    promptArea.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, composed: true }));
                                 }
                             }
 
                             await injectAndSubmitPrompt();
 
-                            // 5. Robust Content Scraper Loop with Deduplication & Auto-Healing Retries
+                            // 5. Robust Content Scraper Loop with Clean Extraction & Smart Rerun
                             updateStatus('Listening for response stream...');
                             let lastOutput = '';
                             let lastThoughts = '';
@@ -2897,7 +2904,7 @@ class OmniBrowser : PluginEntry() {
                                     }
                                 } catch(_) {}
 
-                                // A. Error Trapping with Auto-Healing Self-Retry
+                                // A. Error Trapping with Smart Turn Rerun
                                 const errorNode = document.querySelector(
                                     'ms-callout.error-callout .message, ' +
                                     '.error-callout .message, ' +
@@ -2910,18 +2917,26 @@ class OmniBrowser : PluginEntry() {
                                 if (errorNode) {
                                     const errTxt = (errorNode.innerText || errorNode.textContent || '').trim();
                                     if (errTxt.length > 0 && !errTxt.toLowerCase().includes('saved')) {
-                                        if (retryCount < 2 && (errTxt.toLowerCase().includes('permission') || errTxt.toLowerCase().includes('failed to generate'))) {
+                                        if (retryCount < 3 && (errTxt.toLowerCase().includes('permission') || errTxt.toLowerCase().includes('failed to generate') || errTxt.toLowerCase().includes('internal error'))) {
                                             retryCount++;
-                                            hostLog('RETRY', 'Encountered transient 403 (' + errTxt + '). Performing auto-healing retry #' + retryCount + '...');
+                                            hostLog('RETRY', 'Encountered error (' + errTxt + '). Buffering 3s for rate limiter, then retrying turn #' + retryCount + '...');
                                             
                                             // Dismiss error toast
                                             try {
-                                                const dismissBtn = document.querySelector('ms-callout .dismiss-button, button[aria-label="Dismiss"]');
+                                                const dismissBtn = document.querySelector('ms-callout .dismiss-button, ms-toast .dismiss-button, button[aria-label="Dismiss"]');
                                                 if (dismissBtn) dismissBtn.click();
                                             } catch(_) {}
 
-                                            await delay(1500);
-                                            await injectAndSubmitPrompt();
+                                            await delay(3000);
+
+                                            // Prefer triggering the clean Rerun button directly on the turn
+                                            const rerunBtn = document.querySelector('button[name="rerun-button"], .rerun-button');
+                                            if (rerunBtn && !rerunBtn.disabled) {
+                                                hostLog('RETRY', 'Triggering turn rerun button directly.');
+                                                rerunBtn.click();
+                                            } else {
+                                                await injectAndSubmitPrompt();
+                                            }
                                             continue;
                                         }
 
@@ -2932,52 +2947,37 @@ class OmniBrowser : PluginEntry() {
                                     }
                                 }
 
-                                // B. Extract Model Thoughts (Clean leaf selector to avoid duplication)
+                                // B. Extract Model Thoughts
                                 let currentThoughts = '';
-                                const thoughtChunks = Array.from(document.querySelectorAll('ms-thought-chunk ms-text-chunk, ms-thought-chunk .cmark-node'));
-                                if (thoughtChunks.length > 0) {
-                                    currentThoughts = thoughtChunks
+                                const thoughtNodes = Array.from(document.querySelectorAll('ms-thought-chunk ms-text-chunk .cmark-node:not(ms-cmark-node ms-cmark-node), ms-thought-chunk ms-text-chunk'));
+                                if (thoughtNodes.length > 0) {
+                                    currentThoughts = thoughtNodes
                                         .map(n => n.innerText || n.textContent || '')
                                         .filter(Boolean)
                                         .join('\n')
                                         .trim();
-                                } else {
-                                    const rawThoughts = Array.from(document.querySelectorAll('ms-thought-chunk'));
-                                    if (rawThoughts.length > 0) {
-                                        currentThoughts = rawThoughts
-                                            .map(n => n.innerText || n.textContent || '')
-                                            .filter(Boolean)
-                                            .join('\n')
-                                            .trim();
-                                    }
                                 }
 
-                                // C. Extract Rendered Markdown with strict deduplication (Priority: leaf ms-cmark-nodes only)
+                                // C. Extract Rendered Markdown without Nested Duplication
                                 let currentOutput = '';
                                 const modelTurns = document.querySelectorAll('ms-chat-turn .chat-turn-container.model, div[data-turn-role="Model"]');
 
                                 if (modelTurns.length > 0) {
                                     const lastTurn = modelTurns[modelTurns.length - 1];
                                     
-                                    // 1st Priority: Leaf ms-cmark-node elements (avoids parent container duplication!)
-                                    const cmarkNodes = Array.from(lastTurn.querySelectorAll('ms-cmark-node'));
-                                    if (cmarkNodes.length > 0) {
-                                        currentOutput = cmarkNodes
+                                    // Query top-level cmark nodes only (ignores nested child nodes)
+                                    const topCmarkNodes = Array.from(lastTurn.querySelectorAll('ms-prompt-chunk ms-text-chunk .cmark-node:not(ms-cmark-node ms-cmark-node)'));
+                                    if (topCmarkNodes.length > 0) {
+                                        currentOutput = topCmarkNodes
                                             .map(n => n.innerText || n.textContent || '')
                                             .filter(Boolean)
                                             .join('\n\n')
                                             .trim();
                                     } else {
-                                        // 2nd Priority: Prompt chunk text
-                                        const textChunks = Array.from(lastTurn.querySelectorAll('ms-prompt-chunk > ms-text-chunk:not(ms-thought-chunk ms-text-chunk)'));
-                                        if (textChunks.length > 0) {
-                                            currentOutput = textChunks
-                                                .map(n => n.innerText || n.textContent || '')
-                                                .filter(Boolean)
-                                                .join('\n\n')
-                                                .trim();
+                                        const cmarkSingle = lastTurn.querySelector('.cmark-node');
+                                        if (cmarkSingle) {
+                                            currentOutput = (cmarkSingle.innerText || cmarkSingle.textContent || '').trim();
                                         } else {
-                                            // 3rd Priority: Top level turn container
                                             const turnRoot = lastTurn.querySelector('.turn-content');
                                             if (turnRoot) {
                                                 currentOutput = (turnRoot.innerText || turnRoot.textContent || '').trim();
