@@ -2668,6 +2668,16 @@ class OmniBrowser : PluginEntry() {
                     headlessAutomationWv?.destroy()
                 } catch (_: Exception) {}
 
+                // Flush active cookies before spinning up headless worker
+                if (autoSelectedProfileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+                    try {
+                        val profileStore = ProfileStore.getInstance()
+                        profileStore.getOrCreateProfile(autoSelectedProfileId).cookieManager.flush()
+                    } catch (_: Exception) {}
+                } else {
+                    CookieManager.getInstance().flush()
+                }
+
                 val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
                 val jsEscapedPrompt = org.json.JSONObject.quote(autoUserPrompt.trim())
@@ -2732,8 +2742,8 @@ class OmniBrowser : PluginEntry() {
                                 );
                                 
                                 // Check if backend token placeholder has resolved (session ready)
-                                const isSessionLoading = document.querySelector('.loading-token-count-placeholder') !== null;
-                                if (promptArea && !isSessionLoading) break;
+                                const isSessionLoading = document.querySelector('.loading-token-count-placeholder, mat-spinner') !== null;
+                                if (promptArea && !isSessionLoading && mountAttempts >= 3) break;
 
                                 await delay(1000);
                                 mountAttempts++;
@@ -3034,16 +3044,29 @@ class OmniBrowser : PluginEntry() {
                         domStorageEnabled = true
                         databaseEnabled = true
                         allowFileAccess = true
+                        allowContentAccess = true
                         setSupportMultipleWindows(true)
                         userAgentString = desktopUA
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+
+                        try {
+                            val method = javaClass.getMethod("setRequestedWithHeaderOriginAllowList", Set::class.java)
+                            method.invoke(this, emptySet<String>())
+                        } catch (_: Exception) {}
                     }
 
                     if (autoSelectedProfileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
                         try {
                             val profileStore = ProfileStore.getInstance()
-                            profileStore.getOrCreateProfile(autoSelectedProfileId)
+                            val profile = profileStore.getOrCreateProfile(autoSelectedProfileId)
                             WebViewCompat.setProfile(this, autoSelectedProfileId)
+                            profile.cookieManager.setAcceptCookie(true)
+                            profile.cookieManager.setAcceptThirdPartyCookies(this, true)
                         } catch (_: Exception) {}
+                    } else {
+                        val cm = CookieManager.getInstance()
+                        cm.setAcceptCookie(true)
+                        cm.setAcceptThirdPartyCookies(this, true)
                     }
 
                     webChromeClient = object : WebChromeClient() {
