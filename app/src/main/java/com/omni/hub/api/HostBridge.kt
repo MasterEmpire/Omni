@@ -494,16 +494,46 @@ class HostBridgeImpl(
 
     override fun startForegroundTask(title: String, message: String) {
         acquireWakeLock(title)
-        com.omni.hub.services.OmniForegroundService.start(context, title, message)
+        try {
+            val intent = Intent().apply {
+                setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
+                action = "com.omni.hub.action.START_FOREGROUND"
+                putExtra("extra_title", title)
+                putExtra("extra_message", message)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (_: Exception) {}
     }
 
     override fun updateForegroundTask(message: String) {
-        com.omni.hub.services.OmniForegroundService.update(context, "Omni Hub Task", message)
+        try {
+            val intent = Intent().apply {
+                setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
+                action = "com.omni.hub.action.START_FOREGROUND"
+                putExtra("extra_title", "Omni Hub Task")
+                putExtra("extra_message", message)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (_: Exception) {}
     }
 
     override fun stopForegroundTask() {
         releaseWakeLock()
-        com.omni.hub.services.OmniForegroundService.stop(context)
+        try {
+            val intent = Intent().apply {
+                setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
+                action = "com.omni.hub.action.STOP_FOREGROUND"
+            }
+            context.startService(intent)
+        } catch (_: Exception) {}
     }
 
     override fun log(tag: String, message: String) {
