@@ -112,7 +112,6 @@ class OmniBrowser : PluginEntry() {
             for ((idx, uri) in uris.withIndex()) {
                 try {
                     var name = "exam_image_$idx.jpg"
-                    var mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
                     var size = 0L
 
                     ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -124,19 +123,22 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
 
-                    val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        if (size <= 0) size = bytes.size.toLong()
+                    val (bytes, finalMime) = optimizeImageForAiStudio(ctx, uri)
+                    if (bytes.isNotEmpty()) {
+                        size = bytes.size.toLong()
                         val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        val safeName = if (finalMime == "image/jpeg" && !name.endsWith(".jpg", ignoreCase = true) && !name.endsWith(".jpeg", ignoreCase = true)) {
+                            "${name.substringBeforeLast(".")}.jpg"
+                        } else name
                         attachments.add(
                             AutomationAttachment(
-                                name = name,
-                                mimeType = mime,
+                                name = safeName,
+                                mimeType = finalMime,
                                 sizeBytes = size,
                                 base64Data = b64
                             )
                         )
-                        bridge.log("OMNI_SOLVE_ATTACH", "✅ Ingested attachment [$idx]: $name ($size bytes, mime=$mime)")
+                        bridge.log("OMNI_SOLVE_ATTACH", "✅ Optimized & ingested attachment [$idx]: $safeName ($size bytes, mime=$finalMime)")
                     } else {
                         bridge.log("OMNI_SOLVE_WARN", "⚠️ Empty byte stream for URI [$idx]: $uri")
                     }
