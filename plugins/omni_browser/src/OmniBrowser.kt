@@ -169,7 +169,7 @@ class OmniBrowser : PluginEntry() {
                     model = "Gemini 3.7 Flash",
                     fallbackEnabled = true,
                     temporaryChat = false,
-                    attachments = attachments,
+                    attachments = emptyList(),
                     containerLayout = null,
                     callback = object : AutomationCallback {
                         override fun onStatus(msg: String) {
