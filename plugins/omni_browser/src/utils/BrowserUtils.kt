@@ -479,10 +479,120 @@ fun buildAiStudioAutomationScript(
 
             const STEPS = (STEPS_DATA && Array.isArray(STEPS_DATA) && STEPS_DATA.length > 0)
                 ? STEPS_DATA
-                : [{ prompt: FALLBACK_PROMPT, repeatCount: 1, isInfinite: false }];
+                : [{ prompt: FALLBACK_PROMPT, repeatCount: 1, isInfinite: false, attachments: [] }];
 
             const delay = (ms) => new Promise(r => setTimeout(r, ms));
             const randomDelay = (min, max) => delay(Math.floor(Math.random() * (max - min + 1) + min));
+
+            // Comprehensive English Interstitial & Dialog Dismissal Dictionary
+            const DISMISS_DICTIONARY = [
+                'got it', 'dismiss', 'i understand', 'accept', 'agree', 'i agree',
+                'close', 'not now', 'no thanks', 'maybe later', 'continue', 'get started',
+                'try it', 'try now', 'acknowledge', 'confirm', 'ok', 'done', 'skip',
+                'remind me later', 'never', 'dismiss all', 'accept all', 'stay here',
+                'keep using web', 'close dialog', 'understand'
+            ];
+
+            async function dismissInterstitials() {
+                try {
+                    const dialogContainers = document.querySelectorAll(
+                        'mat-dialog-container, .mat-mdc-dialog-container, [role="dialog"], [aria-modal="true"], ms-announcement-modal, ms-onboarding-dialog, ms-welcome-dialog, ms-terms-dialog, .modal, .popup'
+                    );
+
+                    for (const dialog of dialogContainers) {
+                        if (!isElementVisible(dialog)) continue;
+                        if (dialog.querySelector('ms-system-instructions') && window.__omniConfiguringSysPrompt) {
+                            continue;
+                        }
+
+                        const buttons = Array.from(dialog.querySelectorAll('button, [role="button"], a.btn'));
+                        let dismissed = false;
+
+                        for (const btn of buttons) {
+                            if (!isElementVisible(btn)) continue;
+                            const txt = (btn.textContent || '').trim().toLowerCase();
+                            const aria = (btn.getAttribute('aria-label') || '').trim().toLowerCase();
+                            const testId = (btn.getAttribute('data-testid') || btn.getAttribute('data-test') || '').toLowerCase();
+
+                            if (DISMISS_DICTIONARY.some(d => txt === d || txt.startsWith(d + ' ') || aria.includes(d) || testId.includes(d)) ||
+                                aria.includes('close') || aria.includes('dismiss')) {
+                                hostLog('INTERSTITIAL', 'Dismissing popup/modal with button: "' + (txt || aria) + '"');
+                                btn.click();
+                                dismissed = true;
+                                await delay(400);
+                                break;
+                            }
+                        }
+
+                        if (!dismissed) {
+                            const closeIconBtn = dialog.querySelector('button[aria-label*="close"], button[aria-label*="Close"], button[data-test-close-button], .close-button, .close-btn, mat-icon[fonticon="close"]');
+                            if (closeIconBtn && isElementVisible(closeIconBtn)) {
+                                hostLog('INTERSTITIAL', 'Dismissing popup/modal via close icon button');
+                                closeIconBtn.click();
+                                await delay(400);
+                            }
+                        }
+                    }
+
+                    const banners = document.querySelectorAll('ms-banner, ms-global-banner, .announcement-banner');
+                    for (const banner of banners) {
+                        if (!isElementVisible(banner)) continue;
+                        const bannerDismiss = banner.querySelector('button[aria-label*="dismiss"], button[aria-label*="close"], button.dismiss-button, button.close');
+                        if (bannerDismiss && isElementVisible(bannerDismiss)) {
+                            hostLog('INTERSTITIAL', 'Dismissing announcement banner');
+                            bannerDismiss.click();
+                            await delay(200);
+                        }
+                    }
+                } catch(e) {
+                    hostLog('INTERSTITIAL_ERR', 'Error during interstitial check: ' + e.message);
+                }
+            }
+
+            async function injectAttachments(attachmentsList, label) {
+                if (!attachmentsList || !Array.isArray(attachmentsList) || attachmentsList.length === 0) return;
+                updateStatus(label + ' - Uploading ' + attachmentsList.length + ' file(s)...');
+                hostLog('ATTACHMENTS', 'Injecting ' + attachmentsList.length + ' file(s) into file input for ' + label);
+
+                const fileInput = document.querySelector('input[data-test-upload-file-input], input[type="file"].file-input, input[type="file"]');
+                if (fileInput) {
+                    const dt = new DataTransfer();
+                    for (const att of attachmentsList) {
+                        try {
+                            const b64Clean = att.data.includes(',') ? att.data.split(',')[1] : att.data;
+                            const byteChars = atob(b64Clean);
+                            const byteNums = new Array(byteChars.length);
+                            for (let i = 0; i < byteChars.length; i++) {
+                                byteNums[i] = byteChars.charCodeAt(i);
+                            }
+                            const byteArray = new Uint8Array(byteNums);
+                            const blob = new Blob([byteArray], { type: att.mime || 'application/octet-stream' });
+                            const file = new File([blob], att.name || 'file', { type: att.mime || 'application/octet-stream' });
+                            dt.items.add(file);
+                            hostLog('ATTACHMENTS', 'Prepared File: ' + file.name + ' (' + file.size + ' bytes)');
+                        } catch (e) {
+                            hostLog('ATTACHMENTS_ERR', 'Failed preparing ' + att.name + ': ' + e.message);
+                        }
+                    }
+
+                    if (dt.files.length > 0) {
+                        fileInput.files = dt.files;
+                        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        await randomDelay(1200, 1800);
+
+                        updateStatus(label + ' - Ingesting media into AI Studio...');
+                        let uploadWait = 0;
+                        while (uploadWait < 60) {
+                            const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress, ms-prompt-box .loading');
+                            if (!activeUploadIndicator) break;
+                            await delay(500);
+                            uploadWait++;
+                        }
+                        await randomDelay(800, 1200);
+                        hostLog('ATTACHMENTS', 'Media attachments processed for ' + label);
+                    }
+                }
+            }
 
             function hostLog(tag, msg) {
                 try {
@@ -566,17 +676,21 @@ fun buildAiStudioAutomationScript(
                     return;
                 }
 
+                updateStatus('Checking UI & Dismissing popups...');
+                await dismissInterstitials();
+
                 updateStatus('Waiting for AI Studio UI...');
                 let mountAttempts = 0;
                 let promptArea = null;
 
-                while (mountAttempts < 30) {
+                while (mountAttempts < 35) {
+                    await dismissInterstitials();
                     promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
-                    if (promptArea) break;
+                    if (promptArea && isElementVisible(promptArea)) break;
                     await delay(1000);
                     mountAttempts++;
                     if (mountAttempts % 5 === 0) {
-                        hostLog('MOUNT', 'Polling UI (' + mountAttempts + '/30)...');
+                        hostLog('MOUNT', 'Polling UI (' + mountAttempts + '/35)...');
                     }
                 }
 
@@ -780,7 +894,6 @@ fun buildAiStudioAutomationScript(
                                 if (closeBtn) {
                                     hostLog('SYS_PROMPT', 'Closing System Instructions dialog...');
                                     closeBtn.click();
-                                    // Settle buffer for CDK modal dismiss and automatic mobile drawer cascade
                                     await randomDelay(1000, 1500);
                                 }
                             } else {
@@ -788,6 +901,8 @@ fun buildAiStudioAutomationScript(
                             }
                         } catch(e) {
                             hostLog('SYS_PROMPT_ERR', 'System instructions step failed: ' + e.message);
+                        } finally {
+                            window.__omniConfiguringSysPrompt = false;
                         }
                     }
 
@@ -820,49 +935,9 @@ fun buildAiStudioAutomationScript(
 
                 await randomDelay(800, 1200);
 
-                // 3. Initial Attachments Dispatch (Turn 1 Only)
+                // 3. Initial Attachments Dispatch (Turn 1 Global)
                 if (ATTACHMENTS && Array.isArray(ATTACHMENTS) && ATTACHMENTS.length > 0) {
-                    updateStatus('Attaching ' + ATTACHMENTS.length + ' initial file(s)...');
-                    hostLog('ATTACHMENTS', 'Injecting ' + ATTACHMENTS.length + ' file(s) into file input...');
-
-                    const fileInput = document.querySelector('input[data-test-upload-file-input], input[type="file"].file-input, input[type="file"]');
-                    if (fileInput) {
-                        const dt = new DataTransfer();
-                        for (const att of ATTACHMENTS) {
-                            try {
-                                const b64Clean = att.data.includes(',') ? att.data.split(',')[1] : att.data;
-                                const byteChars = atob(b64Clean);
-                                const byteNums = new Array(byteChars.length);
-                                for (let i = 0; i < byteChars.length; i++) {
-                                    byteNums[i] = byteChars.charCodeAt(i);
-                                }
-                                const byteArray = new Uint8Array(byteNums);
-                                const blob = new Blob([byteArray], { type: att.mime || 'application/octet-stream' });
-                                const file = new File([blob], att.name || 'file', { type: att.mime || 'application/octet-stream' });
-                                dt.items.add(file);
-                                hostLog('ATTACHMENTS', 'Prepared File: ' + file.name + ' (' + file.size + ' bytes)');
-                            } catch (e) {
-                                hostLog('ATTACHMENTS_ERR', 'Failed preparing ' + att.name + ': ' + e.message);
-                            }
-                        }
-
-                        if (dt.files.length > 0) {
-                            fileInput.files = dt.files;
-                            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-                            await randomDelay(1200, 1800);
-
-                            updateStatus('Ingesting media into AI Studio...');
-                            let uploadWait = 0;
-                            while (uploadWait < 40) {
-                                const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress, ms-prompt-box .loading');
-                                if (!activeUploadIndicator) break;
-                                await delay(500);
-                                uploadWait++;
-                            }
-                            await randomDelay(800, 1200);
-                            hostLog('ATTACHMENTS', 'Media attachments processed.');
-                        }
-                    }
+                    await injectAttachments(ATTACHMENTS, 'Turn 1 Global');
                 }
 
                 // 4. Sequential Multi-Turn Prompt Chain Execution
@@ -887,12 +962,20 @@ fun buildAiStudioAutomationScript(
                         updateStatus(stepLabel + ' - Injecting prompt...');
                         hostLog('CHAIN', 'Executing ' + stepLabel + ' [Total Turns: ' + totalTurnsExecuted + ']');
 
+                        await dismissInterstitials();
+
+                        // Ingest step-specific attachments if provided
+                        if (currentStep.attachments && Array.isArray(currentStep.attachments) && currentStep.attachments.length > 0) {
+                            await injectAttachments(currentStep.attachments, stepLabel);
+                        }
+
                         // Find the bottom-most active textarea
                         let activePromptArea = null;
                         for (let a = 0; a < 25; a++) {
                             const allAreas = Array.from(document.querySelectorAll('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea'));
                             activePromptArea = allAreas.length > 0 ? allAreas[allAreas.length - 1] : null;
                             if (activePromptArea && isElementVisible(activePromptArea)) break;
+                            await dismissInterstitials();
                             await delay(400);
                         }
 
@@ -937,18 +1020,23 @@ fun buildAiStudioAutomationScript(
                             }
                         }
 
-                        // Response Polling & Streaming Detection Loop for this turn
+                        // Dynamic Response Polling & Streaming Detection Watchdog
                         updateStatus(stepLabel + ' - Streaming response...');
                         let lastLen = 0;
+                        let lastThoughtsLen = 0;
                         let stable = 0;
-                        let turnTicks = 0;
+                        let totalTurnTicks = 0;
+                        let idleTicks = 0;
+                        const MAX_IDLE_TICKS = 60; // 36 seconds of verified freeze with zero token change
+                        const MAX_TOTAL_TICKS = 1500; // 15 minutes ceiling per turn for extreme reasoning models
                         let turnRetryCount = 0;
                         const MAX_RETRIES = 3;
                         let currentTurnOutput = '';
 
-                        while (turnTicks < 200) {
+                        while (totalTurnTicks < MAX_TOTAL_TICKS) {
                             await delay(600);
-                            turnTicks++;
+                            totalTurnTicks++;
+                            idleTicks++;
 
                             const errBanner = document.querySelector('ms-banner .error-banner-message, ms-global-banner');
                             const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error, ms-chat-turn:last-of-type .model-error');
