@@ -415,7 +415,6 @@ class BrowserStateHolder(
                 try {
                     var name = "attachment_${System.currentTimeMillis()}"
                     var size = 0L
-                    var mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
 
                     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                         val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
@@ -426,18 +425,22 @@ class BrowserStateHolder(
                         }
                     }
 
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        if (size <= 0) size = bytes.size.toLong()
+                    val (bytes, finalMime) = optimizeImageForAiStudio(context, uri)
+                    if (bytes.isNotEmpty()) {
+                        size = bytes.size.toLong()
                         val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        val safeName = if (finalMime == "image/jpeg" && !name.endsWith(".jpg", ignoreCase = true) && !name.endsWith(".jpeg", ignoreCase = true)) {
+                            "${name.substringBeforeLast(".")}.jpg"
+                        } else name
                         newItems.add(
                             AutomationAttachment(
-                                name = name,
-                                mimeType = mime,
+                                name = safeName,
+                                mimeType = finalMime,
                                 sizeBytes = size,
                                 base64Data = b64
                             )
                         )
+                        bridge.log("ATTACH", "✅ Optimized attachment: $safeName ($size bytes, mime=$finalMime)")
                     }
                 } catch (e: Exception) {
                     bridge.log("ATTACH_ERR", "Failed reading attachment: ${e.message}")
@@ -446,7 +449,7 @@ class BrowserStateHolder(
             if (newItems.isNotEmpty()) {
                 withContext(Dispatchers.Main) {
                     autoAttachments = autoAttachments + newItems
-                    bridge.showToast("Attached ${newItems.size} file(s)")
+                    bridge.showToast("Attached ${newItems.size} optimized file(s)")
                 }
             }
         }
