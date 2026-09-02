@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
@@ -24,28 +25,37 @@ class OmniSolveService : Service() {
             return START_NOT_STICKY
         }
 
-        createNotificationChannel()
-        val notification = buildNotification("Omni Hub Exam Solver", "Processing exam images headlessly...")
-        startForeground(NOTIFICATION_ID, notification)
-
-        val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableArrayListExtra("extra_image_uris", Uri::class.java) ?: arrayListOf()
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableArrayListExtra<Uri>("extra_image_uris") ?: arrayListOf()
-        }
-
-        val replyAction = intent.getStringExtra("extra_reply_action") ?: "com.universal.app.ACTION_OMNI_RESULT"
-        val statusAction = intent.getStringExtra("extra_status_action") ?: "com.universal.app.ACTION_OMNI_STATUS"
-        val presetTitle = intent.getStringExtra("extra_preset_title") ?: ""
-        val userPrompt = intent.getStringExtra("extra_user_prompt") ?: ""
-        val requestId = intent.getStringExtra("extra_request_id") ?: "req_${System.currentTimeMillis()}"
-
-        OmniLogger.log("OMNI_SOLVER", "Received exam solve request [$requestId] with ${uris.size} image URI(s).")
+        var replyAction = "com.universal.app.ACTION_OMNI_RESULT"
+        var statusAction = "com.universal.app.ACTION_OMNI_STATUS"
 
         try {
+            createNotificationChannel()
+            val notification = buildNotification("Omni Hub Exam Solver", "Processing exam images headlessly...")
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+
+            replyAction = intent.getStringExtra("extra_reply_action") ?: replyAction
+            statusAction = intent.getStringExtra("extra_status_action") ?: statusAction
+            val presetTitle = intent.getStringExtra("extra_preset_title") ?: "Exam Solver"
+            val userPrompt = intent.getStringExtra("extra_user_prompt") ?: ""
+            val requestId = intent.getStringExtra("extra_request_id") ?: "req_${System.currentTimeMillis()}"
+
+            val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableArrayListExtra("extra_image_uris", Uri::class.java) ?: arrayListOf()
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableArrayListExtra<Uri>("extra_image_uris") ?: arrayListOf()
+            }
+
+            OmniLogger.log("OMNI_SOLVER", "📥 Accepted solve request [$requestId] with ${uris.size} image URI(s). Preset: '$presetTitle'")
+
             val loadedPlugin = PluginLoader.loadFromDir(this, "omni_browser")
             val hostBridge = HostBridgeImpl(this, loadedPlugin.dataDir) {
+                OmniLogger.log("OMNI_SOLVER", "Host bridge close requested for [$requestId]. Stopping service.")
                 stopSelf()
             }
 
@@ -62,9 +72,9 @@ class OmniSolveService : Service() {
 
             loadedPlugin.instance.onSystemEvent("SOLVE_EXAM", payload)
 
-        } catch (e: Exception) {
-            OmniLogger.log("OMNI_SOLVER_ERR", "Failed initializing omni_browser plugin: ${e.message}")
-            sendResultBroadcast(this, replyAction, success = false, json = null, error = "Omni Hub Plugin Error: ${e.message}")
+        } catch (t: Throwable) {
+            OmniLogger.log("OMNI_SOLVER_ERR", "💥 Fatal exception in OmniSolveService: ${t.message}\n${t.stackTraceToString()}")
+            sendResultBroadcast(this, replyAction, success = false, json = null, error = "Omni Hub Service Error: ${t.message}")
             stopSelf()
         }
 
