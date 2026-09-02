@@ -124,12 +124,11 @@ class AiStudioAutomator(
             translationX = 0f
             alpha = 1f
 
-            measure(
-                android.view.View.MeasureSpec.makeMeasureSpec(viewWidth, android.view.View.MeasureSpec.EXACTLY),
-                android.view.View.MeasureSpec.makeMeasureSpec(viewHeight, android.view.View.MeasureSpec.EXACTLY)
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
-            layout(0, 0, viewWidth, viewHeight)
-            bridge.log("AI_STUDIO_VIEWPORT", "📐 Headless phone viewport forced to: ${viewWidth}x${viewHeight} px")
+            bridge.log("AI_STUDIO_VIEWPORT", "📐 Initialized background execution surface (${viewWidth}x${viewHeight} px)")
 
             settings.apply {
                 javaScriptEnabled = true
@@ -220,15 +219,13 @@ class AiStudioAutomator(
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
-                    view?.layout(0, 0, viewWidth, viewHeight)
-                    bridge.log("AI_STUDIO_NAV", "Started loading: $url (Viewport: ${view?.width}x${view?.height})")
+                    bridge.log("AI_STUDIO_NAV", "Started loading: $url")
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    view?.layout(0, 0, viewWidth, viewHeight)
-                    bridge.log("AI_STUDIO_NAV", "Finished loading: $url (Viewport: ${view?.width}x${view?.height})")
+                    bridge.log("AI_STUDIO_NAV", "Finished loading: $url")
                     if (url != null && url.contains("aistudio.google.com")) {
                         bridge.log("AI_STUDIO_INJECT", "Injecting automation script into $url")
                         view?.evaluateJavascript(automationScript, null)
@@ -248,13 +245,7 @@ class AiStudioAutomator(
         }
 
         headlessWv = autoWv
-        containerLayout?.addView(
-            autoWv,
-            ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
+        // Prevent cross-window reparenting: keep autoWv isolated in background memory
         autoWv.onResume()
         autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
     }
