@@ -549,15 +549,26 @@ fun buildAiStudioAutomationScript(
                 }
             }
 
+            const uploadedAttachmentKeys = new Set();
             async function injectAttachments(attachmentsList, label) {
                 if (!attachmentsList || !Array.isArray(attachmentsList) || attachmentsList.length === 0) return;
-                updateStatus(label + ' - Uploading ' + attachmentsList.length + ' file(s)...');
-                hostLog('ATTACHMENTS', 'Injecting ' + attachmentsList.length + ' file(s) into file input for ' + label);
+                const uniqueList = attachmentsList.filter(att => {
+                    const key = (att.name || 'file') + '_' + (att.size || (att.data ? att.data.length : 0));
+                    if (uploadedAttachmentKeys.has(key)) return false;
+                    uploadedAttachmentKeys.add(key);
+                    return true;
+                });
+                if (uniqueList.length === 0) {
+                    hostLog('ATTACHMENTS', 'Skipping already uploaded attachments for ' + label);
+                    return;
+                }
+                updateStatus(label + ' - Uploading ' + uniqueList.length + ' file(s)...');
+                hostLog('ATTACHMENTS', 'Injecting ' + uniqueList.length + ' file(s) into file input for ' + label);
 
                 const fileInput = document.querySelector('input[data-test-upload-file-input], input[type="file"].file-input, input[type="file"]');
                 if (fileInput) {
                     const dt = new DataTransfer();
-                    for (const att of attachmentsList) {
+                    for (const att of uniqueList) {
                         try {
                             const b64Clean = att.data.includes(',') ? att.data.split(',')[1] : att.data;
                             const byteChars = atob(b64Clean);
