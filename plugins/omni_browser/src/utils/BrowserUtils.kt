@@ -572,11 +572,11 @@ fun buildAiStudioAutomationScript(
                         try {
                             const b64Clean = att.data.includes(',') ? att.data.split(',')[1] : att.data;
                             const byteChars = atob(b64Clean);
-                            const byteNums = new Array(byteChars.length);
+                            // Allocate contiguous typed array directly (avoids 8x V8 heap pointer bloat)
+                            const byteArray = new Uint8Array(byteChars.length);
                             for (let i = 0; i < byteChars.length; i++) {
-                                byteNums[i] = byteChars.charCodeAt(i);
+                                byteArray[i] = byteChars.charCodeAt(i);
                             }
-                            const byteArray = new Uint8Array(byteNums);
                             const blob = new Blob([byteArray], { type: att.mime || 'application/octet-stream' });
                             const file = new File([blob], att.name || 'file', { type: att.mime || 'application/octet-stream' });
                             dt.items.add(file);
@@ -1043,6 +1043,8 @@ fun buildAiStudioAutomationScript(
                         let turnRetryCount = 0;
                         const MAX_RETRIES = 3;
                         let currentTurnOutput = '';
+                        let lastDispatchedOutput = '';
+                        let lastDispatchedThoughts = '';
 
                         while (totalTurnTicks < MAX_TOTAL_TICKS) {
                             await delay(600);
@@ -1083,7 +1085,7 @@ fun buildAiStudioAutomationScript(
 
                                     lastLen = 0;
                                     stable = 0;
-                                    turnTicks = 0;
+                                    idleTicks = 0;
                                     currentTurnOutput = '';
                                     await delay(1200);
                                     continue;
@@ -1126,7 +1128,9 @@ fun buildAiStudioAutomationScript(
                                 ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
                                 : currentTurnOutput;
 
-                            if (currentTurnOutput.length > 0 || latestTurnThoughts.length > 0) {
+                            if (combinedDisplay !== lastDispatchedOutput || latestTurnThoughts !== lastDispatchedThoughts) {
+                                lastDispatchedOutput = combinedDisplay;
+                                lastDispatchedThoughts = latestTurnThoughts;
                                 if (window.OmniAutomator) window.OmniAutomator.onProgress(latestTurnThoughts, combinedDisplay);
                             }
 
