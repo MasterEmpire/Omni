@@ -21,6 +21,21 @@ class OmniSolveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+
+        if (action == "com.omni.hub.action.ABORT_SOLVE") {
+            OmniLogger.log("OMNI_SOLVER", "🛑 Received explicit ABORT_SOLVE from client app. Terminating background solver.")
+            try {
+                val loadedPlugin = PluginLoader.loadFromDir(this, "omni_browser")
+                val hostBridge = HostBridgeImpl(this, loadedPlugin.dataDir) {}
+                loadedPlugin.instance.onSystemEvent("ABORT_SOLVE", mapOf("context" to this, "bridge" to hostBridge))
+            } catch (e: Exception) {
+                OmniLogger.log("OMNI_SOLVER_ERR", "Failed dispatching ABORT_SOLVE to plugin: ${e.message}")
+            }
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         if (action != "com.omni.hub.action.SOLVE_EXAM") {
             return START_NOT_STICKY
         }
