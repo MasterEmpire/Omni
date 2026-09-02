@@ -78,14 +78,25 @@ class AiStudioAutomator(
         val jsAttachments = attachmentsArray.toString()
 
         val stepsArray = org.json.JSONArray()
-        val targetSteps = if (steps.isNotEmpty()) steps else listOf(com.omni.plugin.browser.models.SequentialPromptStep(prompt = userPrompt))
+                val targetSteps = if (steps.isNotEmpty()) steps else listOf(com.omni.plugin.browser.models.SequentialPromptStep(prompt = userPrompt))
         targetSteps.forEach { step ->
+            val stepAttArray = org.json.JSONArray()
+            step.attachments.forEach { att ->
+                stepAttArray.put(
+                    JSONObject().apply {
+                        put("name", att.name)
+                        put("mime", att.mimeType)
+                        put("data", att.base64Data)
+                    }
+                )
+            }
             stepsArray.put(
                 JSONObject().apply {
                     put("id", step.id)
                     put("prompt", step.prompt.trim())
                     put("repeatCount", step.repeatCount.coerceAtLeast(1))
                     put("isInfinite", step.isInfinite)
+                    put("attachments", stepAttArray)
                 }
             )
         }
@@ -102,6 +113,8 @@ class AiStudioAutomator(
             attachmentsJson = jsAttachments,
             stepsJson = jsSteps
         )
+
+        bridge.startForegroundTask("AI Studio Automator", "Running automated AI Studio prompt sequence...")
 
         val autoWv = WebView(context).apply {
             translationX = 0f
@@ -164,6 +177,7 @@ class AiStudioAutomator(
             addJavascriptInterface(object {
                 @JavascriptInterface
                 fun onStatus(msg: String) {
+                    bridge.updateForegroundTask("AI Studio: $msg")
                     mainHandler.post { callback.onStatus(msg) }
                 }
 
@@ -179,11 +193,13 @@ class AiStudioAutomator(
 
                 @JavascriptInterface
                 fun onComplete(thoughts: String, output: String) {
+                    bridge.stopForegroundTask()
                     mainHandler.post { callback.onComplete(thoughts, output) }
                 }
 
                 @JavascriptInterface
                 fun onError(err: String) {
+                    bridge.stopForegroundTask()
                     mainHandler.post { callback.onError(err) }
                 }
             }, "OmniAutomator")
@@ -229,6 +245,7 @@ class AiStudioAutomator(
     }
 
     fun stop(containerLayout: FrameLayout?) {
+        bridge.stopForegroundTask()
         try {
             headlessWv?.stopLoading()
             headlessWv?.onPause()
