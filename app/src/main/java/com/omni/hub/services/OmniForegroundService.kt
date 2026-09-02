@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -25,9 +26,15 @@ class OmniForegroundService : Service() {
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Hub Task"
         val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Automation in progress..."
 
-        createNotificationChannel()
-        val notification = buildNotification(title, message)
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            createNotificationChannel()
+            val notification = buildNotification(title, message)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (_: Exception) {}
 
         return START_STICKY
     }
