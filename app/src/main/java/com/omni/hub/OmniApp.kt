@@ -12,7 +12,9 @@ class OmniApp : Application() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             val stackTrace = throwable.stackTraceToString()
-            OmniLogger.log("CRASH_FATAL", "💥 UNCAUGHT CRASH on ${thread.name}: ${throwable.message}\n$stackTrace")
+            OmniLogger.logTelemetry("CRASH_PANIC", "Hardware/Memory state at crash moment")
+            OmniLogger.log("CRASH_FATAL", "💥 UNCAUGHT EXCEPTION on [${thread.name}]: ${throwable.message}\n$stackTrace", forceSync = true)
+            OmniLogger.flushSync()
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }
