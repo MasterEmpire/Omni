@@ -593,11 +593,16 @@ fun buildAiStudioAutomationScript(
 
                         updateStatus(label + ' - Ingesting media into AI Studio...');
                         let uploadWait = 0;
-                        while (uploadWait < 60) {
+                        // Dynamically scale upload window: up to 100s for 5 files on poor networks
+                        const maxUploadTicks = Math.max(80, uniqueList.length * 40);
+                        while (uploadWait < maxUploadTicks) {
                             const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress, ms-prompt-box .loading');
                             if (!activeUploadIndicator) break;
                             await delay(500);
                             uploadWait++;
+                            if (uploadWait % 16 === 0) { // Heartbeat every 8s
+                                updateStatus(label + ' - Uploading files to Google (' + (uploadWait * 0.5).toFixed(0) + 's elapsed)...');
+                            }
                         }
                         await randomDelay(800, 1200);
                         hostLog('ATTACHMENTS', 'Media attachments processed for ' + label);
@@ -1000,13 +1005,19 @@ fun buildAiStudioAutomationScript(
                             updateStatus(stepLabel + ' - Waiting for Run button readiness...');
                             let readyTicks = 0;
                             let submitBtn = null;
+                            const totalFiles = (currentStep.attachments ? currentStep.attachments.length : 0) + (ATTACHMENTS ? ATTACHMENTS.length : 0);
+                            // Scale button readiness wait: up to 90s for multi-image chips
+                            const maxReadyTicks = Math.max(120, totalFiles * 30);
 
-                            while (readyTicks < 90) {
+                            while (readyTicks < maxReadyTicks) {
                                 if (isGenerating()) break;
                                 submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
                                 if (submitBtn && isRunButtonReady(submitBtn)) break;
                                 await delay(500);
                                 readyTicks++;
+                                if (readyTicks % 16 === 0) { // Heartbeat every 8s
+                                    updateStatus(stepLabel + ' - Staging image chips into prompt box (' + (readyTicks * 0.5).toFixed(0) + 's)...');
+                                }
                             }
 
                             let submitTriggered = false;
