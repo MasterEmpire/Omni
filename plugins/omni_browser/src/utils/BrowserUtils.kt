@@ -634,9 +634,23 @@ fun buildAiStudioAutomationScript(
             }
 
             function isGenerating() {
-                const stoppable = document.querySelector('.run-button.stoppable, ms-run-button .stoppable-spinner, ms-run-button .stoppable-stop');
-                const spinner = document.querySelector('ms-run-button .stoppable-spinner, mat-spinner, ms-loading-indicator');
-                return !!(stoppable || spinner);
+                const stoppable = document.querySelector('.run-button.stoppable, ms-run-button .stoppable-spinner, ms-run-button .stoppable-stop, button.stoppable, button[aria-label*="Stop"]');
+                return !!stoppable;
+            }
+
+            function isJsonComplete(str) {
+                if (!str) return false;
+                const trimmed = str.trim();
+                const firstBrace = trimmed.indexOf('{');
+                const lastBrace = trimmed.lastIndexOf('}');
+                if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return false;
+                try {
+                    const candidate = trimmed.substring(firstBrace, lastBrace + 1);
+                    JSON.parse(candidate);
+                    return true;
+                } catch(_) {
+                    return false;
+                }
             }
 
             function isRunButtonReady(btn) {
@@ -1062,14 +1076,14 @@ fun buildAiStudioAutomationScript(
                             }
                         }
 
-                        // Dynamic Response Polling & Streaming Detection Watchdog
+                        // Dynamic Response Polling & Static Bubble Detection Watchdog
                         updateStatus(stepLabel + ' - Streaming response...');
-                        let lastLen = 0;
-                        let lastThoughtsLen = 0;
-                        let stable = 0;
+                        let lastOutputText = '';
+                        let lastThoughtsText = '';
+                        let contentStaticTicks = 0;
                         let totalTurnTicks = 0;
                         let idleTicks = 0;
-                        const MAX_IDLE_TICKS = 75; // 45 seconds of dead silence before triggering auto-rerun
+                        const MAX_IDLE_TICKS = 75; // 45 seconds of absolute silence before triggering auto-rerun
                         const MAX_TOTAL_TICKS = 1500;
                         let turnRetryCount = 0;
                         const MAX_RETRIES = 2;
@@ -1114,8 +1128,8 @@ fun buildAiStudioAutomationScript(
                                         if (submitBtn) submitBtn.click();
                                     }
 
-                                    lastLen = 0;
-                                    stable = 0;
+                                    lastOutputText = '';
+                                    contentStaticTicks = 0;
                                     idleTicks = 0;
                                     currentTurnOutput = '';
                                     await delay(1200);
@@ -1176,17 +1190,20 @@ fun buildAiStudioAutomationScript(
                                     }
                                 }
 
-                                // Ratchet principle: Never overwrite captured text with an empty string during DOM swaps
-                                if (extractedOutput.length > 0) {
+                                // Ratchet principle: Keep the highest length snapshot, never overwrite with empty
+                                if (extractedOutput.length >= currentTurnOutput.length) {
                                     currentTurnOutput = extractedOutput;
                                 }
                             }
 
-                            // Keep-Alive: Reset idle watchdog whenever any new tokens or thoughts arrive
-                            if (currentTurnOutput.length !== lastLen || latestTurnThoughts.length !== lastThoughtsLen) {
+                            // Static Bubble Tracker: Compare actual text values
+                            if (currentTurnOutput !== lastOutputText || latestTurnThoughts !== lastThoughtsText) {
                                 idleTicks = 0;
-                                lastLen = currentTurnOutput.length;
-                                lastThoughtsLen = latestTurnThoughts.length;
+                                contentStaticTicks = 0;
+                                lastOutputText = currentTurnOutput;
+                                lastThoughtsText = latestTurnThoughts;
+                            } else if (currentTurnOutput.length > 0) {
+                                contentStaticTicks++;
                             }
 
                             // Active Dead Man Watchdog: Auto-rerun if completely silent for 45s
@@ -1196,7 +1213,7 @@ fun buildAiStudioAutomationScript(
                                     hostLog('IDLE_RETRY', 'Idle watchdog tripped (' + (idleTicks * 0.6).toFixed(0) + 's silence). Executing auto-rerun attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
                                     updateStatus(stepLabel + ' - Silence timeout. Triggering rerun (' + turnRetryCount + '/' + MAX_RETRIES + ')...');
                                     idleTicks = 0;
-                                    stable = 0;
+                                    contentStaticTicks = 0;
 
                                     const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
                                     const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
@@ -1233,23 +1250,36 @@ fun buildAiStudioAutomationScript(
                                 if (window.OmniAutomator) window.OmniAutomator.onProgress(latestTurnThoughts, combinedDisplay);
                             }
 
-                            const spinner = document.querySelector('ms-run-button .stoppable-spinner, mat-spinner, ms-loading-indicator');
-                            if (!spinner && currentTurnOutput.length > 0) {
-                                const cLen = currentTurnOutput.length;
-                                if (cLen > 0 && cLen === lastLen) {
-                                    stable++;
-                                } else {
-                                    stable = 0;
-                                    lastLen = cLen;
-                                }
+                            // Completion Detection (Zero dependency on spinner)
+                            const hasOutput = currentTurnOutput.length > 0;
+                            const jsonComplete = isJsonComplete(currentTurnOutput);
+                            const stillRunning = isGenerating();
 
-                                if (stable >= 3) {
-                                    hostLog('TURN_DONE', 'Completed ' + stepLabel + ' (' + currentTurnOutput.length + ' chars).');
-                                    fullCumulativeOutput = fullCumulativeOutput.length > 0
-                                        ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
-                                        : currentTurnOutput;
-                                    break;
-                                }
+                            // Pathway 1: Valid and balanced JSON verified, and content stayed static for >= 4 ticks (2.4s)
+                            if (jsonComplete && contentStaticTicks >= 4) {
+                                hostLog('TURN_DONE', 'Valid complete JSON verified in bubble (' + currentTurnOutput.length + ' chars, static ' + (contentStaticTicks * 0.6).toFixed(1) + 's). Finishing turn.');
+                                fullCumulativeOutput = fullCumulativeOutput.length > 0
+                                    ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
+                                    : currentTurnOutput;
+                                break;
+                            }
+
+                            // Pathway 2: UI stopped generating and content stayed static for >= 8 ticks (4.8s)
+                            if (hasOutput && !stillRunning && contentStaticTicks >= 8) {
+                                hostLog('TURN_DONE', 'UI stop button cleared and bubble static for ' + (contentStaticTicks * 0.6).toFixed(1) + 's (' + currentTurnOutput.length + ' chars). Finishing turn.');
+                                fullCumulativeOutput = fullCumulativeOutput.length > 0
+                                    ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
+                                    : currentTurnOutput;
+                                break;
+                            }
+
+                            // Pathway 3: Long stillness safety net (14 ticks = ~8.4s without any new characters)
+                            if (hasOutput && contentStaticTicks >= 14) {
+                                hostLog('TURN_DONE', 'Bubble completely static for ' + (contentStaticTicks * 0.6).toFixed(1) + 's (' + currentTurnOutput.length + ' chars). Finishing turn.');
+                                fullCumulativeOutput = fullCumulativeOutput.length > 0
+                                    ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
+                                    : currentTurnOutput;
+                                break;
                             }
                         }
 
