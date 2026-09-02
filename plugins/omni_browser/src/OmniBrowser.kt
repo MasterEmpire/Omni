@@ -194,12 +194,21 @@ class OmniBrowser : PluginEntry() {
                     attachments = emptyList(),
                     containerLayout = null,
                     callback = object : AutomationCallback {
+                        private var lastProgressBroadcastTime = 0L
+
                         override fun onStatus(msg: String) {
                             sendStatus(msg)
                         }
 
                         override fun onProgress(thoughts: String, output: String) {
                             bridge.log("OMNI_SOLVE_PROGRESS", "Streaming response (${output.length} chars, thoughts: ${thoughts.length} chars)")
+                            val now = System.currentTimeMillis()
+                            // Pulse live streaming heartbeat every 8 seconds to reset client Dead Man Switch
+                            if (now - lastProgressBroadcastTime > 8000L) {
+                                lastProgressBroadcastTime = now
+                                val thinkingSummary = if (thoughts.isNotEmpty()) " (Reasoning: ${thoughts.length} chars)" else ""
+                                sendStatus("AI Studio generating: ${output.length} characters$thinkingSummary...")
+                            }
                         }
 
                         override fun onComplete(thoughts: String, output: String) {
