@@ -44,7 +44,26 @@ import java.io.File
 
 class OmniBrowser : PluginEntry() {
 
+    companion object {
+        @Volatile
+        private var activeSolverAutomator: AiStudioAutomator? = null
+
+        fun abortCurrentSolve() {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                activeSolverAutomator?.stop(null)
+                activeSolverAutomator = null
+            }
+        }
+    }
+
     override fun onSystemEvent(event: String, payload: Map<String, Any>) {
+        if (event == "ABORT_SOLVE") {
+            val bridge = payload["bridge"] as? HostBridge
+            bridge?.log("OMNI_SOLVE_IPC", "🛑 Processing ABORT_SOLVE. Halting AI Studio automator immediately.")
+            abortCurrentSolve()
+            return
+        }
+
         if (event == "SOLVE_EXAM") {
             val ctx = payload["context"] as? Context ?: return
             val bridge = payload["bridge"] as? HostBridge ?: return
@@ -147,6 +166,7 @@ class OmniBrowser : PluginEntry() {
 
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 val automator = AiStudioAutomator(ctx, bridge)
+                activeSolverAutomator = automator
                 val steps = listOf(
                     SequentialPromptStep(
                         prompt = userPrompt,
@@ -184,12 +204,14 @@ class OmniBrowser : PluginEntry() {
                             bridge.log("OMNI_SOLVE_SUCCESS", "🎉 AI Studio returned solution (${output.length} chars)")
                             sendResult(true, output, null)
                             automator.stop(null)
+                            if (activeSolverAutomator == automator) activeSolverAutomator = null
                         }
 
                         override fun onError(err: String) {
                             bridge.log("OMNI_SOLVE_ERROR", "💥 AI Studio automator reported error: $err")
                             sendResult(false, null, err)
                             automator.stop(null)
+                            if (activeSolverAutomator == automator) activeSolverAutomator = null
                         }
                     }
                 )
