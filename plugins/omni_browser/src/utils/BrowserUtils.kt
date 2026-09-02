@@ -995,7 +995,7 @@ fun buildAiStudioAutomationScript(
                             await randomDelay(800, 1400);
                         }
 
-                        // Ingestion Readiness & Submit for this turn
+                        // Ingestion Readiness & State-Verified Submit
                         if (!isGenerating()) {
                             updateStatus(stepLabel + ' - Waiting for Run button readiness...');
                             let readyTicks = 0;
@@ -1009,13 +1009,27 @@ fun buildAiStudioAutomationScript(
                                 readyTicks++;
                             }
 
+                            let submitTriggered = false;
+
                             if (!isGenerating() && submitBtn && isRunButtonReady(submitBtn)) {
                                 hostLog('RUN', 'Clicking Run button for ' + stepLabel + '...');
                                 submitBtn.click();
-                                await randomDelay(800, 1400);
+                                submitTriggered = true;
+
+                                // Guard against race conditions: verify if AI Studio transitions into generation state
+                                let verifyTicks = 0;
+                                while (verifyTicks < 8) { // Wait up to 4s for network transition
+                                    await delay(500);
+                                    if (isGenerating() || document.querySelector('ms-thought-chunk')) {
+                                        hostLog('RUN', 'Generation confirmed active via Run button. Suppressing fallback shortcuts.');
+                                        break;
+                                    }
+                                    verifyTicks++;
+                                }
                             }
 
-                            if (!isGenerating() && activePromptArea) {
+                            // Only execute Ctrl+Enter fallback if the primary button click completely failed to engage
+                            if (!isGenerating() && !submitTriggered && activePromptArea && (activePromptArea.value || '').trim().length > 0) {
                                 hostLog('RUN', 'Fallback Ctrl+Enter for ' + stepLabel + '...');
                                 activePromptArea.focus();
                                 activePromptArea.dispatchEvent(new KeyboardEvent('keydown', {
@@ -1027,7 +1041,13 @@ fun buildAiStudioAutomationScript(
                                     bubbles: true,
                                     cancelable: true
                                 }));
-                                await randomDelay(800, 1200);
+                                
+                                let fallbackVerify = 0;
+                                while (fallbackVerify < 6) {
+                                    await delay(500);
+                                    if (isGenerating()) break;
+                                    fallbackVerify++;
+                                }
                             }
                         }
 
@@ -1038,10 +1058,10 @@ fun buildAiStudioAutomationScript(
                         let stable = 0;
                         let totalTurnTicks = 0;
                         let idleTicks = 0;
-                        const MAX_IDLE_TICKS = 60; // 36 seconds of verified freeze with zero token change
-                        const MAX_TOTAL_TICKS = 1500; // 15 minutes ceiling per turn for extreme reasoning models
+                        const MAX_IDLE_TICKS = 75; // 45 seconds of dead silence before triggering auto-rerun
+                        const MAX_TOTAL_TICKS = 1500;
                         let turnRetryCount = 0;
-                        const MAX_RETRIES = 3;
+                        const MAX_RETRIES = 2;
                         let currentTurnOutput = '';
                         let lastDispatchedOutput = '';
                         let lastDispatchedThoughts = '';
@@ -1121,6 +1141,47 @@ fun buildAiStudioAutomationScript(
                                 } else {
                                     const contentBody = latest.querySelector('.chat-turn-content, ms-chat-turn-content, .text-chunk');
                                     currentTurnOutput = contentBody ? (contentBody.innerText || contentBody.textContent || '').trim() : '';
+                                }
+                            }
+
+                            // Keep-Alive: Reset idle watchdog whenever any new tokens or thoughts arrive
+                            if (currentTurnOutput.length !== lastLen || latestTurnThoughts.length !== lastThoughtsLen) {
+                                idleTicks = 0;
+                                lastLen = currentTurnOutput.length;
+                                lastThoughtsLen = latestTurnThoughts.length;
+                            }
+
+                            // Active Dead Man Watchdog: Auto-rerun if completely silent for 45s
+                            if (idleTicks >= MAX_IDLE_TICKS) {
+                                if (turnRetryCount < MAX_RETRIES) {
+                                    turnRetryCount++;
+                                    hostLog('IDLE_RETRY', 'Idle watchdog tripped (' + (idleTicks * 0.6).toFixed(0) + 's silence). Executing auto-rerun attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
+                                    updateStatus(stepLabel + ' - Silence timeout. Triggering rerun (' + turnRetryCount + '/' + MAX_RETRIES + ')...');
+                                    idleTicks = 0;
+                                    stable = 0;
+
+                                    const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
+                                    const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
+                                    const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
+
+                                    if (rerunBtn && isElementVisible(rerunBtn)) {
+                                        hostLog('IDLE_RETRY', 'Found turn rerun button. Clicking...');
+                                        rerunBtn.click();
+                                    } else {
+                                        const retrySubmit = document.querySelector('ms-run-button button:not(.stoppable), button[type="submit"]:not(.stoppable)');
+                                        if (retrySubmit && isRunButtonReady(retrySubmit)) {
+                                            hostLog('IDLE_RETRY', 'Clicking submit button for rerun...');
+                                            retrySubmit.click();
+                                        }
+                                    }
+                                    await delay(2000);
+                                    continue;
+                                } else {
+                                    const timeoutErr = 'AI Studio generation stalled after ' + MAX_RETRIES + ' rerun attempts.';
+                                    hostLog('STUDIO_TIMEOUT', timeoutErr);
+                                    if (window.OmniAutomator) window.OmniAutomator.onError(timeoutErr);
+                                    window.__omniAutomating = false;
+                                    return;
                                 }
                             }
 
