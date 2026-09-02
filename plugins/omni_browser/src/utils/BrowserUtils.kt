@@ -1177,6 +1177,112 @@ fun buildAiStudioAutomationScript(
     """.trimIndent()
 }
 
+fun optimizeImageForAiStudio(
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
 fun extractDomain(url: String): String {
     return try {
         val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
