@@ -108,6 +108,11 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
+        <service
+            android:name=".services.OmniForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
     </application>
 
 </manifest>
