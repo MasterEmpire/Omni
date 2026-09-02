@@ -630,7 +630,7 @@ fun AutomationResultDialog(
     onCloseOrStop: () -> Unit
 ) {
     var thoughtsExpanded by remember { mutableStateOf(false) }
-    var activeTabMode by remember { mutableStateOf("viewport") } // "viewport" vs "stream"
+    var activeTabMode by remember { mutableStateOf("stream") } // Default to 'stream' to protect SurfaceFlinger
 
     AlertDialog(
         onDismissRequest = {
