@@ -494,6 +494,10 @@ class HostBridgeImpl(
 
     override fun startForegroundTask(title: String, message: String) {
         acquireWakeLock(title)
+        if (context is android.app.Service) {
+            OmniLogger.log("FOREGROUND", "Context is already an active host Service ($title). Bypassing nested FGS start.")
+            return
+        }
         try {
             val intent = Intent().apply {
                 setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
@@ -506,10 +510,16 @@ class HostBridgeImpl(
             } else {
                 context.startService(intent)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            OmniLogger.log("FOREGROUND_WARN", "Could not start OmniForegroundService: ${e.message}")
+        }
     }
 
     override fun updateForegroundTask(message: String) {
+        if (context is android.app.Service) {
+            OmniLogger.log("FOREGROUND", "Task update: $message")
+            return
+        }
         try {
             val intent = Intent().apply {
                 setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
@@ -527,6 +537,9 @@ class HostBridgeImpl(
 
     override fun stopForegroundTask() {
         releaseWakeLock()
+        if (context is android.app.Service) {
+            return
+        }
         try {
             val intent = Intent().apply {
                 setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
