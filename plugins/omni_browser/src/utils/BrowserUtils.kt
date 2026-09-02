@@ -1138,20 +1138,47 @@ fun buildAiStudioAutomationScript(
                                     .trim();
                             }
 
-                            // Capture latest model turn output
+                            // Capture latest model turn output with Ratchet Memory
                             const models = document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model');
                             if (models.length > 0) {
                                 const latest = models[models.length - 1];
+                                let extractedOutput = '';
+
+                                // 1. Scan streaming text chunks
                                 const textChunks = Array.from(latest.querySelectorAll('ms-text-chunk:not(ms-thought-chunk ms-text-chunk)'));
                                 if (textChunks.length > 0) {
-                                    currentTurnOutput = textChunks
+                                    extractedOutput = textChunks
                                         .map(c => (c.innerText || c.textContent || '').trim())
                                         .filter(Boolean)
                                         .join('\n\n')
                                         .trim();
-                                } else {
+                                }
+
+                                // 2. Fallback to finalized rendered Markdown nodes
+                                if (!extractedOutput) {
+                                    const mdNodes = Array.from(latest.querySelectorAll('ms-cmark-node, .rendered-markdown, .markdown, ms-formatted-text'));
+                                    if (mdNodes.length > 0) {
+                                        extractedOutput = mdNodes
+                                            .map(c => (c.innerText || c.textContent || '').trim())
+                                            .filter(Boolean)
+                                            .join('\n\n')
+                                            .trim();
+                                    }
+                                }
+
+                                // 3. Fallback to turn container content with thoughts stripped
+                                if (!extractedOutput) {
                                     const contentBody = latest.querySelector('.chat-turn-content, ms-chat-turn-content, .text-chunk');
-                                    currentTurnOutput = contentBody ? (contentBody.innerText || contentBody.textContent || '').trim() : '';
+                                    if (contentBody) {
+                                        const clone = contentBody.cloneNode(true);
+                                        clone.querySelectorAll('ms-thought-chunk').forEach(tc => tc.remove());
+                                        extractedOutput = (clone.innerText || clone.textContent || '').trim();
+                                    }
+                                }
+
+                                // Ratchet principle: Never overwrite captured text with an empty string during DOM swaps
+                                if (extractedOutput.length > 0) {
+                                    currentTurnOutput = extractedOutput;
                                 }
                             }
 
