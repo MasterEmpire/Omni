@@ -83,5 +83,6 @@ data class SequentialPromptStep(
     val id: String = java.util.UUID.randomUUID().toString(),
     val prompt: String = "",
     val repeatCount: Int = 1,
-    val isInfinite: Boolean = false
+    val isInfinite: Boolean = false,
+    val attachments: List<AutomationAttachment> = emptyList()
 )
