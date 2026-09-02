@@ -123,6 +123,7 @@
             android:foregroundServiceType="dataSync">
             <intent-filter>
                 <action android:name="com.omni.hub.action.SOLVE_EXAM" />
+                <action android:name="com.omni.hub.action.ABORT_SOLVE" />
             </intent-filter>
         </service>
 
