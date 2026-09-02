@@ -150,7 +150,11 @@ object PluginLoader {
         val finalName = manifest?.name ?: pluginId
 
         val optDir = context.getDir("dex_opt", Context.MODE_PRIVATE)
-        if (!optDir.exists()) optDir.mkdirs()
+        if (!optDir.exists()) {
+            optDir.mkdirs()
+        } else {
+            optDir.listFiles()?.filter { it.name.startsWith(pluginId) }?.forEach { it.delete() }
+        }
 
         val sharedPaths = SharedLibManager.getSharedDexPaths(context)
         val combinedDexPath = if (sharedPaths.isNotEmpty()) {
