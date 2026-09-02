@@ -30,8 +30,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.omni.hub.api.HostBridge
 import com.omni.hub.api.PluginEntry
+import com.omni.plugin.browser.engine.AiStudioAutomator
+import com.omni.plugin.browser.engine.AutomationCallback
 import com.omni.plugin.browser.models.*
 import com.omni.plugin.browser.state.BrowserStateHolder
+import com.omni.plugin.browser.storage.VaultManager
 import com.omni.plugin.browser.ui.*
 import com.omni.plugin.browser.ui.dialogs.*
 import com.omni.plugin.browser.utils.*
@@ -40,6 +43,159 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 class OmniBrowser : PluginEntry() {
+
+    override fun onSystemEvent(event: String, payload: Map<String, Any>) {
+        if (event == "SOLVE_EXAM") {
+            val ctx = payload["context"] as? Context ?: return
+            val bridge = payload["bridge"] as? HostBridge ?: return
+            val rawUris = payload["extra_image_uris"] ?: payload["uris"]
+            @Suppress("UNCHECKED_CAST")
+            val uris = (rawUris as? List<android.net.Uri>) ?: emptyList()
+            val replyAction = payload["reply_action"] as? String ?: "com.universal.app.ACTION_OMNI_RESULT"
+            val statusAction = payload["status_action"] as? String ?: "com.universal.app.ACTION_OMNI_STATUS"
+            val presetTitle = payload["preset_title"] as? String ?: "Exam Solver"
+            val userPrompt = payload["user_prompt"] as? String ?: ""
+            val requestId = payload["request_id"] as? String ?: "req_${System.currentTimeMillis()}"
+
+            bridge.log("OMNI_SOLVE_IPC", "🔥 Received SOLVE_EXAM request [$requestId] with ${uris.size} image URI(s). Preset: '$presetTitle'")
+
+            fun sendStatus(msg: String) {
+                bridge.log("OMNI_SOLVE_STATUS", "⚡ Status: $msg")
+                try {
+                    val statusIntent = Intent(statusAction).apply {
+                        putExtra("extra_message", msg)
+                        setPackage("com.universal.app")
+                    }
+                    ctx.sendBroadcast(statusIntent)
+                } catch (e: Exception) {
+                    bridge.log("OMNI_SOLVE_ERR", "Failed sending status broadcast: ${e.message}")
+                }
+            }
+
+            fun sendResult(success: Boolean, json: String?, error: String?) {
+                bridge.log("OMNI_SOLVE_RESULT", "🏁 Dispatching result (success=$success, error='$error', jsonLen=${json?.length ?: 0})")
+                try {
+                    val resultIntent = Intent(replyAction).apply {
+                        putExtra("extra_success", success)
+                        putExtra("extra_solution_json", json ?: "")
+                        putExtra("extra_error", error ?: "")
+                        setPackage("com.universal.app")
+                    }
+                    ctx.sendBroadcast(resultIntent)
+                } catch (e: Exception) {
+                    bridge.log("OMNI_SOLVE_ERR", "Failed sending result broadcast: ${e.message}")
+                }
+            }
+
+            sendStatus("Omni Hub received solve request. Ingesting images...")
+
+            val attachments = mutableListOf<AutomationAttachment>()
+            for ((idx, uri) in uris.withIndex()) {
+                try {
+                    var name = "exam_image_$idx.jpg"
+                    var mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
+                    var size = 0L
+
+                    ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                        if (cursor.moveToFirst()) {
+                            if (nameIdx >= 0) name = cursor.getString(nameIdx) ?: name
+                            if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
+                        }
+                    }
+
+                    val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        if (size <= 0) size = bytes.size.toLong()
+                        val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        attachments.add(
+                            AutomationAttachment(
+                                name = name,
+                                mimeType = mime,
+                                sizeBytes = size,
+                                base64Data = b64
+                            )
+                        )
+                        bridge.log("OMNI_SOLVE_ATTACH", "✅ Ingested attachment [$idx]: $name ($size bytes, mime=$mime)")
+                    } else {
+                        bridge.log("OMNI_SOLVE_WARN", "⚠️ Empty byte stream for URI [$idx]: $uri")
+                    }
+                } catch (e: Exception) {
+                    bridge.log("OMNI_SOLVE_ERR", "❌ Failed reading URI [$idx] ($uri): ${e.message}")
+                }
+            }
+
+            if (attachments.isEmpty() && userPrompt.isBlank()) {
+                bridge.log("OMNI_SOLVE_ERR", "❌ No valid image attachments or prompt provided.")
+                sendResult(false, null, "No readable exam images found")
+                return
+            }
+
+            val vaultManager = VaultManager(ctx, bridge)
+            vaultManager.resurrectFromVault()
+
+            val presets = vaultManager.loadSystemPresets() ?: emptyList()
+            val matchedPreset = presets.find { it.title.equals(presetTitle.trim(), ignoreCase = true) }
+            val finalSysTitle = matchedPreset?.title ?: presetTitle.trim()
+            val finalSysPrompt = matchedPreset?.body ?: ""
+
+            val profiles = vaultManager.loadProfiles() ?: emptyList()
+            val targetProfileId = profiles.firstOrNull()?.id ?: "default"
+
+            bridge.log("OMNI_SOLVE_PRESET", "Using preset: '$finalSysTitle' (${finalSysPrompt.length} chars), Profile: '$targetProfileId'")
+
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                val automator = AiStudioAutomator(ctx, bridge)
+                val steps = listOf(
+                    SequentialPromptStep(
+                        prompt = userPrompt,
+                        repeatCount = 1,
+                        isInfinite = false,
+                        attachments = attachments
+                    )
+                )
+
+                sendStatus("Launching headless AI Studio solver...")
+                bridge.log("OMNI_SOLVE_EXEC", "Starting headless AI Studio automator...")
+
+                automator.start(
+                    profileId = targetProfileId,
+                    steps = steps,
+                    userPrompt = userPrompt,
+                    systemPromptTitle = finalSysTitle,
+                    systemPrompt = finalSysPrompt,
+                    thinkingLevel = "Default",
+                    model = "Gemini 3.7 Flash",
+                    fallbackEnabled = true,
+                    temporaryChat = false,
+                    attachments = attachments,
+                    containerLayout = null,
+                    callback = object : AutomationCallback {
+                        override fun onStatus(msg: String) {
+                            sendStatus(msg)
+                        }
+
+                        override fun onProgress(thoughts: String, output: String) {
+                            bridge.log("OMNI_SOLVE_PROGRESS", "Streaming response (${output.length} chars, thoughts: ${thoughts.length} chars)")
+                        }
+
+                        override fun onComplete(thoughts: String, output: String) {
+                            bridge.log("OMNI_SOLVE_SUCCESS", "🎉 AI Studio returned solution (${output.length} chars)")
+                            sendResult(true, output, null)
+                            automator.stop(null)
+                        }
+
+                        override fun onError(err: String) {
+                            bridge.log("OMNI_SOLVE_ERROR", "💥 AI Studio automator reported error: $err")
+                            sendResult(false, null, err)
+                            automator.stop(null)
+                        }
+                    }
+                )
+            }
+        }
+    }
 
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
         return ComposeView(context).apply {
