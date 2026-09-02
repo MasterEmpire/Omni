@@ -303,15 +303,28 @@ fun DashboardScreen(context: Context) {
                                                     downloadingIds = downloadingIds + module.id
                                                     scope.launch {
                                                         try {
-                                                            // Kill running/suspended memory sessions before overwriting
+                                                            val wasForeground = OmniTaskManager.currentForegroundSession?.pluginId == module.id
+                                                            val wasActive = OmniTaskManager.activeSessions.any { it.pluginId == module.id }
+
                                                             PluginTaskEngine.stopTask(context, module.id)
                                                             OmniTaskManager.activeSessions.find { it.pluginId == module.id }?.let { session ->
                                                                 OmniTaskManager.killTask(context, session.taskId)
                                                             }
-                                                            PluginManager.installPluginFromUrl(context, module.downloadUrl, module.name, module.entryClass)
+                                                            val installed = PluginManager.installPluginFromUrl(context, module.downloadUrl, module.name, module.entryClass)
                                                             plugins = PluginManager.getInstalledPlugins(context)
                                                             refreshRunningStates()
-                                                            Toast.makeText(context, if (isInstalled) "${module.name} Updated!" else "${module.name} Installed!", Toast.LENGTH_SHORT).show()
+
+                                                            if (wasForeground || wasActive) {
+                                                                OmniTaskManager.reloadPluginSession(
+                                                                    context = context,
+                                                                    pluginId = installed.id,
+                                                                    pluginName = installed.name,
+                                                                    entryClass = installed.entryClass,
+                                                                    reopenForeground = wasForeground
+                                                                )
+                                                            }
+
+                                                            Toast.makeText(context, if (isInstalled) "${module.name} Updated & Reloaded!" else "${module.name} Installed!", Toast.LENGTH_SHORT).show()
                                                         } catch (e: Exception) {
                                                             Toast.makeText(context, "Install failed: ${e.message}", Toast.LENGTH_SHORT).show()
                                                         } finally {
@@ -502,10 +515,23 @@ fun DashboardScreen(context: Context) {
     if (showImportDialog && selectedZipUri != null) {
         LaunchedEffect(selectedZipUri) {
             try {
+                val wasForegroundId = OmniTaskManager.currentForegroundSession?.pluginId
+                val wasActiveIdList = OmniTaskManager.activeSessions.map { it.pluginId }.toSet()
+
                 val installed = PluginManager.installPluginFromUri(context, selectedZipUri!!)
                 plugins = PluginManager.getInstalledPlugins(context)
                 refreshRunningStates()
-                Toast.makeText(context, "Installed ${installed.name} via Auto-Discovery!", Toast.LENGTH_SHORT).show()
+
+                val shouldOpenForeground = wasForegroundId == installed.id || !wasActiveIdList.contains(installed.id)
+                OmniTaskManager.reloadPluginSession(
+                    context = context,
+                    pluginId = installed.id,
+                    pluginName = installed.name,
+                    entryClass = installed.entryClass,
+                    reopenForeground = shouldOpenForeground
+                )
+
+                Toast.makeText(context, "Installed & Launched ${installed.name}!", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "Install failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
@@ -522,10 +548,23 @@ fun DashboardScreen(context: Context) {
                 scope.launch {
                     try {
                         Toast.makeText(context, "Downloading OTA module...", Toast.LENGTH_SHORT).show()
+                        val wasForegroundId = OmniTaskManager.currentForegroundSession?.pluginId
+                        val wasActiveIdList = OmniTaskManager.activeSessions.map { it.pluginId }.toSet()
+
                         val installed = PluginManager.installPluginFromUrl(context, url)
                         plugins = PluginManager.getInstalledPlugins(context)
                         refreshRunningStates()
-                        Toast.makeText(context, "Installed ${installed.name} via OTA Manifest!", Toast.LENGTH_SHORT).show()
+
+                        val shouldOpenForeground = wasForegroundId == installed.id || !wasActiveIdList.contains(installed.id)
+                        OmniTaskManager.reloadPluginSession(
+                            context = context,
+                            pluginId = installed.id,
+                            pluginName = installed.name,
+                            entryClass = installed.entryClass,
+                            reopenForeground = shouldOpenForeground
+                        )
+
+                        Toast.makeText(context, "Updated & Reloaded ${installed.name}!", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Toast.makeText(context, "OTA Download failed: ${e.message}", Toast.LENGTH_LONG).show()
                     }
@@ -569,43 +608,45 @@ fun DashboardScreen(context: Context) {
 
     // Fullscreen Active App Overlay
     if (currentSession != null) {
-        BackHandler {
-            val handled = currentSession.bridge.handleBackPressed()
-            if (!handled) {
-                OmniTaskManager.suspendCurrent()
+        key(currentSession.taskId) {
+            BackHandler {
+                val handled = currentSession.bridge.handleBackPressed()
+                if (!handled) {
+                    OmniTaskManager.suspendCurrent()
+                }
             }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF0D1117))
-        ) {
-            AndroidView(
-                factory = {
-                    val view = currentSession.pluginView
-                    (view.parent as? ViewGroup)?.removeView(view)
-                    (view as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
-                        setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-                    }
-                    view.apply {
-                        setViewTreeLifecycleOwner(context as? ComponentActivity)
-                        setViewTreeViewModelStoreOwner(context as? ComponentActivity)
-                        setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                        requestFocus()
-                    }
-                    view
-                },
-                update = { view ->
-                    view.apply {
-                        setViewTreeLifecycleOwner(context as? ComponentActivity)
-                        setViewTreeViewModelStoreOwner(context as? ComponentActivity)
-                        setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF0D1117))
+            ) {
+                AndroidView(
+                    factory = {
+                        val view = currentSession.pluginView
+                        (view.parent as? ViewGroup)?.removeView(view)
+                        (view as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
+                            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                        }
+                        view.apply {
+                            setViewTreeLifecycleOwner(context as? ComponentActivity)
+                            setViewTreeViewModelStoreOwner(context as? ComponentActivity)
+                            setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
+                            isFocusable = true
+                            isFocusableInTouchMode = true
+                            requestFocus()
+                        }
+                        view
+                    },
+                    update = { view ->
+                        view.apply {
+                            setViewTreeLifecycleOwner(context as? ComponentActivity)
+                            setViewTreeViewModelStoreOwner(context as? ComponentActivity)
+                            setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }
