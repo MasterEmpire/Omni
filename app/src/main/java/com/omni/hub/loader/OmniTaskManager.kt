@@ -120,4 +120,26 @@ object OmniTaskManager {
         currentForegroundSession = null
         activeSessions.clear()
     }
+
+    fun reloadPluginSession(
+        context: Context,
+        pluginId: String,
+        pluginName: String,
+        entryClass: String,
+        reopenForeground: Boolean = true
+    ): AppTaskSession {
+        OmniLogger.log("TASK_MANAGER", "Hot-reloading mini app session for [$pluginName] ($pluginId)")
+        val wasForeground = currentForegroundSession?.pluginId == pluginId
+        
+        val existing = activeSessions.find { it.pluginId == pluginId }
+        if (existing != null) {
+            killTask(context, existing.taskId)
+        }
+
+        val newSession = launchOrResume(context, pluginId, pluginName, entryClass)
+        if (!wasForeground && !reopenForeground) {
+            suspendCurrent()
+        }
+        return newSession
+    }
 }
