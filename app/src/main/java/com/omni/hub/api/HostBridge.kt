@@ -82,6 +82,13 @@ interface HostBridge {
     fun runIntent(action: String, dataUri: String?, extras: Map<String, Any>?): Boolean
     fun executeShell(cmd: String): String
 
+    // --- Background & Power Management ---
+    fun acquireWakeLock(tag: String = "OmniAutomation")
+    fun releaseWakeLock()
+    fun startForegroundTask(title: String, message: String)
+    fun updateForegroundTask(message: String)
+    fun stopForegroundTask()
+
     // --- Logging ---
     fun log(tag: String, message: String)
 }
@@ -452,6 +459,51 @@ class HostBridgeImpl(
         } catch (e: Exception) {
             "Error: ${e.message}"
         }
+    }
+
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+
+    override fun acquireWakeLock(tag: String) {
+        try {
+            if (wakeLock == null) {
+                val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "omni:$tag").apply {
+                    setReferenceCounted(false)
+                    acquire(2 * 60 * 60 * 1000L)
+                }
+            }
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+            if (wifiLock == null && wm != null) {
+                wifiLock = wm.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "omni:$tag").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    override fun releaseWakeLock() {
+        try {
+            wakeLock?.let { if (it.isHeld) it.release() }
+            wakeLock = null
+            wifiLock?.let { if (it.isHeld) it.release() }
+            wifiLock = null
+        } catch (_: Exception) {}
+    }
+
+    override fun startForegroundTask(title: String, message: String) {
+        acquireWakeLock(title)
+        com.omni.hub.services.OmniForegroundService.start(context, title, message)
+    }
+
+    override fun updateForegroundTask(message: String) {
+        com.omni.hub.services.OmniForegroundService.update(context, "Omni Hub Task", message)
+    }
+
+    override fun stopForegroundTask() {
+        releaseWakeLock()
+        com.omni.hub.services.OmniForegroundService.stop(context)
     }
 
     override fun log(tag: String, message: String) {
