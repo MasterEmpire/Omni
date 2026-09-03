@@ -35,6 +35,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -238,6 +239,8 @@ fun DashboardScreen(context: Context) {
                         .fillMaxSize()
                         .padding(16.dp)
                 ) {
+                    var showImportDropdown by remember { mutableStateOf(false) }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -245,9 +248,48 @@ fun DashboardScreen(context: Context) {
                     ) {
                         Text("Cloud Catalog", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { filePicker.launch("application/zip") }) {
-                                Icon(Icons.Default.Add, contentDescription = "Import Zip Bundle", tint = Color(0xFF238636))
+                            IconButton(onClick = { showLogModal = true }) {
+                                Text("📋", fontSize = 16.sp)
                             }
+
+                            Box {
+                                IconButton(onClick = { showImportDropdown = true }) {
+                                    Icon(Icons.Default.Add, contentDescription = "Import Module", tint = Color(0xFF238636))
+                                }
+                                DropdownMenu(
+                                    expanded = showImportDropdown,
+                                    onDismissRequest = { showImportDropdown = false },
+                                    modifier = Modifier.background(Color(0xFF21262D))
+                                ) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("📦", fontSize = 14.sp)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Local ZIP Import", color = Color.White, fontSize = 13.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            showImportDropdown = false
+                                            filePicker.launch("application/zip")
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("🌐", fontSize = 14.sp)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Download OTA URL", color = Color(0xFF58A6FF), fontSize = 13.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            showImportDropdown = false
+                                            showUrlDialog = true
+                                        }
+                                    )
+                                }
+                            }
+
                             IconButton(onClick = { loadCloudCatalog() }) {
                                 Icon(Icons.Default.Refresh, contentDescription = "Refresh Catalog", tint = Color(0xFF8B949E))
                             }
@@ -398,17 +440,6 @@ fun DashboardScreen(context: Context) {
                         }
                     },
                     actions = {
-                        TextButton(
-                            onClick = { showLogModal = true },
-                            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFD29922))
-                        ) {
-                            Text("📋 Logs", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        TextButton(onClick = { showUrlDialog = true }) {
-                            Text("OTA URL", color = Color(0xFF58A6FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-
                         IconButton(onClick = {
                             plugins = PluginManager.getInstalledPlugins(context)
                             refreshRunningStates()
@@ -808,43 +839,103 @@ fun PluginCard(
     onDelete: () -> Unit
 ) {
     val dateStr = remember(plugin.installedAt) {
-        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(plugin.installedAt))
+        SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(plugin.installedAt))
+    }
+
+    val (iconText, iconGradient) = remember(plugin.id, plugin.name) {
+        when {
+            plugin.id.contains("browser") || plugin.name.contains("Chrome", ignoreCase = true) ->
+                "🌐" to listOf(Color(0xFF1F6FEB), Color(0xFF58A6FF))
+            plugin.id.contains("ide") || plugin.name.contains("IDE", ignoreCase = true) ->
+                "💻" to listOf(Color(0xFF8957E5), Color(0xFFBC8CFF))
+            else ->
+                "⚡" to listOf(Color(0xFF238636), Color(0xFF3FB950))
+        }
     }
 
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
+        border = BorderStroke(
+            1.dp,
+            if (isHeadlessRunning) Color(0xFF238636).copy(alpha = 0.8f) else Color.White.copy(alpha = 0.08f)
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Brush.linearGradient(iconGradient)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(iconText, fontSize = 22.sp)
+                }
+
+                Spacer(Modifier.width(12.dp))
+
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(plugin.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC9D1D9))
+                        Text(
+                            text = plugin.name,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE8EAED)
+                        )
                         if (isHeadlessRunning) {
                             Spacer(Modifier.width(8.dp))
-                            Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF238636)) {
-                                Text(
-                                    "ACTIVE TASK",
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF238636).copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, Color(0xFF238636))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF3FB950))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        "ACTIVE",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF3FB950)
+                                    )
+                                }
                             }
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text(plugin.entryClass, fontSize = 12.sp, color = Color(0xFF58A6FF))
-                    Spacer(Modifier.height(4.dp))
-                    Text("Installed: $dateStr", fontSize = 11.sp, color = Color(0xFF8B949E))
+
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = plugin.description.ifEmpty { plugin.entryClass.substringAfterLast(".") },
+                        fontSize = 12.sp,
+                        color = Color(0xFF8B949E),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
                 }
 
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFF85149))
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = Color(0xFFF85149).copy(alpha = 0.7f),
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
 
@@ -852,29 +943,48 @@ fun PluginCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(
-                    onClick = onToggleHeadless,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = if (isHeadlessRunning) Color(0xFFF85149) else Color(0xFF8B949E)
-                    )
-                ) {
-                    Text(if (isHeadlessRunning) "Stop Task" else "Run Headless")
-                }
+                Text(
+                    text = "Installed $dateStr",
+                    fontSize = 11.sp,
+                    color = Color(0xFF484F58)
+                )
 
-                Spacer(Modifier.width(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        onClick = onToggleHeadless,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isHeadlessRunning) Color(0xFFF85149).copy(alpha = 0.6f) else Color(0xFF30363D)
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = if (isHeadlessRunning) Color(0xFFF85149) else Color(0xFF8B949E)
+                        ),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text(
+                            if (isHeadlessRunning) "Stop Task" else "Run Headless",
+                            fontSize = 11.sp
+                        )
+                    }
 
-                Button(
-                    onClick = onLaunchUI,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Open UI")
+                    Spacer(Modifier.width(8.dp))
+
+                    Button(
+                        onClick = onLaunchUI,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Open UI", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
