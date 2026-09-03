@@ -5,6 +5,47 @@ import java.util.Locale
 
 const val DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
+val DESKTOP_VIEWPORT_SCRIPT = """
+(function() {
+    function enforceDesktopViewport() {
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) {
+            meta = document.createElement('meta');
+            meta.name = 'viewport';
+            document.head.appendChild(meta);
+        }
+        var screenW = window.screen.width || screen.width || 412;
+        var scale = Math.min(1.0, screenW / 1280).toFixed(4);
+        meta.setAttribute('content', 'width=1280, initial-scale=' + scale + ', maximum-scale=3.0, user-scalable=yes');
+    }
+    if (document.head) enforceDesktopViewport();
+    document.addEventListener('DOMContentLoaded', enforceDesktopViewport);
+    window.addEventListener('load', enforceDesktopViewport);
+})();
+""".trimIndent()
+
+fun convertUrlForDesktop(url: String, toDesktop: Boolean): String {
+    if (url.isEmpty() || url == "about:blank") return url
+    return try {
+        val uri = Uri.parse(url)
+        val host = uri.host ?: return url
+        if (toDesktop) {
+            if (host.startsWith("m.")) {
+                val newHost = if (host == "m.youtube.com") "www.youtube.com" else host.removePrefix("m.")
+                uri.buildUpon().authority(newHost).build().toString()
+            } else if (host.startsWith("mobile.")) {
+                uri.buildUpon().authority(host.removePrefix("mobile.")).build().toString()
+            } else url
+        } else {
+            if (host == "www.youtube.com") {
+                uri.buildUpon().authority("m.youtube.com").build().toString()
+            } else url
+        }
+    } catch (_: Exception) {
+        url
+    }
+}
+
 val BOT_BYPASS_POLYFILL = """
 (function() {
     try { delete Object.getPrototypeOf(navigator).webdriver; } catch(e) {}
