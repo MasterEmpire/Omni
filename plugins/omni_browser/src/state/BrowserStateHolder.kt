@@ -97,6 +97,7 @@ class BrowserStateHolder(
     // Solver States
     var solverApiKey by mutableStateOf("")
     var autoSolveEnabled by mutableStateOf(true)
+    var forceDarkWebPages by mutableStateOf(false)
 
     // Automator States
     var showAutomationDialog by mutableStateOf(false)
@@ -132,9 +133,11 @@ class BrowserStateHolder(
     fun init() {
         vaultManager.resurrectFromVault()
 
-        vaultManager.loadSolverConfig()?.let { (key, auto) ->
+        vaultManager.loadSolverConfig()?.let { (key, auto, dark) ->
             solverApiKey = key
             autoSolveEnabled = auto
+            forceDarkWebPages = dark
+            poolManager.updateForceDark(dark)
         }
 
         vaultManager.loadShortcuts()?.let { loaded ->
@@ -840,6 +843,10 @@ class BrowserStateHolder(
             result.autoSolveEnabled?.let { autoSolveEnabled = it }
             result.systemPresets?.let { systemPresets = it }
             result.smartNotes?.let { smartNotes = it }
+            result.forceDark?.let {
+                forceDarkWebPages = it
+                poolManager.updateForceDark(it)
+            }
             if (!result.tabs.isNullOrEmpty()) {
                 tabs = result.tabs
                 val targetId = if (!result.activeTabId.isNullOrEmpty() && result.tabs.any { it.id == result.activeTabId }) result.activeTabId else result.tabs.first().id
