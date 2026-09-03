@@ -80,6 +80,7 @@ class BrowserStateHolder(
     var canGoForward by mutableStateOf(false)
     var isDesktopMode by mutableStateOf(false)
     var showMenu by mutableStateOf(false)
+    var showIdePickerMenu by mutableStateOf(false)
 
     var containerLayout: FrameLayout? = null
     var currentWebView: WebView? = null
@@ -406,8 +407,16 @@ class BrowserStateHolder(
         return tab.url.contains("/ide/") || tab.url.contains("index.html") || tab.title.contains("IDE", ignoreCase = true)
     }
 
-    fun resolveIdeUrl(): String {
-        val target = shortcuts.firstOrNull { it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true) }
+    fun getLocalShortcuts(): List<ShortcutItem> {
+        return shortcuts.filter {
+            isLocalFilePath(it.url) || it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true)
+        }
+    }
+
+    fun resolveIdeUrl(shortcut: ShortcutItem? = null): String {
+        val target = shortcut ?: shortcuts.firstOrNull { it.isDefault } ?: shortcuts.firstOrNull {
+            it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true)
+        }
         if (target != null) {
             val src = target.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
             val isolatedPath = "ide/vault_${target.id}/index.html"
@@ -427,6 +436,36 @@ class BrowserStateHolder(
                 if (success) resPath else ideInternalPath
             }
         }
+    }
+
+    fun launchIdeShortcutAsNeighbor(item: ShortcutItem) {
+        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+        val thumb = currentWebView?.captureThumbnail()
+        val bundle = Bundle()
+        currentWebView?.saveState(bundle)
+
+        val updatedTabs = tabs.map {
+            if (it.id == activeTabId) it.copy(thumbnail = thumb ?: it.thumbnail, stateBundle = bundle) else it
+        }.toMutableList()
+
+        val targetUrl = resolveIdeUrl(item)
+        val newId = "tab_${System.currentTimeMillis()}"
+        val newTab = BrowserTab(
+            id = newId,
+            title = item.title,
+            url = targetUrl,
+            lastAccessedTime = System.currentTimeMillis(),
+            profileId = selectedProfileId
+        )
+        val insertIdx = if (currentIdx >= 0) (currentIdx + 1).coerceAtMost(updatedTabs.size) else updatedTabs.size
+        updatedTabs.add(insertIdx, newTab)
+
+        tabs = updatedTabs
+        activeTabId = newId
+        isTabSwitcherOpen = false
+
+        vaultManager.saveSession(tabs, newId)
+        attachTabWebView(newId)
     }
 
     fun toggleIdeNeighbor() {
@@ -471,32 +510,12 @@ class BrowserStateHolder(
                 switchToTab(right!!.id)
             }
             else -> {
-                val thumb = currentWebView?.captureThumbnail()
-                val bundle = Bundle()
-                currentWebView?.saveState(bundle)
-
-                val updatedTabs = tabs.map {
-                    if (it.id == activeTabId) it.copy(thumbnail = thumb ?: it.thumbnail, stateBundle = bundle) else it
-                }.toMutableList()
-
-                val targetUrl = resolveIdeUrl()
-                val newId = "tab_${System.currentTimeMillis()}"
-                val newTab = BrowserTab(
-                    id = newId,
-                    title = "Local IDE",
-                    url = targetUrl,
-                    lastAccessedTime = System.currentTimeMillis(),
-                    profileId = selectedProfileId
-                )
-                val insertIdx = (currentIdx + 1).coerceAtMost(updatedTabs.size)
-                updatedTabs.add(insertIdx, newTab)
-
-                tabs = updatedTabs
-                activeTabId = newId
-                isTabSwitcherOpen = false
-
-                vaultManager.saveSession(tabs, newId)
-                attachTabWebView(newId)
+                val defaultItem = shortcuts.firstOrNull { it.isDefault }
+                if (defaultItem != null) {
+                    launchIdeShortcutAsNeighbor(defaultItem)
+                } else {
+                    showIdePickerMenu = true
+                }
             }
         }
     }
