@@ -562,7 +562,9 @@ fun buildAiStudioAutomationScript(
                     hostLog('ATTACHMENTS', 'Skipping already uploaded attachments for ' + label);
                     return;
                 }
-                updateStatus(label + ' - Uploading ' + uniqueList.length + ' file(s)...');
+                const fileWord = uniqueList.length === 1 ? 'image' : 'images';
+                const uploadPrefix = label && !label.includes('Global') ? (label + ' ') : '';
+                updateStatus(uploadPrefix + 'Uploading ' + uniqueList.length + ' ' + fileWord + '.');
                 hostLog('ATTACHMENTS', 'Injecting ' + uniqueList.length + ' file(s) into file input for ' + label);
 
                 const fileInput = document.querySelector('input[data-test-upload-file-input], input[type="file"].file-input, input[type="file"]');
@@ -591,7 +593,7 @@ fun buildAiStudioAutomationScript(
                         fileInput.dispatchEvent(new Event('change', { bubbles: true }));
                         await randomDelay(1200, 1800);
 
-                        updateStatus(label + ' - Ingesting media into AI Studio...');
+                        updateStatus('Processing attached images.');
                         let uploadWait = 0;
                         // Dynamically scale upload window: up to 100s for 5 files on poor networks
                         const maxUploadTicks = Math.max(80, uniqueList.length * 40);
@@ -601,7 +603,7 @@ fun buildAiStudioAutomationScript(
                             await delay(500);
                             uploadWait++;
                             if (uploadWait % 16 === 0) { // Heartbeat every 8s
-                                updateStatus(label + ' - Uploading files to Google (' + (uploadWait * 0.5).toFixed(0) + 's elapsed)...');
+                                updateStatus('Still uploading images to Google.');
                             }
                         }
                         await randomDelay(800, 1200);
@@ -783,10 +785,10 @@ fun buildAiStudioAutomationScript(
                     return;
                 }
 
-                updateStatus('Checking UI & Dismissing popups...');
+                updateStatus('Checking interface and popups.');
                 await dismissInterstitials();
 
-                updateStatus('Waiting for AI Studio UI...');
+                updateStatus('Connecting to AI Studio.');
                 let mountAttempts = 0;
                 let promptArea = null;
 
@@ -1062,12 +1064,18 @@ fun buildAiStudioAutomationScript(
                         currentRepeat++;
                         totalTurnsExecuted++;
 
-                        const stepLabel = currentStep.isInfinite
-                            ? 'Step ' + stepNum + '/' + STEPS.length + ' (Loop ∞, Turn ' + currentRepeat + ')'
-                            : 'Step ' + stepNum + '/' + STEPS.length + ' (Repeat ' + currentRepeat + '/' + maxRepeats + ')';
+                        let stepPrefix = '';
+                        if (STEPS.length > 1) {
+                            stepPrefix += 'Step ' + stepNum + '. ';
+                        }
+                        if (currentStep.isInfinite) {
+                            stepPrefix += 'Loop ' + currentRepeat + '. ';
+                        } else if (maxRepeats > 1) {
+                            stepPrefix += 'Repeat ' + currentRepeat + '. ';
+                        }
 
-                        updateStatus(stepLabel + ' - Injecting prompt...');
-                        hostLog('CHAIN', 'Executing ' + stepLabel + ' [Total Turns: ' + totalTurnsExecuted + ']');
+                        updateStatus((stepPrefix + 'Injecting prompt.').trim());
+                        hostLog('CHAIN', 'Executing Step ' + stepNum + '/' + STEPS.length + ' (Repeat ' + currentRepeat + '/' + maxRepeats + ') [Total Turns: ' + totalTurnsExecuted + ']');
 
                         await dismissInterstitials();
 
@@ -1093,7 +1101,7 @@ fun buildAiStudioAutomationScript(
 
                         // Ingestion Readiness & State-Verified Submit
                         if (!isGenerating()) {
-                            updateStatus(stepLabel + ' - Waiting for Run button readiness...');
+                            updateStatus((stepPrefix + 'Waiting for run button to be ready.').trim());
                             let readyTicks = 0;
                             let submitBtn = null;
                             const totalFiles = (currentStep.attachments ? currentStep.attachments.length : 0) + (ATTACHMENTS ? ATTACHMENTS.length : 0);
@@ -1107,7 +1115,7 @@ fun buildAiStudioAutomationScript(
                                 await delay(500);
                                 readyTicks++;
                                 if (readyTicks % 16 === 0) { // Heartbeat every 8s
-                                    updateStatus(stepLabel + ' - Staging image chips into prompt box (' + (readyTicks * 0.5).toFixed(0) + 's)...');
+                                    updateStatus((stepPrefix + 'Staging images into prompt.').trim());
                                 }
                             }
 
@@ -1154,7 +1162,7 @@ fun buildAiStudioAutomationScript(
                         }
 
                         // Dynamic Response Polling via Screen Stillness Watchdog
-                        updateStatus(stepLabel + ' - Streaming response...');
+                        updateStatus((stepPrefix + 'Streaming response.').trim());
                         let lastOutputText = '';
                         let lastThoughtsText = '';
                         let contentStaticTicks = 0;
@@ -1344,7 +1352,7 @@ fun buildAiStudioAutomationScript(
                     }
                 }
 
-                updateStatus('All sequence steps completed!');
+                updateStatus('Solution ready.');
                 hostLog('CHAIN_DONE', 'Finished prompt chain. Total turns executed: ' + totalTurnsExecuted + '.');
                 if (window.OmniAutomator) window.OmniAutomator.onComplete(latestTurnThoughts, fullCumulativeOutput);
                 window.__omniAutomating = false;
