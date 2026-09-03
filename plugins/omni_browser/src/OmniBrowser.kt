@@ -109,7 +109,7 @@ class OmniBrowser : PluginEntry() {
 
             val imageCount = uris.size
             val imageText = if (imageCount == 1) "1 image" else "$imageCount images"
-            sendStatus("Solve request received. Ingesting $imageText.")
+            sendStatus("Received $imageText. Preparing Omni.")
 
             val attachments = mutableListOf<AutomationAttachment>()
             for ((idx, uri) in uris.withIndex()) {
@@ -181,7 +181,7 @@ class OmniBrowser : PluginEntry() {
                     )
                 )
 
-                sendStatus("Connecting to AI Studio solver.")
+                sendStatus("Connecting to Omni solver.")
                 bridge.log("OMNI_SOLVE_EXEC", "Starting headless AI Studio automator...")
 
                 automator.start(
