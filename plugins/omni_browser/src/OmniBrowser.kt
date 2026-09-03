@@ -50,6 +50,7 @@ class OmniBrowser : PluginEntry() {
 
         fun abortCurrentSolve() {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
+                activeSolverAutomator?.isAborted = true
                 activeSolverAutomator?.stop(null)
                 activeSolverAutomator = null
             }
@@ -231,6 +232,10 @@ class OmniBrowser : PluginEntry() {
                         }
 
                         override fun onError(err: String) {
+                            if (automator.isAborted) {
+                                bridge.log("OMNI_SOLVE_ERROR", "🛑 Suppressed error callback because automator was ABORTED.")
+                                return
+                            }
                             bridge.log("OMNI_SOLVE_ERROR", "💥 AI Studio automator reported error: $err")
                             sendResult(false, null, err)
                             automator.stop(null)
