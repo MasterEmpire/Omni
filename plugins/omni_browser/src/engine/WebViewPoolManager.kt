@@ -10,6 +10,7 @@ import android.view.ViewGroup
 import android.webkit.*
 import android.widget.FrameLayout
 import androidx.webkit.ProfileStore
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.omni.hub.api.HostBridge
@@ -43,6 +44,27 @@ class WebViewPoolManager(
 
     var mobileUA: String = ""
         private set
+
+    var isForceDarkWebPages: Boolean = false
+
+    fun applyForceDark(settings: WebSettings, enabled: Boolean) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, enabled)
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            @Suppress("DEPRECATION")
+            WebSettingsCompat.setForceDark(
+                settings,
+                if (enabled) WebSettingsCompat.FORCE_DARK_ON else WebSettingsCompat.FORCE_DARK_OFF
+            )
+        }
+    }
+
+    fun updateForceDark(enabled: Boolean) {
+        isForceDarkWebPages = enabled
+        pool.values.forEach { wv ->
+            applyForceDark(wv.settings, enabled)
+        }
+    }
 
     fun purgePending(containerLayout: FrameLayout?) {
         pendingPurge.forEach { (_, wv) ->
@@ -137,6 +159,7 @@ class WebViewPoolManager(
             val cleanMobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
             mobileUA = cleanMobileUA
             settings.userAgentString = if (isDesktop) DESKTOP_USER_AGENT else cleanMobileUA
+            applyForceDark(settings, isForceDarkWebPages)
 
             webChromeClient = object : WebChromeClient() {
                 override fun onCreateWindow(
