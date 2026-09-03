@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -155,7 +154,6 @@ fun DashboardScreen(context: Context) {
     var showTaskManagerModal by remember { mutableStateOf(false) }
     var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
     var runningStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
-    var catalogSearchQuery by remember { mutableStateOf("") }
 
     fun refreshRunningStates() {
         runningStates = plugins.associate { it.id to PluginTaskEngine.isTaskRunning(it.id) }
@@ -303,47 +301,17 @@ fun DashboardScreen(context: Context) {
                         "Supabase Public Module Store",
                         fontSize = 11.sp,
                         color = Color(0xFF8B949E),
-                        modifier = Modifier.padding(bottom = 8.dp)
+                        modifier = Modifier.padding(bottom = 12.dp)
                     )
-
-                    OutlinedTextField(
-                        value = catalogSearchQuery,
-                        onValueChange = { catalogSearchQuery = it },
-                        placeholder = { Text("Filter modules...", color = Color(0xFF484F58), fontSize = 12.sp) },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF8B949E), modifier = Modifier.size(16.dp)) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF0D1117),
-                            unfocusedContainerColor = Color(0xFF0D1117),
-                            focusedBorderColor = Color(0xFF58A6FF),
-                            unfocusedBorderColor = Color(0xFF30363D),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    )
-
-                    Spacer(Modifier.height(10.dp))
-
-                    val filteredModules = remember(cloudModules, catalogSearchQuery) {
-                        if (catalogSearchQuery.isBlank()) cloudModules
-                        else cloudModules.filter {
-                            it.name.contains(catalogSearchQuery, ignoreCase = true) ||
-                            it.description.contains(catalogSearchQuery, ignoreCase = true)
-                        }
-                    }
 
                     if (isCloudLoading) {
                         Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(color = Color(0xFF58A6FF), modifier = Modifier.size(32.dp))
                         }
-                    } else if (filteredModules.isEmpty()) {
+                    } else if (cloudModules.isEmpty()) {
                         Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             Text(
-                                if (catalogSearchQuery.isBlank()) "No cloud modules published yet." else "No matching modules found.",
+                                "No cloud modules published yet.",
                                 color = Color(0xFF8B949E),
                                 fontSize = 13.sp
                             )
@@ -353,7 +321,7 @@ fun DashboardScreen(context: Context) {
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(filteredModules) { module ->
+                            items(cloudModules) { module ->
                                 val isInstalled = plugins.any { it.id == module.id }
                                 val isDownloading = downloadingIds.contains(module.id)
 
