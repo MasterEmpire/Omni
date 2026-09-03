@@ -699,11 +699,15 @@ fun buildAiStudioAutomationScript(
                     return '';
                 }
                 try {
-                    const contentContainer = turnEl.querySelector('.chat-turn-content, ms-chat-turn-content, .turn-content') || turnEl;
-                    const textChunkCount = turnEl.querySelectorAll('ms-text-chunk').length;
-                    const codeBlockCount = turnEl.querySelectorAll('ms-code-block, pre, code').length;
-                    const mdNodeCount = turnEl.querySelectorAll('ms-cmark-node').length;
+                    // Gatekeeper: Only scrape if this turn contains actual answer nodes outside of thoughts
+                    const answerCandidates = Array.from(turnEl.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+                        .filter(el => !el.closest('ms-thought-chunk'));
 
+                    if (answerCandidates.length === 0) {
+                        return '';
+                    }
+
+                    const contentContainer = turnEl.querySelector('.chat-turn-content, ms-chat-turn-content, .turn-content') || turnEl;
                     const tempDiv = document.createElement('div');
                     tempDiv.style.position = 'fixed';
                     tempDiv.style.left = '-99999px';
@@ -1176,6 +1180,7 @@ fun buildAiStudioAutomationScript(
                         let currentTurnOutput = '';
                         let lastDispatchedOutput = '';
                         let lastDispatchedThoughts = '';
+                        let lastReportedStage = '';
 
                         while (totalTurnTicks < MAX_TOTAL_TICKS) {
                             await delay(600);
@@ -1245,9 +1250,46 @@ fun buildAiStudioAutomationScript(
                                     .trim();
                             }
 
-                            // Scrape the visual content directly from the latest model turn on screen
-                            const models = document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model');
-                            let activeModelTurn = models.length > 0 ? models[models.length - 1] : null;
+                            // Scrape the visual content: prioritize turns containing mounted answer nodes
+                            const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
+                            let activeModelTurn = null;
+                            for (let i = allModelContainers.length - 1; i >= 0; i--) {
+                                const t = allModelContainers[i];
+                                const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+                                    .some(el => !el.closest('ms-thought-chunk'));
+                                if (hasRealAnswer) {
+                                    activeModelTurn = t;
+                                    break;
+                                }
+                            }
+                            if (!activeModelTurn && allModelContainers.length > 0) {
+                                activeModelTurn = allModelContainers[allModelContainers.length - 1];
+                            }
+
+                            // Audit DOM State transitions
+                            const hasThoughtContent = latestTurnThoughts.length > 0 || document.querySelector('ms-thought-chunk, .thinking-progress-icon') !== null;
+                            const hasAnswerElements = activeModelTurn && Array.from(activeModelTurn.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+                                .some(el => !el.closest('ms-thought-chunk'));
+
+                            let currentStage = 'STAGE_1_WAITING';
+                            if (hasAnswerElements) {
+                                currentStage = 'STAGE_3_ANSWERING';
+                            } else if (hasThoughtContent) {
+                                currentStage = 'STAGE_2_THINKING';
+                            }
+
+                            if (currentStage !== lastReportedStage) {
+                                lastReportedStage = currentStage;
+                                if (currentStage === 'STAGE_1_WAITING') {
+                                    hostLog('DOM_STATE', '⏳ Stage 1: Waiting for model turn or thinking to mount. Stillness timer frozen.');
+                                } else if (currentStage === 'STAGE_2_THINKING') {
+                                    hostLog('DOM_STATE', '🧠 Stage 2: Deep Thinking in progress (' + latestTurnThoughts.length + ' chars). Answer nodes not mounted yet. Stillness timer frozen at 0.');
+                                } else if (currentStage === 'STAGE_3_ANSWERING') {
+                                    hostLog('DOM_STATE', '🎯 Stage 3: Real answer container mounted! Activating character growth and stillness watchdog.');
+                                }
+                            } else if (currentStage === 'STAGE_2_THINKING' && totalTurnTicks % 8 === 0) {
+                                hostLog('DOM_STATE', '🧠 Deep Thinking pulse: still reasoning (' + (totalTurnTicks * 0.6).toFixed(1) + 's elapsed, ' + latestTurnThoughts.length + ' thought chars). Stillness timer held at 0.');
+                            }
 
                             if (activeModelTurn) {
                                 const screenText = getScreenText(activeModelTurn);
