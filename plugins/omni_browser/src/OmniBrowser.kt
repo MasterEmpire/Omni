@@ -499,10 +499,7 @@ class OmniBrowser : PluginEntry() {
                 onCloseTab = { state.closeTab(state.activeTabId) },
                 isDesktopMode = state.isDesktopMode,
                 onToggleDesktopMode = {
-                    state.isDesktopMode = !state.isDesktopMode
-                    state.currentWebView?.settings?.userAgentString = if (state.isDesktopMode) DESKTOP_USER_AGENT else state.poolManager.mobileUA
-                    state.currentWebView?.reload()
-                    bridge.showToast(if (state.isDesktopMode) "Desktop Mode Enabled" else "Mobile Mode Enabled")
+                    state.toggleDesktopMode()
                 },
                 onCopyCleanUrl = {
                     if (state.currentUrl != "about:blank") {
