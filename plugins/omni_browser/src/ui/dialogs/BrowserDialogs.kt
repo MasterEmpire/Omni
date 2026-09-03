@@ -414,11 +414,12 @@ fun EditShortcutDialog(
     onFetchFavicon: (String) -> Unit,
     onPickFile: ((String) -> Unit) -> Unit,
     onDelete: () -> Unit,
-    onSave: (String, String) -> Unit,
+    onSave: (String, String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var editName by remember(shortcut) { mutableStateOf(shortcut.title) }
     var editUrl by remember(shortcut) { mutableStateOf(shortcut.localSourcePath ?: shortcut.url) }
+    var isDefault by remember(shortcut) { mutableStateOf(shortcut.isDefault) }
     val previewDomain = remember(editUrl) { extractDomain(editUrl) }
 
     LaunchedEffect(previewDomain) {
@@ -482,6 +483,24 @@ fun EditShortcutDialog(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                if (com.omni.plugin.browser.utils.isLocalFilePath(editUrl)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("⭐ Set as Default Header IDE", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Tapping 💻 in header will open this workspace directly", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = isDefault,
+                            onCheckedChange = { isDefault = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -491,7 +510,7 @@ fun EditShortcutDialog(
                 }
 
                 Button(
-                    onClick = { onSave(editName, editUrl) },
+                    onClick = { onSave(editName, editUrl, isDefault) },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
                 ) {
                     Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
@@ -511,11 +530,12 @@ fun AddShortcutDialog(
     faviconCache: Map<String, Bitmap>,
     onFetchFavicon: (String) -> Unit,
     onPickFile: ((String) -> Unit) -> Unit,
-    onAdd: (String, String) -> Unit,
+    onAdd: (String, String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var newName by remember { mutableStateOf("") }
     var newUrl by remember { mutableStateOf("https://") }
+    var isDefault by remember { mutableStateOf(false) }
     val previewDomain = remember(newUrl) { extractDomain(newUrl) }
 
     LaunchedEffect(previewDomain) {
@@ -584,11 +604,29 @@ fun AddShortcutDialog(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                if (com.omni.plugin.browser.utils.isLocalFilePath(newUrl)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("⭐ Set as Default Header IDE", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Tapping 💻 in header will open this workspace directly", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = isDefault,
+                            onCheckedChange = { isDefault = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
-                onClick = { onAdd(newName, newUrl) },
+                onClick = { onAdd(newName, newUrl, isDefault) },
                 enabled = newUrl.length >= 3,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
