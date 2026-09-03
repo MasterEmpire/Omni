@@ -603,7 +603,7 @@ fun buildAiStudioAutomationScript(
                             await delay(500);
                             uploadWait++;
                             if (uploadWait % 16 === 0) { // Heartbeat every 8s
-                                updateStatus('Still uploading images to Google.');
+                                updateStatus('Still uploading images...');
                             }
                         }
                         await randomDelay(800, 1200);
@@ -789,10 +789,10 @@ fun buildAiStudioAutomationScript(
                     return;
                 }
 
-                updateStatus('Checking interface and popups.');
+                updateStatus('Checking solver interface.');
                 await dismissInterstitials();
 
-                updateStatus('Connecting to AI Studio.');
+                updateStatus('Connecting to Omni solver.');
                 let mountAttempts = 0;
                 let promptArea = null;
 
@@ -1079,7 +1079,7 @@ fun buildAiStudioAutomationScript(
                         }
                         const stepLabel = stepPrefix.trim();
 
-                        updateStatus((stepPrefix + 'Injecting prompt.').trim());
+                        updateStatus((stepPrefix + 'Submitting prompt.').trim());
                         hostLog('CHAIN', 'Executing Step ' + stepNum + '/' + STEPS.length + ' (Repeat ' + currentRepeat + '/' + maxRepeats + ') [Total Turns: ' + totalTurnsExecuted + ']');
 
                         await dismissInterstitials();
@@ -1106,7 +1106,7 @@ fun buildAiStudioAutomationScript(
 
                         // Ingestion Readiness & State-Verified Submit
                         if (!isGenerating()) {
-                            updateStatus((stepPrefix + 'Waiting for run button to be ready.').trim());
+                            updateStatus((stepPrefix + 'Preparing to run.').trim());
                             let readyTicks = 0;
                             let submitBtn = null;
                             const totalFiles = (currentStep.attachments ? currentStep.attachments.length : 0) + (ATTACHMENTS ? ATTACHMENTS.length : 0);
@@ -1120,7 +1120,7 @@ fun buildAiStudioAutomationScript(
                                 await delay(500);
                                 readyTicks++;
                                 if (readyTicks % 16 === 0) { // Heartbeat every 8s
-                                    updateStatus((stepPrefix + 'Staging images into prompt.').trim());
+                                    updateStatus((stepPrefix + 'Attaching images to prompt.').trim());
                                 }
                             }
 
@@ -1167,7 +1167,7 @@ fun buildAiStudioAutomationScript(
                         }
 
                         // Dynamic Response Polling via Screen Stillness Watchdog
-                        updateStatus((stepPrefix + 'Streaming response.').trim());
+                        updateStatus((stepPrefix + 'Generating answers.').trim());
                         let lastOutputText = '';
                         let lastThoughtsText = '';
                         let contentStaticTicks = 0;
