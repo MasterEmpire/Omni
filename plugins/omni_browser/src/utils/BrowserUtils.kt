@@ -1073,6 +1073,7 @@ fun buildAiStudioAutomationScript(
                         } else if (maxRepeats > 1) {
                             stepPrefix += 'Repeat ' + currentRepeat + '. ';
                         }
+                        const stepLabel = stepPrefix.trim();
 
                         updateStatus((stepPrefix + 'Injecting prompt.').trim());
                         hostLog('CHAIN', 'Executing Step ' + stepNum + '/' + STEPS.length + ' (Repeat ' + currentRepeat + '/' + maxRepeats + ') [Total Turns: ' + totalTurnsExecuted + ']');
@@ -1206,7 +1207,7 @@ fun buildAiStudioAutomationScript(
                                 if (isRetryable && turnRetryCount < MAX_RETRIES) {
                                     turnRetryCount++;
                                     hostLog('RETRY', 'Transient error: "' + errTxt + '". Retrying attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
-                                    updateStatus(stepLabel + ' (Retry ' + turnRetryCount + '/' + MAX_RETRIES + ')...');
+                                    updateStatus((stepPrefix + 'Retrying turn, attempt ' + turnRetryCount + '.').trim());
                                     await delay(1800 + (turnRetryCount * 600));
 
                                     const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
@@ -1285,7 +1286,7 @@ fun buildAiStudioAutomationScript(
                                 if (turnRetryCount < MAX_RETRIES) {
                                     turnRetryCount++;
                                     hostLog('IDLE_RETRY', '⚠️ Idle watchdog tripped (' + (idleTicks * 0.6).toFixed(0) + 's silence). Executing auto-rerun attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
-                                    updateStatus(stepLabel + ' - Silence timeout. Triggering rerun (' + turnRetryCount + '/' + MAX_RETRIES + ')...');
+                                    updateStatus((stepPrefix + 'Silence timeout, rerunning attempt ' + turnRetryCount + '.').trim());
                                     idleTicks = 0;
                                     contentStaticTicks = 0;
 
@@ -1346,7 +1347,7 @@ fun buildAiStudioAutomationScript(
                         // Settle delay before triggering next turn in chain
                         const isLastRepeatOfLastStep = (stepIdx === STEPS.length - 1) && (currentRepeat >= maxRepeats);
                         if (!isLastRepeatOfLastStep) {
-                            updateStatus(stepLabel + ' completed. Preparing next turn...');
+                            updateStatus((stepPrefix + 'Step completed. Preparing next turn.').trim());
                             await randomDelay(1800, 2600);
                         }
                     }
