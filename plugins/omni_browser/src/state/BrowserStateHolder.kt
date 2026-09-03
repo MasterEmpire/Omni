@@ -147,19 +147,15 @@ class BrowserStateHolder(
         }
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId) ->
-            if (loadedTabs.isNotEmpty()) {
-                val landingTabId = "tab_landing_${System.currentTimeMillis()}"
-                val landingTab = BrowserTab(
-                    id = landingTabId,
-                    title = "New Tab",
-                    url = "about:blank",
-                    profileId = selectedProfileId
-                )
-                tabs = loadedTabs + landingTab
-                activeTabId = landingTabId
-                currentUrl = "about:blank"
-                urlInputText = ""
-                pageTitle = "New Tab"
+            val cleanedTabs = loadedTabs.filter { !it.id.startsWith("tab_landing_") }
+            if (cleanedTabs.isNotEmpty()) {
+                tabs = cleanedTabs
+                val targetTab = cleanedTabs.find { it.id == savedActiveId } ?: cleanedTabs.last()
+                activeTabId = targetTab.id
+                currentUrl = targetTab.url
+                urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
+                pageTitle = targetTab.title
+                isHomeOverlayOpen = true
             }
         }
     }
@@ -274,29 +270,19 @@ class BrowserStateHolder(
     fun switchToTab(targetId: String) {
         if (targetId == activeTabId) {
             isTabSwitcherOpen = false
+            isHomeOverlayOpen = false
             return
         }
         val thumb = currentWebView?.captureThumbnail()
         val bundle = Bundle()
         currentWebView?.saveState(bundle)
 
-        val currentTab = tabs.find { it.id == activeTabId }
-        val updatedTabs = if (currentTab?.id?.startsWith("tab_landing_") == true && currentTab.url == "about:blank") {
-            poolManager.pool.remove(currentTab.id)?.let { wv ->
-                wv.onPause()
-                containerLayout?.removeView(wv)
-                wv.destroy()
-            }
-            tabs.filter { it.id != currentTab.id }
-        } else {
-            tabs.map {
-                if (it.id == activeTabId) it.copy(thumbnail = thumb ?: it.thumbnail, stateBundle = bundle) else it
-            }
+        tabs = tabs.map {
+            if (it.id == activeTabId) it.copy(thumbnail = thumb ?: it.thumbnail, stateBundle = bundle) else it
         }
-
-        tabs = updatedTabs
         activeTabId = targetId
         isTabSwitcherOpen = false
+        isHomeOverlayOpen = false
 
         vaultManager.saveSession(tabs, targetId)
         attachTabWebView(targetId)
