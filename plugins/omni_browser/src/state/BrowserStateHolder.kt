@@ -164,6 +164,24 @@ class BrowserStateHolder(
         }
     }
 
+    fun changeSelectedProfile(newProfileId: String) {
+        selectedProfileId = newProfileId
+        val currentTab = tabs.find { it.id == activeTabId }
+        if (currentTab != null && currentTab.url == "about:blank") {
+            tabs = tabs.map {
+                if (it.id == activeTabId || it.url == "about:blank") it.copy(profileId = newProfileId) else it
+            }
+            poolManager.pool.remove(activeTabId)?.let { wv ->
+                wv.onPause()
+                containerLayout?.removeView(wv)
+                wv.destroy()
+            }
+            attachTabWebView(activeTabId)
+        }
+        vaultManager.saveProfiles(profiles)
+        vaultManager.saveSession(tabs, activeTabId)
+    }
+
     fun refreshCompletedDownloads() {
         completedFilesList = downloadController.fetchCompletedDownloads()
     }
@@ -312,7 +330,7 @@ class BrowserStateHolder(
 
         if (remainingTabs.isEmpty()) {
             val newId = "tab_${System.currentTimeMillis()}"
-            val freshTab = BrowserTab(id = newId, title = "New Tab", url = "about:blank")
+            val freshTab = BrowserTab(id = newId, title = "New Tab", url = "about:blank", profileId = selectedProfileId)
             tabs = listOf(freshTab)
             activeTabId = newId
             vaultManager.saveSession(tabs, newId)
@@ -355,7 +373,7 @@ class BrowserStateHolder(
         containerLayout?.removeAllViews()
 
         val newId = "tab_${System.currentTimeMillis()}"
-        tabs = listOf(BrowserTab(id = newId, title = "New Tab", url = "about:blank"))
+        tabs = listOf(BrowserTab(id = newId, title = "New Tab", url = "about:blank", profileId = selectedProfileId))
         activeTabId = newId
         isTabSwitcherOpen = false
 
