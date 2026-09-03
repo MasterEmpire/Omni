@@ -106,7 +106,9 @@ class OmniBrowser : PluginEntry() {
                 }
             }
 
-            sendStatus("Omni Hub received solve request. Ingesting images...")
+            val imageCount = uris.size
+            val imageText = if (imageCount == 1) "1 image" else "$imageCount images"
+            sendStatus("Solve request received. Ingesting $imageText.")
 
             val attachments = mutableListOf<AutomationAttachment>()
             for ((idx, uri) in uris.withIndex()) {
@@ -178,7 +180,7 @@ class OmniBrowser : PluginEntry() {
                     )
                 )
 
-                sendStatus("Launching headless AI Studio solver...")
+                sendStatus("Connecting to AI Studio solver.")
                 bridge.log("OMNI_SOLVE_EXEC", "Starting headless AI Studio automator...")
 
                 automator.start(
@@ -206,8 +208,15 @@ class OmniBrowser : PluginEntry() {
                             // Pulse live streaming heartbeat every 8 seconds to reset client Dead Man Switch
                             if (now - lastProgressBroadcastTime > 8000L) {
                                 lastProgressBroadcastTime = now
-                                val thinkingSummary = if (thoughts.isNotEmpty()) " (Reasoning: ${thoughts.length} chars)" else ""
-                                sendStatus("AI Studio generating: ${output.length} characters$thinkingSummary...")
+                                val roundedCount = (output.length / 50) * 50
+                                val statusMessage = if (output.isEmpty() && thoughts.isNotEmpty()) {
+                                    "Thinking and analyzing questions."
+                                } else if (roundedCount > 0) {
+                                    "Generating answers, approximately $roundedCount characters."
+                                } else {
+                                    "Generating answers."
+                                }
+                                sendStatus(statusMessage)
                             }
                         }
 
