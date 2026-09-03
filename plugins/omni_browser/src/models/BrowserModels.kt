@@ -46,7 +46,8 @@ data class BrowserTab(
     val stateBundle: Bundle? = null,
     val thumbnail: Bitmap? = null,
     val lastAccessedTime: Long = System.currentTimeMillis(),
-    val profileId: String = "default"
+    val profileId: String = "default",
+    val isDesktop: Boolean = false
 )
 
 class OmniBlobBridge(
