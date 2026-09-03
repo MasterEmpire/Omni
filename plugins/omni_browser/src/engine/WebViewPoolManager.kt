@@ -200,6 +200,13 @@ class WebViewPoolManager(
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url?.toString() ?: return false
+                    val isMainFrame = request.isForMainFrame
+
+                    // Subframes & iframes (such as Conduit IDE live preview) must render in-memory blobs freely
+                    if (!isMainFrame) {
+                        return false
+                    }
+
                     if (url.startsWith("blob:") || url.startsWith("data:")) {
                         listener.onDownloadTriggered(view ?: this@apply, url, settings.userAgentString, "", "")
                         return true
