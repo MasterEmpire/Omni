@@ -153,6 +153,7 @@ fun DashboardScreen(context: Context) {
     var showTaskManagerModal by remember { mutableStateOf(false) }
     var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
     var runningStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
+    var catalogSearchQuery by remember { mutableStateOf("") }
 
     fun refreshRunningStates() {
         runningStates = plugins.associate { it.id to PluginTaskEngine.isTaskRunning(it.id) }
@@ -300,44 +301,104 @@ fun DashboardScreen(context: Context) {
                         "Supabase Public Module Store",
                         fontSize = 11.sp,
                         color = Color(0xFF8B949E),
-                        modifier = Modifier.padding(bottom = 14.dp)
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
+
+                    OutlinedTextField(
+                        value = catalogSearchQuery,
+                        onValueChange = { catalogSearchQuery = it },
+                        placeholder = { Text("Filter modules...", color = Color(0xFF484F58), fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF8B949E), modifier = Modifier.size(16.dp)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color(0xFF0D1117),
+                            unfocusedContainerColor = Color(0xFF0D1117),
+                            focusedBorderColor = Color(0xFF58A6FF),
+                            unfocusedBorderColor = Color(0xFF30363D),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    val filteredModules = remember(cloudModules, catalogSearchQuery) {
+                        if (catalogSearchQuery.isBlank()) cloudModules
+                        else cloudModules.filter {
+                            it.name.contains(catalogSearchQuery, ignoreCase = true) ||
+                            it.description.contains(catalogSearchQuery, ignoreCase = true)
+                        }
+                    }
 
                     if (isCloudLoading) {
                         Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(color = Color(0xFF58A6FF), modifier = Modifier.size(32.dp))
                         }
-                    } else if (cloudModules.isEmpty()) {
+                    } else if (filteredModules.isEmpty()) {
                         Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                            Text("No cloud modules published yet.", color = Color(0xFF8B949E), fontSize = 13.sp)
+                            Text(
+                                if (catalogSearchQuery.isBlank()) "No cloud modules published yet." else "No matching modules found.",
+                                color = Color(0xFF8B949E),
+                                fontSize = 13.sp
+                            )
                         }
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(cloudModules) { module ->
+                            items(filteredModules) { module ->
                                 val isInstalled = plugins.any { it.id == module.id }
                                 val isDownloading = downloadingIds.contains(module.id)
 
+                                val (modIcon, modGradient) = remember(module.id, module.name) {
+                                    when {
+                                        module.id.contains("browser") || module.name.contains("Chrome", ignoreCase = true) ->
+                                            "🌐" to listOf(Color(0xFF1F6FEB), Color(0xFF58A6FF))
+                                        module.id.contains("ide") || module.name.contains("IDE", ignoreCase = true) ->
+                                            "💻" to listOf(Color(0xFF8957E5), Color(0xFFBC8CFF))
+                                        else ->
+                                            "⚡" to listOf(Color(0xFF238636), Color(0xFF3FB950))
+                                    }
+                                }
+
                                 Card(
                                     shape = RoundedCornerShape(12.dp),
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117))
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
                                 ) {
                                     Column(modifier = Modifier.padding(12.dp)) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(module.name, fontWeight = FontWeight.Bold, color = Color(0xFFC9D1D9), fontSize = 15.sp)
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Brush.linearGradient(modGradient)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(modIcon, fontSize = 18.sp)
+                                            }
+
+                                            Spacer(Modifier.width(10.dp))
+
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(module.name, fontWeight = FontWeight.Bold, color = Color(0xFFC9D1D9), fontSize = 14.sp)
+                                                Text(module.description, color = Color(0xFF8B949E), fontSize = 11.sp, maxLines = 1)
+                                            }
+
                                             Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFF21262D)) {
                                                 Text("v${module.version}", color = Color(0xFF58A6FF), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontWeight = FontWeight.Bold)
                                             }
                                         }
 
-                                        Text(module.description, color = Color(0xFF8B949E), fontSize = 12.sp, modifier = Modifier.padding(vertical = 4.dp))
-                                        Text(module.entryClass, color = Color(0xFF484F58), fontSize = 10.sp, modifier = Modifier.padding(bottom = 8.dp))
+                                        Spacer(Modifier.height(8.dp))
 
                                         Button(
                                             onClick = {
@@ -451,26 +512,63 @@ fun DashboardScreen(context: Context) {
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF161B22))
                 )
             },
+            floatingActionButtonPosition = FabPosition.Center,
             floatingActionButton = {
-                val taskCount = OmniTaskManager.activeSessions.size
-                ExtendedFloatingActionButton(
-                    onClick = { showTaskManagerModal = true },
-                    icon = {
-                        Icon(
-                            Icons.Default.PlayArrow,
-                            contentDescription = "Recents Task Manager",
-                            tint = Color.White
-                        )
-                    },
-                    text = {
-                        Text(
-                            if (taskCount > 0) "Recents ($taskCount)" else "Recents",
-                            fontWeight = FontWeight.Bold
-                        )
-                    },
-                    containerColor = if (taskCount > 0) Color(0xFF1F6FEB) else Color(0xFF21262D),
-                    contentColor = Color.White
-                )
+                val sessions = OmniTaskManager.activeSessions
+                val taskCount = sessions.size
+
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color(0xFF161B22).copy(alpha = 0.95f),
+                    border = BorderStroke(
+                        1.dp,
+                        if (taskCount > 0) Color(0xFF1F6FEB).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f)
+                    ),
+                    shadowElevation = 10.dp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable { showTaskManagerModal = true }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (taskCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF3FB950))
+                            )
+
+                            // Mini-avatar stack of running applets
+                            sessions.take(3).forEach { s ->
+                                val icon = when {
+                                    s.pluginId.contains("browser") || s.pluginName.contains("Chrome", true) -> "🌐"
+                                    s.pluginId.contains("ide") || s.pluginName.contains("IDE", true) -> "💻"
+                                    else -> "⚡"
+                                }
+                                Text(icon, fontSize = 13.sp)
+                            }
+
+                            Text(
+                                "$taskCount Active",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else {
+                            Text("📱", fontSize = 13.sp)
+                            Text(
+                                "Recents",
+                                color = Color(0xFF8B949E),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
             }
         ) { padding ->
             Column(
@@ -696,7 +794,7 @@ fun TaskManagerDialog(
         containerColor = Color(0xFF161B22),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 24.dp),
+            .padding(vertical = 16.dp),
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -704,7 +802,7 @@ fun TaskManagerDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Recent Tasks", color = Color(0xFF58A6FF), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("Recents Deck", color = Color(0xFF58A6FF), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Spacer(Modifier.width(8.dp))
                     Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF21262D)) {
                         Text(
@@ -718,7 +816,7 @@ fun TaskManagerDialog(
                 }
                 if (sessions.isNotEmpty()) {
                     TextButton(onClick = onKillAll) {
-                        Text("Clear All", color = Color(0xFFDA3633), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Clear All", color = Color(0xFFF85149), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -728,13 +826,15 @@ fun TaskManagerDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(180.dp),
+                        .height(160.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("No recent apps in memory", color = Color(0xFF8B949E), fontSize = 14.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Text("Launched apps stay here when you exit.", color = Color(0xFF484F58), fontSize = 11.sp)
+                        Text("📱", fontSize = 28.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text("No active applets in memory", color = Color(0xFF8B949E), fontSize = 13.sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text("Launched apps stay here when you suspend them.", color = Color(0xFF484F58), fontSize = 11.sp)
                     }
                 }
             } else {
@@ -745,30 +845,43 @@ fun TaskManagerDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(sessions, key = { it.taskId }) { session ->
+                        val (appIcon, appGrad) = when {
+                            session.pluginId.contains("browser") || session.pluginName.contains("Chrome", true) ->
+                                "🌐" to listOf(Color(0xFF1F6FEB), Color(0xFF58A6FF))
+                            session.pluginId.contains("ide") || session.pluginName.contains("IDE", true) ->
+                                "💻" to listOf(Color(0xFF8957E5), Color(0xFFBC8CFF))
+                            else ->
+                                "⚡" to listOf(Color(0xFF238636), Color(0xFF3FB950))
+                        }
+
                         Card(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(14.dp))
                                 .clickable { onResumeTask(session) }
                         ) {
                             Column {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(Color(0xFF21262D))
-                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        .background(Color(0xFF161B22))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Box(
                                             modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF238636))
-                                        )
+                                                .size(24.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Brush.linearGradient(appGrad)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(appIcon, fontSize = 12.sp)
+                                        }
                                         Spacer(Modifier.width(8.dp))
                                         Text(
                                             session.pluginName,
@@ -794,8 +907,8 @@ fun TaskManagerDialog(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(110.dp)
-                                        .background(Color(0xFF161B22)),
+                                        .height(115.dp)
+                                        .background(Color(0xFF0D1117)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (session.thumbnail != null) {
@@ -807,9 +920,9 @@ fun TaskManagerDialog(
                                         )
                                     } else {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("📱", fontSize = 24.sp)
+                                            Text(appIcon, fontSize = 24.sp)
                                             Spacer(Modifier.height(4.dp))
-                                            Text("Tap to resume", color = Color(0xFF8B949E), fontSize = 11.sp)
+                                            Text("Tap to resume", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                         }
                                     }
                                 }
