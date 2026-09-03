@@ -1161,7 +1161,7 @@ fun buildAiStudioAutomationScript(
                         let totalTurnTicks = 0;
                         let idleTicks = 0;
                         const MAX_IDLE_TICKS = 100; // 60s of absolute silence before timeout/retry
-                        const MAX_TOTAL_TICKS = 1500;
+                        const MAX_TOTAL_TICKS = 300; // 3 minutes hard ceiling (300 * 0.6s = 180s)
                         let turnRetryCount = 0;
                         const MAX_RETRIES = 2;
                         let currentTurnOutput = '';
