@@ -30,6 +30,7 @@ interface WebViewEventListener {
     fun onNewTabRequested(url: String)
     fun onExternalUri(url: String, view: WebView?): Boolean
     fun onOpenFileChooser(filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: WebChromeClient.FileChooserParams?)
+    fun onRenderProcessKilled(tabId: String)
 }
 
 class WebViewPoolManager(
@@ -204,6 +205,19 @@ class WebViewPoolManager(
                         return true
                     }
                     return listener.onExternalUri(url, view)
+                }
+
+                override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                    bridge.log("RENDER_CRASH", "Chromium render process terminated for tab [$tabId] (didCrash: ${detail?.didCrash()})")
+                    pool.remove(tabId)
+                    try {
+                        (view?.parent as? ViewGroup)?.removeView(view)
+                        view?.destroy()
+                    } catch (_: Exception) {}
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onRenderProcessKilled(tabId)
+                    }
+                    return true
                 }
 
                 override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
