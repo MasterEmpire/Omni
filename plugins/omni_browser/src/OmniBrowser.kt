@@ -213,6 +213,9 @@ class OmniBrowser : PluginEntry() {
 
                         override fun onComplete(thoughts: String, output: String) {
                             bridge.log("OMNI_SOLVE_SUCCESS", "🎉 AI Studio returned solution (${output.length} chars)")
+                            bridge.log("OMNI_SOLVE_AUDIT", "Head (first 200 chars): ${output.take(200).replace("\n", " ")}")
+                            bridge.log("OMNI_SOLVE_AUDIT", "Tail (last 200 chars): ${output.takeLast(200).replace("\n", " ")}")
+                            bridge.log("OMNI_SOLVE_FULL_DUMP", "=== [DISPATCHING SOLUTION TO UNIVERSAL (${output.length} chars)] ===\n$output\n=== [END DISPATCH] ===", forceSync = true)
                             sendResult(true, output, null)
                             automator.stop(null)
                             if (activeSolverAutomator == automator) activeSolverAutomator = null
