@@ -398,6 +398,105 @@ class BrowserStateHolder(
         }
     }
 
+    fun isIdeTab(tab: BrowserTab): Boolean {
+        return tab.url.contains("/ide/") || tab.url.contains("index.html") || tab.title.contains("IDE", ignoreCase = true)
+    }
+
+    fun resolveIdeUrl(): String {
+        val target = shortcuts.firstOrNull { it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true) }
+        if (target != null) {
+            val src = target.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
+            val isolatedPath = "ide/vault_${target.id}/index.html"
+            val vFile = File(bridge.getPluginDir(), isolatedPath)
+            return if (vFile.exists() && vFile.length() > 0) {
+                "file://${vFile.absolutePath}"
+            } else {
+                val (success, resPath) = vaultManager.syncLocalFileToVault(src, isolatedPath)
+                if (success) resPath else target.url
+            }
+        } else {
+            val defaultFile = File(bridge.getPluginDir(), "ide/index.html")
+            return if (defaultFile.exists() && defaultFile.length() > 0) {
+                "file://${defaultFile.absolutePath}"
+            } else {
+                val (success, resPath) = vaultManager.syncLocalFileToVault("/storage/emulated/0/Download/F/index.html", "ide/index.html")
+                if (success) resPath else ideInternalPath
+            }
+        }
+    }
+
+    fun toggleIdeNeighbor() {
+        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+        if (currentIdx == -1) return
+        val currentTab = tabs[currentIdx]
+
+        if (isIdeTab(currentTab)) {
+            val left = tabs.getOrNull(currentIdx - 1)
+            val right = tabs.getOrNull(currentIdx + 1)
+            val leftNonIde = if (left != null && !isIdeTab(left)) left else null
+            val rightNonIde = if (right != null && !isIdeTab(right)) right else null
+
+            val target = when {
+                leftNonIde != null && rightNonIde != null -> {
+                    if (leftNonIde.lastAccessedTime >= rightNonIde.lastAccessedTime) leftNonIde else rightNonIde
+                }
+                leftNonIde != null -> leftNonIde
+                rightNonIde != null -> rightNonIde
+                else -> null
+            }
+            if (target != null) {
+                switchToTab(target.id)
+            }
+            return
+        }
+
+        val left = tabs.getOrNull(currentIdx - 1)
+        val right = tabs.getOrNull(currentIdx + 1)
+        val leftIsIde = left != null && isIdeTab(left)
+        val rightIsIde = right != null && isIdeTab(right)
+
+        when {
+            leftIsIde && rightIsIde -> {
+                val target = if (left!!.lastAccessedTime >= right!!.lastAccessedTime) left else right
+                switchToTab(target.id)
+            }
+            leftIsIde -> {
+                switchToTab(left!!.id)
+            }
+            rightIsIde -> {
+                switchToTab(right!!.id)
+            }
+            else -> {
+                val thumb = currentWebView?.captureThumbnail()
+                val bundle = Bundle()
+                currentWebView?.saveState(bundle)
+
+                val updatedTabs = tabs.map {
+                    if (it.id == activeTabId) it.copy(thumbnail = thumb ?: it.thumbnail, stateBundle = bundle) else it
+                }.toMutableList()
+
+                val targetUrl = resolveIdeUrl()
+                val newId = "tab_${System.currentTimeMillis()}"
+                val newTab = BrowserTab(
+                    id = newId,
+                    title = "Local IDE",
+                    url = targetUrl,
+                    lastAccessedTime = System.currentTimeMillis(),
+                    profileId = selectedProfileId
+                )
+                val insertIdx = (currentIdx + 1).coerceAtMost(updatedTabs.size)
+                updatedTabs.add(insertIdx, newTab)
+
+                tabs = updatedTabs
+                activeTabId = newId
+                isTabSwitcherOpen = false
+
+                vaultManager.saveSession(tabs, newId)
+                attachTabWebView(newId)
+            }
+        }
+    }
+
     fun saveCurrentSystemPreset(title: String, body: String) {
         val cleanTitle = title.trim().ifEmpty { "Preset ${systemPresets.size + 1}" }
         val existing = systemPresets.find { it.title.equals(cleanTitle, ignoreCase = true) }
