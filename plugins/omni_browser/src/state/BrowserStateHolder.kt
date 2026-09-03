@@ -156,7 +156,10 @@ class BrowserStateHolder(
                 currentUrl = targetTab.url
                 urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
                 pageTitle = targetTab.title
-                isHomeOverlayOpen = true
+                isHomeOverlayOpen = targetTab.url == "about:blank"
+                if (containerLayout != null) {
+                    attachTabWebView(targetTab.id)
+                }
             }
         }
     }
@@ -228,12 +231,23 @@ class BrowserStateHolder(
             }, containerLayout)
         }
 
-        if (targetTab.url.isNotEmpty() && targetTab.url != "about:blank" && (targetWv.url == null || targetWv.url == "about:blank")) {
+        val needsUrlLoad = targetTab.url.isNotEmpty() && targetTab.url != "about:blank" &&
+            (targetWv.url == null || targetWv.url == "about:blank" || (isNewInstance && targetWv.copyBackForwardList().size == 0))
+
+        if (needsUrlLoad) {
             targetWv.loadUrl(targetTab.url)
         }
 
+        (targetWv.parent as? ViewGroup)?.removeView(targetWv)
         container.addView(targetWv)
         targetWv.onResume()
+        targetWv.visibility = android.view.View.VISIBLE
+        targetWv.requestLayout()
+        targetWv.invalidate()
+        targetWv.post {
+            targetWv.requestLayout()
+            targetWv.invalidate()
+        }
         currentWebView = targetWv
 
         currentUrl = targetTab.url
@@ -805,6 +819,14 @@ class BrowserStateHolder(
     override fun onOpenFileChooser(filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: WebChromeClient.FileChooserParams?) {
         activeFileChooserCallback?.onReceiveValue(null)
         activeFileChooserCallback = filePathCallback
+    }
+
+    override fun onRenderProcessKilled(tabId: String) {
+        bridge.log("RENDER_WATCHDOG", "Resurrecting killed render process for tab [$tabId]")
+        poolManager.pool.remove(tabId)
+        if (activeTabId == tabId) {
+            attachTabWebView(tabId)
+        }
     }
 
     // --- AutomationCallback Impl ---
