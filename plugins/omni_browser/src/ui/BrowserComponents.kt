@@ -50,10 +50,14 @@ fun OmniBrowserTopBar(
     tabCount: Int,
     isHomeOverlayOpen: Boolean,
     onHomeClick: () -> Unit,
+    onOpenIdeNeighbor: () -> Unit,
     onTabSwitcherClick: () -> Unit,
     showMenu: Boolean,
     onMenuToggle: () -> Unit
 ) {
+    var isSearchFocused by remember { mutableStateOf(false) }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -67,15 +71,37 @@ fun OmniBrowserTopBar(
                 .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = onHomeClick,
-                modifier = Modifier.size(36.dp)
+            AnimatedVisibility(
+                visible = !isSearchFocused,
+                enter = fadeIn() + expandHorizontally(),
+                exit = fadeOut() + shrinkHorizontally()
             ) {
-                Icon(
-                    Icons.Default.Home,
-                    contentDescription = "Home",
-                    tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFF9AA0A6)
-                )
+                IconButton(
+                    onClick = onHomeClick,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Home,
+                        contentDescription = "Home",
+                        tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFF9AA0A6)
+                    )
+                }
+            }
+
+            if (isSearchFocused) {
+                IconButton(
+                    onClick = {
+                        isSearchFocused = false
+                        focusManager.clearFocus()
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Collapse Search",
+                        tint = profColor
+                    )
+                }
             }
 
             Box(
@@ -129,7 +155,11 @@ fun OmniBrowserTopBar(
                             imeAction = ImeAction.Go
                         ),
                         keyboardActions = KeyboardActions(
-                            onGo = { onNavigate(urlInputText) }
+                            onGo = {
+                                isSearchFocused = false
+                                focusManager.clearFocus()
+                                onNavigate(urlInputText)
+                            }
                         ),
                         decorationBox = { innerTextField ->
                             Box(
@@ -155,6 +185,9 @@ fun OmniBrowserTopBar(
                             .weight(1f)
                             .fillMaxHeight()
                             .wrapContentHeight(Alignment.CenterVertically)
+                            .androidx.compose.ui.focus.onFocusChanged {
+                                isSearchFocused = it.isFocused
+                            }
                     )
 
                     if (urlInputText.isNotEmpty()) {
@@ -168,36 +201,53 @@ fun OmniBrowserTopBar(
                 }
             }
 
-            Spacer(Modifier.width(6.dp))
-
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(profColor.copy(alpha = 0.2f))
-                    .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
-                    .clickable { onTabSwitcherClick() }
+            AnimatedVisibility(
+                visible = !isSearchFocused,
+                enter = fadeIn() + expandHorizontally(),
+                exit = fadeOut() + shrinkHorizontally()
             ) {
-                Text(
-                    "$tabCount",
-                    color = profColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.width(4.dp))
 
-            Spacer(Modifier.width(2.dp))
+                    IconButton(
+                        onClick = onOpenIdeNeighbor,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Text("💻", fontSize = 16.sp)
+                    }
 
-            IconButton(
-                onClick = onMenuToggle,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    Icons.Default.MoreVert,
-                    contentDescription = "Menu",
-                    tint = if (showMenu) profColor else Color(0xFF9AA0A6)
-                )
+                    Spacer(Modifier.width(2.dp))
+
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(profColor.copy(alpha = 0.2f))
+                            .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
+                            .clickable { onTabSwitcherClick() }
+                    ) {
+                        Text(
+                            "$tabCount",
+                            color = profColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Spacer(Modifier.width(2.dp))
+
+                    IconButton(
+                        onClick = onMenuToggle,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "Menu",
+                            tint = if (showMenu) profColor else Color(0xFF9AA0A6)
+                        )
+                    }
+                }
             }
         }
     }
