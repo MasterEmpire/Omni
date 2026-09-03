@@ -307,7 +307,7 @@ val ERUDA_DEVTOOLS_SCRIPT = """
         eruda.init({
             tool: ['console', 'elements', 'network', 'resource', 'info', 'snippets', 'storage'],
             defaults: {
-                displaySize: 60,
+                displaySize: 65,
                 transparency: 0.95,
                 theme: 'Dark'
             }
@@ -317,6 +317,55 @@ val ERUDA_DEVTOOLS_SCRIPT = """
     document.body.appendChild(script);
 })();
 """.trimIndent()
+
+fun buildErudaInjectionScript(erudaSource: String): String {
+    val prefix = """
+        (function() {
+            try {
+                if (window.eruda) {
+                    if (window.eruda._isInit) {
+                        var devtools = eruda.get();
+                        if (devtools && devtools._isShow) {
+                            eruda.hide();
+                        } else {
+                            eruda.show();
+                        }
+                    } else {
+                        eruda.init();
+                        eruda.show();
+                    }
+                    return;
+                }
+    """.trimIndent() + "\n"
+
+    val suffix = "\n" + """
+                if (window.eruda) {
+                    eruda.init({
+                        tool: ['console', 'elements', 'network', 'resource', 'info', 'snippets', 'storage'],
+                        defaults: {
+                            displaySize: 65,
+                            transparency: 0.95,
+                            theme: 'Dark'
+                        }
+                    });
+                    eruda.show();
+
+                    var armor = document.getElementById('omni-eruda-armor');
+                    if (!armor) {
+                        armor = document.createElement('style');
+                        armor.id = 'omni-eruda-armor';
+                        armor.textContent = '#eruda, .eruda-container, .eruda-entry-btn { z-index: 2147483647 !important; pointer-events: auto !important; opacity: 1 !important; display: block !important; }';
+                        (document.head || document.documentElement).appendChild(armor);
+                    }
+                }
+            } catch(e) {
+                console.error('Eruda injection failure: ' + e.message);
+            }
+        })();
+    """.trimIndent()
+
+    return prefix + erudaSource + suffix
+}
 
 val CAPTCHA_DETECTOR_SCRIPT = """
 (function() {
