@@ -417,6 +417,62 @@ class BrowserStateHolder(
         }
     }
 
+    fun injectEruda() {
+        val wv = currentWebView ?: return
+        if (currentUrl == "about:blank") return
+
+        val probeScript = """
+            (function() {
+                if (window.eruda) {
+                    if (window.eruda._isInit) {
+                        var devtools = eruda.get();
+                        if (devtools && devtools._isShow) {
+                            eruda.hide();
+                        } else {
+                            eruda.show();
+                        }
+                    } else {
+                        eruda.init();
+                        eruda.show();
+                    }
+                    return true;
+                }
+                return false;
+            })();
+        """.trimIndent()
+
+        wv.evaluateJavascript(probeScript) { result ->
+            if (result == "true") return@evaluateJavascript
+
+            bridge.showToast("🛠️ Initializing Eruda DevTools (CSP-Immune)...")
+            coroutineScope.launch(Dispatchers.IO) {
+                var scriptSource: String? = null
+
+                val cachedBytes = bridge.readFile("cache/eruda.min.js")
+                if (cachedBytes != null && cachedBytes.isNotEmpty()) {
+                    scriptSource = String(cachedBytes, Charsets.UTF_8)
+                }
+
+                if (scriptSource == null) {
+                    val downloaded = bridge.httpGet("https://cdn.jsdelivr.net/npm/eruda")
+                    if (!downloaded.isNullOrEmpty() && downloaded.length > 500) {
+                        bridge.saveFile("cache/eruda.min.js", downloaded.toByteArray(Charsets.UTF_8))
+                        scriptSource = downloaded
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (!scriptSource.isNullOrEmpty()) {
+                        val payload = buildErudaInjectionScript(scriptSource)
+                        wv.evaluateJavascript(payload, null)
+                    } else {
+                        wv.evaluateJavascript(ERUDA_DEVTOOLS_SCRIPT, null)
+                    }
+                }
+            }
+        }
+    }
+
     fun isIdeTab(tab: BrowserTab): Boolean {
         return tab.url.contains("/ide/") || tab.url.contains("index.html") || tab.title.contains("IDE", ignoreCase = true)
     }
