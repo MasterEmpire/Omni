@@ -228,11 +228,8 @@ class OmniBrowser : PluginEntry() {
                             // Pulse live streaming heartbeat every 8 seconds to reset client Dead Man Switch
                             if (now - lastProgressBroadcastTime > 8000L) {
                                 lastProgressBroadcastTime = now
-                                val roundedCount = (output.length / 50) * 50
                                 val statusMessage = if (output.isEmpty() && thoughts.isNotEmpty()) {
                                     "Thinking and analyzing questions."
-                                } else if (roundedCount > 0) {
-                                    "Generating answers, approximately $roundedCount characters."
                                 } else {
                                     "Generating answers."
                                 }
