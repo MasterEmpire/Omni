@@ -509,10 +509,7 @@ class OmniBrowser : PluginEntry() {
                     }
                 },
                 onInjectEruda = {
-                    if (state.currentUrl != "about:blank") {
-                        bridge.showToast("🛠️ Initializing Eruda DevTools...")
-                        state.currentWebView?.evaluateJavascript(ERUDA_DEVTOOLS_SCRIPT, null)
-                    }
+                    state.injectEruda()
                 },
                 onCaptureDomSnapshot = {
                     state.currentWebView?.evaluateJavascript(DOM_SNAPSHOT_SCRIPT) { html ->
