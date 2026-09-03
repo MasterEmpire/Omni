@@ -29,7 +29,8 @@ data class VaultRestoreData(
     val activeTabId: String? = null,
     val solverApiKey: String? = null,
     val autoSolveEnabled: Boolean? = null,
-    val systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
+    val systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null,
+    val smartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null
 )
 
 class VaultManager(
@@ -100,6 +101,7 @@ class VaultManager(
             mirrorFile("config/session.json", "session.json")
             mirrorFile("config/solver.json", "solver.json")
             mirrorFile("config/system_presets.json", "system_presets.json")
+            mirrorFile("config/smart_notes.json", "smart_notes.json")
 
             val ideDir = File(bridge.getPluginDir(), "ide")
             if (ideDir.exists() && ideDir.isDirectory) {
@@ -127,6 +129,7 @@ class VaultManager(
                 restoreIfMissing("config/session.json", "session.json")
                 restoreIfMissing("config/solver.json", "solver.json")
                 restoreIfMissing("config/system_presets.json", "system_presets.json")
+                restoreIfMissing("config/smart_notes.json", "smart_notes.json")
 
                 val vaultIdeDir = File(vaultDir, "ide")
                 if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
@@ -291,6 +294,47 @@ class VaultManager(
         }
     }
 
+    fun saveSmartNotes(list: List<com.omni.plugin.browser.models.SmartNote>) {
+        try {
+            val arr = JSONArray()
+            list.forEach { n ->
+                val obj = JSONObject().apply {
+                    put("id", n.id)
+                    put("title", n.title)
+                    put("content", n.content)
+                    put("createdAt", n.createdAt)
+                    put("updatedAt", n.updatedAt)
+                }
+                arr.put(obj)
+            }
+            bridge.saveFile("config/smart_notes.json", arr.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadSmartNotes(): List<com.omni.plugin.browser.models.SmartNote>? {
+        return try {
+            val bytes = bridge.readFile("config/smart_notes.json") ?: return null
+            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+            val list = mutableListOf<com.omni.plugin.browser.models.SmartNote>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    com.omni.plugin.browser.models.SmartNote(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        title = obj.getString("title"),
+                        content = obj.getString("content"),
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun saveSystemPresets(list: List<com.omni.plugin.browser.models.SystemInstructionPreset>) {
         try {
             val arr = JSONArray()
@@ -351,6 +395,7 @@ class VaultManager(
             addFileToZip("config/session.json", "session.json")
             addFileToZip("config/solver.json", "solver.json")
             addFileToZip("config/system_presets.json", "system_presets.json")
+            addFileToZip("config/smart_notes.json", "smart_notes.json")
 
             val ideDir = File(bridge.getPluginDir(), "ide")
             if (ideDir.exists() && ideDir.isDirectory) {
@@ -386,6 +431,7 @@ class VaultManager(
         var loadedApiKey: String? = null
         var loadedAutoSolve: Boolean? = null
         var loadedSystemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
+        var loadedSmartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null
 
         ZipInputStream(tempFile.inputStream()).use { zis ->
             var entry = zis.nextEntry
@@ -470,6 +516,24 @@ class VaultManager(
                             }
                             if (presets.isNotEmpty()) loadedSystemPresets = presets
                         }
+                        "smart_notes.json" -> {
+                            bridge.saveFile("config/smart_notes.json", bytes)
+                            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+                            val notes = mutableListOf<com.omni.plugin.browser.models.SmartNote>()
+                            for (i in 0 until arr.length()) {
+                                val obj = arr.getJSONObject(i)
+                                notes.add(
+                                    com.omni.plugin.browser.models.SmartNote(
+                                        id = obj.optString("id", UUID.randomUUID().toString()),
+                                        title = obj.getString("title"),
+                                        content = obj.getString("content"),
+                                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                                    )
+                                )
+                            }
+                            if (notes.isNotEmpty()) loadedSmartNotes = notes
+                        }
                         "ide_index.html" -> {
                             bridge.saveFile("ide/index.html", bytes)
                         }
@@ -488,7 +552,8 @@ class VaultManager(
             activeTabId = loadedActiveTabId,
             solverApiKey = loadedApiKey,
             autoSolveEnabled = loadedAutoSolve,
-            systemPresets = loadedSystemPresets
+            systemPresets = loadedSystemPresets,
+            smartNotes = loadedSmartNotes
         )
     }
 }
