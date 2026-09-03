@@ -50,10 +50,10 @@ fun TabSwitcherScreen(
 
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(tabs.size, activeTabId) {
         val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
         val targetIndex = if (activeIndex >= 0) activeIndex else (tabs.size - 1).coerceAtLeast(0)
-        if (targetIndex > 0) {
+        if (targetIndex >= 0 && tabs.isNotEmpty()) {
             gridState.scrollToItem(targetIndex)
         }
     }
