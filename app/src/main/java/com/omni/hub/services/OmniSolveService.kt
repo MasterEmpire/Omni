@@ -19,10 +19,23 @@ class OmniSolveService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            createNotificationChannel()
+            val notification = buildNotification("Omni Hub Exam Solver", "Headless solver service active...")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (_: Exception) {}
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
 
-                        if (action == "com.omni.hub.action.ABORT_SOLVE") {
+        if (action == "com.omni.hub.action.ABORT_SOLVE") {
             OmniLogger.log("OMNI_SOLVER", "🛑 Received explicit ABORT_SOLVE from client app. Terminating background solver.")
             abortActiveSolve(this)
             stopForeground(STOP_FOREGROUND_REMOVE)
