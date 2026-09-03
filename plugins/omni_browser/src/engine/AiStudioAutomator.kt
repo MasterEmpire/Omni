@@ -30,6 +30,8 @@ class AiStudioAutomator(
 ) {
     var headlessWv: WebView? = null
         private set
+    @Volatile
+    var isAborted: Boolean = false
 
     @SuppressLint("SetJavaScriptEnabled")
     fun start(
@@ -47,6 +49,7 @@ class AiStudioAutomator(
         callback: AutomationCallback
     ) {
         stop(containerLayout)
+        isAborted = false
 
         if (profileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             try {
@@ -216,6 +219,7 @@ class AiStudioAutomator(
 
                 @JavascriptInterface
                 fun onError(err: String) {
+                    if (isAborted) return
                     bridge.stopForegroundTask()
                     mainHandler.post { callback.onError(err) }
                 }
@@ -240,6 +244,7 @@ class AiStudioAutomator(
                 override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                     super.onReceivedError(view, request, error)
                     bridge.log("AI_STUDIO_ERR", "WebView Error: ${error?.description} on URL: ${request?.url}")
+                    if (isAborted) return
                     if (request?.isForMainFrame == true) {
                         mainHandler.post {
                             callback.onError("Network error connecting to AI Studio (${error?.description})")
@@ -256,6 +261,7 @@ class AiStudioAutomator(
     }
 
     fun stop(containerLayout: FrameLayout?) {
+        isAborted = true
         bridge.stopForegroundTask()
         try {
             headlessWv?.stopLoading()
