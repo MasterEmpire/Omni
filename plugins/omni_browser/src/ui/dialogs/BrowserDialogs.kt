@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -67,6 +69,73 @@ private fun getFileEmoji(filename: String): String {
     }
 }
 
+private fun resolveMimeType(file: File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+private fun getShareableUri(context: Context, file: File): Uri {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val projection = arrayOf(MediaStore.MediaColumns._ID)
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+            val selectionArgs = arrayOf(file.name)
+            val queryUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+
+            context.contentResolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            Context::class.java,
+            String::class.java,
+            File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
 @Composable
 fun DownloadsManagerDialog(
     bridge: HostBridge,
@@ -80,16 +149,23 @@ fun DownloadsManagerDialog(
 
     fun openDownloadedFile(file: File) {
         try {
-            val ext = file.extension.lowercase()
-            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(Uri.parse("file://${file.absolutePath}"), mime)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (!file.exists()) {
+                bridge.showToast("File no longer exists on storage")
+                return
             }
-            context.startActivity(Intent.createChooser(intent, "Open with...").apply {
+            val mime = resolveMimeType(file)
+            val contentUri = getShareableUri(context, file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
+            }
+            val chooser = Intent.createChooser(intent, "Open with...").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
+        } catch (e: android.content.ActivityNotFoundException) {
+            bridge.showToast("No installed app found to open .${file.extension} files")
         } catch (e: Exception) {
             bridge.showToast("Could not open file: ${e.message}")
         }
@@ -97,17 +173,22 @@ fun DownloadsManagerDialog(
 
     fun shareDownloadedFile(file: File) {
         try {
-            val ext = file.extension.lowercase()
-            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+            if (!file.exists()) {
+                bridge.showToast("File no longer exists on storage")
+                return
+            }
+            val mime = resolveMimeType(file)
+            val contentUri = getShareableUri(context, file)
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = mime
-                putExtra(Intent.EXTRA_STREAM, Uri.parse("file://${file.absolutePath}"))
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(Intent.EXTRA_STREAM, contentUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(Intent.createChooser(intent, "Share ${file.name}").apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
+            }
+            val chooser = Intent.createChooser(intent, "Share ${file.name}").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
         } catch (e: Exception) {
             bridge.showToast("Share failed: ${e.message}")
         }
