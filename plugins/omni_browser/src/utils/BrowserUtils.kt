@@ -659,6 +659,38 @@ fun buildAiStudioAutomationScript(
                 return checkUiGenerating(latest);
             }
 
+            function isBracketsBalanced(text) {
+                if (!text) return false;
+                const trimmed = text.trim();
+                if (!trimmed.endsWith('}') && !trimmed.endsWith('```')) return false;
+                let braceCount = 0;
+                let bracketCount = 0;
+                let inString = false;
+                let escaped = false;
+                for (let i = 0; i < trimmed.length; i++) {
+                    const char = trimmed[i];
+                    if (escaped) {
+                        escaped = false;
+                        continue;
+                    }
+                    if (char === '\\') {
+                        escaped = true;
+                        continue;
+                    }
+                    if (char === '"') {
+                        inString = !inString;
+                        continue;
+                    }
+                    if (!inString) {
+                        if (char === '{') braceCount++;
+                        else if (char === '}') braceCount--;
+                        else if (char === '[') bracketCount++;
+                        else if (char === ']') bracketCount--;
+                    }
+                }
+                return !inString && braceCount === 0 && bracketCount === 0;
+            }
+
             function getScreenText(turnEl) {
                 if (!turnEl) {
                     hostLog('SCRAPE_WARN', 'getScreenText called with null turn element.');
@@ -1141,6 +1173,13 @@ fun buildAiStudioAutomationScript(
                             totalTurnTicks++;
                             idleTicks++;
 
+                            // Force active autoscroll so Angular renders nodes below viewport
+                            try {
+                                const autoscroll = document.querySelector('ms-autoscroll-container, .chat-view-container');
+                                if (autoscroll) autoscroll.scrollTop = autoscroll.scrollHeight;
+                                window.scrollTo(0, document.body.scrollHeight);
+                            } catch(_) {}
+
                             const errBanner = document.querySelector('ms-banner .error-banner-message, ms-global-banner');
                             const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error, ms-chat-turn:last-of-type .model-error');
                             const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
@@ -1275,9 +1314,18 @@ fun buildAiStudioAutomationScript(
                                 if (window.OmniAutomator) window.OmniAutomator.onProgress(latestTurnThoughts, combinedDisplay);
                             }
 
-                            // Pure Screen Stillness Completion:
-                            if (hasContent && contentStaticTicks >= 10) {
-                                hostLog('DECISION_STOP', '🛑 DECISION: Stop waiting. Stillness threshold reached (' + contentStaticTicks + ' ticks / ' + (contentStaticTicks * 0.6).toFixed(1) + 's of zero new text).');
+                            // Bracket-Aware Screen Stillness Completion:
+                            const trimmedOutput = currentTurnOutput.trim();
+                            const looksLikeJson = trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[') || trimmedOutput.includes('"solutions"');
+                            const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
+
+                            // If JSON is verified and fully closed, 5 ticks (3.0s) of stillness is enough.
+                            // If JSON is unclosed/unbalanced, wait at least 25 ticks (15.0s) to absorb mid-generation pauses.
+                            // For regular text, wait 12 ticks (7.2s).
+                            const targetTicks = balanced ? 5 : (looksLikeJson ? 25 : 12);
+
+                            if (hasContent && contentStaticTicks >= targetTicks) {
+                                hostLog('DECISION_STOP', '🛑 DECISION: Stop waiting. Target stillness reached (' + contentStaticTicks + '/' + targetTicks + ' ticks, ' + (contentStaticTicks * 0.6).toFixed(1) + 's). balanced=' + balanced + ', looksLikeJson=' + looksLikeJson);
                                 hostLog('SCRAPE_TAIL', 'Scraped content tail (last 300 chars):\n' + currentTurnOutput.slice(-300));
                                 hostLog('RAW_SCRAPE_DUMP', '=== [BEGIN FULL RAW SCRAPE PAYLOAD (' + currentTurnOutput.length + ' chars)] ===\n' + currentTurnOutput + '\n=== [END FULL RAW SCRAPE PAYLOAD] ===');
 
