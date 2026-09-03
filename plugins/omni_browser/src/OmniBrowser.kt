@@ -459,6 +459,7 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 },
+                onOpenSmartNotes = { state.showSmartNotesDialog = true },
                 onOpenAutomation = { state.showAutomationDialog = true },
                 onOpenLocalIde = {
                     val localIdeShortcuts = state.shortcuts.filter { it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true) }
@@ -559,6 +560,17 @@ class OmniBrowser : PluginEntry() {
             }
 
             // --- Modals & Dialogs ---
+            if (state.showSmartNotesDialog) {
+                SmartNotesDialog(
+                    bridge = bridge,
+                    notes = state.smartNotes,
+                    onSaveNote = { title, content, id -> state.saveSmartNote(title, content, id) },
+                    onDeleteNote = { id -> state.deleteSmartNote(id) },
+                    onInjectToPage = { text -> state.injectTextToActivePage(text) },
+                    onDismiss = { state.showSmartNotesDialog = false }
+                )
+            }
+
             if (state.showAutomationDialog) {
                 AutomationOrderDialog(
                     profiles = state.profiles,
