@@ -363,6 +363,10 @@ class OmniBrowser : PluginEntry() {
                         }
                     },
                     onOpenIdeNeighbor = { state.toggleIdeNeighbor() },
+                    showIdePickerMenu = state.showIdePickerMenu,
+                    onDismissIdePicker = { state.showIdePickerMenu = false },
+                    localShortcuts = state.getLocalShortcuts(),
+                    onSelectIdeShortcut = { item -> state.launchIdeShortcutAsNeighbor(item) },
                     onTabSwitcherClick = {
                         val thumb = state.currentWebView?.captureThumbnail()
                         val bundle = android.os.Bundle()
@@ -702,7 +706,7 @@ class OmniBrowser : PluginEntry() {
                         state.editingShortcut = null
                         bridge.showToast("Shortcut deleted")
                     },
-                    onSave = { name, rawUrl ->
+                    onSave = { name, rawUrl, isDef ->
                         val trimmedUrl = rawUrl.trim()
                         val isLocal = isLocalFilePath(trimmedUrl)
                         val (finalUrl, srcPath) = if (isLocal) {
@@ -721,7 +725,11 @@ class OmniBrowser : PluginEntry() {
                         }
 
                         val updated = state.shortcuts.map {
-                            if (it.id == targetItem.id) it.copy(title = name.trim().ifEmpty { targetItem.title }, url = finalUrl, localSourcePath = srcPath) else it
+                            if (it.id == targetItem.id) {
+                                it.copy(title = name.trim().ifEmpty { targetItem.title }, url = finalUrl, localSourcePath = srcPath, isDefault = isDef)
+                            } else if (isDef) {
+                                it.copy(isDefault = false)
+                            } else it
                         }
                         state.shortcuts = updated
                         state.vaultManager.saveShortcuts(updated)
@@ -748,7 +756,7 @@ class OmniBrowser : PluginEntry() {
                             }
                         }
                     },
-                    onAdd = { name, rawUrl ->
+                    onAdd = { name, rawUrl, isDef ->
                         val trimmedUrl = rawUrl.trim()
                         val isLocal = isLocalFilePath(trimmedUrl)
                         val newShortcutId = "sc_${System.currentTimeMillis()}"
@@ -773,9 +781,10 @@ class OmniBrowser : PluginEntry() {
                             url = finalUrl,
                             iconText = if (isLocal) "💻" else title.take(1).uppercase(),
                             colorValue = 0xFF58A6FF,
-                            localSourcePath = srcPath
+                            localSourcePath = srcPath,
+                            isDefault = isDef
                         )
-                        val updated = state.shortcuts + newItem
+                        val updated = state.shortcuts.map { if (isDef) it.copy(isDefault = false) else it } + newItem
                         state.shortcuts = updated
                         state.vaultManager.saveShortcuts(updated)
                         state.fetchFavicon(extractDomain(finalUrl))
