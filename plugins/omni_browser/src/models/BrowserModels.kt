@@ -14,6 +14,14 @@ data class ShortcutItem(
     val isDefault: Boolean = false
 )
 
+data class SmartNote(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val content: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
 data class BrowserProfile(
     val id: String,
     val name: String,
