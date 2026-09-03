@@ -128,7 +128,12 @@ class AiStudioAutomator(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            bridge.log("AI_STUDIO_VIEWPORT", "📐 Initialized background execution surface (${viewWidth}x${viewHeight} px)")
+            measure(
+                android.view.View.MeasureSpec.makeMeasureSpec(viewWidth, android.view.View.MeasureSpec.EXACTLY),
+                android.view.View.MeasureSpec.makeMeasureSpec(viewHeight, android.view.View.MeasureSpec.EXACTLY)
+            )
+            layout(0, 0, viewWidth, viewHeight)
+            bridge.log("AI_STUDIO_VIEWPORT", "📐 Initialized & laid out background surface (${viewWidth}x${viewHeight} px)")
 
             settings.apply {
                 javaScriptEnabled = true
