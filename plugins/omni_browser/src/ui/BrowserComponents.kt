@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -181,13 +182,13 @@ fun OmniBrowserTopBar(
                                 innerTextField()
                             }
                         },
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .wrapContentHeight(Alignment.CenterVertically)
-                            .androidx.compose.ui.focus.onFocusChanged {
-                                isSearchFocused = it.isFocused
-                            }
+                                                        modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .wrapContentHeight(Alignment.CenterVertically)
+                                    .onFocusChanged {
+                                        isSearchFocused = it.isFocused
+                                    }
                     )
 
                     if (urlInputText.isNotEmpty()) {
