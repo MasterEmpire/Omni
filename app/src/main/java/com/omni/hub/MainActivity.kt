@@ -4,8 +4,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.ViewGroup
+import androidx.compose.ui.draw.alpha
+import com.omni.hub.services.OmniForegroundService
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -155,6 +160,62 @@ fun DashboardScreen(context: Context) {
     var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
     var runningStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
 
+    val keepAlivePrefs = remember { context.getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE) }
+    var isKeepAliveEnabled by remember { mutableStateOf(keepAlivePrefs.getBoolean("key_keep_alive", false)) }
+
+    fun proceedKeepAliveActivation() {
+        isKeepAliveEnabled = true
+        keepAlivePrefs.edit().putBoolean("key_keep_alive", true).apply()
+
+        try {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(context.packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            }
+        } catch (e: Exception) {
+            OmniLogger.log("KEEP_ALIVE_WARN", "Battery optimization prompt failed: ${e.message}")
+        }
+
+        OmniForegroundService.start(
+            context,
+            "Omni Hub Keep-Alive Active",
+            "Workspaces, tabs, and background tasks protected in memory"
+        )
+        Toast.makeText(context, "🛡️ Keep-Alive Active: Process protected", Toast.LENGTH_SHORT).show()
+    }
+
+    fun toggleKeepAlive() {
+        if (!isKeepAliveEnabled) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val hasNotifPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+                if (!hasNotifPermission) {
+                    PermissionDispatcher.request(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS)) { perms ->
+                        if (perms[android.Manifest.permission.POST_NOTIFICATIONS] == true) {
+                            proceedKeepAliveActivation()
+                        } else {
+                            Toast.makeText(context, "Notification permission needed for persistent Keep-Alive", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    return
+                }
+            }
+            proceedKeepAliveActivation()
+        } else {
+            isKeepAliveEnabled = false
+            keepAlivePrefs.edit().putBoolean("key_keep_alive", false).apply()
+            OmniForegroundService.stop(context)
+            Toast.makeText(context, "Keep-Alive Disabled", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun refreshRunningStates() {
         runningStates = plugins.associate { it.id to PluginTaskEngine.isTaskRunning(it.id) }
     }
@@ -206,6 +267,13 @@ fun DashboardScreen(context: Context) {
             }
         }
         OmniLogger.log("INIT", "Omni Hub Dashboard loaded. Ensuring shared runtime...")
+        if (isKeepAliveEnabled) {
+            OmniForegroundService.start(
+                context,
+                "Omni Hub Keep-Alive Active",
+                "Workspaces, tabs, and background tasks protected in memory"
+            )
+        }
         scope.launch {
             SharedLibManager.ensureSharedRuntime(context)
         }
@@ -471,6 +539,25 @@ fun DashboardScreen(context: Context) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { toggleKeepAlive() }) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "🛡️",
+                                    fontSize = 18.sp,
+                                    modifier = Modifier.alpha(if (isKeepAliveEnabled) 1f else 0.35f)
+                                )
+                                if (isKeepAliveEnabled) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .align(Alignment.TopEnd)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF3FB950))
+                                    )
+                                }
+                            }
+                        }
+
                         IconButton(onClick = {
                             plugins = PluginManager.getInstalledPlugins(context)
                             refreshRunningStates()
