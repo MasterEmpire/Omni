@@ -30,7 +30,8 @@ data class VaultRestoreData(
     val solverApiKey: String? = null,
     val autoSolveEnabled: Boolean? = null,
     val systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null,
-    val smartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null
+    val smartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null,
+    val forceDark: Boolean? = null
 )
 
 class VaultManager(
@@ -273,22 +274,27 @@ class VaultManager(
         }
     }
 
-    fun saveSolverConfig(apiKey: String, autoSolve: Boolean) {
+    fun saveSolverConfig(apiKey: String, autoSolve: Boolean, forceDark: Boolean = false) {
         try {
             val cfg = JSONObject().apply {
                 put("apiKey", apiKey)
                 put("autoSolve", autoSolve)
+                put("forceDark", forceDark)
             }
             bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
         } catch (_: Exception) {}
     }
 
-    fun loadSolverConfig(): Pair<String, Boolean>? {
+    fun loadSolverConfig(): Triple<String, Boolean, Boolean>? {
         return try {
             val bytes = bridge.readFile("config/solver.json") ?: return null
             val json = JSONObject(String(bytes, Charsets.UTF_8))
-            Pair(json.optString("apiKey", ""), json.optBoolean("autoSolve", true))
+            Triple(
+                json.optString("apiKey", ""),
+                json.optBoolean("autoSolve", true),
+                json.optBoolean("forceDark", false)
+            )
         } catch (_: Exception) {
             null
         }
@@ -430,6 +436,7 @@ class VaultManager(
         var loadedActiveTabId: String? = null
         var loadedApiKey: String? = null
         var loadedAutoSolve: Boolean? = null
+        var loadedForceDark: Boolean? = null
         var loadedSystemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
         var loadedSmartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null
 
@@ -498,6 +505,7 @@ class VaultManager(
                             val json = JSONObject(String(bytes, Charsets.UTF_8))
                             loadedApiKey = json.optString("apiKey", "")
                             loadedAutoSolve = json.optBoolean("autoSolve", true)
+                            loadedForceDark = json.optBoolean("forceDark", false)
                         }
                         "system_presets.json" -> {
                             bridge.saveFile("config/system_presets.json", bytes)
@@ -553,7 +561,8 @@ class VaultManager(
             solverApiKey = loadedApiKey,
             autoSolveEnabled = loadedAutoSolve,
             systemPresets = loadedSystemPresets,
-            smartNotes = loadedSmartNotes
+            smartNotes = loadedSmartNotes,
+            forceDark = loadedForceDark
         )
     }
 }
