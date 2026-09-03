@@ -88,6 +88,8 @@ class BrowserStateHolder(
     // Dialog Visibility States
     var showSettingsDialog by mutableStateOf(false)
     var showDownloadsDialog by mutableStateOf(false)
+    var showSmartNotesDialog by mutableStateOf(false)
+    var smartNotes by mutableStateOf<List<SmartNote>>(emptyList())
     val trackedDownloadIds = mutableStateListOf<Long>()
     var activeDownloadsList by mutableStateOf<List<ActiveDownloadItem>>(emptyList())
     var completedFilesList by mutableStateOf<List<File>>(emptyList())
@@ -145,6 +147,10 @@ class BrowserStateHolder(
 
         vaultManager.loadSystemPresets()?.let { loaded ->
             if (loaded.isNotEmpty()) systemPresets = loaded
+        }
+
+        vaultManager.loadSmartNotes()?.let { loaded ->
+            if (loaded.isNotEmpty()) smartNotes = loaded
         }
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId) ->
@@ -590,6 +596,81 @@ class BrowserStateHolder(
         }
     }
 
+    fun saveSmartNote(title: String, content: String, existingId: String? = null) {
+        val cleanContent = content.trim()
+        if (cleanContent.isEmpty()) return
+
+        val cleanTitle = title.trim().ifEmpty {
+            cleanContent.lines().firstOrNull { it.isNotBlank() }?.take(32) ?: "Note"
+        }
+
+        val updated = if (existingId != null && smartNotes.any { it.id == existingId }) {
+            smartNotes.map {
+                if (it.id == existingId) it.copy(title = cleanTitle, content = cleanContent, updatedAt = System.currentTimeMillis())
+                else it
+            }
+        } else {
+            listOf(SmartNote(title = cleanTitle, content = cleanContent)) + smartNotes
+        }
+
+        smartNotes = updated
+        vaultManager.saveSmartNotes(updated)
+        bridge.showToast("Note saved!")
+    }
+
+    fun deleteSmartNote(id: String) {
+        val updated = smartNotes.filter { it.id != id }
+        smartNotes = updated
+        vaultManager.saveSmartNotes(updated)
+        bridge.showToast("Note deleted")
+    }
+
+    fun injectTextToActivePage(text: String) {
+        val wv = currentWebView ?: return
+        val escapedText = org.json.JSONObject.quote(text)
+        val script = """
+            (function() {
+                try {
+                    var text = $escapedText;
+                    var el = document.activeElement;
+                    if (!el || el === document.body || (!['TEXTAREA', 'INPUT'].includes(el.tagName) && !el.isContentEditable)) {
+                        el = document.querySelector('textarea, div[contenteditable="true"], input[type="text"]:not([readonly])');
+                    }
+                    if (!el) return false;
+
+                    el.focus();
+                    if (el.isContentEditable) {
+                        document.execCommand('insertText', false, text);
+                    } else {
+                        var proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                        var descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+                        if (descriptor && descriptor.set) {
+                            descriptor.set.call(el, text);
+                        } else {
+                            el.value = text;
+                        }
+                        el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                    }
+                    return true;
+                } catch(e) {
+                    return false;
+                }
+            })();
+        """.trimIndent()
+
+        wv.evaluateJavascript(script) { result ->
+            if (result == "true") {
+                bridge.showToast("⚡ Injected into page input!")
+                showSmartNotesDialog = false
+            } else {
+                bridge.copyToClipboard(text)
+                bridge.showToast("Copied to clipboard (No active input found)")
+                showSmartNotesDialog = false
+            }
+        }
+    }
+
     fun saveCurrentSystemPreset(title: String, body: String) {
         val cleanTitle = title.trim().ifEmpty { "Preset ${systemPresets.size + 1}" }
         val existing = systemPresets.find { it.title.equals(cleanTitle, ignoreCase = true) }
@@ -758,6 +839,7 @@ class BrowserStateHolder(
             result.solverApiKey?.let { solverApiKey = it }
             result.autoSolveEnabled?.let { autoSolveEnabled = it }
             result.systemPresets?.let { systemPresets = it }
+            result.smartNotes?.let { smartNotes = it }
             if (!result.tabs.isNullOrEmpty()) {
                 tabs = result.tabs
                 val targetId = if (!result.activeTabId.isNullOrEmpty() && result.tabs.any { it.id == result.activeTabId }) result.activeTabId else result.tabs.first().id
@@ -797,6 +879,7 @@ class BrowserStateHolder(
     fun handleBackPressed(): Boolean {
         return when {
             showMenu -> { showMenu = false; true }
+            showSmartNotesDialog -> { showSmartNotesDialog = false; true }
             showAutomationResultDialog -> { showAutomationResultDialog = false; true }
             showAutomationDialog -> { showAutomationDialog = false; true }
             showDownloadsDialog -> { showDownloadsDialog = false; true }
