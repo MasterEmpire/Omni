@@ -662,6 +662,7 @@ class OmniBrowser : PluginEntry() {
                 SettingsBackupDialog(
                     apiKey = state.solverApiKey,
                     autoSolve = state.autoSolveEnabled,
+                    forceDark = state.forceDarkWebPages,
                     onExportBackup = { state.exportBackup() },
                     onRestoreBackup = {
                         restoreCallback = { uri -> state.restoreBackup(uri) }
@@ -673,10 +674,12 @@ class OmniBrowser : PluginEntry() {
                         state.currentWebView?.clearCache(true)
                         bridge.showToast("Cookies and Cache cleared.")
                     },
-                    onSave = { key, auto ->
+                    onSave = { key, auto, dark ->
                         state.solverApiKey = key
                         state.autoSolveEnabled = auto
-                        state.vaultManager.saveSolverConfig(key, auto)
+                        state.forceDarkWebPages = dark
+                        state.poolManager.updateForceDark(dark)
+                        state.vaultManager.saveSolverConfig(key, auto, dark)
                         bridge.showToast("Settings saved!")
                         state.showSettingsDialog = false
                     },
