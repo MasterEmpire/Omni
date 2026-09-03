@@ -398,18 +398,12 @@ class OmniBrowser : PluginEntry() {
                             FrameLayout(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                                 state.containerLayout = this
-                                val initialWv = state.poolManager.pool.getOrPut(state.activeTabId) {
-                                    state.poolManager.createConfiguredWebView(
-                                        tabId = state.activeTabId,
-                                        initialUrl = state.currentUrl,
-                                        savedState = null,
-                                        profileId = activeProf.id,
-                                        isDesktop = state.isDesktopMode,
-                                        listener = state
-                                    )
-                                }
-                                state.currentWebView = initialWv
-                                addView(initialWv)
+                                state.attachTabWebView(state.activeTabId)
+                            }
+                        },
+                        update = { _ ->
+                            if (state.containerLayout != null && state.currentWebView == null) {
+                                state.attachTabWebView(state.activeTabId)
                             }
                         },
                         modifier = Modifier.fillMaxSize()
