@@ -52,6 +52,10 @@ fun OmniBrowserTopBar(
     isHomeOverlayOpen: Boolean,
     onHomeClick: () -> Unit,
     onOpenIdeNeighbor: () -> Unit,
+    showIdePickerMenu: Boolean = false,
+    onDismissIdePicker: () -> Unit = {},
+    localShortcuts: List<ShortcutItem> = emptyList(),
+    onSelectIdeShortcut: (ShortcutItem) -> Unit = {},
     onTabSwitcherClick: () -> Unit,
     showMenu: Boolean,
     onMenuToggle: () -> Unit
@@ -210,11 +214,62 @@ fun OmniBrowserTopBar(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.width(4.dp))
 
-                    IconButton(
-                        onClick = onOpenIdeNeighbor,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Text("💻", fontSize = 16.sp)
+                    Box {
+                        IconButton(
+                            onClick = onOpenIdeNeighbor,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Text("💻", fontSize = 16.sp)
+                        }
+
+                        DropdownMenu(
+                            expanded = showIdePickerMenu,
+                            onDismissRequest = onDismissIdePicker,
+                            modifier = Modifier.background(Color(0xFF282C34))
+                        ) {
+                            Text(
+                                "Select Workspace / IDE",
+                                color = Color(0xFF8AB4F8),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                            HorizontalDivider(color = Color(0xFF3C4043))
+                            if (localShortcuts.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Default IDE", color = Color(0xFFE8EAED), fontSize = 12.sp) },
+                                    onClick = {
+                                        onDismissIdePicker()
+                                        onSelectIdeShortcut(ShortcutItem(title = "Local IDE", url = "ide/index.html", iconText = "💻"))
+                                    }
+                                )
+                            } else {
+                                localShortcuts.forEach { item ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(item.iconText.ifEmpty { "💻" }, fontSize = 13.sp)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    item.title,
+                                                    color = if (item.isDefault) Color(0xFF8AB4F8) else Color(0xFFE8EAED),
+                                                    fontWeight = if (item.isDefault) FontWeight.Bold else FontWeight.Normal,
+                                                    fontSize = 12.sp
+                                                )
+                                                if (item.isDefault) {
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("⭐", fontSize = 10.sp)
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            onDismissIdePicker()
+                                            onSelectIdeShortcut(item)
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     Spacer(Modifier.width(2.dp))
@@ -385,6 +440,16 @@ fun SpeedDialView(
                                     fontWeight = FontWeight.Bold,
                                     color = Color(item.colorValue)
                                 )
+                            }
+                            if (item.isDefault) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(2.dp),
+                                    contentAlignment = Alignment.TopEnd
+                                ) {
+                                    Text("⭐", fontSize = 10.sp)
+                                }
                             }
                         }
                     }
