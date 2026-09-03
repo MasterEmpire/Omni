@@ -41,9 +41,21 @@ class WebViewPoolManager(
 ) {
     val pool = mutableMapOf<String, WebView>()
     val pendingPurge = mutableMapOf<String, WebView>()
+    val tabDesktopModes = mutableMapOf<String, Boolean>()
 
     var mobileUA: String = ""
         private set
+
+    fun setTabDesktopMode(tabId: String, isDesktop: Boolean) {
+        tabDesktopModes[tabId] = isDesktop
+        val wv = pool[tabId] ?: return
+        wv.settings.userAgentString = if (isDesktop) DESKTOP_USER_AGENT else mobileUA
+        wv.settings.useWideViewPort = true
+        wv.settings.loadWithOverviewMode = true
+        if (isDesktop) {
+            wv.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
+        }
+    }
 
     var isForceDarkWebPages: Boolean = false
 
@@ -158,6 +170,7 @@ class WebViewPoolManager(
             val rawUA = settings.userAgentString
             val cleanMobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
             mobileUA = cleanMobileUA
+            tabDesktopModes[tabId] = isDesktop
             settings.userAgentString = if (isDesktop) DESKTOP_USER_AGENT else cleanMobileUA
             applyForceDark(settings, isForceDarkWebPages)
 
@@ -265,12 +278,18 @@ class WebViewPoolManager(
                     if (url != null) listener.onPageStarted(tabId, url)
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
+                    if (tabDesktopModes[tabId] == true) {
+                        view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
+                    }
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     if (url != null) listener.onPageFinished(tabId, url)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
+                    if (tabDesktopModes[tabId] == true) {
+                        view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
+                    }
                     CookieManager.getInstance().flush()
                 }
             }
