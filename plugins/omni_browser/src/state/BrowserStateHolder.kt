@@ -221,6 +221,7 @@ class BrowserStateHolder(
         container.removeAllViews()
 
         val targetTab = tabs.find { it.id == targetTabId } ?: return
+        isDesktopMode = targetTab.isDesktop
         val isNewInstance = !poolManager.pool.containsKey(targetTabId)
 
         val targetWv = poolManager.pool.getOrPut(targetTabId) {
@@ -229,7 +230,7 @@ class BrowserStateHolder(
                 initialUrl = targetTab.url,
                 savedState = targetTab.stateBundle,
                 profileId = targetTab.profileId,
-                isDesktop = isDesktopMode,
+                isDesktop = targetTab.isDesktop,
                 listener = this
             )
         }
@@ -416,6 +417,26 @@ class BrowserStateHolder(
         currentUrl = target
         tabs = tabs.map { if (it.id == activeTabId) it.copy(url = target) else it }
         currentWebView?.loadUrl(target)
+    }
+
+    fun toggleDesktopMode() {
+        val currentTab = tabs.find { it.id == activeTabId } ?: return
+        val newDesktop = !currentTab.isDesktop
+        isDesktopMode = newDesktop
+
+        tabs = tabs.map { if (it.id == activeTabId) it.copy(isDesktop = newDesktop) else it }
+        vaultManager.saveSession(tabs, activeTabId)
+
+        poolManager.setTabDesktopMode(activeTabId, newDesktop)
+
+        val targetUrl = convertUrlForDesktop(currentUrl, newDesktop)
+        if (targetUrl != currentUrl) {
+            navigateTo(targetUrl)
+        } else {
+            currentWebView?.reload()
+        }
+
+        bridge.showToast(if (newDesktop) "Desktop Site (1280px) Enabled" else "Mobile Site Enabled")
     }
 
     fun solveCurrentCaptcha() {
