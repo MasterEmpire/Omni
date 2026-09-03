@@ -165,9 +165,28 @@ class OmniBrowser : PluginEntry() {
             val finalSysPrompt = matchedPreset?.body ?: ""
 
             val profiles = vaultManager.loadProfiles() ?: emptyList()
-            val targetProfileId = profiles.firstOrNull()?.id ?: "default"
+            val eligibleProfiles = profiles.filter { profile ->
+                !profile.id.equals("default", ignoreCase = true) &&
+                !profile.name.trim().equals("default", ignoreCase = true)
+            }
 
-            bridge.log("OMNI_SOLVE_PRESET", "Using preset: '$finalSysTitle' (${finalSysPrompt.length} chars), Profile: '$targetProfileId'")
+            if (eligibleProfiles.isEmpty()) {
+                val noProfErr = "No secondary solver profile found in Omni Chrome. Main Default account is protected."
+                bridge.log("OMNI_SOLVE_ERR", "❌ Abort: $noProfErr")
+                sendStatus("No secondary profile found. Create an account in Omni Chrome.")
+                sendResult(false, null, noProfErr)
+                return
+            }
+
+            val prefs = ctx.getSharedPreferences("omni_solver_prefs", Context.MODE_PRIVATE)
+            val lastIdx = prefs.getInt("solver_profile_round_robin_idx", -1)
+            val nextIdx = (lastIdx + 1) % eligibleProfiles.size
+            prefs.edit().putInt("solver_profile_round_robin_idx", nextIdx).apply()
+
+            val targetProfile = eligibleProfiles[nextIdx]
+            val targetProfileId = targetProfile.id
+
+            bridge.log("OMNI_SOLVE_PRESET", "Using preset: '$finalSysTitle' (${finalSysPrompt.length} chars), Profile: '${targetProfile.name}' ($targetProfileId) [idx: $nextIdx/${eligibleProfiles.size}]")
 
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 val automator = AiStudioAutomator(ctx, bridge)
@@ -181,8 +200,8 @@ class OmniBrowser : PluginEntry() {
                     )
                 )
 
-                sendStatus("Connecting to Omni solver.")
-                bridge.log("OMNI_SOLVE_EXEC", "Starting headless AI Studio automator...")
+                sendStatus("Connecting to Omni solver on ${targetProfile.name}.")
+                bridge.log("OMNI_SOLVE_EXEC", "Starting headless AI Studio automator on ${targetProfile.name} ($targetProfileId)...")
 
                 automator.start(
                     profileId = targetProfileId,
