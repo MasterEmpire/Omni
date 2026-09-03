@@ -512,6 +512,7 @@ fun BrowserMenuOverlay(
     onBackClick: () -> Unit,
     onForwardClick: () -> Unit,
     onReloadClick: () -> Unit,
+    onOpenSmartNotes: () -> Unit,
     onOpenAutomation: () -> Unit,
     onOpenLocalIde: () -> Unit,
     activeDownloadsCount: Int,
@@ -628,6 +629,10 @@ fun BrowserMenuOverlay(
                             fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal
                         )
                     }
+                }
+
+                InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8), isBold = true) {
+                    onOpenSmartNotes()
                 }
 
                 InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) {
