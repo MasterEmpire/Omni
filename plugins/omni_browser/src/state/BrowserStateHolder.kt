@@ -148,14 +148,12 @@ class BrowserStateHolder(
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId) ->
             if (loadedTabs.isNotEmpty()) {
-                val homeTabId = "tab_home_${System.currentTimeMillis()}"
-                val homeTab = BrowserTab(id = homeTabId, title = "New Tab", url = "about:blank", profileId = "default")
-                val nonBlankTabs = loadedTabs.filter { it.url != "about:blank" }
-                tabs = listOf(homeTab) + nonBlankTabs
-                activeTabId = homeTabId
-                currentUrl = "about:blank"
-                urlInputText = ""
-                pageTitle = "New Tab"
+                tabs = loadedTabs
+                val targetTab = loadedTabs.find { it.id == savedActiveId } ?: loadedTabs.last()
+                activeTabId = targetTab.id
+                currentUrl = targetTab.url
+                urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
+                pageTitle = targetTab.title
             }
         }
     }
