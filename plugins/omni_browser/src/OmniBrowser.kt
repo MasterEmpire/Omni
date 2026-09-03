@@ -362,6 +362,7 @@ class OmniBrowser : PluginEntry() {
                             state.isHomeOverlayOpen = !state.isHomeOverlayOpen
                         }
                     },
+                    onOpenIdeNeighbor = { state.toggleIdeNeighbor() },
                     onTabSwitcherClick = {
                         val thumb = state.currentWebView?.captureThumbnail()
                         val bundle = android.os.Bundle()
