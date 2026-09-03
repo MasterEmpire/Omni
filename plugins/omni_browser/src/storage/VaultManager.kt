@@ -151,6 +151,7 @@ class VaultManager(
                     put("url", s.url)
                     put("iconText", s.iconText)
                     put("colorValue", s.colorValue)
+                    put("isDefault", s.isDefault)
                     if (!s.localSourcePath.isNullOrEmpty()) {
                         put("localSourcePath", s.localSourcePath)
                     }
@@ -176,7 +177,8 @@ class VaultManager(
                         url = obj.getString("url"),
                         iconText = obj.optString("iconText", ""),
                         colorValue = obj.optLong("colorValue", 0xFF4285F4),
-                        localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() }
+                        localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() },
+                        isDefault = obj.optBoolean("isDefault", false)
                     )
                 )
             }
@@ -416,7 +418,8 @@ class VaultManager(
                                         url = obj.getString("url"),
                                         iconText = obj.optString("iconText", ""),
                                         colorValue = obj.optLong("colorValue", 0xFF4285F4),
-                                        localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() }
+                                        localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() },
+                                        isDefault = obj.optBoolean("isDefault", false)
                                     )
                                 )
                             }
