@@ -219,11 +219,10 @@ class VaultManager(
 
     fun saveSession(tabList: List<BrowserTab>, currentActiveId: String) {
         try {
-            val persistentTabs = tabList.filter { !it.id.startsWith("tab_landing_") || it.url != "about:blank" }
+            val persistentTabs = tabList.filter { !it.id.startsWith("tab_landing_") }
             if (persistentTabs.isEmpty()) return
 
-            val fallbackActiveId = persistentTabs.lastOrNull()?.id ?: currentActiveId
-            val finalActiveId = if (currentActiveId.startsWith("tab_landing_")) fallbackActiveId else currentActiveId
+            val finalActiveId = if (persistentTabs.any { it.id == currentActiveId }) currentActiveId else persistentTabs.last().id
 
             val json = JSONObject()
             json.put("activeTabId", finalActiveId)
