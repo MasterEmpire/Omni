@@ -37,6 +37,7 @@ import com.omni.plugin.browser.state.BrowserStateHolder
 import com.omni.plugin.browser.storage.VaultManager
 import com.omni.plugin.browser.ui.*
 import com.omni.plugin.browser.ui.dialogs.*
+import com.omni.plugin.browser.ui.dialogs.SmartNotesDialog
 import com.omni.plugin.browser.utils.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -564,9 +565,9 @@ class OmniBrowser : PluginEntry() {
                 SmartNotesDialog(
                     bridge = bridge,
                     notes = state.smartNotes,
-                    onSaveNote = { title, content, id -> state.saveSmartNote(title, content, id) },
-                    onDeleteNote = { id -> state.deleteSmartNote(id) },
-                    onInjectToPage = { text -> state.injectTextToActivePage(text) },
+                    onSaveNote = { title: String, content: String, id: String? -> state.saveSmartNote(title, content, id) },
+                    onDeleteNote = { id: String -> state.deleteSmartNote(id) },
+                    onInjectToPage = { text: String -> state.injectTextToActivePage(text) },
                     onDismiss = { state.showSmartNotesDialog = false }
                 )
             }
