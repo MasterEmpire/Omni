@@ -240,6 +240,7 @@ class VaultManager(
                     put("url", tab.url)
                     put("profileId", tab.profileId)
                     put("lastAccessedTime", tab.lastAccessedTime)
+                    put("isDesktop", tab.isDesktop)
                 }
                 arr.put(tObj)
             }
@@ -264,7 +265,8 @@ class VaultManager(
                         title = tObj.optString("title", "New Tab"),
                         url = tObj.optString("url", "about:blank"),
                         lastAccessedTime = tObj.optLong("lastAccessedTime", System.currentTimeMillis()),
-                        profileId = tObj.optString("profileId", "default")
+                        profileId = tObj.optString("profileId", "default"),
+                        isDesktop = tObj.optBoolean("isDesktop", false)
                     )
                 )
             }
@@ -493,7 +495,8 @@ class VaultManager(
                                             title = tObj.optString("title", "New Tab"),
                                             url = tObj.optString("url", "about:blank"),
                                             lastAccessedTime = tObj.optLong("lastAccessedTime", System.currentTimeMillis()),
-                                            profileId = tObj.optString("profileId", "default")
+                                            profileId = tObj.optString("profileId", "default"),
+                                            isDesktop = tObj.optBoolean("isDesktop", false)
                                         )
                                     )
                                 }
