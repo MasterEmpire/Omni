@@ -543,18 +543,15 @@ class OmniBrowser : PluginEntry() {
                     profiles = state.profiles,
                     selectedProfileId = state.selectedProfileId,
                     onSelectProfile = {
-                        state.selectedProfileId = it
-                        state.vaultManager.saveProfiles(state.profiles)
+                        state.changeSelectedProfile(it)
                     },
                     onAddProfile = {
                         val nextIdx = state.profiles.size
                         val newId = "profile_${System.currentTimeMillis()}"
                         val newColor = PROFILE_PALETTE[nextIdx % PROFILE_PALETTE.size]
                         val newProf = BrowserProfile(newId, "Account ${nextIdx + 1}", newColor)
-                        val updated = state.profiles + newProf
-                        state.profiles = updated
-                        state.selectedProfileId = newId
-                        state.vaultManager.saveProfiles(updated)
+                        state.profiles = state.profiles + newProf
+                        state.changeSelectedProfile(newId)
                     },
                     onRenameProfile = { prof -> state.editingProfile = prof },
                     onSelectTab = { state.switchToTab(it) },
