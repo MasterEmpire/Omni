@@ -383,15 +383,17 @@ fun DownloadsManagerDialog(
 fun SettingsBackupDialog(
     apiKey: String,
     autoSolve: Boolean,
+    forceDark: Boolean = false,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
-    onSave: (String, Boolean) -> Unit,
+    onSave: (String, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
     var tempAuto by remember { mutableStateOf(autoSolve) }
+    var tempForceDark by remember { mutableStateOf(forceDark) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -462,6 +464,22 @@ fun SettingsBackupDialog(
                     )
                 }
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Force Dark Web Content", color = Color(0xFFE8EAED), fontSize = 12.sp)
+                        Text("Inverts blinding white web pages into dark mode", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempForceDark,
+                        onCheckedChange = { tempForceDark = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                    )
+                }
+
                 HorizontalDivider(color = Color(0xFF3C4043))
 
                 TextButton(
@@ -474,7 +492,7 @@ fun SettingsBackupDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(tempKey.trim(), tempAuto) },
+                onClick = { onSave(tempKey.trim(), tempAuto, tempForceDark) },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
                 Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
