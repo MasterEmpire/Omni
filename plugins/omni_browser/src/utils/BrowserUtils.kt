@@ -660,9 +660,16 @@ fun buildAiStudioAutomationScript(
             }
 
             function getScreenText(turnEl) {
-                if (!turnEl) return '';
+                if (!turnEl) {
+                    hostLog('SCRAPE_WARN', 'getScreenText called with null turn element.');
+                    return '';
+                }
                 try {
                     const contentContainer = turnEl.querySelector('.chat-turn-content, ms-chat-turn-content, .turn-content') || turnEl;
+                    const textChunkCount = turnEl.querySelectorAll('ms-text-chunk').length;
+                    const codeBlockCount = turnEl.querySelectorAll('ms-code-block, pre, code').length;
+                    const mdNodeCount = turnEl.querySelectorAll('ms-cmark-node').length;
+
                     const tempDiv = document.createElement('div');
                     tempDiv.style.position = 'fixed';
                     tempDiv.style.left = '-99999px';
@@ -675,11 +682,18 @@ fun buildAiStudioAutomationScript(
                     tempDiv.appendChild(clone);
                     document.body.appendChild(tempDiv);
 
-                    const text = (tempDiv.innerText || tempDiv.textContent || '').trim();
+                    let text = (tempDiv.innerText || '').trim();
+                    if (!text) {
+                        text = (tempDiv.textContent || '').trim();
+                        if (text) {
+                            hostLog('SCRAPE_FALLBACK', 'innerText returned empty, fell back to textContent (' + text.length + ' chars)');
+                        }
+                    }
                     document.body.removeChild(tempDiv);
+
                     return text;
                 } catch(e) {
-                    hostLog('SCRAPE_ERR', 'Error scraping screen: ' + e.message);
+                    hostLog('SCRAPE_ERR', 'Exception in getScreenText: ' + e.message);
                     return '';
                 }
             }
@@ -1194,24 +1208,36 @@ fun buildAiStudioAutomationScript(
                                 }
                             }
 
-                            // Screen Stillness Watchdog: Did text or thoughts change?
+                            // Screen Stillness Watchdog & Deep Telemetry
                             const hasContent = currentTurnOutput.length > 0;
-                            const isContentChanged = (currentTurnOutput !== lastOutputText) || (latestTurnThoughts !== lastThoughtsText);
+                            const textGrew = currentTurnOutput.length > lastOutputText.length;
+                            const thoughtsChanged = latestTurnThoughts !== lastThoughtsText;
+                            const isContentChanged = (currentTurnOutput !== lastOutputText) || thoughtsChanged;
 
-                            if (isContentChanged) {
+                            if (textGrew) {
+                                const diff = currentTurnOutput.length - lastOutputText.length;
+                                hostLog('WATCHDOG_GROWTH', '📈 Growth: ' + lastOutputText.length + ' -> ' + currentTurnOutput.length + ' chars (+' + diff + ')');
                                 idleTicks = 0;
                                 contentStaticTicks = 0;
                                 lastOutputText = currentTurnOutput;
                                 lastThoughtsText = latestTurnThoughts;
+                            } else if (thoughtsChanged) {
+                                hostLog('WATCHDOG_THOUGHTS', '🧠 Thoughts updated (' + latestTurnThoughts.length + ' chars). Resetting stillness ticks.');
+                                idleTicks = 0;
+                                contentStaticTicks = 0;
+                                lastThoughtsText = latestTurnThoughts;
                             } else if (hasContent) {
                                 contentStaticTicks++;
+                                if (contentStaticTicks % 2 === 0 || contentStaticTicks >= 8) {
+                                    hostLog('WATCHDOG_STILL', '⏳ Stillness tick ' + contentStaticTicks + '/10: ' + currentTurnOutput.length + ' chars on screen, no changes for ' + (contentStaticTicks * 0.6).toFixed(1) + 's.');
+                                }
                             }
 
                             // Dead Man Watchdog: Auto-rerun if completely silent before any text appears (60s)
                             if (!hasContent && idleTicks >= MAX_IDLE_TICKS) {
                                 if (turnRetryCount < MAX_RETRIES) {
                                     turnRetryCount++;
-                                    hostLog('IDLE_RETRY', 'Idle watchdog tripped (' + (idleTicks * 0.6).toFixed(0) + 's silence). Executing auto-rerun attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
+                                    hostLog('IDLE_RETRY', '⚠️ Idle watchdog tripped (' + (idleTicks * 0.6).toFixed(0) + 's silence). Executing auto-rerun attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
                                     updateStatus(stepLabel + ' - Silence timeout. Triggering rerun (' + turnRetryCount + '/' + MAX_RETRIES + ')...');
                                     idleTicks = 0;
                                     contentStaticTicks = 0;
@@ -1250,10 +1276,11 @@ fun buildAiStudioAutomationScript(
                             }
 
                             // Pure Screen Stillness Completion:
-                            // Once content is visible, if the screen hasn't added a single character for 10 ticks (6.0s),
-                            // rendering on the screen is complete!
                             if (hasContent && contentStaticTicks >= 10) {
-                                hostLog('TURN_DONE', 'Screen rendering finished (' + currentTurnOutput.length + ' chars, still for ' + (contentStaticTicks * 0.6).toFixed(1) + 's). Finishing turn.');
+                                hostLog('DECISION_STOP', '🛑 DECISION: Stop waiting. Stillness threshold reached (' + contentStaticTicks + ' ticks / ' + (contentStaticTicks * 0.6).toFixed(1) + 's of zero new text).');
+                                hostLog('SCRAPE_TAIL', 'Scraped content tail (last 300 chars):\n' + currentTurnOutput.slice(-300));
+                                hostLog('RAW_SCRAPE_DUMP', '=== [BEGIN FULL RAW SCRAPE PAYLOAD (' + currentTurnOutput.length + ' chars)] ===\n' + currentTurnOutput + '\n=== [END FULL RAW SCRAPE PAYLOAD] ===');
+
                                 fullCumulativeOutput = fullCumulativeOutput.length > 0
                                     ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
                                     : currentTurnOutput;
