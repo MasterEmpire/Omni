@@ -659,29 +659,28 @@ fun buildAiStudioAutomationScript(
                 return checkUiGenerating(latest);
             }
 
-            function checkTurnFinalized(latest) {
-                if (!latest) return false;
-                const rerun = latest.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]');
-                if (rerun && isElementVisible(rerun)) return true;
-                const feedback = latest.querySelector('.turn-footer button[aria-label*="Good response"], .turn-footer button[aria-label*="Bad response"], button.response-feedback-button');
-                if (feedback) return true;
-                const announcer = document.querySelector('#cdk-live-announcer-0, .cdk-live-announcer-element');
-                if (announcer && (announcer.textContent || '').toLowerCase().includes('response ready')) return true;
-                return false;
-            }
-
-            function isJsonComplete(str) {
-                if (!str) return false;
-                const trimmed = str.trim();
-                const firstBrace = trimmed.indexOf('{');
-                const lastBrace = trimmed.lastIndexOf('}');
-                if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return false;
+            function getScreenText(turnEl) {
+                if (!turnEl) return '';
                 try {
-                    const candidate = trimmed.substring(firstBrace, lastBrace + 1);
-                    const parsed = JSON.parse(candidate);
-                    return parsed && typeof parsed === 'object';
-                } catch(_) {
-                    return false;
+                    const contentContainer = turnEl.querySelector('.chat-turn-content, ms-chat-turn-content, .turn-content') || turnEl;
+                    const tempDiv = document.createElement('div');
+                    tempDiv.style.position = 'fixed';
+                    tempDiv.style.left = '-99999px';
+                    tempDiv.style.top = '-99999px';
+                    tempDiv.style.opacity = '0';
+                    tempDiv.style.pointerEvents = 'none';
+
+                    const clone = contentContainer.cloneNode(true);
+                    clone.querySelectorAll('ms-thought-chunk, .turn-footer, button, .actions-container, ms-run-button').forEach(el => el.remove());
+                    tempDiv.appendChild(clone);
+                    document.body.appendChild(tempDiv);
+
+                    const text = (tempDiv.innerText || tempDiv.textContent || '').trim();
+                    document.body.removeChild(tempDiv);
+                    return text;
+                } catch(e) {
+                    hostLog('SCRAPE_ERR', 'Error scraping screen: ' + e.message);
+                    return '';
                 }
             }
 
@@ -1108,14 +1107,14 @@ fun buildAiStudioAutomationScript(
                             }
                         }
 
-                        // Dynamic Response Polling & Static Bubble Detection Watchdog
+                        // Dynamic Response Polling via Screen Stillness Watchdog
                         updateStatus(stepLabel + ' - Streaming response...');
                         let lastOutputText = '';
                         let lastThoughtsText = '';
                         let contentStaticTicks = 0;
                         let totalTurnTicks = 0;
                         let idleTicks = 0;
-                        const MAX_IDLE_TICKS = 75; // 45 seconds of absolute silence before triggering auto-rerun
+                        const MAX_IDLE_TICKS = 100; // 60s of absolute silence before timeout/retry
                         const MAX_TOTAL_TICKS = 1500;
                         let turnRetryCount = 0;
                         const MAX_RETRIES = 2;
@@ -1184,63 +1183,32 @@ fun buildAiStudioAutomationScript(
                                     .trim();
                             }
 
-                            // Capture latest model turn output with Ratchet Memory
+                            // Scrape the visual content directly from the latest model turn on screen
                             const models = document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model');
-                            let activeModelTurn = null;
-                            if (models.length > 0) {
-                                activeModelTurn = models[models.length - 1];
-                                let extractedOutput = '';
+                            let activeModelTurn = models.length > 0 ? models[models.length - 1] : null;
 
-                                // 1. Scan streaming text chunks excluding thoughts
-                                const textChunks = Array.from(activeModelTurn.querySelectorAll('ms-text-chunk')).filter(c => !c.closest('ms-thought-chunk'));
-                                if (textChunks.length > 0) {
-                                    extractedOutput = textChunks
-                                        .map(c => (c.innerText || c.textContent || '').trim())
-                                        .filter(Boolean)
-                                        .join('\n\n')
-                                        .trim();
-                                }
-
-                                // 2. Fallback to finalized rendered Markdown nodes
-                                if (!extractedOutput) {
-                                    const mdNodes = Array.from(activeModelTurn.querySelectorAll('ms-cmark-node, .rendered-markdown, .markdown, ms-formatted-text')).filter(c => !c.closest('ms-thought-chunk'));
-                                    if (mdNodes.length > 0) {
-                                        extractedOutput = mdNodes
-                                            .map(c => (c.innerText || c.textContent || '').trim())
-                                            .filter(Boolean)
-                                            .join('\n\n')
-                                            .trim();
-                                    }
-                                }
-
-                                // 3. Fallback to turn container content with thoughts stripped
-                                if (!extractedOutput) {
-                                    const contentBody = activeModelTurn.querySelector('.chat-turn-content, ms-chat-turn-content, .text-chunk, .turn-content');
-                                    if (contentBody) {
-                                        const clone = contentBody.cloneNode(true);
-                                        clone.querySelectorAll('ms-thought-chunk').forEach(tc => tc.remove());
-                                        extractedOutput = (clone.innerText || clone.textContent || '').trim();
-                                    }
-                                }
-
-                                // Ratchet principle: Keep the highest length snapshot, never overwrite with empty
-                                if (extractedOutput.length >= currentTurnOutput.length) {
-                                    currentTurnOutput = extractedOutput;
+                            if (activeModelTurn) {
+                                const screenText = getScreenText(activeModelTurn);
+                                if (screenText.length >= currentTurnOutput.length) {
+                                    currentTurnOutput = screenText;
                                 }
                             }
 
-                            // Static Bubble Tracker: Compare actual text values
-                            if (currentTurnOutput !== lastOutputText || latestTurnThoughts !== lastThoughtsText) {
+                            // Screen Stillness Watchdog: Did text or thoughts change?
+                            const hasContent = currentTurnOutput.length > 0;
+                            const isContentChanged = (currentTurnOutput !== lastOutputText) || (latestTurnThoughts !== lastThoughtsText);
+
+                            if (isContentChanged) {
                                 idleTicks = 0;
                                 contentStaticTicks = 0;
                                 lastOutputText = currentTurnOutput;
                                 lastThoughtsText = latestTurnThoughts;
-                            } else if (currentTurnOutput.length > 0) {
+                            } else if (hasContent) {
                                 contentStaticTicks++;
                             }
 
-                            // Active Dead Man Watchdog: Auto-rerun if completely silent for 45s
-                            if (idleTicks >= MAX_IDLE_TICKS) {
+                            // Dead Man Watchdog: Auto-rerun if completely silent before any text appears (60s)
+                            if (!hasContent && idleTicks >= MAX_IDLE_TICKS) {
                                 if (turnRetryCount < MAX_RETRIES) {
                                     turnRetryCount++;
                                     hostLog('IDLE_RETRY', 'Idle watchdog tripped (' + (idleTicks * 0.6).toFixed(0) + 's silence). Executing auto-rerun attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
@@ -1253,12 +1221,10 @@ fun buildAiStudioAutomationScript(
                                     const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
 
                                     if (rerunBtn && isElementVisible(rerunBtn)) {
-                                        hostLog('IDLE_RETRY', 'Found turn rerun button. Clicking...');
                                         rerunBtn.click();
                                     } else {
                                         const retrySubmit = document.querySelector('ms-run-button button:not(.stoppable), button[type="submit"]:not(.stoppable)');
                                         if (retrySubmit && isRunButtonReady(retrySubmit)) {
-                                            hostLog('IDLE_RETRY', 'Clicking submit button for rerun...');
                                             retrySubmit.click();
                                         }
                                     }
@@ -1283,48 +1249,11 @@ fun buildAiStudioAutomationScript(
                                 if (window.OmniAutomator) window.OmniAutomator.onProgress(latestTurnThoughts, combinedDisplay);
                             }
 
-                            // Robust Multi-Tier Completion Detection
-                            const hasOutput = currentTurnOutput.length > 0;
-                            const isJsonExpected = currentTurnOutput.trim().startsWith('{') || currentTurnOutput.includes('"solutions"');
-                            const jsonComplete = isJsonComplete(currentTurnOutput);
-                            const stillRunning = checkUiGenerating(activeModelTurn);
-                            const turnFinalized = checkTurnFinalized(activeModelTurn);
-
-                            // Pathway 1: Valid and balanced JSON verified, and content stayed static for >= 4 ticks (2.4s)
-                            if (isJsonExpected && jsonComplete && contentStaticTicks >= 4) {
-                                hostLog('TURN_DONE', 'Valid complete JSON verified in bubble (' + currentTurnOutput.length + ' chars, static ' + (contentStaticTicks * 0.6).toFixed(1) + 's). Finishing turn.');
-                                fullCumulativeOutput = fullCumulativeOutput.length > 0
-                                    ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
-                                    : currentTurnOutput;
-                                break;
-                            }
-
-                            // Pathway 2: Turn explicitly finalized by AI Studio DOM (rerun button, feedback footer, live announcer)
-                            if (hasOutput && turnFinalized && contentStaticTicks >= 3) {
-                                if (!isJsonExpected || jsonComplete || contentStaticTicks >= 8) {
-                                    hostLog('TURN_DONE', 'Turn finalized by AI Studio DOM (rerun/feedback verified, static ' + (contentStaticTicks * 0.6).toFixed(1) + 's, ' + currentTurnOutput.length + ' chars). Finishing turn.');
-                                    fullCumulativeOutput = fullCumulativeOutput.length > 0
-                                        ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
-                                        : currentTurnOutput;
-                                    break;
-                                }
-                            }
-
-                            // Pathway 3: Generation UI quiet & settled
-                            // If JSON was expected but still incomplete/unterminated, wait at least 35 ticks (21s) before giving up!
-                            // For standard text, wait 16 ticks (9.6s).
-                            const quietThreshold = (isJsonExpected && !jsonComplete) ? 35 : 16;
-                            if (hasOutput && !stillRunning && contentStaticTicks >= quietThreshold) {
-                                hostLog('TURN_DONE', 'UI quiet for ' + (contentStaticTicks * 0.6).toFixed(1) + 's (' + currentTurnOutput.length + ' chars, isJson=' + isJsonExpected + ', jsonComplete=' + jsonComplete + '). Finishing turn.');
-                                fullCumulativeOutput = fullCumulativeOutput.length > 0
-                                    ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
-                                    : currentTurnOutput;
-                                break;
-                            }
-
-                            // Pathway 4: Absolute silence stillness safety net (50 ticks = 30.0s without any new characters)
-                            if (hasOutput && contentStaticTicks >= 50) {
-                                hostLog('TURN_DONE', 'Hard stillness timeout reached (' + (contentStaticTicks * 0.6).toFixed(1) + 's silence, ' + currentTurnOutput.length + ' chars). Finishing turn.');
+                            // Pure Screen Stillness Completion:
+                            // Once content is visible, if the screen hasn't added a single character for 10 ticks (6.0s),
+                            // rendering on the screen is complete!
+                            if (hasContent && contentStaticTicks >= 10) {
+                                hostLog('TURN_DONE', 'Screen rendering finished (' + currentTurnOutput.length + ' chars, still for ' + (contentStaticTicks * 0.6).toFixed(1) + 's). Finishing turn.');
                                 fullCumulativeOutput = fullCumulativeOutput.length > 0
                                     ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
                                     : currentTurnOutput;
