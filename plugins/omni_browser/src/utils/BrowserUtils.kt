@@ -710,7 +710,7 @@ fun buildAiStudioAutomationScript(
                     tempDiv.style.pointerEvents = 'none';
 
                     const clone = contentContainer.cloneNode(true);
-                    clone.querySelectorAll('ms-thought-chunk, .turn-footer, button, .actions-container, ms-run-button').forEach(el => el.remove());
+                    clone.querySelectorAll('ms-thought-chunk, .author-label, .header, .timestamp, .info-container, .turn-information, loading-indicator, .turn-footer, button, .actions-container, ms-run-button').forEach(el => el.remove());
                     tempDiv.appendChild(clone);
                     document.body.appendChild(tempDiv);
 
@@ -1320,11 +1320,10 @@ fun buildAiStudioAutomationScript(
                             const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
 
                             // If JSON is verified and fully closed, 5 ticks (3.0s) of stillness is enough.
-                            // If JSON is unclosed/unbalanced, wait at least 25 ticks (15.0s) to absorb mid-generation pauses.
-                            // For regular text, wait 12 ticks (7.2s).
-                            const targetTicks = balanced ? 5 : (looksLikeJson ? 25 : 12);
+                            // Otherwise, wait at least 25 ticks (15.0s) across the board so pauses during thinking or multi-image ingestion never get sniped!
+                            const targetTicks = balanced ? 5 : 25;
 
-                            if (hasContent && contentStaticTicks >= targetTicks) {
+                            if (hasContent && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
                                 hostLog('DECISION_STOP', '🛑 DECISION: Stop waiting. Target stillness reached (' + contentStaticTicks + '/' + targetTicks + ' ticks, ' + (contentStaticTicks * 0.6).toFixed(1) + 's). balanced=' + balanced + ', looksLikeJson=' + looksLikeJson);
                                 hostLog('SCRAPE_TAIL', 'Scraped content tail (last 300 chars):\n' + currentTurnOutput.slice(-300));
                                 hostLog('RAW_SCRAPE_DUMP', '=== [BEGIN FULL RAW SCRAPE PAYLOAD (' + currentTurnOutput.length + ' chars)] ===\n' + currentTurnOutput + '\n=== [END FULL RAW SCRAPE PAYLOAD] ===');
