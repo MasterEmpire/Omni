@@ -10,7 +10,8 @@ data class ShortcutItem(
     val url: String,
     val iconText: String = "",
     val colorValue: Long = 0xFF4285F4,
-    val localSourcePath: String? = null
+    val localSourcePath: String? = null,
+    val isDefault: Boolean = false
 )
 
 data class BrowserProfile(
