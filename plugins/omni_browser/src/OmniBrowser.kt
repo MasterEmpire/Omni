@@ -305,6 +305,15 @@ class OmniBrowser : PluginEntry() {
             state.activeFileChooserCallback = null
         }
 
+        DisposableEffect(fileChooserLauncher) {
+            state.registerFileChooserLauncher { intent ->
+                fileChooserLauncher.launch(intent)
+            }
+            onDispose {
+                state.registerFileChooserLauncher(null)
+            }
+        }
+
         // --- Lifecycle and Background Loops ---
         LaunchedEffect(Unit) {
             state.init()
