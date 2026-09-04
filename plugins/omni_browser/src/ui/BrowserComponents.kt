@@ -690,6 +690,85 @@ fun BrowserMenuOverlay(
 }
 
 @Composable
+fun DownloadCompletedPillBanner(
+    visible: Boolean,
+    file: java.io.File?,
+    onOpen: (java.io.File) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible && file != null,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+        modifier = modifier
+    ) {
+        if (file == null) return@AnimatedVisibility
+        val emoji = remember(file.name) { com.omni.plugin.browser.utils.getFileEmoji(file.name) }
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF161B22),
+            border = BorderStroke(1.2.dp, Color(0xFF58A6FF).copy(alpha = 0.8f)),
+            shadowElevation = 12.dp,
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .wrapContentWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(emoji, fontSize = 16.sp)
+
+                Column(modifier = Modifier.widthIn(max = 160.dp)) {
+                    Text(
+                        text = file.name,
+                        color = Color(0xFFE8EAED),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Downloaded",
+                        color = Color(0xFF3FB950),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onOpen(file)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text("Open", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Dismiss",
+                        tint = Color(0xFF8B949E),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun UndoBanner(
     visible: Boolean,
     message: String,
