@@ -22,6 +22,13 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
+data class BrowserConfig(
+    val apiKey: String = "",
+    val autoSolve: Boolean = true,
+    val forceDark: Boolean = false,
+    val localPort: Int = 8080
+)
+
 data class VaultRestoreData(
     val profiles: List<BrowserProfile>? = null,
     val shortcuts: List<ShortcutItem>? = null,
@@ -31,7 +38,8 @@ data class VaultRestoreData(
     val autoSolveEnabled: Boolean? = null,
     val systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null,
     val smartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null,
-    val forceDark: Boolean? = null
+    val forceDark: Boolean? = null,
+    val localPort: Int? = null
 )
 
 class VaultManager(
@@ -276,26 +284,28 @@ class VaultManager(
         }
     }
 
-    fun saveSolverConfig(apiKey: String, autoSolve: Boolean, forceDark: Boolean = false) {
+    fun saveSolverConfig(apiKey: String, autoSolve: Boolean, forceDark: Boolean = false, localPort: Int = 8080) {
         try {
             val cfg = JSONObject().apply {
                 put("apiKey", apiKey)
                 put("autoSolve", autoSolve)
                 put("forceDark", forceDark)
+                put("localPort", localPort)
             }
             bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
         } catch (_: Exception) {}
     }
 
-    fun loadSolverConfig(): Triple<String, Boolean, Boolean>? {
+    fun loadSolverConfig(): BrowserConfig? {
         return try {
             val bytes = bridge.readFile("config/solver.json") ?: return null
             val json = JSONObject(String(bytes, Charsets.UTF_8))
-            Triple(
-                json.optString("apiKey", ""),
-                json.optBoolean("autoSolve", true),
-                json.optBoolean("forceDark", false)
+            BrowserConfig(
+                apiKey = json.optString("apiKey", ""),
+                autoSolve = json.optBoolean("autoSolve", true),
+                forceDark = json.optBoolean("forceDark", false),
+                localPort = json.optInt("localPort", 8080)
             )
         } catch (_: Exception) {
             null
@@ -439,6 +449,7 @@ class VaultManager(
         var loadedApiKey: String? = null
         var loadedAutoSolve: Boolean? = null
         var loadedForceDark: Boolean? = null
+        var loadedLocalPort: Int? = null
         var loadedSystemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
         var loadedSmartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null
 
@@ -509,6 +520,7 @@ class VaultManager(
                             loadedApiKey = json.optString("apiKey", "")
                             loadedAutoSolve = json.optBoolean("autoSolve", true)
                             loadedForceDark = json.optBoolean("forceDark", false)
+                            loadedLocalPort = json.optInt("localPort", 8080)
                         }
                         "system_presets.json" -> {
                             bridge.saveFile("config/system_presets.json", bytes)
@@ -565,7 +577,8 @@ class VaultManager(
             autoSolveEnabled = loadedAutoSolve,
             systemPresets = loadedSystemPresets,
             smartNotes = loadedSmartNotes,
-            forceDark = loadedForceDark
+            forceDark = loadedForceDark,
+            localPort = loadedLocalPort
         )
     }
 }
