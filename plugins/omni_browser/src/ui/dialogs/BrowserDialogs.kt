@@ -384,16 +384,18 @@ fun SettingsBackupDialog(
     apiKey: String,
     autoSolve: Boolean,
     forceDark: Boolean = false,
+    localPort: Int = 8080,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
-    onSave: (String, Boolean, Boolean) -> Unit,
+    onSave: (String, Boolean, Boolean, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
     var tempAuto by remember { mutableStateOf(autoSolve) }
     var tempForceDark by remember { mutableStateOf(forceDark) }
+    var tempPortText by remember { mutableStateOf(localPort.toString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -482,6 +484,25 @@ fun SettingsBackupDialog(
 
                 HorizontalDivider(color = Color(0xFF3C4043))
 
+                Text("Localhost Server (Local Apps & Auth)", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("Simulates a secure origin so Web Crypto, service workers, and OAuth logins work offline.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
+
+                OutlinedTextField(
+                    value = tempPortText,
+                    onValueChange = { tempPortText = it.filter { ch -> ch.isDigit() }.take(5) },
+                    label = { Text("Localhost Port (e.g. 8080, 3000, 5173)") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFFE8EAED),
+                        unfocusedTextColor = Color(0xFFE8EAED),
+                        focusedBorderColor = Color(0xFF8AB4F8),
+                        unfocusedBorderColor = Color(0xFF5F6368)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                HorizontalDivider(color = Color(0xFF3C4043))
+
                 TextButton(
                     onClick = onClearCookiesAndCache,
                     modifier = Modifier.fillMaxWidth()
@@ -492,7 +513,10 @@ fun SettingsBackupDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(tempKey.trim(), tempAuto, tempForceDark) },
+                onClick = {
+                    val portNum = tempPortText.toIntOrNull() ?: 8080
+                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum)
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
                 Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
