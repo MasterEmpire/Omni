@@ -36,6 +36,38 @@ class OmniForegroundService : Service() {
             return START_NOT_STICKY
         }
 
+        if (action == ACTION_MEDIA_ACTION) {
+            val desiredPlay = intent.getBooleanExtra(EXTRA_DESIRED_PLAY, false)
+            mediaActionListener?.invoke(desiredPlay)
+            return START_STICKY
+        }
+
+        if (action == ACTION_STOP_MEDIA) {
+            mediaActionListener?.invoke(false)
+            mediaActionListener = null
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        if (action == ACTION_START_MEDIA || action == ACTION_UPDATE_MEDIA) {
+            val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Audio"
+            val artist = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Playing in Background"
+            val isPlaying = intent?.getBooleanExtra(EXTRA_IS_PLAYING, true) ?: true
+
+            try {
+                createMediaNotificationChannel()
+                val notification = buildMediaNotification(title, artist, isPlaying)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_MEDIA_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                } else {
+                    startForeground(NOTIFICATION_MEDIA_ID, notification)
+                }
+            } catch (_: Exception) {}
+
+            return START_STICKY
+        }
+
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Hub Task"
         val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Automation in progress..."
 
@@ -67,6 +99,58 @@ class OmniForegroundService : Service() {
         }
     }
 
+    private fun createMediaNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_MEDIA_ID,
+                "Omni Media Playback",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Controls background audio playback with lockscreen media controls"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildMediaNotification(title: String, artist: String, isPlaying: Boolean): Notification {
+        val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val playPauseText = if (isPlaying) "Pause" else "Play"
+
+        val toggleIntent = Intent(this, OmniForegroundService::class.java).apply {
+            action = ACTION_MEDIA_ACTION
+            putExtra(EXTRA_DESIRED_PLAY, !isPlaying)
+        }
+        val togglePending = android.app.PendingIntent.getService(
+            this,
+            101,
+            toggleIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val stopIntent = Intent(this, OmniForegroundService::class.java).apply {
+            action = ACTION_STOP_MEDIA
+        }
+        val stopPending = android.app.PendingIntent.getService(
+            this,
+            102,
+            stopIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_MEDIA_ID)
+            .setContentTitle(title)
+            .setContentText(artist)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .addAction(playPauseIcon, playPauseText, togglePending)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Close", stopPending)
+            .setOngoing(isPlaying)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
     private fun buildNotification(title: String, message: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
@@ -78,6 +162,50 @@ class OmniForegroundService : Service() {
     }
 
     companion object {
+        private const val CHANNEL_MEDIA_ID = "omni_media_channel"
+        private const val NOTIFICATION_MEDIA_ID = 8846
+
+        const val ACTION_START_MEDIA = "com.omni.hub.action.START_MEDIA"
+        const val ACTION_UPDATE_MEDIA = "com.omni.hub.action.UPDATE_MEDIA"
+        const val ACTION_STOP_MEDIA = "com.omni.hub.action.STOP_MEDIA"
+        const val ACTION_MEDIA_ACTION = "com.omni.hub.action.MEDIA_ACTION"
+        const val EXTRA_IS_PLAYING = "extra_is_playing"
+        const val EXTRA_DESIRED_PLAY = "extra_desired_play"
+
+        private var mediaActionListener: ((Boolean) -> Unit)? = null
+
+        fun startMedia(context: Context, title: String, artist: String, isPlaying: Boolean, onAction: (Boolean) -> Unit) {
+            mediaActionListener = onAction
+            val intent = Intent(context, OmniForegroundService::class.java).apply {
+                action = ACTION_START_MEDIA
+                putExtra(EXTRA_TITLE, title)
+                putExtra(EXTRA_MESSAGE, artist)
+                putExtra(EXTRA_IS_PLAYING, isPlaying)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun updateMedia(context: Context, title: String, artist: String, isPlaying: Boolean) {
+            val intent = Intent(context, OmniForegroundService::class.java).apply {
+                action = ACTION_UPDATE_MEDIA
+                putExtra(EXTRA_TITLE, title)
+                putExtra(EXTRA_MESSAGE, artist)
+                putExtra(EXTRA_IS_PLAYING, isPlaying)
+            }
+            context.startService(intent)
+        }
+
+        fun stopMedia(context: Context) {
+            mediaActionListener = null
+            val intent = Intent(context, OmniForegroundService::class.java).apply {
+                action = ACTION_STOP_MEDIA
+            }
+            context.startService(intent)
+        }
         private const val CHANNEL_ID = "omni_automation_channel"
         private const val NOTIFICATION_ID = 8842
         const val ACTION_START = "com.omni.hub.action.START_FOREGROUND"
