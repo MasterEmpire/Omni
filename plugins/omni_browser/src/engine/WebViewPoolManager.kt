@@ -10,6 +10,8 @@ import android.view.ViewGroup
 import android.webkit.*
 import android.widget.FrameLayout
 import androidx.webkit.ProfileStore
+import java.io.File
+import java.util.Locale
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -46,6 +48,73 @@ class WebViewPoolManager(
     var mobileUA: String = ""
         private set
 
+    private fun interceptLocalhostRequest(uri: Uri): WebResourceResponse? {
+        return try {
+            val rawPath = uri.path?.removePrefix("/") ?: ""
+            val pluginDir = File(bridge.getPluginDir())
+
+            val targetFile = when {
+                rawPath.isEmpty() || rawPath == "index.html" -> {
+                    File(pluginDir, "ide/index.html")
+                }
+                rawPath.startsWith("vault_") -> {
+                    File(pluginDir, "ide/$rawPath")
+                }
+                rawPath.startsWith("ide/") -> {
+                    File(pluginDir, rawPath)
+                }
+                else -> {
+                    val ideCandidate = File(pluginDir, "ide/$rawPath")
+                    if (ideCandidate.exists()) ideCandidate else File(pluginDir, rawPath)
+                }
+            }
+
+            val finalFile = if (targetFile.isDirectory) File(targetFile, "index.html") else targetFile
+
+            if (finalFile.exists() && finalFile.isFile) {
+                val mime = when (finalFile.extension.lowercase(Locale.US)) {
+                    "html", "htm" -> "text/html"
+                    "js", "mjs" -> "application/javascript"
+                    "css" -> "text/css"
+                    "json" -> "application/json"
+                    "png" -> "image/png"
+                    "jpg", "jpeg" -> "image/jpeg"
+                    "webp" -> "image/webp"
+                    "svg" -> "image/svg+xml"
+                    "ico" -> "image/x-icon"
+                    "wasm" -> "application/wasm"
+                    "woff2" -> "font/woff2"
+                    "woff" -> "font/woff"
+                    "ttf" -> "font/ttf"
+                    else -> "application/octet-stream"
+                }
+
+                val response = WebResourceResponse(mime, "UTF-8", finalFile.inputStream())
+                response.responseHeaders = mutableMapOf(
+                    "Access-Control-Allow-Origin" to "*",
+                    "Access-Control-Allow-Methods" to "GET, POST, OPTIONS, HEAD",
+                    "Access-Control-Allow-Headers" to "*",
+                    "Cache-Control" to "no-cache, no-store, must-revalidate"
+                )
+                response
+            } else {
+                // SPA fallback for client-side OAuth callbacks without file extensions
+                val spaFallback = File(pluginDir, "ide/index.html")
+                if (spaFallback.exists() && !rawPath.contains(".")) {
+                    val response = WebResourceResponse("text/html", "UTF-8", spaFallback.inputStream())
+                    response.responseHeaders = mutableMapOf(
+                        "Access-Control-Allow-Origin" to "*",
+                        "Access-Control-Allow-Methods" to "GET, POST, OPTIONS, HEAD"
+                    )
+                    response
+                } else null
+            }
+        } catch (e: Exception) {
+            bridge.log("LOCAL_HOST_ERR", "Error intercepting localhost request $uri: ${e.message}")
+            null
+        }
+    }
+
     fun setTabDesktopMode(tabId: String, isDesktop: Boolean) {
         tabDesktopModes[tabId] = isDesktop
         val wv = pool[tabId] ?: return
@@ -58,6 +127,7 @@ class WebViewPoolManager(
     }
 
     var isForceDarkWebPages: Boolean = false
+    var localPort: Int = 8080
 
     fun applyForceDark(settings: WebSettings, enabled: Boolean) {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
@@ -248,6 +318,17 @@ class WebViewPoolManager(
                         return true
                     }
                     return listener.onExternalUri(url, view)
+                }
+
+                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                    val reqUri = request?.url ?: return super.shouldInterceptRequest(view, request)
+                    val host = reqUri.host?.lowercase(Locale.US) ?: ""
+                    val port = if (reqUri.port != -1) reqUri.port else 80
+
+                    if ((host == "localhost" || host == "127.0.0.1") && port == localPort) {
+                        return interceptLocalhostRequest(reqUri)
+                    }
+                    return super.shouldInterceptRequest(view, request)
                 }
 
                 override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
