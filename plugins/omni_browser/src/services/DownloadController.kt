@@ -34,12 +34,13 @@ class DownloadController(
         }
     }
 
-    fun queryActiveDownloads(trackedIds: List<Long>): Pair<List<ActiveDownloadItem>, List<Long>> {
-        if (trackedIds.isEmpty()) return Pair(emptyList(), emptyList())
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return Pair(emptyList(), emptyList())
+    fun queryActiveDownloads(trackedIds: List<Long>): Triple<List<ActiveDownloadItem>, List<Long>, List<File>> {
+        if (trackedIds.isEmpty()) return Triple(emptyList(), emptyList(), emptyList())
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return Triple(emptyList(), emptyList(), emptyList())
 
         val updated = mutableListOf<ActiveDownloadItem>()
         val finishedIds = mutableListOf<Long>()
+        val finishedFiles = mutableListOf<File>()
 
         try {
             val query = DownloadManager.Query().setFilterById(*trackedIds.toLongArray())
@@ -51,6 +52,7 @@ class DownloadController(
                 val bytesCol = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
                 val totalCol = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
                 val statusCol = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                val localUriCol = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
 
                 do {
                     val dId = if (idCol >= 0) cursor.getLong(idCol) else -1L
@@ -62,6 +64,26 @@ class DownloadController(
 
                     if (status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED) {
                         finishedIds.add(dId)
+                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                            var resolved: File? = null
+                            if (localUriCol >= 0) {
+                                val uriStr = cursor.getString(localUriCol)
+                                if (!uriStr.isNullOrEmpty()) {
+                                    val u = Uri.parse(uriStr)
+                                    if (u.scheme == "file") {
+                                        val f = File(u.path ?: "")
+                                        if (f.exists()) resolved = f
+                                    }
+                                }
+                            }
+                            if (resolved == null) {
+                                val candidate = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), title)
+                                if (candidate.exists()) resolved = candidate
+                            }
+                            if (resolved != null && !finishedFiles.contains(resolved)) {
+                                finishedFiles.add(resolved)
+                            }
+                        }
                     } else {
                         updated.add(ActiveDownloadItem(dId, title, bytes, total, prog, status))
                     }
@@ -70,10 +92,10 @@ class DownloadController(
             }
         } catch (_: Exception) {}
 
-        return Pair(updated, finishedIds)
+        return Triple(updated, finishedIds, finishedFiles)
     }
 
-    fun saveBase64ToDownloads(base64Data: String, mimeType: String, rawFilename: String): String {
+    fun saveBase64ToDownloads(base64Data: String, mimeType: String, rawFilename: String): File? {
         bridge.log("DOWNLOAD", "Processing Base64 payload (mime: '$mimeType', rawFilename: '$rawFilename', len: ${base64Data.length})")
         try {
             val cleanBase64 = if (base64Data.contains(",")) base64Data.substringAfter(",") else base64Data
@@ -138,11 +160,12 @@ class DownloadController(
 
             bridge.showToast("Saved $filename to Downloads/OmniDownloads")
             bridge.log("DOWNLOAD_SUCCESS", "✅ Download complete: $filename (${bytes.size} bytes)")
-            return filename
+            val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            return File(File(publicDocs, "OmniDownloads"), filename)
         } catch (e: Exception) {
             bridge.showToast("Blob save failed: ${e.message}")
             bridge.log("DOWNLOAD_ERR", "Failed saving base64 file: ${e.message}\n${e.stackTraceToString()}")
-            return ""
+            return null
         }
     }
 
