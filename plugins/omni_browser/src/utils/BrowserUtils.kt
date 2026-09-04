@@ -1740,7 +1740,8 @@ fun isLocalFilePath(input: String): Boolean {
            clean.startsWith("sdcard/") ||
            clean.startsWith("storage/") ||
            clean.endsWith(".html") ||
-           clean.endsWith(".htm")
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
 }
 
 fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
