@@ -46,7 +46,7 @@ fun TabSwitcherScreen(
 ) {
     var showTabMenu by remember { mutableStateOf(false) }
     var profileMenuExpanded by remember { mutableStateOf(false) }
-    val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF8AB4F8)
+    val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
 
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
 
@@ -251,7 +251,7 @@ fun TabSwitcherScreen(
         ) {
             items(tabs, key = { it.id }) { tab ->
                 val isActive = tab.id == activeTabId
-                val tabProfile = profiles.find { it.id == tab.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF8AB4F8)
+                val tabProfile = profiles.find { it.id == tab.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF2979FF)
 
                 Card(
                     shape = RoundedCornerShape(12.dp),
