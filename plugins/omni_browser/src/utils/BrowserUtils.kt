@@ -46,6 +46,15 @@ fun convertUrlForDesktop(url: String, toDesktop: Boolean): String {
     }
 }
 
+fun convertLocalFileToLocalhost(rawUrl: String, port: Int): String {
+    if (!rawUrl.startsWith("file://") || !rawUrl.contains("/ide/")) return rawUrl
+    val subpath = rawUrl.substringAfter("/ide/").removePrefix("/")
+    return when {
+        subpath.isEmpty() || subpath == "index.html" -> "http://localhost:$port/"
+        else -> "http://localhost:$port/$subpath"
+    }
+}
+
 val BOT_BYPASS_POLYFILL = """
 (function() {
     try { delete Object.getPrototypeOf(navigator).webdriver; } catch(e) {}
