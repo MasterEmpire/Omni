@@ -421,11 +421,15 @@ class OmniBrowser : PluginEntry() {
                             onFetchFavicon = { state.fetchFavicon(it) },
                             onReturnToLivePage = { state.isHomeOverlayOpen = false },
                             onShortcutClick = { item ->
+                                val targetUrl = if (isLocalFilePath(item.url) || item.localSourcePath != null || item.url.contains("/ide/") || item.title.contains("IDE", ignoreCase = true)) {
+                                    state.resolveIdeUrl(item)
+                                } else item.url
+
                                 if (state.isHomeOverlayOpen && state.currentUrl != "about:blank") {
                                     state.isHomeOverlayOpen = false
-                                    state.createNewTab(item.url)
+                                    state.createNewTab(targetUrl)
                                 } else {
-                                    state.navigateTo(item.url)
+                                    state.navigateTo(targetUrl)
                                 }
                             },
                             onShortcutLongClick = { item ->
