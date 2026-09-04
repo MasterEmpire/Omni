@@ -89,6 +89,11 @@ interface HostBridge {
     fun updateForegroundTask(message: String)
     fun stopForegroundTask()
 
+    // --- Background Media Playback ---
+    fun startMediaPlayback(title: String, artist: String, isPlaying: Boolean, onAction: (Boolean) -> Unit)
+    fun updateMediaPlayback(title: String, artist: String, isPlaying: Boolean)
+    fun stopMediaPlayback()
+
     // --- Logging ---
     fun log(tag: String, message: String)
 }
@@ -131,6 +136,21 @@ object FilePickerDispatcher {
             Handler(Looper.getMainLooper()).post {
                 callback(emptyList())
             }
+        }
+    }
+}
+
+object MediaPlaybackDispatcher {
+    @Volatile
+    private var listener: ((Boolean) -> Unit)? = null
+
+    fun registerListener(cb: ((Boolean) -> Unit)?) {
+        listener = cb
+    }
+
+    fun onAction(shouldPlay: Boolean) {
+        Handler(Looper.getMainLooper()).post {
+            listener?.invoke(shouldPlay)
         }
     }
 }
@@ -551,16 +571,48 @@ class HostBridgeImpl(
 
     override fun startMediaPlayback(title: String, artist: String, isPlaying: Boolean, onAction: (Boolean) -> Unit) {
         acquireWakeLock("OmniMediaPlayback")
-        com.omni.hub.services.OmniForegroundService.startMedia(context, title, artist, isPlaying, onAction)
+        MediaPlaybackDispatcher.registerListener(onAction)
+        try {
+            val intent = Intent().apply {
+                setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
+                action = "com.omni.hub.action.START_MEDIA"
+                putExtra("extra_title", title)
+                putExtra("extra_message", artist)
+                putExtra("extra_is_playing", isPlaying)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            OmniLogger.log("MEDIA_WARN", "Could not start media service: ${e.message}")
+        }
     }
 
     override fun updateMediaPlayback(title: String, artist: String, isPlaying: Boolean) {
-        com.omni.hub.services.OmniForegroundService.updateMedia(context, title, artist, isPlaying)
+        try {
+            val intent = Intent().apply {
+                setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
+                action = "com.omni.hub.action.UPDATE_MEDIA"
+                putExtra("extra_title", title)
+                putExtra("extra_message", artist)
+                putExtra("extra_is_playing", isPlaying)
+            }
+            context.startService(intent)
+        } catch (_: Exception) {}
     }
 
     override fun stopMediaPlayback() {
         releaseWakeLock()
-        com.omni.hub.services.OmniForegroundService.stopMedia(context)
+        MediaPlaybackDispatcher.registerListener(null)
+        try {
+            val intent = Intent().apply {
+                setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
+                action = "com.omni.hub.action.STOP_MEDIA"
+            }
+            context.startService(intent)
+        } catch (_: Exception) {}
     }
 
     override fun log(tag: String, message: String) {
