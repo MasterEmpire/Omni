@@ -337,7 +337,7 @@ class OmniBrowser : PluginEntry() {
 
         // --- UI Rendering ---
         val activeTab = state.tabs.find { it.id == state.activeTabId }
-        val activeProf = state.profiles.find { it.id == activeTab?.profileId } ?: state.profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF8AB4F8)
+        val activeProf = state.profiles.find { it.id == activeTab?.profileId } ?: state.profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF2979FF)
         val profColor = remember(activeProf.colorValue) { Color(activeProf.colorValue) }
 
         Box(modifier = Modifier.fillMaxSize()) {
