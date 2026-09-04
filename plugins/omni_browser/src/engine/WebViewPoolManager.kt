@@ -254,7 +254,8 @@ class WebViewPoolManager(
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         listener.onMediaStateChanged(tabId, title, artist, isPlaying)
                     }
-                }
+                },
+                onLog = { tag, msg -> bridge.log(tag, msg) }
             )
             addJavascriptInterface(mediaBridge, "OmniMediaBridge")
 
