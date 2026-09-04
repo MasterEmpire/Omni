@@ -328,7 +328,8 @@ class OmniBrowser : PluginEntry() {
             state.isTabSwitcherOpen, state.showSettingsDialog, state.showDownloadsDialog,
             state.showAutomationDialog, state.showAutomationResultDialog, state.editingProfile,
             state.editingShortcut, state.isAddingShortcut, state.isHomeOverlayOpen,
-            state.canGoBack, state.currentUrl, state.currentWebView, state.showMenu
+            state.canGoBack, state.currentUrl, state.currentWebView, state.showMenu,
+            state.showDownloadBanner
         ) {
             bridge.setOnBackPressedHandler { state.handleBackPressed() }
             onDispose { bridge.setOnBackPressedHandler(null) }
@@ -788,6 +789,20 @@ class OmniBrowser : PluginEntry() {
                     onDismiss = { state.editingProfile = null }
                 )
             }
+
+            DownloadCompletedPillBanner(
+                visible = state.showDownloadBanner,
+                file = state.latestDownloadedFile,
+                onOpen = { file ->
+                    openDownloadedFile(context, file, bridge)
+                },
+                onDismiss = { state.showDownloadBanner = false },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = if (state.showUndoBanner) 76.dp else 20.dp)
+                    .zIndex(35f)
+            )
 
             UndoBanner(
                 visible = state.showUndoBanner,
