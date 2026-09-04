@@ -420,7 +420,12 @@ class OmniBrowser : PluginEntry() {
                             shortcuts = state.shortcuts,
                             faviconCache = state.faviconCache,
                             onFetchFavicon = { state.fetchFavicon(it) },
-                            onReturnToLivePage = { state.isHomeOverlayOpen = false },
+                            onReturnToLivePage = {
+                                state.isHomeOverlayOpen = false
+                                if (state.currentUrl != "about:blank") {
+                                    state.urlInputText = state.currentUrl
+                                }
+                            },
                             onShortcutClick = { item ->
                                 val targetUrl = if (isLocalFilePath(item.url) || item.localSourcePath != null || item.url.contains("/ide/") || item.title.contains("IDE", ignoreCase = true)) {
                                     state.resolveIdeUrl(item)
