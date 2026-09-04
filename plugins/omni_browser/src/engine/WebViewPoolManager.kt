@@ -49,10 +49,8 @@ class WebViewPoolManager(
         private set
 
     private fun interceptLocalhostRequest(uri: Uri, request: WebResourceRequest?): WebResourceResponse? {
-        bridge.log("LOCAL_HOST_REQ", "Intercepting URI: $uri | Method: ${request?.method}")
         return try {
             if (request?.method.equals("OPTIONS", ignoreCase = true)) {
-                bridge.log("LOCAL_HOST_OPT", "Auto-answering OPTIONS request")
                 val headers = mutableMapOf(
                     "Access-Control-Allow-Origin" to "*",
                     "Access-Control-Allow-Methods" to "GET, POST, OPTIONS, HEAD",
@@ -63,8 +61,6 @@ class WebViewPoolManager(
             }
 
             val rawPath = uri.path?.removePrefix("/") ?: ""
-            bridge.log("LOCAL_HOST_PATH", "Raw path parsed: '$rawPath'")
-
             val pluginDir = File(bridge.getPluginDir())
 
             val targetFile = when {
@@ -83,7 +79,6 @@ class WebViewPoolManager(
             val fileToServe = if (finalFile.exists() && finalFile.isFile) {
                 finalFile
             } else {
-                bridge.log("LOCAL_HOST_SPA", "Target missing (${finalFile.absolutePath}), applying SPA fallback...")
                 if (rawPath.startsWith("vault_")) {
                     val vaultName = rawPath.substringBefore("/")
                     val vaultIndex = File(pluginDir, "ide/$vaultName/index.html")
@@ -111,8 +106,6 @@ class WebViewPoolManager(
                     else -> "application/octet-stream"
                 }
 
-                bridge.log("LOCAL_HOST_SERVE", "Serving: ${fileToServe.absolutePath} (MIME: $mime, Size: ${fileToServe.length()} bytes)")
-
                 val headers = mutableMapOf(
                     "Access-Control-Allow-Origin" to "*",
                     "Access-Control-Allow-Methods" to "GET, POST, OPTIONS, HEAD",
@@ -121,16 +114,13 @@ class WebViewPoolManager(
                 )
 
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-                    return WebResourceResponse(mime, "UTF-8", 200, "OK", headers, fileToServe.inputStream())
+                    WebResourceResponse(mime, "UTF-8", 200, "OK", headers, fileToServe.inputStream())
                 } else {
-                    return WebResourceResponse(mime, "UTF-8", fileToServe.inputStream())
+                    WebResourceResponse(mime, "UTF-8", fileToServe.inputStream())
                 }
-            } else {
-                bridge.log("LOCAL_HOST_ERR", "File NOT FOUND even after fallback. Returning null.")
-                null
-            }
+            } else null
         } catch (e: Exception) {
-            bridge.log("LOCAL_HOST_ERR", "Exception intercepting localhost request $uri: ${e.message}\n${e.stackTraceToString()}")
+            bridge.log("LOCAL_HOST_ERR", "Exception intercepting localhost request $uri: ${e.message}")
             null
         }
     }
