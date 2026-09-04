@@ -549,6 +549,20 @@ class HostBridgeImpl(
         } catch (_: Exception) {}
     }
 
+    override fun startMediaPlayback(title: String, artist: String, isPlaying: Boolean, onAction: (Boolean) -> Unit) {
+        acquireWakeLock("OmniMediaPlayback")
+        com.omni.hub.services.OmniForegroundService.startMedia(context, title, artist, isPlaying, onAction)
+    }
+
+    override fun updateMediaPlayback(title: String, artist: String, isPlaying: Boolean) {
+        com.omni.hub.services.OmniForegroundService.updateMedia(context, title, artist, isPlaying)
+    }
+
+    override fun stopMediaPlayback() {
+        releaseWakeLock()
+        com.omni.hub.services.OmniForegroundService.stopMedia(context)
+    }
+
     override fun log(tag: String, message: String) {
         OmniLogger.log(tag, message)
     }
