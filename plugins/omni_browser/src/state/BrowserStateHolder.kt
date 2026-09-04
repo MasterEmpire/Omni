@@ -1089,13 +1089,18 @@ class BrowserStateHolder(
     }
 
     override fun onMediaStateChanged(tabId: String, title: String, artist: String, isPlaying: Boolean) {
-        if (!isBackgroundAudioEnabled) return
+        if (!isBackgroundAudioEnabled) {
+            bridge.log("BACKGROUND_AUDIO", "Media change ignored (Background audio toggle is OFF)")
+            return
+        }
+        bridge.log("BACKGROUND_AUDIO", "onMediaStateChanged -> tabId: $tabId | title: '$title' | isPlaying: $isPlaying")
         currentMediaTitle = title
         currentMediaArtist = artist
         isMediaPlaying = isPlaying
         if (isPlaying) {
             activeMediaTabId = tabId
             bridge.startMediaPlayback(title, artist, true) { shouldPlay: Boolean ->
+                bridge.log("BACKGROUND_AUDIO", "Notification IPC action received -> shouldPlay: $shouldPlay for tabId: $tabId")
                 poolManager.pool[tabId]?.evaluateJavascript("window.__omniTogglePlay($shouldPlay);", null)
             }
         } else {
