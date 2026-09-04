@@ -51,11 +51,17 @@ data class BrowserTab(
 )
 
 class OmniMediaBridge(
-    private val onMediaStateChanged: (title: String, artist: String, isPlaying: Boolean) -> Unit
+    private val onMediaStateChanged: (title: String, artist: String, isPlaying: Boolean) -> Unit,
+    private val onLog: (tag: String, message: String) -> Unit
 ) {
     @JavascriptInterface
     fun reportMediaState(title: String, artist: String, isPlaying: Boolean) {
         onMediaStateChanged(title, artist, isPlaying)
+    }
+
+    @JavascriptInterface
+    fun log(tag: String, message: String) {
+        onLog(tag, message)
     }
 }
 
