@@ -50,6 +50,15 @@ data class BrowserTab(
     val isDesktop: Boolean = false
 )
 
+class OmniMediaBridge(
+    private val onMediaStateChanged: (title: String, artist: String, isPlaying: Boolean) -> Unit
+) {
+    @JavascriptInterface
+    fun reportMediaState(title: String, artist: String, isPlaying: Boolean) {
+        onMediaStateChanged(title, artist, isPlaying)
+    }
+}
+
 class OmniBlobBridge(
     private val onBlobReceived: (base64Data: String, mimeType: String, filename: String) -> Unit,
     private val onLog: (tag: String, message: String) -> Unit
