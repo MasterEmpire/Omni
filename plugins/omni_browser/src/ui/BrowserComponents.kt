@@ -699,8 +699,8 @@ fun DownloadCompletedPillBanner(
 ) {
     AnimatedVisibility(
         visible = visible && file != null,
-        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
-        exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+        enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
         modifier = modifier
     ) {
         if (file == null) return@AnimatedVisibility
