@@ -71,8 +71,21 @@ class WebViewPoolManager(
 
             val finalFile = if (targetFile.isDirectory) File(targetFile, "index.html") else targetFile
 
-            if (finalFile.exists() && finalFile.isFile) {
-                val mime = when (finalFile.extension.lowercase(Locale.US)) {
+            // Secure SPA Fallback Resolver (Routes OAuth callbacks natively)
+            val fileToServe = if (finalFile.exists() && finalFile.isFile) {
+                finalFile
+            } else {
+                if (rawPath.startsWith("vault_")) {
+                    val vaultName = rawPath.substringBefore("/")
+                    val vaultIndex = File(pluginDir, "ide/$vaultName/index.html")
+                    if (vaultIndex.exists() && vaultIndex.isFile) vaultIndex else File(pluginDir, "ide/index.html")
+                } else {
+                    File(pluginDir, "ide/index.html")
+                }
+            }
+
+            if (fileToServe.exists() && fileToServe.isFile) {
+                val mime = when (fileToServe.extension.lowercase(Locale.US)) {
                     "html", "htm" -> "text/html"
                     "js", "mjs" -> "application/javascript"
                     "css" -> "text/css"
@@ -89,26 +102,20 @@ class WebViewPoolManager(
                     else -> "application/octet-stream"
                 }
 
-                val response = WebResourceResponse(mime, "UTF-8", finalFile.inputStream())
-                response.responseHeaders = mutableMapOf(
-                    "Access-Control-Allow-Origin" to "*",
-                    "Access-Control-Allow-Methods" to "GET, POST, OPTIONS, HEAD",
-                    "Access-Control-Allow-Headers" to "*",
-                    "Cache-Control" to "no-cache, no-store, must-revalidate"
-                )
-                response
-            } else {
-                // SPA fallback for client-side OAuth callbacks without file extensions
-                val spaFallback = File(pluginDir, "ide/index.html")
-                if (spaFallback.exists() && !rawPath.contains(".")) {
-                    val response = WebResourceResponse("text/html", "UTF-8", spaFallback.inputStream())
+                val response = WebResourceResponse(mime, "UTF-8", fileToServe.inputStream())
+                
+                // Critical Fix: Explicit HTTP Code Definition for Chromium Engine
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                    response.setStatusCodeAndReasonPhrase(200, "OK")
                     response.responseHeaders = mutableMapOf(
                         "Access-Control-Allow-Origin" to "*",
-                        "Access-Control-Allow-Methods" to "GET, POST, OPTIONS, HEAD"
+                        "Access-Control-Allow-Methods" to "GET, POST, OPTIONS, HEAD",
+                        "Access-Control-Allow-Headers" to "*",
+                        "Cache-Control" to "no-cache, no-store, must-revalidate"
                     )
-                    response
-                } else null
-            }
+                }
+                response
+            } else null
         } catch (e: Exception) {
             bridge.log("LOCAL_HOST_ERR", "Error intercepting localhost request $uri: ${e.message}")
             null
