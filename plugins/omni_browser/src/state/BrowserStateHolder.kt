@@ -43,7 +43,7 @@ class BrowserStateHolder(
     val automator = AiStudioAutomator(context, bridge)
 
     // UI & Profile State
-    var profiles by mutableStateOf(listOf(BrowserProfile("default", "Default", 0xFF8AB4F8)))
+    var profiles by mutableStateOf(listOf(BrowserProfile("default", "Default", 0xFF2979FF)))
     var selectedProfileId by mutableStateOf("default")
     var editingProfile by mutableStateOf<BrowserProfile?>(null)
 
@@ -173,7 +173,13 @@ class BrowserStateHolder(
         }
 
         vaultManager.loadProfiles()?.let { loaded ->
-            if (loaded.isNotEmpty()) profiles = loaded
+            if (loaded.isNotEmpty()) {
+                val upgraded = loaded.mapIndexed { idx, prof ->
+                    prof.copy(colorValue = PROFILE_PALETTE[idx % PROFILE_PALETTE.size])
+                }
+                profiles = upgraded
+                vaultManager.saveProfiles(upgraded)
+            }
         }
 
         vaultManager.loadSystemPresets()?.let { loaded ->
