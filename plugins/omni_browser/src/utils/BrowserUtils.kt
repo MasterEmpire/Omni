@@ -1719,6 +1719,88 @@ fun openDownloadedFile(context: android.content.Context, file: java.io.File, bri
     }
 }
 
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+    } catch(e) {}
+
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    window.__omniTogglePlay = function(play) {
+        const mediaElements = Array.from(document.querySelectorAll('video, audio'));
+        mediaElements.forEach(m => {
+            try {
+                if (play) m.play(); else m.pause();
+            } catch(e) {}
+        });
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
 fun extractDomain(url: String): String {
     return try {
         val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
