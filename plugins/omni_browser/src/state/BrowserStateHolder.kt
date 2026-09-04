@@ -128,6 +128,21 @@ class BrowserStateHolder(
     var showUndoBanner by mutableStateOf(false)
     var undoJob by mutableStateOf<Job?>(null)
 
+    // Download Completed Pill State
+    var latestDownloadedFile by mutableStateOf<File?>(null)
+    var showDownloadBanner by mutableStateOf(false)
+    var downloadBannerJob by mutableStateOf<Job?>(null)
+
+    fun notifyDownloadCompleted(file: File) {
+        latestDownloadedFile = file
+        showDownloadBanner = true
+        downloadBannerJob?.cancel()
+        downloadBannerJob = coroutineScope.launch {
+            delay(6500)
+            showDownloadBanner = false
+        }
+    }
+
     // File Chooser Callback
     var activeFileChooserCallback: ValueCallback<Array<Uri>>? = null
 
@@ -215,11 +230,14 @@ class BrowserStateHolder(
 
     fun pollDownloads() {
         if (trackedDownloadIds.isNotEmpty()) {
-            val (updated, finished) = downloadController.queryActiveDownloads(trackedDownloadIds)
+            val (updated, finished, finishedFiles) = downloadController.queryActiveDownloads(trackedDownloadIds)
             activeDownloadsList = updated
             if (finished.isNotEmpty()) {
                 trackedDownloadIds.removeAll(finished)
                 refreshCompletedDownloads()
+                finishedFiles.firstOrNull()?.let { file ->
+                    notifyDownloadCompleted(file)
+                }
             }
         }
         if (showDownloadsDialog) {
@@ -925,6 +943,7 @@ class BrowserStateHolder(
 
     fun handleBackPressed(): Boolean {
         return when {
+            showDownloadBanner -> { showDownloadBanner = false; true }
             showMenu -> { showMenu = false; true }
             showSmartNotesDialog -> { showSmartNotesDialog = false; true }
             showAutomationResultDialog -> { showAutomationResultDialog = false; true }
@@ -989,8 +1008,11 @@ class BrowserStateHolder(
             bridge.showToast("Blob extract failed: $filename")
             bridge.log("DOWNLOAD_ERR", "Blob extraction error: $filename")
         } else {
-            downloadController.saveBase64ToDownloads(base64Data, mime, filename)
+            val savedFile = downloadController.saveBase64ToDownloads(base64Data, mime, filename)
             refreshCompletedDownloads()
+            if (savedFile != null && savedFile.exists()) {
+                notifyDownloadCompleted(savedFile)
+            }
         }
     }
 
