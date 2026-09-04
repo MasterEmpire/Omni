@@ -47,10 +47,11 @@ class BrowserStateHolder(
     var selectedProfileId by mutableStateOf("default")
     var editingProfile by mutableStateOf<BrowserProfile?>(null)
 
-    // Shortcuts State
+    // Server & Shortcuts State
+    var localServerPort by mutableIntStateOf(8080)
     val ideInternalPath: String get() = "http://localhost:$localServerPort/"
     val defaultShortcuts = listOf(
-        ShortcutItem(title = "Local IDE", url = ideInternalPath, iconText = "💻", colorValue = 0xFF58A6FF, localSourcePath = "/storage/emulated/0/Download/F/index.html"),
+        ShortcutItem(title = "Local IDE", url = "http://localhost:8080/", iconText = "💻", colorValue = 0xFF58A6FF, localSourcePath = "/storage/emulated/0/Download/F/index.html"),
         ShortcutItem(title = "Google", url = "https://www.google.com", iconText = "G", colorValue = 0xFF4285F4),
         ShortcutItem(title = "YouTube", url = "https://m.youtube.com", iconText = "▶", colorValue = 0xFFEA4335),
         ShortcutItem(title = "Bot Test", url = "https://bot.sannysoft.com/", iconText = "🕵️", colorValue = 0xFF34A853),
@@ -98,7 +99,6 @@ class BrowserStateHolder(
     var solverApiKey by mutableStateOf("")
     var autoSolveEnabled by mutableStateOf(true)
     var forceDarkWebPages by mutableStateOf(false)
-    var localServerPort by mutableIntStateOf(8080)
 
     // Automator States
     var showAutomationDialog by mutableStateOf(false)
