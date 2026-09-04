@@ -512,6 +512,8 @@ fun BrowserMenuOverlay(
     onBackClick: () -> Unit,
     onForwardClick: () -> Unit,
     onReloadClick: () -> Unit,
+    isBackgroundAudioEnabled: Boolean,
+    onToggleBackgroundAudio: () -> Unit,
     onOpenSmartNotes: () -> Unit,
     onOpenAutomation: () -> Unit,
     onOpenLocalIde: () -> Unit,
@@ -629,6 +631,14 @@ fun BrowserMenuOverlay(
                             fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal
                         )
                     }
+                }
+
+                InLayoutMenuItem(
+                    title = if (isBackgroundAudioEnabled) "🔊 Background Audio: ON" else "🔈 Background Audio: OFF",
+                    color = if (isBackgroundAudioEnabled) Color(0xFF00E676) else Color(0xFFE8EAED),
+                    isBold = true
+                ) {
+                    onToggleBackgroundAudio()
                 }
 
                 InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8), isBold = true) {
