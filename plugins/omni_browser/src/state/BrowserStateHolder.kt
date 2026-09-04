@@ -504,7 +504,7 @@ class BrowserStateHolder(
             bridge.showToast("Background Audio Enabled")
             if (currentMediaTitle.isNotEmpty() && isMediaPlaying) {
                 activeMediaTabId?.let { tabId ->
-                    bridge.startMediaPlayback(currentMediaTitle, currentMediaArtist, true) { shouldPlay ->
+                    bridge.startMediaPlayback(currentMediaTitle, currentMediaArtist, true) { shouldPlay: Boolean ->
                         poolManager.pool[tabId]?.evaluateJavascript("window.__omniTogglePlay($shouldPlay);", null)
                     }
                 }
@@ -1095,7 +1095,7 @@ class BrowserStateHolder(
         isMediaPlaying = isPlaying
         if (isPlaying) {
             activeMediaTabId = tabId
-            bridge.startMediaPlayback(title, artist, true) { shouldPlay ->
+            bridge.startMediaPlayback(title, artist, true) { shouldPlay: Boolean ->
                 poolManager.pool[tabId]?.evaluateJavascript("window.__omniTogglePlay($shouldPlay);", null)
             }
         } else {
