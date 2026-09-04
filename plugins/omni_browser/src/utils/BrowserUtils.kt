@@ -1724,28 +1724,131 @@ val BACKGROUND_MEDIA_SCRIPT = """
     if (window.__omniMediaHooked) return;
     window.__omniMediaHooked = true;
 
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    hostLog('MEDIA_JS', 'Stealth Background Media Script engaged on: ' + window.location.hostname);
+
+    // 1. Defang Visibility & Focus Snitches
     try {
         Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
         Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
         Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
         Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
     } catch(e) {}
 
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video
     const origAddEvent = EventTarget.prototype.addEventListener;
     EventTarget.prototype.addEventListener = function(type, listener, options) {
         if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            hostLog('MEDIA_JS', 'Suppressed visibilitychange listener on ' + this.constructor.name);
             return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                hostLog('MEDIA_JS', 'Suppressed ' + type + ' listener on window/document');
+                return;
+            }
         }
         return origAddEvent.call(this, type, listener, options);
     };
 
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+            hostLog('MEDIA_JS', 'Armed IntersectionObserver spoofing for media elements');
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
     window.__omniTogglePlay = function(play) {
-        const mediaElements = Array.from(document.querySelectorAll('video, audio'));
-        mediaElements.forEach(m => {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
             try {
-                if (play) m.play(); else m.pause();
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
             } catch(e) {}
         });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
     };
 
     function getMediaTitle() {
@@ -1770,6 +1873,7 @@ val BACKGROUND_MEDIA_SCRIPT = """
         if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
             const title = getMediaTitle();
             const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
             window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
         }
     }
@@ -1781,6 +1885,7 @@ val BACKGROUND_MEDIA_SCRIPT = """
         el.addEventListener('playing', () => notifyState(true));
         el.addEventListener('pause', () => notifyState(false));
         el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
     }
 
     document.querySelectorAll('video, audio').forEach(hookMedia);
