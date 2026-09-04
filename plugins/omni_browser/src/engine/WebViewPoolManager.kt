@@ -29,6 +29,8 @@ interface WebViewEventListener {
     fun onDownloadTriggered(view: WebView, url: String, userAgent: String, contentDisposition: String, mimeType: String)
     fun onBlobReceived(base64Data: String, mime: String, filename: String)
     fun onNewTabRequested(url: String)
+    fun onCreateWindowRequested(): WebView?
+    fun onCloseTabRequested(tabId: String)
     fun onExternalUri(url: String, view: WebView?): Boolean
     fun onOpenFileChooser(filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: WebChromeClient.FileChooserParams?)
     fun onRenderProcessKilled(tabId: String)
@@ -251,21 +253,26 @@ class WebViewPoolManager(
                 ): Boolean {
                     if (resultMsg == null) return false
                     val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
-                    val tempWv = WebView(context).apply {
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
-                                val targetUrl = req?.url?.toString() ?: return false
-                                if (listener.onExternalUri(targetUrl, v)) {
-                                    return true
-                                }
-                                listener.onNewTabRequested(targetUrl)
-                                return true
-                            }
+                    
+                    // Request a synchronously attached WebView from the Host UI to retain window.opener
+                    val newWv = listener.onCreateWindowRequested()
+                    if (newWv != null) {
+                        transport.webView = newWv
+                        resultMsg.sendToTarget()
+                        return true
+                    }
+                    return false
+                }
+
+                override fun onCloseWindow(window: WebView?) {
+                    super.onCloseWindow(window)
+                    // Allows popup tabs to gracefully close themselves via JavaScript (window.close)
+                    val tabIdToClose = pool.entries.find { it.value == window }?.key
+                    if (tabIdToClose != null) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            listener.onCloseTabRequested(tabIdToClose)
                         }
                     }
-                    transport.webView = tempWv
-                    resultMsg.sendToTarget()
-                    return true
                 }
 
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
