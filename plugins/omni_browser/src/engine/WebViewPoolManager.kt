@@ -34,6 +34,7 @@ interface WebViewEventListener {
     fun onExternalUri(url: String, view: WebView?): Boolean
     fun onOpenFileChooser(filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: WebChromeClient.FileChooserParams?)
     fun onRenderProcessKilled(tabId: String)
+    fun onMediaStateChanged(tabId: String, title: String, artist: String, isPlaying: Boolean)
 }
 
 class WebViewPoolManager(
@@ -215,6 +216,7 @@ class WebViewPoolManager(
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 try {
                     WebViewCompat.addDocumentStartJavaScript(this, BLOB_INTERCEPTOR_SCRIPT, setOf("*"))
+                    WebViewCompat.addDocumentStartJavaScript(this, BACKGROUND_MEDIA_SCRIPT, setOf("*"))
                 } catch (_: Exception) {}
             }
 
@@ -246,6 +248,15 @@ class WebViewPoolManager(
                 onLog = { tag, msg -> bridge.log(tag, msg) }
             )
             addJavascriptInterface(blobBridge, "OmniBlobDownloader")
+
+            val mediaBridge = com.omni.plugin.browser.models.OmniMediaBridge(
+                onMediaStateChanged = { title, artist, isPlaying ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onMediaStateChanged(tabId, title, artist, isPlaying)
+                    }
+                }
+            )
+            addJavascriptInterface(mediaBridge, "OmniMediaBridge")
 
             val rawUA = settings.userAgentString
             val cleanMobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
@@ -374,6 +385,7 @@ class WebViewPoolManager(
                     if (url != null) listener.onPageStarted(tabId, url)
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
+                    view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
@@ -383,6 +395,7 @@ class WebViewPoolManager(
                     super.onPageFinished(view, url)
                     if (url != null) listener.onPageFinished(tabId, url)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
+                    view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
