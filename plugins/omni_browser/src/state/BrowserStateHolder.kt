@@ -150,8 +150,13 @@ class BrowserStateHolder(
         }
     }
 
-    // File Chooser Callback
+    // File Chooser Callback & Launcher
     var activeFileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private var fileChooserLauncherBlock: ((Intent) -> Unit)? = null
+
+    fun registerFileChooserLauncher(launcher: ((Intent) -> Unit)?) {
+        fileChooserLauncherBlock = launcher
+    }
 
     fun init() {
         vaultManager.resurrectFromVault()
@@ -1078,6 +1083,33 @@ class BrowserStateHolder(
     override fun onOpenFileChooser(filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: WebChromeClient.FileChooserParams?) {
         activeFileChooserCallback?.onReceiveValue(null)
         activeFileChooserCallback = filePathCallback
+
+        val launcher = fileChooserLauncherBlock
+        if (launcher != null && fileChooserParams != null) {
+            try {
+                val intent = fileChooserParams.createIntent()
+                bridge.log("FILE_CHOOSER", "Dispatching WebChromeClient file chooser intent")
+                launcher(intent)
+            } catch (e: Exception) {
+                bridge.log("FILE_CHOOSER_WARN", "createIntent failed: ${e.message}. Falling back to Intent.ACTION_GET_CONTENT")
+                try {
+                    val fallbackIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                    }
+                    launcher(Intent.createChooser(fallbackIntent, "Select File"))
+                } catch (err: Exception) {
+                    bridge.log("FILE_CHOOSER_ERR", "File chooser invocation failed: ${err.message}")
+                    activeFileChooserCallback?.onReceiveValue(null)
+                    activeFileChooserCallback = null
+                }
+            }
+        } else if (filePathCallback != null) {
+            bridge.pickFiles("*/*", false) { uris ->
+                filePathCallback.onReceiveValue(uris.toTypedArray())
+                activeFileChooserCallback = null
+            }
+        }
     }
 
     override fun onRenderProcessKilled(tabId: String) {
