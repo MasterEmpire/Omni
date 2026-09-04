@@ -19,12 +19,7 @@ class OmniForegroundService : Service() {
         super.onCreate()
         try {
             createNotificationChannel()
-            val notification = buildNotification("Omni Hub Task", "Automation in progress...")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
+            createMediaNotificationChannel()
         } catch (_: Exception) {}
     }
 
@@ -134,7 +129,6 @@ class OmniForegroundService : Service() {
 
         val toggleIntent = Intent(this, OmniForegroundService::class.java).apply {
             action = ACTION_MEDIA_ACTION
-            putExtra(EXTRA_DESIRED_PLAY, !isPlaying)
         }
         val togglePending = android.app.PendingIntent.getService(
             this,
@@ -191,7 +185,10 @@ class OmniForegroundService : Service() {
         @Volatile private var currentPlaying: Boolean = true
 
         fun startMedia(context: Context, title: String, artist: String, isPlaying: Boolean, onAction: (Boolean) -> Unit) {
-            mediaActionListener = onAction
+            com.omni.hub.api.MediaPlaybackDispatcher.registerListener(onAction)
+            currentTitle = title
+            currentArtist = artist
+            currentPlaying = isPlaying
             val intent = Intent(context, OmniForegroundService::class.java).apply {
                 action = ACTION_START_MEDIA
                 putExtra(EXTRA_TITLE, title)
@@ -206,6 +203,9 @@ class OmniForegroundService : Service() {
         }
 
         fun updateMedia(context: Context, title: String, artist: String, isPlaying: Boolean) {
+            currentTitle = title
+            currentArtist = artist
+            currentPlaying = isPlaying
             val intent = Intent(context, OmniForegroundService::class.java).apply {
                 action = ACTION_UPDATE_MEDIA
                 putExtra(EXTRA_TITLE, title)
@@ -216,7 +216,7 @@ class OmniForegroundService : Service() {
         }
 
         fun stopMedia(context: Context) {
-            mediaActionListener = null
+            com.omni.hub.api.MediaPlaybackDispatcher.registerListener(null)
             val intent = Intent(context, OmniForegroundService::class.java).apply {
                 action = ACTION_STOP_MEDIA
             }
