@@ -29,14 +29,14 @@ data class BrowserProfile(
 )
 
 val PROFILE_PALETTE = listOf(
-    0xFF8AB4F8, // Blue (Default)
-    0xFFC58AF9, // Purple (AI 2)
-    0xFF81C995, // Emerald (AI 3)
-    0xFFFDD663, // Amber
-    0xFFF28B82, // Coral Rose
-    0xFF78D9EC, // Cyan
-    0xFFFFB74D, // Orange
-    0xFFA7FFEB  // Mint
+    0xFF2979FF, // Electric Royal Blue
+    0xFF00E676, // Neon Emerald Green
+    0xFFFF1744, // Vivid Crimson Red
+    0xFFD500F9, // Electric Magenta Violet
+    0xFFFFD600, // Vibrant Sun Gold
+    0xFF00E5FF, // Cyberpunk Cyan
+    0xFFFF6D00, // Deep Blaze Orange
+    0xFFFF4081  // Hot Fuchsia Pink
 )
 
 data class BrowserTab(
