@@ -37,33 +37,47 @@ class OmniForegroundService : Service() {
         }
 
         if (action == ACTION_MEDIA_ACTION) {
-            val desiredPlay = intent.getBooleanExtra(EXTRA_DESIRED_PLAY, false)
-            mediaActionListener?.invoke(desiredPlay)
+            currentPlaying = !currentPlaying
+            com.omni.hub.api.OmniLogger.log("MEDIA_SERVICE", "Interactive Notification button pressed. Toggling play to: $currentPlaying")
+            com.omni.hub.api.MediaPlaybackDispatcher.onAction(currentPlaying)
+
+            try {
+                val notification = buildMediaNotification(currentTitle, currentArtist, currentPlaying)
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.notify(NOTIFICATION_MEDIA_ID, notification)
+            } catch (e: Exception) {
+                com.omni.hub.api.OmniLogger.log("MEDIA_SERVICE_ERR", "Failed updating notification: " + e.message)
+            }
             return START_STICKY
         }
 
         if (action == ACTION_STOP_MEDIA) {
-            mediaActionListener?.invoke(false)
-            mediaActionListener = null
+            com.omni.hub.api.OmniLogger.log("MEDIA_SERVICE", "Interactive Notification STOP pressed. Halting media.")
+            com.omni.hub.api.MediaPlaybackDispatcher.onAction(false)
+            com.omni.hub.api.MediaPlaybackDispatcher.registerListener(null)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
 
         if (action == ACTION_START_MEDIA || action == ACTION_UPDATE_MEDIA) {
-            val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Audio"
-            val artist = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Playing in Background"
-            val isPlaying = intent?.getBooleanExtra(EXTRA_IS_PLAYING, true) ?: true
+            currentTitle = intent?.getStringExtra(EXTRA_TITLE) ?: currentTitle
+            currentArtist = intent?.getStringExtra(EXTRA_MESSAGE) ?: currentArtist
+            currentPlaying = intent?.getBooleanExtra(EXTRA_IS_PLAYING, currentPlaying) ?: currentPlaying
+
+            com.omni.hub.api.OmniLogger.log("MEDIA_SERVICE", "Service state update -> '$currentTitle' ($currentArtist), playing=$currentPlaying")
 
             try {
                 createMediaNotificationChannel()
-                val notification = buildMediaNotification(title, artist, isPlaying)
+                val notification = buildMediaNotification(currentTitle, currentArtist, currentPlaying)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(NOTIFICATION_MEDIA_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
                 } else {
                     startForeground(NOTIFICATION_MEDIA_ID, notification)
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                com.omni.hub.api.OmniLogger.log("MEDIA_SERVICE_ERR", "startForeground error: " + e.message)
+            }
 
             return START_STICKY
         }
@@ -172,7 +186,9 @@ class OmniForegroundService : Service() {
         const val EXTRA_IS_PLAYING = "extra_is_playing"
         const val EXTRA_DESIRED_PLAY = "extra_desired_play"
 
-        private var mediaActionListener: ((Boolean) -> Unit)? = null
+        @Volatile private var currentTitle: String = "Omni Audio"
+        @Volatile private var currentArtist: String = "Playing in Background"
+        @Volatile private var currentPlaying: Boolean = true
 
         fun startMedia(context: Context, title: String, artist: String, isPlaying: Boolean, onAction: (Boolean) -> Unit) {
             mediaActionListener = onAction
