@@ -144,7 +144,17 @@ class BrowserStateHolder(
         }
 
         vaultManager.loadShortcuts()?.let { loaded ->
-            if (loaded.isNotEmpty()) shortcuts = loaded
+            if (loaded.isNotEmpty()) {
+                val migrated = loaded.map {
+                    if (it.url.startsWith("file://") && it.url.contains("/ide/")) {
+                        it.copy(url = convertLocalFileToLocalhost(it.url, localServerPort))
+                    } else it
+                }
+                shortcuts = migrated
+                if (migrated != loaded) {
+                    vaultManager.saveShortcuts(migrated)
+                }
+            }
         }
 
         vaultManager.loadProfiles()?.let { loaded ->
@@ -162,8 +172,13 @@ class BrowserStateHolder(
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId) ->
             val cleanedTabs = loadedTabs.filter { !it.id.startsWith("tab_landing_") }
             if (cleanedTabs.isNotEmpty()) {
-                tabs = cleanedTabs
-                val targetTab = cleanedTabs.find { it.id == savedActiveId } ?: cleanedTabs.last()
+                val migratedTabs = cleanedTabs.map {
+                    if (it.url.startsWith("file://") && it.url.contains("/ide/")) {
+                        it.copy(url = convertLocalFileToLocalhost(it.url, localServerPort))
+                    } else it
+                }
+                tabs = migratedTabs
+                val targetTab = migratedTabs.find { it.id == savedActiveId } ?: migratedTabs.last()
                 activeTabId = targetTab.id
                 currentUrl = targetTab.url
                 urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
@@ -401,6 +416,7 @@ class BrowserStateHolder(
 
         val target = when {
             input == "about:blank" -> "about:blank"
+            input.startsWith("file://") && input.contains("/ide/") -> convertLocalFileToLocalhost(input, localServerPort)
             input.startsWith("http://") || input.startsWith("https://") -> input
             input.startsWith("file://") -> input
             input.startsWith("/storage/") || input.startsWith("/") -> "file://$input"
