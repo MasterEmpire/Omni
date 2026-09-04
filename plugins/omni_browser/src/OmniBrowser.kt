@@ -470,6 +470,8 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 },
+                isBackgroundAudioEnabled = state.isBackgroundAudioEnabled,
+                onToggleBackgroundAudio = { state.toggleBackgroundAudio() },
                 onOpenSmartNotes = { state.showSmartNotesDialog = true },
                 onOpenAutomation = { state.showAutomationDialog = true },
                 onOpenLocalIde = {
