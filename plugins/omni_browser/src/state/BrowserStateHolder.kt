@@ -70,7 +70,7 @@ class BrowserStateHolder(
     var tabs by mutableStateOf(listOf(BrowserTab(id = "tab_1", title = "New Tab", url = "about:blank", profileId = "default")))
     var activeTabId by mutableStateOf("tab_1")
     var isTabSwitcherOpen by mutableStateOf(false)
-    var isHomeOverlayOpen by mutableStateOf(false)
+    var isHomeOverlayOpen by mutableStateOf(true)
 
     var currentUrl by mutableStateOf("about:blank")
     var urlInputText by mutableStateOf("")
@@ -196,9 +196,9 @@ class BrowserStateHolder(
                 val targetTab = migratedTabs.find { it.id == savedActiveId } ?: migratedTabs.last()
                 activeTabId = targetTab.id
                 currentUrl = targetTab.url
-                urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
+                urlInputText = ""
                 pageTitle = targetTab.title
-                isHomeOverlayOpen = targetTab.url == "about:blank"
+                isHomeOverlayOpen = true
                 if (containerLayout != null) {
                     attachTabWebView(targetTab.id)
                 }
@@ -954,7 +954,13 @@ class BrowserStateHolder(
             editingProfile != null -> { editingProfile = null; true }
             showSettingsDialog -> { showSettingsDialog = false; true }
             isTabSwitcherOpen -> { isTabSwitcherOpen = false; true }
-            isHomeOverlayOpen -> { isHomeOverlayOpen = false; true }
+            isHomeOverlayOpen -> {
+                isHomeOverlayOpen = false
+                if (currentUrl != "about:blank") {
+                    urlInputText = currentUrl
+                }
+                true
+            }
             currentUrl == "about:blank" -> false
             currentWebView?.canGoBack() == true -> { currentWebView?.goBack(); true }
             else -> { navigateTo("about:blank"); true }
