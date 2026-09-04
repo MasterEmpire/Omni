@@ -1614,6 +1614,111 @@ fun optimizeImageForAiStudio(
     }
 }
 
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val selection = "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+            val selectionArgs = arrayOf(file.name)
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+
+            context.contentResolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
 fun extractDomain(url: String): String {
     return try {
         val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
