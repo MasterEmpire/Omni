@@ -463,32 +463,8 @@ class OmniBrowser : PluginEntry() {
                 onOpenSmartNotes = { state.showSmartNotesDialog = true },
                 onOpenAutomation = { state.showAutomationDialog = true },
                 onOpenLocalIde = {
-                    val localIdeShortcuts = state.shortcuts.filter { it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true) }
-                    val target = localIdeShortcuts.firstOrNull()
-                    if (target != null) {
-                        val src = target.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
-                        val isolatedPath = "ide/vault_${target.id}/index.html"
-                        val vFile = File(bridge.getPluginDir(), isolatedPath)
-                        val targetUrl = if (vFile.exists() && vFile.length() > 0) {
-                            "file://${vFile.absolutePath}"
-                        } else {
-                            val (success, resPath) = state.vaultManager.syncLocalFileToVault(src, isolatedPath)
-                            if (success) {
-                                bridge.showToast("✅ Synced ${target.title} from disk!")
-                                resPath
-                            } else target.url
-                        }
-                        state.navigateTo(targetUrl)
-                    } else {
-                        val defaultFile = File(bridge.getPluginDir(), "ide/index.html")
-                        val targetUrl = if (defaultFile.exists() && defaultFile.length() > 0) {
-                            "file://${defaultFile.absolutePath}"
-                        } else {
-                            val (success, resPath) = state.vaultManager.syncLocalFileToVault("/storage/emulated/0/Download/F/index.html", "ide/index.html")
-                            if (success) resPath else state.ideInternalPath
-                        }
-                        state.navigateTo(targetUrl)
-                    }
+                    val targetUrl = state.resolveIdeUrl()
+                    state.navigateTo(targetUrl)
                 },
                 activeDownloadsCount = state.trackedDownloadIds.size,
                 onOpenDownloads = {
@@ -655,34 +631,37 @@ class OmniBrowser : PluginEntry() {
                 )
             }
 
-            if (state.showSettingsDialog) {
-                SettingsBackupDialog(
-                    apiKey = state.solverApiKey,
-                    autoSolve = state.autoSolveEnabled,
-                    forceDark = state.forceDarkWebPages,
-                    onExportBackup = { state.exportBackup() },
-                    onRestoreBackup = {
-                        restoreCallback = { uri -> state.restoreBackup(uri) }
-                        backupPickerLauncher.launch("application/zip")
-                    },
-                    onSolveNow = { state.solveCurrentCaptcha() },
-                    onClearCookiesAndCache = {
-                        CookieManager.getInstance().removeAllCookies(null)
-                        state.currentWebView?.clearCache(true)
-                        bridge.showToast("Cookies and Cache cleared.")
-                    },
-                    onSave = { key, auto, dark ->
-                        state.solverApiKey = key
-                        state.autoSolveEnabled = auto
-                        state.forceDarkWebPages = dark
-                        state.poolManager.updateForceDark(dark)
-                        state.vaultManager.saveSolverConfig(key, auto, dark)
-                        bridge.showToast("Settings saved!")
-                        state.showSettingsDialog = false
-                    },
-                    onDismiss = { state.showSettingsDialog = false }
-                )
-            }
+                                if (state.showSettingsDialog) {
+                        SettingsBackupDialog(
+                            apiKey = state.solverApiKey,
+                            autoSolve = state.autoSolveEnabled,
+                            forceDark = state.forceDarkWebPages,
+                            localPort = state.localServerPort,
+                            onExportBackup = { state.exportBackup() },
+                            onRestoreBackup = {
+                                restoreCallback = { uri -> state.restoreBackup(uri) }
+                                backupPickerLauncher.launch("application/zip")
+                            },
+                            onSolveNow = { state.solveCurrentCaptcha() },
+                            onClearCookiesAndCache = {
+                                CookieManager.getInstance().removeAllCookies(null)
+                                state.currentWebView?.clearCache(true)
+                                bridge.showToast("Cookies and Cache cleared.")
+                            },
+                            onSave = { key, auto, dark, port ->
+                                state.solverApiKey = key
+                                state.autoSolveEnabled = auto
+                                state.forceDarkWebPages = dark
+                                state.localServerPort = port
+                                state.poolManager.localPort = port
+                                state.poolManager.updateForceDark(dark)
+                                state.vaultManager.saveSolverConfig(key, auto, dark, port)
+                                bridge.showToast("Settings saved (Port: $port)!")
+                                state.showSettingsDialog = false
+                            },
+                            onDismiss = { state.showSettingsDialog = false }
+                        )
+                    }
 
             if (state.editingShortcut != null) {
                 val targetItem = state.editingShortcut!!
@@ -715,14 +694,11 @@ class OmniBrowser : PluginEntry() {
                         val isLocal = isLocalFilePath(trimmedUrl)
                         val (finalUrl, srcPath) = if (isLocal) {
                             val isolatedSubPath = "ide/vault_${targetItem.id}/index.html"
-                            val (success, vaultedPath) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
+                            val (success, _) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
                             if (success) {
                                 bridge.showToast("✅ Synced to private vault slot!")
-                                Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
-                            } else {
-                                val cleanNorm = normalizeLocalFilePath(trimmedUrl)
-                                Pair("file://$cleanNorm", cleanNorm)
                             }
+                            Pair("http://localhost:${state.localServerPort}/vault_${targetItem.id}/index.html", normalizeLocalFilePath(trimmedUrl))
                         } else {
                             val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
                             Pair(webUrl, null)
@@ -766,14 +742,11 @@ class OmniBrowser : PluginEntry() {
                         val newShortcutId = "sc_${System.currentTimeMillis()}"
                         val (finalUrl, srcPath) = if (isLocal) {
                             val isolatedSubPath = "ide/vault_$newShortcutId/index.html"
-                            val (success, vaultedPath) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
+                            val (success, _) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
                             if (success) {
                                 bridge.showToast("✅ Isolated vault created for local app")
-                                Pair(vaultedPath, normalizeLocalFilePath(trimmedUrl))
-                            } else {
-                                val cleanNorm = normalizeLocalFilePath(trimmedUrl)
-                                Pair("file://$cleanNorm", cleanNorm)
                             }
+                            Pair("http://localhost:${state.localServerPort}/vault_$newShortcutId/index.html", normalizeLocalFilePath(trimmedUrl))
                         } else {
                             val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
                             Pair(webUrl, null)
