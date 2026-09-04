@@ -803,9 +803,9 @@ class OmniBrowser : PluginEntry() {
                 },
                 onDismiss = { state.showDownloadBanner = false },
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = if (state.showUndoBanner) 76.dp else 20.dp)
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 58.dp)
                     .zIndex(35f)
             )
 
