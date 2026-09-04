@@ -18,9 +18,7 @@ import androidx.webkit.WebViewFeature
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.browser.models.BrowserTab
 import com.omni.plugin.browser.models.OmniBlobBridge
-import com.omni.plugin.browser.utils.BLOB_INTERCEPTOR_SCRIPT
-import com.omni.plugin.browser.utils.BOT_BYPASS_POLYFILL
-import com.omni.plugin.browser.utils.DESKTOP_USER_AGENT
+import com.omni.plugin.browser.utils.*
 
 interface WebViewEventListener {
     fun onProgressChanged(tabId: String, progress: Int)
