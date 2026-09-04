@@ -95,6 +95,13 @@ class BrowserStateHolder(
     var activeDownloadsList by mutableStateOf<List<ActiveDownloadItem>>(emptyList())
     var completedFilesList by mutableStateOf<List<File>>(emptyList())
 
+    // Background Audio & Media State
+    var isBackgroundAudioEnabled by mutableStateOf(true)
+    var currentMediaTitle by mutableStateOf("")
+    var currentMediaArtist by mutableStateOf("")
+    var isMediaPlaying by mutableStateOf(false)
+    var activeMediaTabId by mutableStateOf<String?>(null)
+
     // Solver States
     var solverApiKey by mutableStateOf("")
     var autoSolveEnabled by mutableStateOf(true)
@@ -257,7 +264,11 @@ class BrowserStateHolder(
         tabs = tabs.map { if (it.id == targetTabId) it.copy(lastAccessedTime = now) else it }
 
         poolManager.pool.forEach { (id, wv) ->
-            if (id != targetTabId) wv.onPause()
+            if (id != targetTabId) {
+                if (!isBackgroundAudioEnabled || id != activeMediaTabId) {
+                    wv.onPause()
+                }
+            }
         }
         CookieManager.getInstance().flush()
         container.removeAllViews()
@@ -480,6 +491,25 @@ class BrowserStateHolder(
         }
 
         bridge.showToast(if (newDesktop) "Desktop Site (1280px) Enabled" else "Mobile Site Enabled")
+    }
+
+    fun toggleBackgroundAudio() {
+        isBackgroundAudioEnabled = !isBackgroundAudioEnabled
+        if (!isBackgroundAudioEnabled) {
+            bridge.stopMediaPlayback()
+            currentWebView?.evaluateJavascript("window.__omniTogglePlay(false);", null)
+            isMediaPlaying = false
+            bridge.showToast("Background Audio Disabled")
+        } else {
+            bridge.showToast("Background Audio Enabled")
+            if (currentMediaTitle.isNotEmpty() && isMediaPlaying) {
+                activeMediaTabId?.let { tabId ->
+                    bridge.startMediaPlayback(currentMediaTitle, currentMediaArtist, true) { shouldPlay ->
+                        poolManager.pool[tabId]?.evaluateJavascript("window.__omniTogglePlay($shouldPlay);", null)
+                    }
+                }
+            }
+        }
     }
 
     fun solveCurrentCaptcha() {
@@ -1055,6 +1085,23 @@ class BrowserStateHolder(
         poolManager.pool.remove(tabId)
         if (activeTabId == tabId) {
             attachTabWebView(tabId)
+        }
+    }
+
+    override fun onMediaStateChanged(tabId: String, title: String, artist: String, isPlaying: Boolean) {
+        if (!isBackgroundAudioEnabled) return
+        currentMediaTitle = title
+        currentMediaArtist = artist
+        isMediaPlaying = isPlaying
+        if (isPlaying) {
+            activeMediaTabId = tabId
+            bridge.startMediaPlayback(title, artist, true) { shouldPlay ->
+                poolManager.pool[tabId]?.evaluateJavascript("window.__omniTogglePlay($shouldPlay);", null)
+            }
+        } else {
+            if (activeMediaTabId == tabId) {
+                bridge.updateMediaPlayback(title, artist, false)
+            }
         }
     }
 
