@@ -48,7 +48,7 @@ class BrowserStateHolder(
     var editingProfile by mutableStateOf<BrowserProfile?>(null)
 
     // Shortcuts State
-    val ideInternalPath = "file://${bridge.getPluginDir()}/ide/index.html"
+    val ideInternalPath: String get() = "http://localhost:$localServerPort/"
     val defaultShortcuts = listOf(
         ShortcutItem(title = "Local IDE", url = ideInternalPath, iconText = "💻", colorValue = 0xFF58A6FF, localSourcePath = "/storage/emulated/0/Download/F/index.html"),
         ShortcutItem(title = "Google", url = "https://www.google.com", iconText = "G", colorValue = 0xFF4285F4),
@@ -98,6 +98,7 @@ class BrowserStateHolder(
     var solverApiKey by mutableStateOf("")
     var autoSolveEnabled by mutableStateOf(true)
     var forceDarkWebPages by mutableStateOf(false)
+    var localServerPort by mutableIntStateOf(8080)
 
     // Automator States
     var showAutomationDialog by mutableStateOf(false)
@@ -133,11 +134,13 @@ class BrowserStateHolder(
     fun init() {
         vaultManager.resurrectFromVault()
 
-        vaultManager.loadSolverConfig()?.let { (key, auto, dark) ->
-            solverApiKey = key
-            autoSolveEnabled = auto
-            forceDarkWebPages = dark
-            poolManager.updateForceDark(dark)
+        vaultManager.loadSolverConfig()?.let { config ->
+            solverApiKey = config.apiKey
+            autoSolveEnabled = config.autoSolve
+            forceDarkWebPages = config.forceDark
+            localServerPort = config.localPort
+            poolManager.localPort = config.localPort
+            poolManager.updateForceDark(config.forceDark)
         }
 
         vaultManager.loadShortcuts()?.let { loaded ->
@@ -509,32 +512,28 @@ class BrowserStateHolder(
 
     fun getLocalShortcuts(): List<ShortcutItem> {
         return shortcuts.filter {
-            isLocalFilePath(it.url) || it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true)
+            isLocalFilePath(it.url) || it.localSourcePath != null || it.url.contains("/ide/") || it.url.contains("localhost") || it.title.contains("IDE", ignoreCase = true)
         }
     }
 
     fun resolveIdeUrl(shortcut: ShortcutItem? = null): String {
         val target = shortcut ?: shortcuts.firstOrNull { it.isDefault } ?: shortcuts.firstOrNull {
-            it.localSourcePath != null || it.url.contains("/ide/") || it.title.contains("IDE", ignoreCase = true)
+            it.localSourcePath != null || it.url.contains("/ide/") || it.url.contains("localhost") || it.title.contains("IDE", ignoreCase = true)
         }
         if (target != null) {
             val src = target.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
             val isolatedPath = "ide/vault_${target.id}/index.html"
             val vFile = File(bridge.getPluginDir(), isolatedPath)
-            return if (vFile.exists() && vFile.length() > 0) {
-                "file://${vFile.absolutePath}"
-            } else {
-                val (success, resPath) = vaultManager.syncLocalFileToVault(src, isolatedPath)
-                if (success) resPath else target.url
+            if (!vFile.exists() || vFile.length() == 0L) {
+                vaultManager.syncLocalFileToVault(src, isolatedPath)
             }
+            return "http://localhost:$localServerPort/vault_${target.id}/index.html"
         } else {
             val defaultFile = File(bridge.getPluginDir(), "ide/index.html")
-            return if (defaultFile.exists() && defaultFile.length() > 0) {
-                "file://${defaultFile.absolutePath}"
-            } else {
-                val (success, resPath) = vaultManager.syncLocalFileToVault("/storage/emulated/0/Download/F/index.html", "ide/index.html")
-                if (success) resPath else ideInternalPath
+            if (!defaultFile.exists() || defaultFile.length() == 0L) {
+                vaultManager.syncLocalFileToVault("/storage/emulated/0/Download/F/index.html", "ide/index.html")
             }
+            return "http://localhost:$localServerPort/"
         }
     }
 
@@ -867,6 +866,10 @@ class BrowserStateHolder(
             result.forceDark?.let {
                 forceDarkWebPages = it
                 poolManager.updateForceDark(it)
+            }
+            result.localPort?.let {
+                localServerPort = it
+                poolManager.localPort = it
             }
             if (!result.tabs.isNullOrEmpty()) {
                 tabs = result.tabs
