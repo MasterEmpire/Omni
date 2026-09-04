@@ -998,6 +998,15 @@ class BrowserStateHolder(
         createNewTab(url)
     }
 
+    override fun onCreateWindowRequested(): WebView? {
+        createNewTab("about:blank")
+        return currentWebView
+    }
+
+    override fun onCloseTabRequested(tabId: String) {
+        closeTab(tabId)
+    }
+
     override fun onExternalUri(url: String, view: WebView?): Boolean {
         return handleExternalUri(context, url, view, bridge)
     }
