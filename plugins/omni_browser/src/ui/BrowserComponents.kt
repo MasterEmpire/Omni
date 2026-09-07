@@ -3,6 +3,7 @@ package com.omni.plugin.browser.ui
 import android.graphics.Bitmap
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -58,10 +59,16 @@ fun OmniBrowserTopBar(
     onSelectIdeShortcut: (ShortcutItem) -> Unit = {},
     onTabSwitcherClick: () -> Unit,
     showMenu: Boolean,
-    onMenuToggle: () -> Unit
+    onMenuToggle: () -> Unit,
+    onSwipeNextTab: () -> Unit = {},
+    onSwipePreviousTab: () -> Unit = {}
 ) {
     var isSearchFocused by remember { mutableStateOf(false) }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    var totalDragX by remember { mutableFloatStateOf(0f) }
+    var hasTriggeredDrag by remember { mutableStateOf(false) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val thresholdPx = remember(density) { with(density) { 45.dp.toPx() } }
 
     Box(
         modifier = Modifier
@@ -69,6 +76,36 @@ fun OmniBrowserTopBar(
             .zIndex(1f)
             .graphicsLayer()
             .background(Color(0xFF16181D))
+            .pointerInput(isSearchFocused) {
+                if (!isSearchFocused) {
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            totalDragX = 0f
+                            hasTriggeredDrag = false
+                        },
+                        onDragEnd = {
+                            totalDragX = 0f
+                            hasTriggeredDrag = false
+                        },
+                        onDragCancel = {
+                            totalDragX = 0f
+                            hasTriggeredDrag = false
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            if (!hasTriggeredDrag) {
+                                totalDragX += dragAmount
+                                if (totalDragX <= -thresholdPx) {
+                                    hasTriggeredDrag = true
+                                    onSwipeNextTab()
+                                } else if (totalDragX >= thresholdPx) {
+                                    hasTriggeredDrag = true
+                                    onSwipePreviousTab()
+                                }
+                            }
+                        }
+                    )
+                }
+            }
     ) {
         Row(
             modifier = Modifier
