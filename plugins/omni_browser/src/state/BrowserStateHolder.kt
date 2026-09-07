@@ -331,14 +331,18 @@ class BrowserStateHolder(
         canGoForward = targetWv.canGoForward()
     }
 
-    fun createNewTab(targetUrl: String = "about:blank", targetProfileId: String = selectedProfileId) {
+    fun createNewTab(
+        targetUrl: String = "about:blank",
+        targetProfileId: String = selectedProfileId,
+        insertAtIndex: Int? = null
+    ) {
         val thumb = currentWebView?.captureThumbnail()
         val bundle = Bundle()
         currentWebView?.saveState(bundle)
 
         val updatedTabs = tabs.map {
             if (it.id == activeTabId) it.copy(thumbnail = thumb ?: it.thumbnail, stateBundle = bundle) else it
-        }
+        }.toMutableList()
 
         val newId = "tab_${System.currentTimeMillis()}"
         val newTab = BrowserTab(
@@ -348,11 +352,18 @@ class BrowserStateHolder(
             lastAccessedTime = System.currentTimeMillis(),
             profileId = targetProfileId
         )
-        tabs = updatedTabs + newTab
+
+        if (insertAtIndex != null && insertAtIndex in 0..updatedTabs.size) {
+            updatedTabs.add(insertAtIndex, newTab)
+        } else {
+            updatedTabs.add(newTab)
+        }
+
+        tabs = updatedTabs
         activeTabId = newId
         isTabSwitcherOpen = false
 
-        vaultManager.saveSession(tabs, newId)
+        vaultManager.saveSession(tabs, newId, targetProfileId)
         attachTabWebView(newId)
     }
 
@@ -1077,12 +1088,22 @@ class BrowserStateHolder(
         }
     }
 
-    override fun onNewTabRequested(url: String) {
-        createNewTab(url)
+    override fun onNewTabRequested(url: String, sourceTabId: String?) {
+        val parentTab = sourceTabId?.let { sId -> tabs.find { it.id == sId } } ?: tabs.find { it.id == activeTabId }
+        val parentIdx = tabs.indexOfFirst { it.id == (parentTab?.id ?: activeTabId) }
+        val inheritedProfileId = parentTab?.profileId ?: selectedProfileId
+        val insertAt = if (parentIdx >= 0) parentIdx + 1 else tabs.size
+
+        createNewTab(targetUrl = url, targetProfileId = inheritedProfileId, insertAtIndex = insertAt)
     }
 
-    override fun onCreateWindowRequested(): WebView? {
-        createNewTab("about:blank")
+    override fun onCreateWindowRequested(sourceTabId: String): WebView? {
+        val parentTab = tabs.find { it.id == sourceTabId } ?: tabs.find { it.id == activeTabId }
+        val parentIdx = tabs.indexOfFirst { it.id == (parentTab?.id ?: activeTabId) }
+        val inheritedProfileId = parentTab?.profileId ?: selectedProfileId
+        val insertAt = if (parentIdx >= 0) parentIdx + 1 else tabs.size
+
+        createNewTab(targetUrl = "about:blank", targetProfileId = inheritedProfileId, insertAtIndex = insertAt)
         return currentWebView
     }
 
