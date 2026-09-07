@@ -34,6 +34,7 @@ data class VaultRestoreData(
     val shortcuts: List<ShortcutItem>? = null,
     val tabs: List<BrowserTab>? = null,
     val activeTabId: String? = null,
+    val selectedProfileId: String? = null,
     val solverApiKey: String? = null,
     val autoSolveEnabled: Boolean? = null,
     val systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null,
@@ -231,15 +232,20 @@ class VaultManager(
         }
     }
 
-    fun saveSession(tabList: List<BrowserTab>, currentActiveId: String) {
+    fun saveSession(tabList: List<BrowserTab>, currentActiveId: String, selectedProfileId: String? = null) {
         try {
             val persistentTabs = tabList.filter { !it.id.startsWith("tab_landing_") }
             if (persistentTabs.isEmpty()) return
 
             val finalActiveId = if (persistentTabs.any { it.id == currentActiveId }) currentActiveId else persistentTabs.last().id
+            val activeTab = persistentTabs.find { it.id == finalActiveId }
+            val profileToSave = selectedProfileId ?: activeTab?.profileId
 
             val json = JSONObject()
             json.put("activeTabId", finalActiveId)
+            if (!profileToSave.isNullOrEmpty()) {
+                json.put("selectedProfileId", profileToSave)
+            }
             val arr = JSONArray()
             persistentTabs.forEach { tab ->
                 val tObj = JSONObject().apply {
@@ -258,11 +264,12 @@ class VaultManager(
         } catch (_: Exception) {}
     }
 
-    fun loadSession(): Pair<List<BrowserTab>, String?>? {
+    fun loadSession(): Triple<List<BrowserTab>, String?, String?>? {
         return try {
             val bytes = bridge.readFile("config/session.json") ?: return null
             val sObj = JSONObject(String(bytes, Charsets.UTF_8))
             val savedActiveId = sObj.optString("activeTabId", "").takeIf { it.isNotEmpty() }
+            val savedProfileId = sObj.optString("selectedProfileId", "").takeIf { it.isNotEmpty() }
             val arr = sObj.optJSONArray("tabs") ?: return null
             val loadedTabs = mutableListOf<BrowserTab>()
             for (i in 0 until arr.length()) {
@@ -278,7 +285,7 @@ class VaultManager(
                     )
                 )
             }
-            if (loadedTabs.isEmpty()) null else Pair(loadedTabs, savedActiveId)
+            if (loadedTabs.isEmpty()) null else Triple(loadedTabs, savedActiveId, savedProfileId)
         } catch (_: Exception) {
             null
         }
@@ -446,6 +453,7 @@ class VaultManager(
         var loadedShortcuts: List<ShortcutItem>? = null
         var loadedTabs: List<BrowserTab>? = null
         var loadedActiveTabId: String? = null
+        var loadedSelectedProfileId: String? = null
         var loadedApiKey: String? = null
         var loadedAutoSolve: Boolean? = null
         var loadedForceDark: Boolean? = null
@@ -495,6 +503,7 @@ class VaultManager(
                             bridge.saveFile("config/session.json", bytes)
                             val sObj = JSONObject(String(bytes, Charsets.UTF_8))
                             loadedActiveTabId = sObj.optString("activeTabId", "").takeIf { it.isNotEmpty() }
+                            loadedSelectedProfileId = sObj.optString("selectedProfileId", "").takeIf { it.isNotEmpty() }
                             val arr = sObj.optJSONArray("tabs")
                             if (arr != null && arr.length() > 0) {
                                 val tList = mutableListOf<BrowserTab>()
@@ -573,6 +582,7 @@ class VaultManager(
             shortcuts = loadedShortcuts,
             tabs = loadedTabs,
             activeTabId = loadedActiveTabId,
+            selectedProfileId = loadedSelectedProfileId,
             solverApiKey = loadedApiKey,
             autoSolveEnabled = loadedAutoSolve,
             systemPresets = loadedSystemPresets,
