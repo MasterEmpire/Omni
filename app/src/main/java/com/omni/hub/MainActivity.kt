@@ -298,7 +298,8 @@ fun DashboardScreen(context: Context) {
     Box(modifier = Modifier.fillMaxSize()) {
         ModalNavigationDrawer(
             drawerState = drawerState,
-        drawerContent = {
+            gesturesEnabled = currentSession == null,
+            drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = Color(0xFF161B22),
                 modifier = Modifier.width(320.dp)
