@@ -60,15 +60,13 @@ fun OmniBrowserTopBar(
     onTabSwitcherClick: () -> Unit,
     showMenu: Boolean,
     onMenuToggle: () -> Unit,
-    onSwipeNextTab: () -> Unit = {},
-    onSwipePreviousTab: () -> Unit = {}
+    onTopBarDragStart: () -> Unit = {},
+    onTopBarDrag: (Float) -> Unit = {},
+    onTopBarDragEnd: () -> Unit = {},
+    onTopBarDragCancel: () -> Unit = {}
 ) {
     var isSearchFocused by remember { mutableStateOf(false) }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-    var totalDragX by remember { mutableFloatStateOf(0f) }
-    var hasTriggeredDrag by remember { mutableStateOf(false) }
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val thresholdPx = remember(density) { with(density) { 45.dp.toPx() } }
 
     Box(
         modifier = Modifier
@@ -79,29 +77,11 @@ fun OmniBrowserTopBar(
             .pointerInput(isSearchFocused) {
                 if (!isSearchFocused) {
                     detectHorizontalDragGestures(
-                        onDragStart = {
-                            totalDragX = 0f
-                            hasTriggeredDrag = false
-                        },
-                        onDragEnd = {
-                            totalDragX = 0f
-                            hasTriggeredDrag = false
-                        },
-                        onDragCancel = {
-                            totalDragX = 0f
-                            hasTriggeredDrag = false
-                        },
+                        onDragStart = { onTopBarDragStart() },
+                        onDragEnd = { onTopBarDragEnd() },
+                        onDragCancel = { onTopBarDragCancel() },
                         onHorizontalDrag = { _, dragAmount ->
-                            if (!hasTriggeredDrag) {
-                                totalDragX += dragAmount
-                                if (totalDragX <= -thresholdPx) {
-                                    hasTriggeredDrag = true
-                                    onSwipeNextTab()
-                                } else if (totalDragX >= thresholdPx) {
-                                    hasTriggeredDrag = true
-                                    onSwipePreviousTab()
-                                }
-                            }
+                            onTopBarDrag(dragAmount)
                         }
                     )
                 }
