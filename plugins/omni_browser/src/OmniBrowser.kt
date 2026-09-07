@@ -387,7 +387,9 @@ class OmniBrowser : PluginEntry() {
                         state.isTabSwitcherOpen = true
                     },
                     showMenu = state.showMenu,
-                    onMenuToggle = { state.showMenu = !state.showMenu }
+                    onMenuToggle = { state.showMenu = !state.showMenu },
+                    onSwipeNextTab = { state.switchToNextTab() },
+                    onSwipePreviousTab = { state.switchToPreviousTab() }
                 )
 
                 AnimatedVisibility(
