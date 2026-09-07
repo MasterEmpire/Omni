@@ -28,8 +28,8 @@ interface WebViewEventListener {
     fun onPageFinished(tabId: String, url: String)
     fun onDownloadTriggered(view: WebView, url: String, userAgent: String, contentDisposition: String, mimeType: String)
     fun onBlobReceived(base64Data: String, mime: String, filename: String)
-    fun onNewTabRequested(url: String)
-    fun onCreateWindowRequested(): WebView?
+    fun onNewTabRequested(url: String, sourceTabId: String? = null)
+    fun onCreateWindowRequested(sourceTabId: String): WebView?
     fun onCloseTabRequested(tabId: String)
     fun onExternalUri(url: String, view: WebView?): Boolean
     fun onOpenFileChooser(filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: WebChromeClient.FileChooserParams?)
@@ -277,7 +277,7 @@ class WebViewPoolManager(
                     val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
                     
                     // Request a synchronously attached WebView from the Host UI to retain window.opener
-                    val newWv = listener.onCreateWindowRequested()
+                    val newWv = listener.onCreateWindowRequested(tabId)
                     if (newWv != null) {
                         transport.webView = newWv
                         resultMsg.sendToTarget()
