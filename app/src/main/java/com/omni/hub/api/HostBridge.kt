@@ -40,6 +40,7 @@ interface HostBridge {
     fun close()
     fun showToast(message: String)
     fun copyToClipboard(text: String)
+    fun getClipboardText(): String?
     fun vibrate(durationMs: Long)
     fun setOnBackPressedHandler(handler: (() -> Boolean)?)
     fun handleBackPressed(): Boolean
@@ -232,6 +233,18 @@ class HostBridgeImpl(
             val clip = android.content.ClipData.newPlainText("Omni Hub", text)
             clipboard.setPrimaryClip(clip)
             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun getClipboardText(): String? {
+        return try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = clipboard.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                clip.getItemAt(0).coerceToText(context)?.toString()
+            } else null
+        } catch (_: Exception) {
+            null
         }
     }
 
