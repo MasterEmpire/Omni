@@ -49,6 +49,7 @@ fun TabSwitcherScreen(
     onCloseAll: () -> Unit,
     onCloseSwitcher: () -> Unit,
     onReorderTabs: (Int, Int) -> Unit = { _, _ -> },
+    onSaveTabOrder: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showTabMenu by remember { mutableStateOf(false) }
@@ -267,6 +268,14 @@ fun TabSwitcherScreen(
                     val elevation by animateDpAsState(if (isDragging) 16.dp else 0.dp)
                     val scale by animateFloatAsState(if (isDragging) 1.05f else 1f)
 
+                    var wasDragging by remember { mutableStateOf(false) }
+                    LaunchedEffect(isDragging) {
+                        if (wasDragging && !isDragging) {
+                            onSaveTabOrder()
+                        }
+                        wasDragging = isDragging
+                    }
+
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF282C34)),
@@ -277,8 +286,10 @@ fun TabSwitcherScreen(
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
+                                shadowElevation = elevation.toPx()
+                                shape = RoundedCornerShape(12.dp)
+                                clip = true
                             }
-                            .shadow(elevation, RoundedCornerShape(12.dp))
                             .longPressDraggableHandle()
                             .clickable { onSelectTab(tab.id) }
                     ) {
@@ -329,9 +340,12 @@ fun TabSwitcherScreen(
                                 .background(Color(0xFF16181D)),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (tab.thumbnail != null && tab.url != "about:blank") {
+                            val thumbBmp = remember(tab.thumbnail) {
+                                tab.thumbnail?.asImageBitmap()
+                            }
+                            if (thumbBmp != null && tab.url != "about:blank") {
                                 Image(
-                                    bitmap = tab.thumbnail.asImageBitmap(),
+                                    bitmap = thumbBmp,
                                     contentDescription = tab.title,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
