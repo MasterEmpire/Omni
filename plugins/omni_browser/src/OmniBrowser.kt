@@ -26,6 +26,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.omni.hub.api.HostBridge
@@ -388,8 +397,10 @@ class OmniBrowser : PluginEntry() {
                     },
                     showMenu = state.showMenu,
                     onMenuToggle = { state.showMenu = !state.showMenu },
-                    onSwipeNextTab = { state.switchToNextTab() },
-                    onSwipePreviousTab = { state.switchToPreviousTab() }
+                    onTopBarDragStart = { state.onTopBarDragStart() },
+                    onTopBarDrag = { state.onTopBarDrag(it) },
+                    onTopBarDragEnd = { state.onTopBarDragEnd() },
+                    onTopBarDragCancel = { state.onTopBarDragCancel() }
                 )
 
                 AnimatedVisibility(
@@ -405,56 +416,146 @@ class OmniBrowser : PluginEntry() {
                     )
                 }
 
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    AndroidView(
-                        factory = { ctx ->
-                            FrameLayout(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                                state.containerLayout = this
-                                state.attachTabWebView(state.activeTabId)
-                            }
-                        },
-                        update = { _ ->
-                            if (state.containerLayout != null && state.currentWebView == null) {
-                                state.attachTabWebView(state.activeTabId)
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    val screenW = constraints.maxWidth.toFloat()
+                    LaunchedEffect(screenW) {
+                        state.swipeScreenWidth = screenW
+                    }
 
-                    if (state.currentUrl == "about:blank" || state.isHomeOverlayOpen) {
-                        SpeedDialView(
-                            currentUrl = state.currentUrl,
-                            isHomeOverlayOpen = state.isHomeOverlayOpen,
-                            activeProfile = activeProf,
-                            profColor = profColor,
-                            shortcuts = state.shortcuts,
-                            faviconCache = state.faviconCache,
-                            onFetchFavicon = { state.fetchFavicon(it) },
-                            onReturnToLivePage = {
-                                state.isHomeOverlayOpen = false
-                                if (state.currentUrl != "about:blank") {
-                                    state.urlInputText = state.currentUrl
+                    // Active Tab Container (Translates smoothly with thumb drag)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                translationX = state.tabSwipeOffset.value
+                            }
+                    ) {
+                        AndroidView(
+                            factory = { ctx ->
+                                FrameLayout(ctx).apply {
+                                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                                    state.containerLayout = this
+                                    state.attachTabWebView(state.activeTabId)
                                 }
                             },
-                            onShortcutClick = { item ->
-                                val targetUrl = if (isLocalFilePath(item.url) || item.localSourcePath != null || item.url.contains("/ide/") || item.title.contains("IDE", ignoreCase = true)) {
-                                    state.resolveIdeUrl(item)
-                                } else item.url
-
-                                if (state.isHomeOverlayOpen && state.currentUrl != "about:blank") {
-                                    state.isHomeOverlayOpen = false
-                                    state.createNewTab(targetUrl)
-                                } else {
-                                    state.navigateTo(targetUrl)
+                            update = { _ ->
+                                if (state.containerLayout != null && state.currentWebView == null) {
+                                    state.attachTabWebView(state.activeTabId)
                                 }
                             },
-                            onShortcutLongClick = { item ->
-                                bridge.vibrate(40L)
-                                state.editingShortcut = item
-                            },
-                            onAddShortcutClick = { state.isAddingShortcut = true }
+                            modifier = Modifier.fillMaxSize()
                         )
+
+                        if (state.currentUrl == "about:blank" || state.isHomeOverlayOpen) {
+                            SpeedDialView(
+                                currentUrl = state.currentUrl,
+                                isHomeOverlayOpen = state.isHomeOverlayOpen,
+                                activeProfile = activeProf,
+                                profColor = profColor,
+                                shortcuts = state.shortcuts,
+                                faviconCache = state.faviconCache,
+                                onFetchFavicon = { state.fetchFavicon(it) },
+                                onReturnToLivePage = {
+                                    state.isHomeOverlayOpen = false
+                                    if (state.currentUrl != "about:blank") {
+                                        state.urlInputText = state.currentUrl
+                                    }
+                                },
+                                onShortcutClick = { item ->
+                                    val targetUrl = if (isLocalFilePath(item.url) || item.localSourcePath != null || item.url.contains("/ide/") || item.title.contains("IDE", ignoreCase = true)) {
+                                        state.resolveIdeUrl(item)
+                                    } else item.url
+
+                                    if (state.isHomeOverlayOpen && state.currentUrl != "about:blank") {
+                                        state.isHomeOverlayOpen = false
+                                        state.createNewTab(targetUrl)
+                                    } else {
+                                        state.navigateTo(targetUrl)
+                                    }
+                                },
+                                onShortcutLongClick = { item ->
+                                    bridge.vibrate(40L)
+                                    state.editingShortcut = item
+                                },
+                                onAddShortcutClick = { state.isAddingShortcut = true }
+                            )
+                        }
+                    }
+
+                    // Interactive Incoming Neighbor Tab Preview (Translates alongside active tab)
+                    if (state.isTabSwiping && state.swipeTargetTab != null) {
+                        val targetTab = state.swipeTargetTab!!
+                        val isFromRight = state.tabSwipeOffset.value < 0
+                        val incomingBaseX = if (isFromRight) screenW else -screenW
+                        val targetProf = state.profiles.find { it.id == targetTab.profileId } ?: state.profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF2979FF)
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    translationX = incomingBaseX + state.tabSwipeOffset.value
+                                }
+                                .background(Color(0xFF16181D))
+                        ) {
+                            if (targetTab.thumbnail != null && targetTab.url != "about:blank") {
+                                Image(
+                                    bitmap = targetTab.thumbnail!!.asImageBitmap(),
+                                    contentDescription = targetTab.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                SpeedDialView(
+                                    currentUrl = "about:blank",
+                                    isHomeOverlayOpen = true,
+                                    activeProfile = targetProf,
+                                    profColor = Color(targetProf.colorValue),
+                                    shortcuts = state.shortcuts,
+                                    faviconCache = state.faviconCache,
+                                    onFetchFavicon = { state.fetchFavicon(it) },
+                                    onReturnToLivePage = {},
+                                    onShortcutClick = {},
+                                    onShortcutLongClick = {},
+                                    onAddShortcutClick = {}
+                                )
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color(0xFF161B22).copy(alpha = 0.94f),
+                                border = BorderStroke(1.dp, Color(targetProf.colorValue)),
+                                shadowElevation = 8.dp,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 16.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(targetProf.colorValue))
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = targetProf.name,
+                                        color = Color(targetProf.colorValue),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = "• ${if (targetTab.url == "about:blank") "Speed Dial" else targetTab.title.take(18)}",
+                                        color = Color(0xFFE8EAED),
+                                        fontSize = 12.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
