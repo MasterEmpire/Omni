@@ -1,5 +1,7 @@
 package com.omni.plugin.browser.ui
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -17,8 +19,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -27,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omni.plugin.browser.models.BrowserProfile
 import com.omni.plugin.browser.models.BrowserTab
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyGridState
 
 @Composable
 fun TabSwitcherScreen(
@@ -42,6 +48,7 @@ fun TabSwitcherScreen(
     onNewTab: (String) -> Unit,
     onCloseAll: () -> Unit,
     onCloseSwitcher: () -> Unit,
+    onReorderTabs: (Int, Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var showTabMenu by remember { mutableStateOf(false) }
@@ -49,6 +56,9 @@ fun TabSwitcherScreen(
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
 
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val reorderableLazyGridState = rememberReorderableLazyGridState(gridState) { from, to ->
+        onReorderTabs(from.index, to.index)
+    }
 
     LaunchedEffect(tabs.size, activeTabId) {
         val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
@@ -253,15 +263,25 @@ fun TabSwitcherScreen(
                 val isActive = tab.id == activeTabId
                 val tabProfile = profiles.find { it.id == tab.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF2979FF)
 
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF282C34)),
-                    border = if (isActive) BorderStroke(2.dp, Color(tabProfile.colorValue)) else null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                        .clickable { onSelectTab(tab.id) }
-                ) {
+                ReorderableItem(reorderableLazyGridState, key = tab.id) { isDragging ->
+                    val elevation by animateDpAsState(if (isDragging) 16.dp else 0.dp)
+                    val scale by animateFloatAsState(if (isDragging) 1.05f else 1f)
+
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF282C34)),
+                        border = if (isActive) BorderStroke(2.dp, Color(tabProfile.colorValue)) else null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                            .shadow(elevation, RoundedCornerShape(12.dp))
+                            .longPressDraggableHandle()
+                            .clickable { onSelectTab(tab.id) }
+                    ) {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Row(
                             modifier = Modifier
@@ -376,6 +396,7 @@ fun TabSwitcherScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }
