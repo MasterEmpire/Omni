@@ -1651,30 +1651,7 @@ fun resolveMimeType(file: java.io.File): String {
 }
 
 fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
-    try {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
-            val selection = "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?"
-            val selectionArgs = arrayOf(file.name)
-            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
-
-            context.contentResolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
-                    return android.content.ContentUris.withAppendedId(queryUri, id)
-                }
-            }
-
-            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
-            context.contentResolver.query(filesUri, projection, selection, selectionArgs, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
-                    return android.content.ContentUris.withAppendedId(filesUri, id)
-                }
-            }
-        }
-    } catch (_: Exception) {}
-
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
     try {
         val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
         val getUriMethod = fileProviderClass.getMethod(
@@ -1687,6 +1664,32 @@ fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
         if (uri != null) return uri
     } catch (_: Exception) {}
 
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
     try {
         val builder = android.os.StrictMode.VmPolicy.Builder()
         android.os.StrictMode.setVmPolicy(builder.build())
