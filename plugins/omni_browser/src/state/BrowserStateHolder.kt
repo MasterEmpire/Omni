@@ -77,6 +77,7 @@ class BrowserStateHolder(
     var pageTitle by mutableStateOf("New Tab")
     var isLoading by mutableStateOf(false)
     var loadProgress by mutableFloatStateOf(0f)
+    val tabProgressMap = mutableStateMapOf<String, Int>()
     var canGoBack by mutableStateOf(false)
     var canGoForward by mutableStateOf(false)
     var isDesktopMode by mutableStateOf(false)
@@ -329,6 +330,15 @@ class BrowserStateHolder(
         pageTitle = targetTab.title
         canGoBack = targetWv.canGoBack()
         canGoForward = targetWv.canGoForward()
+
+        val recordedProg = tabProgressMap[targetTabId] ?: targetWv.progress
+        if (targetTab.url == "about:blank" || recordedProg >= 100 || recordedProg <= 0) {
+            isLoading = false
+            loadProgress = if (recordedProg >= 100) 1f else 0f
+        } else {
+            loadProgress = recordedProg / 100f
+            isLoading = true
+        }
     }
 
     fun createNewTab(
@@ -531,6 +541,7 @@ class BrowserStateHolder(
             lastClosedTabsSnapshot = null
         }
 
+        tabProgressMap.remove(targetId)
         poolManager.pool.remove(targetId)?.let { wv ->
             wv.onPause()
             containerLayout?.removeView(wv)
@@ -577,6 +588,7 @@ class BrowserStateHolder(
             lastClosedTabsSnapshot = null
         }
 
+        tabProgressMap.clear()
         poolManager.pool.forEach { (id, wv) ->
             wv.onPause()
             poolManager.pendingPurge[id] = wv
@@ -630,6 +642,17 @@ class BrowserStateHolder(
         urlInputText = if (target == "about:blank") "" else target
         currentUrl = target
         tabs = tabs.map { if (it.id == activeTabId) it.copy(url = target) else it }
+
+        if (target == "about:blank") {
+            isLoading = false
+            loadProgress = 0f
+            tabProgressMap[activeTabId] = 0
+        } else {
+            isLoading = true
+            loadProgress = 0.05f
+            tabProgressMap[activeTabId] = 5
+        }
+
         currentWebView?.loadUrl(target)
     }
 
@@ -1167,18 +1190,19 @@ class BrowserStateHolder(
         }
     }
 
-    // --- WebViewEventListener Impl ---
     override fun onProgressChanged(tabId: String, progress: Int) {
+        tabProgressMap[tabId] = progress
         if (activeTabId == tabId) {
             loadProgress = progress / 100f
-            isLoading = progress in 1..99
+            val targetTab = tabs.find { it.id == tabId }
+            isLoading = progress in 1..99 && targetTab?.url != "about:blank"
         }
     }
 
     override fun onReceivedTitle(tabId: String, title: String) {
         if (activeTabId == tabId) pageTitle = title
         tabs = tabs.map { if (it.id == tabId) it.copy(title = title) else it }
-        vaultManager.saveSession(tabs, activeTabId)
+        vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
     }
 
     override fun onUrlChanged(tabId: String, url: String, canGoBack: Boolean, canGoForward: Boolean) {
@@ -1189,15 +1213,23 @@ class BrowserStateHolder(
             urlInputText = url
         }
         tabs = tabs.map { if (it.id == tabId) it.copy(url = url) else it }
-        vaultManager.saveSession(tabs, activeTabId)
+        vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
     }
 
     override fun onPageStarted(tabId: String, url: String) {
-        if (activeTabId == tabId) isLoading = true
+        tabProgressMap[tabId] = 10
+        if (activeTabId == tabId) {
+            loadProgress = 0.1f
+            isLoading = url != "about:blank"
+        }
     }
 
     override fun onPageFinished(tabId: String, url: String) {
-        if (activeTabId == tabId) isLoading = false
+        tabProgressMap[tabId] = 100
+        if (activeTabId == tabId) {
+            loadProgress = 1f
+            isLoading = false
+        }
         if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != "about:blank") {
             solveCurrentCaptcha()
         }
@@ -1283,6 +1315,11 @@ class BrowserStateHolder(
 
     override fun onRenderProcessKilled(tabId: String) {
         bridge.log("RENDER_WATCHDOG", "Resurrecting killed render process for tab [$tabId]")
+        tabProgressMap[tabId] = 0
+        if (activeTabId == tabId) {
+            isLoading = false
+            loadProgress = 0f
+        }
         poolManager.pool.remove(tabId)
         if (activeTabId == tabId) {
             attachTabWebView(tabId)
