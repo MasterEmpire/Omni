@@ -550,6 +550,7 @@ class OmniBrowser : PluginEntry() {
                     onNewTab = { profId -> state.createNewTab(targetProfileId = profId) },
                     onCloseAll = { state.closeAllTabs() },
                     onCloseSwitcher = { state.isTabSwitcherOpen = false },
+                    onReorderTabs = { from, to -> state.reorderTabs(from, to) },
                     modifier = Modifier.fillMaxSize().zIndex(10f)
                 )
             }
