@@ -103,10 +103,46 @@ val BOT_BYPASS_POLYFILL = """
             const originalQuery = window.navigator.permissions.query;
             window.navigator.permissions.query = function(parameters) {
                 if (parameters.name === 'notifications') return Promise.resolve({ state: window.Notification.permission });
+                if (parameters.name === 'clipboard-read' || parameters.name === 'clipboard-write') return Promise.resolve({ state: 'granted' });
+                if (parameters.name === 'microphone' || parameters.name === 'camera') return Promise.resolve({ state: 'granted' });
                 return originalQuery.call(navigator, parameters);
             };
             window.navigator.permissions.query.toString = function() { return "function query() { [native code] }"; };
         } 
+    } catch(e) {}
+    try {
+        if (!window.navigator.clipboard) {
+            window.navigator.clipboard = {};
+        }
+        const origReadText = window.navigator.clipboard.readText;
+        window.navigator.clipboard.readText = function() {
+            if (window.OmniClipboardBridge && window.OmniClipboardBridge.getClipboardText) {
+                return Promise.resolve(window.OmniClipboardBridge.getClipboardText());
+            }
+            return origReadText ? origReadText.apply(this, arguments) : Promise.resolve("");
+        };
+        window.navigator.clipboard.readText.toString = function() { return "function readText() { [native code] }"; };
+
+        const origWriteText = window.navigator.clipboard.writeText;
+        window.navigator.clipboard.writeText = function(text) {
+            if (window.OmniClipboardBridge && window.OmniClipboardBridge.setClipboardText) {
+                window.OmniClipboardBridge.setClipboardText(String(text));
+                return Promise.resolve();
+            }
+            return origWriteText ? origWriteText.apply(this, arguments) : Promise.resolve();
+        };
+        window.navigator.clipboard.writeText.toString = function() { return "function writeText() { [native code] }"; };
+
+        if (!window.navigator.clipboard.read) {
+            window.navigator.clipboard.read = function() {
+                const text = window.OmniClipboardBridge ? window.OmniClipboardBridge.getClipboardText() : "";
+                if (typeof ClipboardItem !== 'undefined') {
+                    const blob = new Blob([text], { type: 'text/plain' });
+                    return Promise.resolve([new ClipboardItem({ 'text/plain': blob })]);
+                }
+                return Promise.resolve([]);
+            };
+        }
     } catch(e) {}
 })();
 """.trimIndent()
