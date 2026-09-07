@@ -551,6 +551,7 @@ class OmniBrowser : PluginEntry() {
                     onCloseAll = { state.closeAllTabs() },
                     onCloseSwitcher = { state.isTabSwitcherOpen = false },
                     onReorderTabs = { from, to -> state.reorderTabs(from, to) },
+                    onSaveTabOrder = { state.saveCurrentTabOrder() },
                     modifier = Modifier.fillMaxSize().zIndex(10f)
                 )
             }
