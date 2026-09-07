@@ -34,3 +34,7 @@
     @android.webkit.JavascriptInterface <methods>;
 }
 -keep class com.omni.plugin.browser.OmniBlobBridge { *; }
+
+# Reorderable Library
+-keep class sh.calvin.reorderable.** { *; }
+-dontwarn sh.calvin.reorderable.**
