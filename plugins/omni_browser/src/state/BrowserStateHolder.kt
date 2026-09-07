@@ -392,6 +392,106 @@ class BrowserStateHolder(
         attachTabWebView(targetId)
     }
 
+    // Interactive Tab Swipe Parallax State
+    var isTabSwiping by mutableStateOf(false)
+    val tabSwipeOffset = androidx.compose.animation.core.Animatable(0f)
+    var swipeTargetTab by mutableStateOf<BrowserTab?>(null)
+    var swipeScreenWidth by mutableFloatStateOf(1080f)
+
+    fun onTopBarDragStart() {
+        if (tabs.size <= 1) return
+        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+        if (currentIdx == -1) return
+
+        currentWebView?.captureThumbnail()?.let { freshThumb ->
+            tabs = tabs.map { if (it.id == activeTabId) it.copy(thumbnail = freshThumb) else it }
+        }
+
+        isTabSwiping = true
+        swipeTargetTab = null
+        coroutineScope.launch {
+            tabSwipeOffset.snapTo(0f)
+        }
+    }
+
+    fun onTopBarDrag(dragAmount: Float) {
+        if (!isTabSwiping || tabs.size <= 1) return
+        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+        if (currentIdx == -1) return
+
+        val currentOffset = tabSwipeOffset.value
+        val rawNext = currentOffset + dragAmount
+
+        val targetTab: BrowserTab?
+        val appliedOffset: Float
+
+        if (rawNext < 0) {
+            val nextIdx = currentIdx + 1
+            if (nextIdx in tabs.indices) {
+                targetTab = tabs[nextIdx]
+                appliedOffset = rawNext
+            } else {
+                targetTab = null
+                appliedOffset = currentOffset + dragAmount * 0.3f
+            }
+        } else if (rawNext > 0) {
+            val prevIdx = currentIdx - 1
+            if (prevIdx in tabs.indices) {
+                targetTab = tabs[prevIdx]
+                appliedOffset = rawNext
+            } else {
+                targetTab = null
+                appliedOffset = currentOffset + dragAmount * 0.3f
+            }
+        } else {
+            targetTab = null
+            appliedOffset = 0f
+        }
+
+        swipeTargetTab = targetTab
+        coroutineScope.launch {
+            tabSwipeOffset.snapTo(appliedOffset)
+        }
+    }
+
+    fun onTopBarDragEnd() {
+        if (!isTabSwiping) return
+        val currentOffset = tabSwipeOffset.value
+        val target = swipeTargetTab
+        val screenW = if (swipeScreenWidth > 0) swipeScreenWidth else 1080f
+        val threshold = screenW * 0.22f
+
+        coroutineScope.launch {
+            if (target != null && Math.abs(currentOffset) >= threshold) {
+                val settleTarget = if (currentOffset < 0) -screenW else screenW
+                tabSwipeOffset.animateTo(
+                    targetValue = settleTarget,
+                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 180, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+                )
+                switchToTab(target.id)
+                bridge.vibrate(25L)
+            } else {
+                tabSwipeOffset.animateTo(
+                    targetValue = 0f,
+                    animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f)
+                )
+            }
+            tabSwipeOffset.snapTo(0f)
+            swipeTargetTab = null
+            isTabSwiping = false
+        }
+    }
+
+    fun onTopBarDragCancel() {
+        if (!isTabSwiping) return
+        coroutineScope.launch {
+            tabSwipeOffset.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f))
+            tabSwipeOffset.snapTo(0f)
+            swipeTargetTab = null
+            isTabSwiping = false
+        }
+    }
+
     fun switchToNextTab(): Boolean {
         val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
         if (currentIdx != -1 && currentIdx < tabs.lastIndex) {
