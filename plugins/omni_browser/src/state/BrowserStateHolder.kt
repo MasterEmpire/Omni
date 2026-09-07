@@ -202,7 +202,7 @@ class BrowserStateHolder(
             if (loaded.isNotEmpty()) smartNotes = loaded
         }
 
-        vaultManager.loadSession()?.let { (loadedTabs, savedActiveId) ->
+        vaultManager.loadSession()?.let { (loadedTabs, savedActiveId, savedProfileId) ->
             val cleanedTabs = loadedTabs.filter { !it.id.startsWith("tab_landing_") }
             if (cleanedTabs.isNotEmpty()) {
                 val migratedTabs = cleanedTabs.map {
@@ -213,6 +213,11 @@ class BrowserStateHolder(
                 tabs = migratedTabs
                 val targetTab = migratedTabs.find { it.id == savedActiveId } ?: migratedTabs.last()
                 activeTabId = targetTab.id
+                val resolvedProfileId = savedProfileId?.takeIf { pId -> profiles.any { it.id == pId } }
+                    ?: targetTab.profileId.takeIf { pId -> profiles.any { it.id == pId } }
+                    ?: "default"
+                selectedProfileId = resolvedProfileId
+                autoSelectedProfileId = resolvedProfileId
                 currentUrl = targetTab.url
                 urlInputText = ""
                 pageTitle = targetTab.title
@@ -279,6 +284,7 @@ class BrowserStateHolder(
         container.removeAllViews()
 
         val targetTab = tabs.find { it.id == targetTabId } ?: return
+        selectedProfileId = targetTab.profileId
         isDesktopMode = targetTab.isDesktop
         val isNewInstance = !poolManager.pool.containsKey(targetTabId)
 
@@ -364,10 +370,14 @@ class BrowserStateHolder(
             if (it.id == activeTabId) it.copy(thumbnail = thumb ?: it.thumbnail, stateBundle = bundle) else it
         }
         activeTabId = targetId
+        val targetTab = tabs.find { it.id == targetId }
+        if (targetTab != null) {
+            selectedProfileId = targetTab.profileId
+        }
         isTabSwitcherOpen = false
         isHomeOverlayOpen = false
 
-        vaultManager.saveSession(tabs, targetId)
+        vaultManager.saveSession(tabs, targetId, selectedProfileId)
         attachTabWebView(targetId)
     }
 
@@ -938,6 +948,10 @@ class BrowserStateHolder(
             result.autoSolveEnabled?.let { autoSolveEnabled = it }
             result.systemPresets?.let { systemPresets = it }
             result.smartNotes?.let { smartNotes = it }
+            result.selectedProfileId?.let {
+                selectedProfileId = it
+                autoSelectedProfileId = it
+            }
             result.forceDark?.let {
                 forceDarkWebPages = it
                 poolManager.updateForceDark(it)
