@@ -273,6 +273,9 @@ class WebViewPoolManager(
             )
             addJavascriptInterface(mediaBridge, "OmniMediaBridge")
 
+            val clipboardBridge = com.omni.plugin.browser.models.OmniClipboardBridge(bridge)
+            addJavascriptInterface(clipboardBridge, "OmniClipboardBridge")
+
             val rawUA = settings.userAgentString
             val cleanMobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
             mobileUA = cleanMobileUA
@@ -327,7 +330,38 @@ class WebViewPoolManager(
                 }
 
                 override fun onPermissionRequest(request: PermissionRequest?) {
-                    request?.grant(request.resources)
+                    if (request == null) return
+                    val resources = request.resources
+                    val needsAudio = resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+                    val needsVideo = resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+
+                    val requiredPermissions = mutableListOf<String>()
+                    if (needsAudio && !bridge.hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+                        requiredPermissions.add(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                    if (needsVideo && !bridge.hasPermission(android.Manifest.permission.CAMERA)) {
+                        requiredPermissions.add(android.Manifest.permission.CAMERA)
+                    }
+
+                    if (requiredPermissions.isNotEmpty()) {
+                        bridge.requestPermissions(requiredPermissions.toTypedArray()) { result ->
+                            val audioGranted = !needsAudio || result[android.Manifest.permission.RECORD_AUDIO] == true
+                            val videoGranted = !needsVideo || result[android.Manifest.permission.CAMERA] == true
+
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                if (audioGranted && videoGranted) {
+                                    bridge.log("PERM_GRANT", "Granted WebKit permissions for tab [$tabId]: ${resources.joinToString()}")
+                                    request.grant(resources)
+                                } else {
+                                    bridge.log("PERM_DENY", "Denied WebKit permissions for tab [$tabId] (OS permission rejected)")
+                                    request.deny()
+                                }
+                            }
+                        }
+                    } else {
+                        bridge.log("PERM_GRANT", "Auto-granted WebKit permissions (OS permits held): ${resources.joinToString()}")
+                        request.grant(resources)
+                    }
                 }
 
                 override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
