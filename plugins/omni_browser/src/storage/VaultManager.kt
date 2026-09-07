@@ -96,29 +96,31 @@ class VaultManager(
     }
 
     fun autoMirrorVaultToDocuments() {
-        try {
-            val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val vaultDir = File(docsDir, ".omni_vault").apply { mkdirs() }
+        Thread {
+            try {
+                val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                val vaultDir = File(docsDir, ".omni_vault").apply { mkdirs() }
 
-            fun mirrorFile(relPath: String, outName: String) {
-                val src = File(bridge.getPluginDir(), relPath)
-                if (src.exists() && src.isFile) {
-                    src.copyTo(File(vaultDir, outName), overwrite = true)
+                fun mirrorFile(relPath: String, outName: String) {
+                    val src = File(bridge.getPluginDir(), relPath)
+                    if (src.exists() && src.isFile) {
+                        src.copyTo(File(vaultDir, outName), overwrite = true)
+                    }
                 }
-            }
-            mirrorFile("config/profiles.json", "profiles.json")
-            mirrorFile("config/shortcuts.json", "shortcuts.json")
-            mirrorFile("config/session.json", "session.json")
-            mirrorFile("config/solver.json", "solver.json")
-            mirrorFile("config/system_presets.json", "system_presets.json")
-            mirrorFile("config/smart_notes.json", "smart_notes.json")
+                mirrorFile("config/profiles.json", "profiles.json")
+                mirrorFile("config/shortcuts.json", "shortcuts.json")
+                mirrorFile("config/session.json", "session.json")
+                mirrorFile("config/solver.json", "solver.json")
+                mirrorFile("config/system_presets.json", "system_presets.json")
+                mirrorFile("config/smart_notes.json", "smart_notes.json")
 
-            val ideDir = File(bridge.getPluginDir(), "ide")
-            if (ideDir.exists() && ideDir.isDirectory) {
-                val destIdeDir = File(vaultDir, "ide").apply { mkdirs() }
-                ideDir.copyRecursively(destIdeDir, overwrite = true)
-            }
-        } catch (_: Exception) {}
+                val ideDir = File(bridge.getPluginDir(), "ide")
+                if (ideDir.exists() && ideDir.isDirectory) {
+                    val destIdeDir = File(vaultDir, "ide").apply { mkdirs() }
+                    ideDir.copyRecursively(destIdeDir, overwrite = true)
+                }
+            } catch (_: Exception) {}
+        }.start()
     }
 
     fun resurrectFromVault() {
