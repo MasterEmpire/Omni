@@ -80,6 +80,20 @@ class OmniBlobBridge(
     }
 }
 
+class OmniClipboardBridge(
+    private val bridge: com.omni.hub.api.HostBridge
+) {
+    @JavascriptInterface
+    fun getClipboardText(): String {
+        return bridge.getClipboardText() ?: ""
+    }
+
+    @JavascriptInterface
+    fun setClipboardText(text: String) {
+        bridge.copyToClipboard(text)
+    }
+}
+
 data class ActiveDownloadItem(
     val downloadId: Long,
     val filename: String,
