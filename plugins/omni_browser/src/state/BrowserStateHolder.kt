@@ -477,6 +477,9 @@ class BrowserStateHolder(
         val item = list.removeAt(fromIndex)
         list.add(toIndex, item)
         tabs = list
+    }
+
+    fun saveCurrentTabOrder() {
         vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
     }
 
