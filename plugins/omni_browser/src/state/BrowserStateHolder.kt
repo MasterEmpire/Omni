@@ -392,6 +392,28 @@ class BrowserStateHolder(
         attachTabWebView(targetId)
     }
 
+    fun switchToNextTab(): Boolean {
+        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+        if (currentIdx != -1 && currentIdx < tabs.lastIndex) {
+            val nextTab = tabs[currentIdx + 1]
+            switchToTab(nextTab.id)
+            bridge.vibrate(25L)
+            return true
+        }
+        return false
+    }
+
+    fun switchToPreviousTab(): Boolean {
+        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+        if (currentIdx > 0) {
+            val prevTab = tabs[currentIdx - 1]
+            switchToTab(prevTab.id)
+            bridge.vibrate(25L)
+            return true
+        }
+        return false
+    }
+
     fun closeTab(targetId: String) {
         poolManager.purgePending(containerLayout)
 
