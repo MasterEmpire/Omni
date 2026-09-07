@@ -471,6 +471,15 @@ class BrowserStateHolder(
         attachTabWebView(newId)
     }
 
+    fun reorderTabs(fromIndex: Int, toIndex: Int) {
+        if (fromIndex !in tabs.indices || toIndex !in tabs.indices || fromIndex == toIndex) return
+        val list = tabs.toMutableList()
+        val item = list.removeAt(fromIndex)
+        list.add(toIndex, item)
+        tabs = list
+        vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
+    }
+
     fun navigateTo(rawInput: String) {
         val input = rawInput.trim()
         if (input.isEmpty()) return
