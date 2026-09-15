@@ -82,7 +82,7 @@ class BrowserStateHolder(
     var canGoForward by mutableStateOf(false)
     var isDesktopMode by mutableStateOf(false)
     var showMenu by mutableStateOf(false)
-    var showIdePickerMenu by mutableStateOf(false)
+    var previousActiveTabId by mutableStateOf<String?>(null)
 
     var containerLayout: FrameLayout? = null
     var currentWebView: WebView? = null
@@ -346,6 +346,7 @@ class BrowserStateHolder(
         targetProfileId: String = selectedProfileId,
         insertAtIndex: Int? = null
     ) {
+        previousActiveTabId = activeTabId
         val thumb = currentWebView?.captureThumbnail()
         val bundle = Bundle()
         currentWebView?.saveState(bundle)
@@ -383,6 +384,7 @@ class BrowserStateHolder(
             isHomeOverlayOpen = false
             return
         }
+        previousActiveTabId = activeTabId
         val thumb = currentWebView?.captureThumbnail()
         val bundle = Bundle()
         currentWebView?.saveState(bundle)
@@ -527,6 +529,9 @@ class BrowserStateHolder(
     fun closeTab(targetId: String) {
         poolManager.purgePending(containerLayout)
 
+        if (previousActiveTabId == targetId) {
+            previousActiveTabId = null
+        }
         val closedTab = tabs.find { it.id == targetId }
         lastClosedTabsSnapshot = tabs
         lastActiveTabIdSnapshot = activeTabId
@@ -588,6 +593,7 @@ class BrowserStateHolder(
             lastClosedTabsSnapshot = null
         }
 
+        previousActiveTabId = null
         tabProgressMap.clear()
         poolManager.pool.forEach { (id, wv) ->
             wv.onPause()
@@ -820,55 +826,17 @@ class BrowserStateHolder(
         attachTabWebView(newId)
     }
 
-    fun toggleIdeNeighbor() {
-        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
-        if (currentIdx == -1) return
-        val currentTab = tabs[currentIdx]
-
-        if (isIdeTab(currentTab)) {
-            val left = tabs.getOrNull(currentIdx - 1)
-            val right = tabs.getOrNull(currentIdx + 1)
-            val leftNonIde = if (left != null && !isIdeTab(left)) left else null
-            val rightNonIde = if (right != null && !isIdeTab(right)) right else null
-
-            val target = when {
-                leftNonIde != null && rightNonIde != null -> {
-                    if (leftNonIde.lastAccessedTime >= rightNonIde.lastAccessedTime) leftNonIde else rightNonIde
-                }
-                leftNonIde != null -> leftNonIde
-                rightNonIde != null -> rightNonIde
-                else -> null
-            }
-            if (target != null) {
-                switchToTab(target.id)
-            }
-            return
+    fun togglePreviousTab() {
+        if (tabs.size <= 1) return
+        val candidateId = previousActiveTabId
+        val target = if (candidateId != null && candidateId != activeTabId && tabs.any { it.id == candidateId }) {
+            tabs.find { it.id == candidateId }
+        } else {
+            tabs.filter { it.id != activeTabId }.maxByOrNull { it.lastAccessedTime }
         }
-
-        val left = tabs.getOrNull(currentIdx - 1)
-        val right = tabs.getOrNull(currentIdx + 1)
-        val leftIsIde = left != null && isIdeTab(left)
-        val rightIsIde = right != null && isIdeTab(right)
-
-        when {
-            leftIsIde && rightIsIde -> {
-                val target = if (left!!.lastAccessedTime >= right!!.lastAccessedTime) left else right
-                switchToTab(target.id)
-            }
-            leftIsIde -> {
-                switchToTab(left!!.id)
-            }
-            rightIsIde -> {
-                switchToTab(right!!.id)
-            }
-            else -> {
-                val defaultItem = shortcuts.firstOrNull { it.isDefault }
-                if (defaultItem != null) {
-                    launchIdeShortcutAsNeighbor(defaultItem)
-                } else {
-                    showIdePickerMenu = true
-                }
-            }
+        if (target != null) {
+            switchToTab(target.id)
+            bridge.vibrate(25L)
         }
     }
 
