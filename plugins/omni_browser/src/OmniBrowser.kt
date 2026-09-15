@@ -383,11 +383,7 @@ class OmniBrowser : PluginEntry() {
                             state.isHomeOverlayOpen = !state.isHomeOverlayOpen
                         }
                     },
-                    onOpenIdeNeighbor = { state.toggleIdeNeighbor() },
-                    showIdePickerMenu = state.showIdePickerMenu,
-                    onDismissIdePicker = { state.showIdePickerMenu = false },
-                    localShortcuts = state.getLocalShortcuts(),
-                    onSelectIdeShortcut = { item -> state.launchIdeShortcutAsNeighbor(item) },
+                    onQuickToggleTab = { state.togglePreviousTab() },
                     onTabSwitcherClick = {
                         val thumb = state.currentWebView?.captureThumbnail()
                         val bundle = android.os.Bundle()
