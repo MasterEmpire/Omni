@@ -661,255 +661,260 @@ class OmniBrowser : PluginEntry() {
             }
 
             // --- Modals & Dialogs ---
-            if (state.showSmartNotesDialog) {
-                SmartNotesDialog(
-                    bridge = bridge,
-                    notes = state.smartNotes,
-                    onSaveNote = { title: String, content: String, id: String? -> state.saveSmartNote(title, content, id) },
-                    onDeleteNote = { id: String -> state.deleteSmartNote(id) },
-                    onInjectToPage = { text: String -> state.injectTextToActivePage(text) },
-                    onDismiss = { state.showSmartNotesDialog = false }
-                )
-            }
+            val hostActivity = context as? android.app.Activity
+            val isHostAlive = hostActivity == null || (!hostActivity.isFinishing && !hostActivity.isDestroyed)
 
-            if (state.showAutomationDialog) {
-                AutomationOrderDialog(
-                    profiles = state.profiles,
-                    selectedProfileId = state.autoSelectedProfileId,
-                    onSelectProfileId = { state.autoSelectedProfileId = it },
-                    thinkingLevel = state.autoThinkingLevel,
-                    onThinkingLevelChange = { state.autoThinkingLevel = it },
-                    temporaryChat = state.autoTemporaryChat,
-                    onTemporaryChatChange = { state.autoTemporaryChat = it },
-                    attachments = state.autoAttachments,
-                    onPickFiles = {
-                        bridge.pickFiles("*/*", true) { uris ->
-                            state.attachFiles(uris)
-                        }
-                    },
-                    onRemoveAttachment = { state.removeAttachment(it) },
-                    systemPresets = state.systemPresets,
-                    systemPromptTitle = state.autoSystemPromptTitle,
-                    onSystemPromptTitleChange = { state.autoSystemPromptTitle = it },
-                    systemPrompt = state.autoSystemPrompt,
-                    onSystemPromptChange = { state.autoSystemPrompt = it },
-                    fallbackEnabled = state.autoFallbackToLocalPreset,
-                    onFallbackEnabledChange = { state.autoFallbackToLocalPreset = it },
-                    onSavePreset = { t, b -> state.saveCurrentSystemPreset(t, b) },
-                    onDeletePreset = { id -> state.deleteSystemPreset(id) },
-                    onSelectPreset = { preset -> state.selectSystemPreset(preset) },
-                    promptSteps = state.promptSteps,
-                    onAddPromptStep = { state.addPromptStep() },
-                    onUpdatePromptStep = { id, p, r, inf -> state.updatePromptStep(id, p, r, inf) },
-                    onRemovePromptStep = { state.removePromptStep(it) },
-                    userPrompt = state.autoUserPrompt,
-                    onUserPromptChange = { state.autoUserPrompt = it },
-                    onDismiss = { state.showAutomationDialog = false },
-                    onRun = { state.startAutomation() }
-                )
-            }
+            if (isHostAlive) {
+                if (state.showSmartNotesDialog) {
+                    SmartNotesDialog(
+                        bridge = bridge,
+                        notes = state.smartNotes,
+                        onSaveNote = { title: String, content: String, id: String? -> state.saveSmartNote(title, content, id) },
+                        onDeleteNote = { id: String -> state.deleteSmartNote(id) },
+                        onInjectToPage = { text: String -> state.injectTextToActivePage(text) },
+                        onDismiss = { state.showSmartNotesDialog = false }
+                    )
+                }
 
-            if (state.showAutomationResultDialog) {
-                AutomationResultDialog(
-                    isAutomating = state.isAutomating,
-                    automationStatus = state.automationStatus,
-                    automationThoughts = state.automationThoughts,
-                    automationResult = state.automationResult,
-                    automationError = state.automationError,
-                    automationElapsedSec = state.automationElapsedSec,
-                    automationWebView = state.automator.headlessWv,
-                    onBackToStaging = {
-                        state.showAutomationResultDialog = false
-                        state.showAutomationDialog = true
-                    },
-                    onDumpDom = {
-                        bridge.showToast("Dumping live DOM to Downloads/OmniSnapshots...")
-                        state.automator.dumpDom { rawHtml ->
-                            if (rawHtml != null) saveHtmlSnapshot(context, bridge, rawHtml, "Automator_DOM")
-                        }
-                    },
-                    onCopyResult = {
-                        bridge.copyToClipboard(state.automationResult)
-                        bridge.showToast("Copied result to clipboard!")
-                    },
-                    onCloseOrStop = { state.stopAutomation() }
-                )
-            }
-
-            if (state.showDownloadsDialog) {
-                DownloadsManagerDialog(
-                    bridge = bridge,
-                    activeDownloadsList = state.activeDownloadsList,
-                    completedFilesList = state.completedFilesList,
-                    onCancelDownload = { id ->
-                        (context.getSystemService(Context.DOWNLOAD_SERVICE) as? android.app.DownloadManager)?.remove(id)
-                        state.trackedDownloadIds.remove(id)
-                    },
-                    onDeleteFile = { file ->
-                        try {
-                            file.delete()
-                            state.refreshCompletedDownloads()
-                            bridge.showToast("Deleted ${file.name}")
-                        } catch (e: Exception) {
-                            bridge.showToast("Delete failed: ${e.message}")
-                        }
-                    },
-                    onDismiss = { state.showDownloadsDialog = false }
-                )
-            }
-
-                                if (state.showSettingsDialog) {
-                        SettingsBackupDialog(
-                            apiKey = state.solverApiKey,
-                            autoSolve = state.autoSolveEnabled,
-                            forceDark = state.forceDarkWebPages,
-                            localPort = state.localServerPort,
-                            onExportBackup = { state.exportBackup() },
-                            onRestoreBackup = {
-                                restoreCallback = { uri -> state.restoreBackup(uri) }
-                                backupPickerLauncher.launch("application/zip")
-                            },
-                            onSolveNow = { state.solveCurrentCaptcha() },
-                            onClearCookiesAndCache = {
-                                CookieManager.getInstance().removeAllCookies(null)
-                                state.currentWebView?.clearCache(true)
-                                bridge.showToast("Cookies and Cache cleared.")
-                            },
-                            onSave = { key, auto, dark, port ->
-                                state.solverApiKey = key
-                                state.autoSolveEnabled = auto
-                                state.forceDarkWebPages = dark
-                                state.localServerPort = port
-                                state.poolManager.localPort = port
-                                state.poolManager.updateForceDark(dark)
-                                state.vaultManager.saveSolverConfig(key, auto, dark, port)
-                                bridge.showToast("Settings saved (Port: $port)!")
-                                state.showSettingsDialog = false
-                            },
-                            onDismiss = { state.showSettingsDialog = false }
-                        )
-                    }
-
-            if (state.editingShortcut != null) {
-                val targetItem = state.editingShortcut!!
-                EditShortcutDialog(
-                    shortcut = targetItem,
-                    faviconCache = state.faviconCache,
-                    onFetchFavicon = { state.fetchFavicon(it) },
-                    onPickFile = { onPicked ->
-                        bridge.pickFiles("*/*", false) { uris ->
-                            val picked = uris.firstOrNull()
-                            if (picked != null) {
-                                val pathStr = picked.path
-                                val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
-                                    pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
-                                } else picked.toString()
-                                onPicked(directPath)
+                if (state.showAutomationDialog) {
+                    AutomationOrderDialog(
+                        profiles = state.profiles,
+                        selectedProfileId = state.autoSelectedProfileId,
+                        onSelectProfileId = { state.autoSelectedProfileId = it },
+                        thinkingLevel = state.autoThinkingLevel,
+                        onThinkingLevelChange = { state.autoThinkingLevel = it },
+                        temporaryChat = state.autoTemporaryChat,
+                        onTemporaryChatChange = { state.autoTemporaryChat = it },
+                        attachments = state.autoAttachments,
+                        onPickFiles = {
+                            bridge.pickFiles("*/*", true) { uris ->
+                                state.attachFiles(uris)
                             }
-                        }
-                    },
-                    onDelete = {
-                        val updated = state.shortcuts.filter { it.id != targetItem.id }
-                        state.shortcuts = updated
-                        state.vaultManager.saveShortcuts(updated)
-                        try { File(bridge.getPluginDir(), "ide/vault_${targetItem.id}").deleteRecursively() } catch (_: Exception) {}
-                        state.editingShortcut = null
-                        bridge.showToast("Shortcut deleted")
-                    },
-                    onSave = { name, rawUrl, isDef ->
-                        val trimmedUrl = rawUrl.trim()
-                        val isLocal = isLocalFilePath(trimmedUrl)
-                        val (finalUrl, srcPath) = if (isLocal) {
-                            val isolatedSubPath = "ide/vault_${targetItem.id}/index.html"
-                            val (success, _) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
-                            if (success) {
-                                bridge.showToast("✅ Synced to private vault slot!")
-                            }
-                            Pair("http://localhost:${state.localServerPort}/vault_${targetItem.id}/index.html", normalizeLocalFilePath(trimmedUrl))
-                        } else {
-                            val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
-                            Pair(webUrl, null)
-                        }
+                        },
+                        onRemoveAttachment = { state.removeAttachment(it) },
+                        systemPresets = state.systemPresets,
+                        systemPromptTitle = state.autoSystemPromptTitle,
+                        onSystemPromptTitleChange = { state.autoSystemPromptTitle = it },
+                        systemPrompt = state.autoSystemPrompt,
+                        onSystemPromptChange = { state.autoSystemPrompt = it },
+                        fallbackEnabled = state.autoFallbackToLocalPreset,
+                        onFallbackEnabledChange = { state.autoFallbackToLocalPreset = it },
+                        onSavePreset = { t, b -> state.saveCurrentSystemPreset(t, b) },
+                        onDeletePreset = { id -> state.deleteSystemPreset(id) },
+                        onSelectPreset = { preset -> state.selectSystemPreset(preset) },
+                        promptSteps = state.promptSteps,
+                        onAddPromptStep = { state.addPromptStep() },
+                        onUpdatePromptStep = { id, p, r, inf -> state.updatePromptStep(id, p, r, inf) },
+                        onRemovePromptStep = { state.removePromptStep(it) },
+                        userPrompt = state.autoUserPrompt,
+                        onUserPromptChange = { state.autoUserPrompt = it },
+                        onDismiss = { state.showAutomationDialog = false },
+                        onRun = { state.startAutomation() }
+                    )
+                }
 
-                        val updated = state.shortcuts.map {
-                            if (it.id == targetItem.id) {
-                                it.copy(title = name.trim().ifEmpty { targetItem.title }, url = finalUrl, localSourcePath = srcPath, isDefault = isDef)
-                            } else if (isDef) {
-                                it.copy(isDefault = false)
-                            } else it
-                        }
-                        state.shortcuts = updated
-                        state.vaultManager.saveShortcuts(updated)
-                        state.fetchFavicon(extractDomain(finalUrl))
-                        state.editingShortcut = null
-                    },
-                    onDismiss = { state.editingShortcut = null }
-                )
-            }
-
-            if (state.isAddingShortcut) {
-                AddShortcutDialog(
-                    faviconCache = state.faviconCache,
-                    onFetchFavicon = { state.fetchFavicon(it) },
-                    onPickFile = { onPicked ->
-                        bridge.pickFiles("*/*", false) { uris ->
-                            val picked = uris.firstOrNull()
-                            if (picked != null) {
-                                val pathStr = picked.path
-                                val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
-                                    pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
-                                } else picked.toString()
-                                onPicked(directPath)
+                if (state.showAutomationResultDialog) {
+                    AutomationResultDialog(
+                        isAutomating = state.isAutomating,
+                        automationStatus = state.automationStatus,
+                        automationThoughts = state.automationThoughts,
+                        automationResult = state.automationResult,
+                        automationError = state.automationError,
+                        automationElapsedSec = state.automationElapsedSec,
+                        automationWebView = state.automator.headlessWv,
+                        onBackToStaging = {
+                            state.showAutomationResultDialog = false
+                            state.showAutomationDialog = true
+                        },
+                        onDumpDom = {
+                            bridge.showToast("Dumping live DOM to Downloads/OmniSnapshots...")
+                            state.automator.dumpDom { rawHtml ->
+                                if (rawHtml != null) saveHtmlSnapshot(context, bridge, rawHtml, "Automator_DOM")
                             }
-                        }
-                    },
-                    onAdd = { name, rawUrl, isDef ->
-                        val trimmedUrl = rawUrl.trim()
-                        val isLocal = isLocalFilePath(trimmedUrl)
-                        val newShortcutId = "sc_${System.currentTimeMillis()}"
-                        val (finalUrl, srcPath) = if (isLocal) {
-                            val isolatedSubPath = "ide/vault_$newShortcutId/index.html"
-                            val (success, _) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
-                            if (success) {
-                                bridge.showToast("✅ Isolated vault created for local app")
-                            }
-                            Pair("http://localhost:${state.localServerPort}/vault_$newShortcutId/index.html", normalizeLocalFilePath(trimmedUrl))
-                        } else {
-                            val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
-                            Pair(webUrl, null)
-                        }
-                        val title = name.trim().ifEmpty { if (isLocal) "Local App" else extractDomain(finalUrl) }
-                        val newItem = ShortcutItem(
-                            id = newShortcutId,
-                            title = title,
-                            url = finalUrl,
-                            iconText = if (isLocal) "💻" else title.take(1).uppercase(),
-                            colorValue = 0xFF58A6FF,
-                            localSourcePath = srcPath,
-                            isDefault = isDef
-                        )
-                        val updated = state.shortcuts.map { if (isDef) it.copy(isDefault = false) else it } + newItem
-                        state.shortcuts = updated
-                        state.vaultManager.saveShortcuts(updated)
-                        state.fetchFavicon(extractDomain(finalUrl))
-                        state.isAddingShortcut = false
-                    },
-                    onDismiss = { state.isAddingShortcut = false }
-                )
-            }
+                        },
+                        onCopyResult = {
+                            bridge.copyToClipboard(state.automationResult)
+                            bridge.showToast("Copied result to clipboard!")
+                        },
+                        onCloseOrStop = { state.stopAutomation() }
+                    )
+                }
 
-            if (state.editingProfile != null) {
-                val targetProf = state.editingProfile!!
-                RenameProfileDialog(
-                    profile = targetProf,
-                    onSave = { newName ->
-                        val updated = state.profiles.map { if (it.id == targetProf.id) it.copy(name = newName) else it }
-                        state.profiles = updated
-                        state.vaultManager.saveProfiles(updated)
-                        state.editingProfile = null
-                    },
-                    onDismiss = { state.editingProfile = null }
-                )
+                if (state.showDownloadsDialog) {
+                    DownloadsManagerDialog(
+                        bridge = bridge,
+                        activeDownloadsList = state.activeDownloadsList,
+                        completedFilesList = state.completedFilesList,
+                        onCancelDownload = { id ->
+                            (context.getSystemService(Context.DOWNLOAD_SERVICE) as? android.app.DownloadManager)?.remove(id)
+                            state.trackedDownloadIds.remove(id)
+                        },
+                        onDeleteFile = { file ->
+                            try {
+                                file.delete()
+                                state.refreshCompletedDownloads()
+                                bridge.showToast("Deleted ${file.name}")
+                            } catch (e: Exception) {
+                                bridge.showToast("Delete failed: ${e.message}")
+                            }
+                        },
+                        onDismiss = { state.showDownloadsDialog = false }
+                    )
+                }
+
+                if (state.showSettingsDialog) {
+                    SettingsBackupDialog(
+                        apiKey = state.solverApiKey,
+                        autoSolve = state.autoSolveEnabled,
+                        forceDark = state.forceDarkWebPages,
+                        localPort = state.localServerPort,
+                        onExportBackup = { state.exportBackup() },
+                        onRestoreBackup = {
+                            restoreCallback = { uri -> state.restoreBackup(uri) }
+                            backupPickerLauncher.launch("application/zip")
+                        },
+                        onSolveNow = { state.solveCurrentCaptcha() },
+                        onClearCookiesAndCache = {
+                            CookieManager.getInstance().removeAllCookies(null)
+                            state.currentWebView?.clearCache(true)
+                            bridge.showToast("Cookies and Cache cleared.")
+                        },
+                        onSave = { key, auto, dark, port ->
+                            state.solverApiKey = key
+                            state.autoSolveEnabled = auto
+                            state.forceDarkWebPages = dark
+                            state.localServerPort = port
+                            state.poolManager.localPort = port
+                            state.poolManager.updateForceDark(dark)
+                            state.vaultManager.saveSolverConfig(key, auto, dark, port)
+                            bridge.showToast("Settings saved (Port: $port)!")
+                            state.showSettingsDialog = false
+                        },
+                        onDismiss = { state.showSettingsDialog = false }
+                    )
+                }
+
+                if (state.editingShortcut != null) {
+                    val targetItem = state.editingShortcut!!
+                    EditShortcutDialog(
+                        shortcut = targetItem,
+                        faviconCache = state.faviconCache,
+                        onFetchFavicon = { state.fetchFavicon(it) },
+                        onPickFile = { onPicked ->
+                            bridge.pickFiles("*/*", false) { uris ->
+                                val picked = uris.firstOrNull()
+                                if (picked != null) {
+                                    val pathStr = picked.path
+                                    val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
+                                        pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
+                                    } else picked.toString()
+                                    onPicked(directPath)
+                                }
+                            }
+                        },
+                        onDelete = {
+                            val updated = state.shortcuts.filter { it.id != targetItem.id }
+                            state.shortcuts = updated
+                            state.vaultManager.saveShortcuts(updated)
+                            try { File(bridge.getPluginDir(), "ide/vault_${targetItem.id}").deleteRecursively() } catch (_: Exception) {}
+                            state.editingShortcut = null
+                            bridge.showToast("Shortcut deleted")
+                        },
+                        onSave = { name, rawUrl, isDef ->
+                            val trimmedUrl = rawUrl.trim()
+                            val isLocal = isLocalFilePath(trimmedUrl)
+                            val (finalUrl, srcPath) = if (isLocal) {
+                                val isolatedSubPath = "ide/vault_${targetItem.id}/index.html"
+                                val (success, _) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
+                                if (success) {
+                                    bridge.showToast("✅ Synced to private vault slot!")
+                                }
+                                Pair("http://localhost:${state.localServerPort}/vault_${targetItem.id}/index.html", normalizeLocalFilePath(trimmedUrl))
+                            } else {
+                                val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
+                                Pair(webUrl, null)
+                            }
+
+                            val updated = state.shortcuts.map {
+                                if (it.id == targetItem.id) {
+                                    it.copy(title = name.trim().ifEmpty { targetItem.title }, url = finalUrl, localSourcePath = srcPath, isDefault = isDef)
+                                } else if (isDef) {
+                                    it.copy(isDefault = false)
+                                } else it
+                            }
+                            state.shortcuts = updated
+                            state.vaultManager.saveShortcuts(updated)
+                            state.fetchFavicon(extractDomain(finalUrl))
+                            state.editingShortcut = null
+                        },
+                        onDismiss = { state.editingShortcut = null }
+                    )
+                }
+
+                if (state.isAddingShortcut) {
+                    AddShortcutDialog(
+                        faviconCache = state.faviconCache,
+                        onFetchFavicon = { state.fetchFavicon(it) },
+                        onPickFile = { onPicked ->
+                            bridge.pickFiles("*/*", false) { uris ->
+                                val picked = uris.firstOrNull()
+                                if (picked != null) {
+                                    val pathStr = picked.path
+                                    val directPath = if (pathStr != null && (pathStr.contains("/storage/") || pathStr.contains("/sdcard/"))) {
+                                        pathStr.substring(pathStr.indexOf("/storage/").coerceAtLeast(pathStr.indexOf("/sdcard/")))
+                                    } else picked.toString()
+                                    onPicked(directPath)
+                                }
+                            }
+                        },
+                        onAdd = { name, rawUrl, isDef ->
+                            val trimmedUrl = rawUrl.trim()
+                            val isLocal = isLocalFilePath(trimmedUrl)
+                            val newShortcutId = "sc_${System.currentTimeMillis()}"
+                            val (finalUrl, srcPath) = if (isLocal) {
+                                val isolatedSubPath = "ide/vault_$newShortcutId/index.html"
+                                val (success, _) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
+                                if (success) {
+                                    bridge.showToast("✅ Isolated vault created for local app")
+                                }
+                                Pair("http://localhost:${state.localServerPort}/vault_$newShortcutId/index.html", normalizeLocalFilePath(trimmedUrl))
+                            } else {
+                                val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
+                                Pair(webUrl, null)
+                            }
+                            val title = name.trim().ifEmpty { if (isLocal) "Local App" else extractDomain(finalUrl) }
+                            val newItem = ShortcutItem(
+                                id = newShortcutId,
+                                title = title,
+                                url = finalUrl,
+                                iconText = if (isLocal) "💻" else title.take(1).uppercase(),
+                                colorValue = 0xFF58A6FF,
+                                localSourcePath = srcPath,
+                                isDefault = isDef
+                            )
+                            val updated = state.shortcuts.map { if (isDef) it.copy(isDefault = false) else it } + newItem
+                            state.shortcuts = updated
+                            state.vaultManager.saveShortcuts(updated)
+                            state.fetchFavicon(extractDomain(finalUrl))
+                            state.isAddingShortcut = false
+                        },
+                        onDismiss = { state.isAddingShortcut = false }
+                    )
+                }
+
+                if (state.editingProfile != null) {
+                    val targetProf = state.editingProfile!!
+                    RenameProfileDialog(
+                        profile = targetProf,
+                        onSave = { newName ->
+                            val updated = state.profiles.map { if (it.id == targetProf.id) it.copy(name = newName) else it }
+                            state.profiles = updated
+                            state.vaultManager.saveProfiles(updated)
+                            state.editingProfile = null
+                        },
+                        onDismiss = { state.editingProfile = null }
+                    )
+                }
             }
 
             DownloadCompletedPillBanner(
