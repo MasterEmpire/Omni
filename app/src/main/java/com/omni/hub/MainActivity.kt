@@ -727,7 +727,10 @@ fun DashboardScreen(context: Context) {
         }
     }
 
-    if (showUrlDialog) {
+    val hostActivity = context as? android.app.Activity
+    val isHostAlive = hostActivity == null || (!hostActivity.isFinishing && !hostActivity.isDestroyed)
+
+    if (isHostAlive && showUrlDialog) {
         DownloadUrlDialog(
             onDismiss = { showUrlDialog = false },
             onConfirm = { url ->
@@ -760,7 +763,7 @@ fun DashboardScreen(context: Context) {
         )
     }
 
-    if (showLogModal) {
+    if (isHostAlive && showLogModal) {
         LogConsoleDialog(
             onDismiss = { showLogModal = false },
             onCopy = {
@@ -775,7 +778,7 @@ fun DashboardScreen(context: Context) {
         )
     }
 
-    if (showTaskManagerModal) {
+    if (isHostAlive && showTaskManagerModal) {
         TaskManagerDialog(
             sessions = OmniTaskManager.activeSessions,
             onResumeTask = { session ->
@@ -795,44 +798,59 @@ fun DashboardScreen(context: Context) {
 
     // Fullscreen Active App Overlay
     if (currentSession != null) {
-        key(currentSession.taskId) {
-            BackHandler {
-                val handled = currentSession.bridge.handleBackPressed()
-                if (!handled) {
-                    OmniTaskManager.suspendCurrent()
-                }
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF0D1117))
-            ) {
-                AndroidView(
-                    factory = {
-                        val view = currentSession.pluginView
-                        (view.parent as? ViewGroup)?.removeView(view)
-                        (view as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
-                            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-                        }
-                        view.apply {
-                            setViewTreeLifecycleOwner(context as? ComponentActivity)
-                            setViewTreeViewModelStoreOwner(context as? ComponentActivity)
-                            setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
-                            isFocusable = true
-                            isFocusableInTouchMode = true
-                            requestFocus()
-                        }
-                        view
-                    },
-                    update = { view ->
-                        view.apply {
-                            setViewTreeLifecycleOwner(context as? ComponentActivity)
-                            setViewTreeViewModelStoreOwner(context as? ComponentActivity)
-                            setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
+        val sessionActivity = currentSession.pluginView.context as? android.app.Activity
+        val isSessionContextDead = sessionActivity != null && (sessionActivity.isDestroyed || sessionActivity.isFinishing)
+
+        if (isSessionContextDead) {
+            LaunchedEffect(currentSession.taskId) {
+                OmniTaskManager.reloadPluginSession(
+                    context = context,
+                    pluginId = currentSession.pluginId,
+                    pluginName = currentSession.pluginName,
+                    entryClass = currentSession.entryClass,
+                    reopenForeground = true
                 )
+            }
+        } else {
+            key(currentSession.taskId) {
+                BackHandler {
+                    val handled = currentSession.bridge.handleBackPressed()
+                    if (!handled) {
+                        OmniTaskManager.suspendCurrent()
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF0D1117))
+                ) {
+                    AndroidView(
+                        factory = {
+                            val view = currentSession.pluginView
+                            (view.parent as? ViewGroup)?.removeView(view)
+                            (view as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
+                                setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                            }
+                            view.apply {
+                                setViewTreeLifecycleOwner(context as? ComponentActivity)
+                                setViewTreeViewModelStoreOwner(context as? ComponentActivity)
+                                setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
+                                isFocusable = true
+                                isFocusableInTouchMode = true
+                                requestFocus()
+                            }
+                            view
+                        },
+                        update = { view ->
+                            view.apply {
+                                setViewTreeLifecycleOwner(context as? ComponentActivity)
+                                setViewTreeViewModelStoreOwner(context as? ComponentActivity)
+                                setViewTreeSavedStateRegistryOwner(context as? ComponentActivity)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }
