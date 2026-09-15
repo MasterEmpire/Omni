@@ -35,9 +35,15 @@ object OmniTaskManager {
     ): AppTaskSession {
         val existing = activeSessions.find { it.pluginId == pluginId }
         if (existing != null) {
-            OmniLogger.log("TASK_MANAGER", "Resuming existing session for [$pluginName]")
-            currentForegroundSession = existing
-            return existing
+            val act = existing.pluginView.context as? android.app.Activity
+            if (act != null && (act.isDestroyed || act.isFinishing)) {
+                OmniLogger.log("TASK_MANAGER", "Existing session for [$pluginName] has dead activity context. Purging.")
+                killTask(context, existing.taskId)
+            } else {
+                OmniLogger.log("TASK_MANAGER", "Resuming existing session for [$pluginName]")
+                currentForegroundSession = existing
+                return existing
+            }
         }
 
         OmniLogger.log("TASK_MANAGER", "Instantiating new session for [$pluginName] ($entryClass)")
@@ -90,6 +96,11 @@ object OmniTaskManager {
     }
 
     fun resumeSession(session: AppTaskSession) {
+        val act = session.pluginView.context as? android.app.Activity
+        if (act != null && (act.isDestroyed || act.isFinishing)) {
+            OmniLogger.log("TASK_MANAGER", "Cannot resume [${session.pluginName}] - activity context is dead.")
+            return
+        }
         OmniLogger.log("TASK_MANAGER", "Resuming [${session.pluginName}] from Recents")
         activeSessions.remove(session)
         activeSessions.add(0, session)
