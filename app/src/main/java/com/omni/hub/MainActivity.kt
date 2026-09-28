@@ -253,6 +253,17 @@ fun DashboardScreen(context: Context) {
         activeFilePickerCallback = null
     }
 
+    val mediaProjectionManager = remember {
+        context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+    }
+    var activeProjectionCallback by remember { mutableStateOf<((Int, Intent?) -> Unit)?>(null) }
+    val projectionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        activeProjectionCallback?.invoke(result.resultCode, result.data)
+        activeProjectionCallback = null
+    }
+
     LaunchedEffect(Unit) {
         PermissionDispatcher.registerLauncher { perms, cb ->
             activePermissionCallback = cb
@@ -265,6 +276,10 @@ fun DashboardScreen(context: Context) {
             } else {
                 singleFilePicker.launch(mimeType)
             }
+        }
+        com.omni.hub.api.ScreenCaptureDispatcher.registerLauncher { cb ->
+            activeProjectionCallback = cb
+            projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
         }
         OmniLogger.log("INIT", "Omni Hub Dashboard loaded. Ensuring shared runtime...")
         if (isKeepAliveEnabled) {
