@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioAttributes
+import android.os.SystemClock
+import kotlinx.coroutines.delay
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
@@ -53,12 +55,12 @@ import java.util.Locale
 import kotlin.math.abs
 
 enum class EngineState(val label: String, val color: Color) {
-    DISARMED("ENGINE OFFLINE", Color(0xFF8B949E)),
-    ARMED_LISTENING("RADAR ACTIVE (WAITING NEXT TRACK)", Color(0xFF1DB954)),
+    DISARMED("RADAR MONITORING (RECORDING DISARMED)", Color(0xFF8B949E)),
+    ARMED_LISTENING("RADAR ARMED (READY TO CAPTURE 0:00)", Color(0xFF1DB954)),
     RECORDING("CAPTURING CLEAN STREAM", Color(0xFF58A6FF)),
-    SKIPPING_AD("AD DETECTED (IGNORING)", Color(0xFFD29922)),
-    WAITING_CLEAN_START("JOINED MID-TRACK (WAITING FOR 0:00)", Color(0xFFBC8CFF)),
-    ALREADY_EXISTS("SONG ALREADY RECORDED", Color(0xFF388BFD)),
+    SKIPPING_AD("AD SHIELD ACTIVE: SKIPPING COMMERCIAL", Color(0xFFD29922)),
+    WAITING_CLEAN_START("JOINED MID-TRACK (WAITING FOR NEXT 0:00)", Color(0xFFBC8CFF)),
+    ALREADY_EXISTS("SONG ALREADY IN VAULT", Color(0xFF388BFD)),
     INTERRUPTED_DISCARDED("INTERRUPTED (DISCARDED)", Color(0xFFF85149))
 }
 
@@ -87,13 +89,15 @@ class SpotifyRecorderPlugin : PluginEntry() {
     @Volatile private var currentArtist = ""
     @Volatile private var currentLengthMs = 0L
     @Volatile private var currentPositionMs = 0L
+    @Volatile private var isPlayingTrack = false
+    @Volatile private var lastSyncTimestamp = 0L
     @Volatile private var wasInterrupted = false
     @Volatile private var tempRecordingFile: File? = null
     @Volatile private var recordedBytesCount = 0L
 
     // UI Reactive State Bridges
     private var stateUpdater: ((EngineState) -> Unit)? = null
-    private var trackMetaUpdater: ((title: String, artist: String, lengthMs: Long, posMs: Long) -> Unit)? = null
+    private var trackMetaUpdater: ((title: String, artist: String, lengthMs: Long, posMs: Long, isPlaying: Boolean) -> Unit)? = null
     private var statsUpdater: ((saved: Int, discarded: Int, ads: Int) -> Unit)? = null
     private var vaultRefreshTrigger: (() -> Unit)? = null
 
@@ -105,7 +109,6 @@ class SpotifyRecorderPlugin : PluginEntry() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action ?: return
             activeBridge?.log("SPOTIFY_RX", "📥 Broadcast [${action}]")
-            if (!isArmed) return
             when (action) {
                 "com.spotify.music.metadatachanged",
                 "com.spotify.mobile.android.metadatachanged" -> handleMetadataChanged(intent)
@@ -118,9 +121,14 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
     private fun getVaultDirectory(context: Context): File {
         val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-        val vaultDir = File(musicDir, "Omni Spotify")
-        if (!vaultDir.exists()) vaultDir.mkdirs()
-        return if (vaultDir.canWrite()) vaultDir else File(context.filesDir, "omni_spotify_vault").apply { if (!exists()) mkdirs() }
+        val publicVault = File(musicDir, "Omni Spotify")
+        if (!publicVault.exists()) publicVault.mkdirs()
+        if (publicVault.canWrite()) return publicVault
+
+        // Scoped Storage fallback: Guaranteed accessible on Android 10+
+        val appMusic = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+        val appVault = File(appMusic ?: context.filesDir, "Omni Spotify").apply { if (!exists()) mkdirs() }
+        return appVault
     }
 
     private fun sanitizeFilename(name: String): String {
@@ -153,7 +161,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
         currentArtist = newArtist
         currentLengthMs = newLengthMs
         currentPositionMs = newPos
-        trackMetaUpdater?.invoke(newTrack, newArtist, newLengthMs, newPos)
+        isPlayingTrack = isPlaying
+        lastSyncTimestamp = SystemClock.elapsedRealtime()
+        trackMetaUpdater?.invoke(newTrack, newArtist, newLengthMs, newPos, isPlaying)
 
         // 2. Ad Detection (explicit ad ID or short advertisement duration)
         val isExplicitAd = newTrackId.contains(":ad:") || newTrack.equals("Advertisement", ignoreCase = true)
@@ -185,9 +195,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
             return
         }
 
-        // 5. Conditions met: Launch Audio Stream Capture
-        if (isPlaying && mediaProjection != null) {
+        // 5. Conditions met: Launch Audio Stream Capture if armed
+        if (isArmed && isPlaying && mediaProjection != null) {
             startAudioRecording(vaultDir, targetName, newLengthMs)
+        } else if (!isArmed) {
+            stateUpdater?.invoke(EngineState.DISARMED)
         }
     }
 
@@ -200,22 +212,29 @@ class SpotifyRecorderPlugin : PluginEntry() {
         if (!fallbackTrack.isNullOrEmpty()) currentTrackTitle = fallbackTrack
         if (!fallbackArtist.isNullOrEmpty()) currentArtist = fallbackArtist
 
-        activeBridge?.log("SPOTIFY_RADAR", "State: playing=$isPlaying, pos=${pos}ms, track='$currentTrackTitle'")
+        isPlayingTrack = isPlaying
+        lastSyncTimestamp = SystemClock.elapsedRealtime()
 
         if (pos >= 0) {
             currentPositionMs = pos
-            trackMetaUpdater?.invoke(currentTrackTitle, currentArtist, currentLengthMs, pos)
         }
+        trackMetaUpdater?.invoke(currentTrackTitle, currentArtist, currentLengthMs, currentPositionMs, isPlaying)
+        activeBridge?.log("SPOTIFY_RADAR", "State update: playing=$isPlaying, pos=${currentPositionMs}ms, track='$currentTrackTitle'")
 
         if (isRecording) {
+            val recordedMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
             if (!isPlaying) {
-                activeBridge?.log("SPOTIFY_RADAR", "Playback paused mid-song! Discarding incomplete track.")
-                abortAndDiscard("Paused mid-play")
+                // Natural end-of-track check: If within 4 seconds of completion, commit rather than discard
+                if (currentLengthMs > 0 && recordedMs >= currentLengthMs - 4000L) {
+                    activeBridge?.log("SPOTIFY_RADAR", "Track reached natural stream end (${recordedMs}ms/${currentLengthMs}ms). Finalizing take.")
+                    finalizeCurrentRecording()
+                } else {
+                    activeBridge?.log("SPOTIFY_RADAR", "Playback paused early (${recordedMs}ms of ${currentLengthMs}ms). Discarding.")
+                    abortAndDiscard("Paused early")
+                }
             } else if (pos >= 0 && currentLengthMs > 0) {
-                // Seek detection: Check if position drastically jumped away from real time
-                val recordedMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
-                if (abs(pos - recordedMs) > 4000L) {
-                    activeBridge?.log("SPOTIFY_RADAR", "Timeline seek detected! Discarding incomplete track.")
+                if (abs(pos - recordedMs) > 5000L) {
+                    activeBridge?.log("SPOTIFY_RADAR", "Timeline seek scrub detected! Discarding.")
                     abortAndDiscard("Seek detected")
                 }
             }
@@ -302,26 +321,47 @@ class SpotifyRecorderPlugin : PluginEntry() {
         val totalPcmBytes = (temp.length() - 44L).coerceAtLeast(0L)
         val recordedDurationMs = (totalPcmBytes * 1000L) / (44100 * 2 * 2)
 
-        // Tolerance window: within 2.5 seconds of metadata duration
-        val isDurationComplete = currentLengthMs > 0 && abs(recordedDurationMs - currentLengthMs) <= 2500L
+        // Tolerance window: accommodates Spotify's 1-2s lead-out variance
+        val isDurationComplete = currentLengthMs > 0 && (
+            abs(recordedDurationMs - currentLengthMs) <= 4500L ||
+            recordedDurationMs >= currentLengthMs - 4000L
+        )
 
         if (!wasInterrupted && isDurationComplete) {
             writeWavHeader(temp, 44100, 2, 16)
             val ctx = activeContext ?: return
             val vaultDir = getVaultDirectory(ctx)
             val finalTarget = File(vaultDir, "${sanitizeFilename(currentArtist)} - ${sanitizeFilename(currentTrackTitle)}.wav")
-            temp.renameTo(finalTarget)
 
-            countSaved++
-            statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-            vaultRefreshTrigger?.invoke()
-            activeBridge?.log("SPOTIFY_RECORDER", "✅ [PERFECT TAKE] Saved: ${finalTarget.name} (${finalTarget.length() / 1024} KB)")
-            activeBridge?.showToast("Saved: ${finalTarget.name}")
+            activeBridge?.log("SPOTIFY_VAULT", "Committing audio file to vault: ${finalTarget.absolutePath}...")
+
+            val savedOk = if (temp.renameTo(finalTarget)) {
+                true
+            } else {
+                try {
+                    temp.copyTo(finalTarget, overwrite = true)
+                    temp.delete()
+                    true
+                } catch (e: Exception) {
+                    activeBridge?.log("SPOTIFY_ERR", "File copy fallback failed: ${e.message}")
+                    false
+                }
+            }
+
+            if (savedOk) {
+                countSaved++
+                statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+                vaultRefreshTrigger?.invoke()
+                activeBridge?.log("SPOTIFY_VAULT", "✅ [PERFECT TAKE SAVED] File: ${finalTarget.name} (${finalTarget.length() / 1024} KB, Recorded: ${recordedDurationMs}ms)")
+                activeBridge?.showToast("Saved: ${finalTarget.name}")
+            } else {
+                activeBridge?.log("SPOTIFY_ERR", "Failed to commit ${finalTarget.name} to storage.")
+            }
         } else {
             temp.delete()
             countDiscarded++
             statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-            activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded ${recordedDurationMs}ms vs Expected ${currentLengthMs}ms, Interrupted: $wasInterrupted)")
+            activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${currentLengthMs}ms, Interrupted: $wasInterrupted)")
         }
 
         tempRecordingFile = null
@@ -462,25 +502,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             if (mp != null) {
                                 mediaProjection = mp
 
-                                val filter = IntentFilter().apply {
-                                    addAction("com.spotify.music.metadatachanged")
-                                    addAction("com.spotify.music.playbackstatechanged")
-                                    addAction("com.spotify.music.queuechanged")
-                                    addAction("com.spotify.mobile.android.metadatachanged")
-                                    addAction("com.spotify.mobile.android.playbackstatechanged")
-                                    addAction("com.spotify.mobile.android.queuechanged")
-                                }
-
-                                val appContext = context.applicationContext
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    appContext.registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
-                                } else {
-                                    appContext.registerReceiver(spotifyReceiver, filter)
-                                }
-
                                 isArmed = true
                                 engineState = EngineState.ARMED_LISTENING
-                                bridge.showToast("Spotify Radar Armed! Play a song in Spotify.")
+                                bridge.showToast("Spotify Radar Armed! Ready to capture next 0:00 track.")
                             } else {
                                 bridge.log("SPOTIFY_ERR", "MediaProjection dispatch returned null from foreground service.")
                                 bridge.showToast("Failed to initialize MediaProjection.")
@@ -531,10 +555,17 @@ class SpotifyRecorderPlugin : PluginEntry() {
             Spacer(Modifier.height(16.dp))
 
             // Main Radar & Arming Card
+            val isAdShieldActive = engineState == EngineState.SKIPPING_AD
+            val cardBorderColor = when {
+                isAdShieldActive -> Color(0xFFD29922)
+                isArmed -> Color(0xFF1DB954).copy(alpha = 0.8f)
+                else -> Color.White.copy(alpha = 0.08f)
+            }
+
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
-                border = BorderStroke(1.dp, if (isArmed) Color(0xFF1DB954).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.08f)),
+                border = BorderStroke(if (isAdShieldActive) 2.dp else 1.dp, cardBorderColor),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -553,7 +584,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 engineState.label,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = engineState.color
                             )
@@ -579,21 +610,58 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
                     Spacer(Modifier.height(14.dp))
 
+                    // Visual Ad Alert Banner
+                    if (isAdShieldActive) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFD29922).copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, Color(0xFFD29922).copy(alpha = 0.6f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("🛡️", fontSize = 14.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "Commercial Ad Shield Active — Stream Bypassed",
+                                    color = Color(0xFFD29922),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
                     // Live Track Info
-                    Text(trackTitle, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1)
-                    Text(artistName, color = Color(0xFF8B949E), fontSize = 12.sp, maxLines = 1)
+                    Text(
+                        if (isAdShieldActive) "Commercial Advertisement" else trackTitle,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        maxLines = 1
+                    )
+                    Text(
+                        if (isAdShieldActive) "Ad stream blocked — Waiting for next song" else artistName,
+                        color = if (isAdShieldActive) Color(0xFFD29922) else Color(0xFF8B949E),
+                        fontSize = 12.sp,
+                        maxLines = 1
+                    )
 
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(12.dp))
 
-                    // Duration Bar
-                    val progress = if (trackLen > 0) (trackPos.toFloat() / trackLen.toFloat()).coerceIn(0f, 1f) else 0f
+                    // Live Moving Real-Time Duration Bar
+                    val progress = if (trackLen > 0) (currentDisplayPos.toFloat() / trackLen.toFloat()).coerceIn(0f, 1f) else 0f
                     LinearProgressIndicator(
                         progress = { progress },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
                             .clip(RoundedCornerShape(3.dp)),
-                        color = Color(0xFF1DB954),
+                        color = if (isAdShieldActive) Color(0xFFD29922) else Color(0xFF1DB954),
                         trackColor = Color(0xFF21262D)
                     )
 
@@ -603,7 +671,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(formatMs(trackPos), fontSize = 10.sp, color = Color(0xFF8B949E), fontFamily = FontFamily.Monospace)
+                        Text(formatMs(currentDisplayPos), fontSize = 10.sp, color = Color(0xFF8B949E), fontFamily = FontFamily.Monospace)
                         Text(formatMs(trackLen), fontSize = 10.sp, color = Color(0xFF8B949E), fontFamily = FontFamily.Monospace)
                     }
                 }
