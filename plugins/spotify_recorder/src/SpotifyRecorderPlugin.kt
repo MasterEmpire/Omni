@@ -103,10 +103,15 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
     private val spotifyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            val action = intent.action ?: return
+            activeBridge?.log("SPOTIFY_RX", "📥 Broadcast [${action}]")
             if (!isArmed) return
-            when (intent.action) {
-                "com.spotify.music.metadatachanged" -> handleMetadataChanged(intent)
-                "com.spotify.music.playbackstatechanged" -> handlePlaybackStateChanged(intent)
+            when (action) {
+                "com.spotify.music.metadatachanged",
+                "com.spotify.mobile.android.metadatachanged" -> handleMetadataChanged(intent)
+                "com.spotify.music.playbackstatechanged",
+                "com.spotify.mobile.android.playbackstatechanged" -> handlePlaybackStateChanged(intent)
+                else -> activeBridge?.log("SPOTIFY_RX", "Ignored action: $action")
             }
         }
     }
@@ -124,14 +129,19 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
     private fun handleMetadataChanged(intent: Intent) {
         val newTrackId = intent.getStringExtra("id") ?: ""
-        val newTrack = intent.getStringExtra("track") ?: "Unknown Track"
+        val newTrack = intent.getStringExtra("track")
+            ?: intent.getStringExtra("title")
+            ?: "Unknown Track"
         val newArtist = intent.getStringExtra("artist") ?: "Unknown Artist"
-        val newLength = intent.getIntExtra("length", 0).takeIf { it > 0 }?.toLong()
+
+        val rawLength = intent.getIntExtra("length", 0).takeIf { it > 0 }?.toLong()
             ?: intent.getLongExtra("length", 0L)
+        // Normalize length: if <= 10000, Spotify sent duration in seconds -> convert to ms
+        val newLengthMs = if (rawLength in 1..10000) rawLength * 1000L else rawLength
         val newPos = intent.getIntExtra("playbackPosition", 0).toLong()
         val isPlaying = intent.getBooleanExtra("playing", true)
 
-        activeBridge?.log("SPOTIFY_RADAR", "Metadata: '$newTrack' by '$newArtist' (ID: $newTrackId, Pos: ${newPos}ms, Len: ${newLength}ms, Playing: $isPlaying)")
+        activeBridge?.log("SPOTIFY_RADAR", "Metadata: '$newTrack' by '$newArtist' (ID: $newTrackId, Pos: ${newPos}ms, Len: ${newLengthMs}ms, Playing: $isPlaying)")
 
         // 1. If currently recording previous track, finalize & evaluate
         if (isRecording) {
@@ -141,16 +151,19 @@ class SpotifyRecorderPlugin : PluginEntry() {
         currentTrackId = newTrackId
         currentTrackTitle = newTrack
         currentArtist = newArtist
-        currentLengthMs = newLength
+        currentLengthMs = newLengthMs
         currentPositionMs = newPos
-        trackMetaUpdater?.invoke(newTrack, newArtist, newLength, newPos)
+        trackMetaUpdater?.invoke(newTrack, newArtist, newLengthMs, newPos)
 
-        // 2. Ad Detection
-        if (newTrackId.contains(":ad:") || newTrack.equals("Advertisement", ignoreCase = true) || newLength < 25000L) {
+        // 2. Ad Detection (explicit ad ID or short advertisement duration)
+        val isExplicitAd = newTrackId.contains(":ad:") || newTrack.equals("Advertisement", ignoreCase = true)
+        val isShortAd = newLengthMs in 1..25000L && (isExplicitAd || newTrackId.isEmpty() || newTrack.contains("Spotify", ignoreCase = true))
+
+        if (isExplicitAd || isShortAd) {
             countAds++
             statsUpdater?.invoke(countSaved, countDiscarded, countAds)
             stateUpdater?.invoke(EngineState.SKIPPING_AD)
-            activeBridge?.log("SPOTIFY_RADAR", "Shield active: Ad detected. Skipping.")
+            activeBridge?.log("SPOTIFY_RADAR", "Shield active: Ad detected ($newTrackId). Skipping.")
             return
         }
 
@@ -181,6 +194,13 @@ class SpotifyRecorderPlugin : PluginEntry() {
     private fun handlePlaybackStateChanged(intent: Intent) {
         val isPlaying = intent.getBooleanExtra("playing", false)
         val pos = intent.getIntExtra("playbackPosition", -1).toLong()
+
+        val fallbackTrack = intent.getStringExtra("track") ?: intent.getStringExtra("title")
+        val fallbackArtist = intent.getStringExtra("artist")
+        if (!fallbackTrack.isNullOrEmpty()) currentTrackTitle = fallbackTrack
+        if (!fallbackArtist.isNullOrEmpty()) currentArtist = fallbackArtist
+
+        activeBridge?.log("SPOTIFY_RADAR", "State: playing=$isPlaying, pos=${pos}ms, track='$currentTrackTitle'")
 
         if (pos >= 0) {
             currentPositionMs = pos
@@ -415,7 +435,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
             if (isRecording) finalizeCurrentRecording()
             isArmed = false
             try {
-                context.unregisterReceiver(spotifyReceiver)
+                context.applicationContext.unregisterReceiver(spotifyReceiver)
             } catch (_: Exception) {}
             mediaProjection?.stop()
             mediaProjection = null
@@ -445,12 +465,17 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                 val filter = IntentFilter().apply {
                                     addAction("com.spotify.music.metadatachanged")
                                     addAction("com.spotify.music.playbackstatechanged")
+                                    addAction("com.spotify.music.queuechanged")
+                                    addAction("com.spotify.mobile.android.metadatachanged")
+                                    addAction("com.spotify.mobile.android.playbackstatechanged")
+                                    addAction("com.spotify.mobile.android.queuechanged")
                                 }
 
+                                val appContext = context.applicationContext
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    context.registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
+                                    appContext.registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
                                 } else {
-                                    context.registerReceiver(spotifyReceiver, filter)
+                                    appContext.registerReceiver(spotifyReceiver, filter)
                                 }
 
                                 isArmed = true
@@ -698,7 +723,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
     override fun onStop(context: Context) {
         if (isArmed) {
             try {
-                context.unregisterReceiver(spotifyReceiver)
+                context.applicationContext.unregisterReceiver(spotifyReceiver)
             } catch (_: Exception) {}
             isArmed = false
         }
