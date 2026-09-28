@@ -14,8 +14,11 @@ import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import android.media.projection.MediaProjection
 import java.io.FileInputStream
 import android.net.Uri
@@ -75,7 +78,8 @@ data class VaultTrack(
     val name: String,
     val sizeBytes: Long,
     val modifiedAt: Long,
-    val durationMs: Long = 0L
+    val durationMs: Long = 0L,
+    val coverFile: File? = null
 )
 
 data class TranscodeJob(
@@ -83,6 +87,7 @@ data class TranscodeJob(
     val vaultDir: File,
     val artist: String,
     val title: String,
+    val trackId: String,
     val recordedDurationMs: Long,
     val targetLengthMs: Long
 )
@@ -115,6 +120,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
     @Volatile private var recordingTrackTitle = ""
     @Volatile private var recordingArtistName = ""
     @Volatile private var recordingExpectedDurationMs = 0L
+    @Volatile private var recordingTrackId = ""
 
     // Ad and Intermission State Tracking
     @Volatile private var isAdActive = false
@@ -331,6 +337,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         recordingTrackTitle = currentTrackTitle
         recordingArtistName = currentArtist
         recordingExpectedDurationMs = expectedDurationMs
+        recordingTrackId = currentTrackId
 
         try {
             val minBuf = AudioRecord.getMinBufferSize(44100, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
@@ -442,6 +449,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 val vaultDir = if (ctx != null) getVaultDirectory(ctx) else null
                 val saveArtist = recordingArtistName.ifEmpty { currentArtist }
                 val saveTitle = recordingTrackTitle.ifEmpty { currentTrackTitle }
+                val saveTrackId = recordingTrackId.ifEmpty { currentTrackId }
 
                 if (vaultDir != null) {
                     jobToTranscode = TranscodeJob(
@@ -449,6 +457,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                         vaultDir = vaultDir,
                         artist = saveArtist,
                         title = saveTitle,
+                        trackId = saveTrackId,
                         recordedDurationMs = recordedDurationMs,
                         targetLengthMs = targetLength
                     )
@@ -480,6 +489,16 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 val cleanTitle = sanitizeFilename(job.title)
                 val finalM4a = File(job.vaultDir, "$cleanArtist - $cleanTitle.m4a")
 
+                // 1. Fetch High-Res Album Art from Spotify oEmbed
+                val artworkBytes = fetchArtworkBytes(job.trackId)
+                if (artworkBytes != null && artworkBytes.isNotEmpty()) {
+                    try {
+                        val coverFile = File(job.vaultDir, "$cleanArtist - $cleanTitle.jpg")
+                        coverFile.writeBytes(artworkBytes)
+                        activeBridge?.log("SPOTIFY_ART", "🖼️ Saved cover art file: ${coverFile.name} (${artworkBytes.size / 1024} KB)")
+                    } catch (_: Exception) {}
+                }
+
                 activeBridge?.log("SPOTIFY_VAULT", "⚙️ Background transcoding [${finalM4a.name}] via MediaCodec...")
                 val aacSuccess = encodePcmToAac(job.tempPcmFile, finalM4a, 44100, 2, 192000)
                 val finalFile: File
@@ -489,6 +508,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     job.tempPcmFile.delete()
                     savedOk = true
                     finalFile = finalM4a
+                    // 2. Inject MP4 metadata & covr atom into M4A container
+                    injectMp4Metadata(finalM4a, job.title, job.artist, artworkBytes)
                 } else {
                     activeBridge?.log("SPOTIFY_WARN", "AAC hardware encoder fallback. Preserving WAV...")
                     writeWavHeader(job.tempPcmFile, 44100, 2, 16)
@@ -515,6 +536,147 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 activeBridge?.log("SPOTIFY_ERR", "Background transcode error on [${job.title}]: ${e.message}")
                 job.tempPcmFile.delete()
             }
+        }
+    }
+
+    private fun fetchArtworkBytes(trackId: String): ByteArray? {
+        val cleanId = trackId.removePrefix("spotify:track:").trim()
+        if (cleanId.isEmpty()) return null
+        return try {
+            val oEmbedUrl = "https://open.spotify.com/oembed?url=https://open.spotify.com/track/$cleanId"
+            val conn = java.net.URL(oEmbedUrl).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile)")
+            if (conn.responseCode in 200..299) {
+                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = org.json.JSONObject(jsonStr)
+                val thumbUrl = json.optString("thumbnail_url", "")
+                if (thumbUrl.isNotEmpty()) {
+                    val imgConn = java.net.URL(thumbUrl).openConnection() as java.net.HttpURLConnection
+                    imgConn.connectTimeout = 6000
+                    imgConn.readTimeout = 6000
+                    imgConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile)")
+                    if (imgConn.responseCode in 200..299) {
+                        imgConn.inputStream.use { it.readBytes() }
+                    } else null
+                } else null
+            } else null
+        } catch (e: Exception) {
+            activeBridge?.log("SPOTIFY_ART", "Artwork fetch exception for [$cleanId]: ${e.message}")
+            null
+        }
+    }
+
+    private fun buildBox(type: String, payload: ByteArray): ByteArray {
+        val typeBytes = type.toByteArray(Charsets.US_ASCII)
+        val size = 8 + payload.size
+        val buf = java.nio.ByteBuffer.allocate(size)
+        buf.putInt(size)
+        buf.put(typeBytes)
+        buf.put(payload)
+        return buf.array()
+    }
+
+    private fun buildTextDataBox(text: String): ByteArray {
+        val textBytes = text.toByteArray(Charsets.UTF_8)
+        val payload = java.nio.ByteBuffer.allocate(8 + textBytes.size)
+        payload.putInt(1) // type: UTF-8 text
+        payload.putInt(0) // locale/padding
+        payload.put(textBytes)
+        return buildBox("data", payload.array())
+    }
+
+    private fun buildImageDataBox(imageBytes: ByteArray): ByteArray {
+        val isPng = imageBytes.size >= 8 &&
+            imageBytes[0] == 0x89.toByte() && imageBytes[1] == 0x50.toByte() &&
+            imageBytes[2] == 0x4E.toByte() && imageBytes[3] == 0x47.toByte()
+        val typeCode = if (isPng) 14 else 13 // 13 = JPEG, 14 = PNG
+        val payload = java.nio.ByteBuffer.allocate(8 + imageBytes.size)
+        payload.putInt(typeCode)
+        payload.putInt(0)
+        payload.put(imageBytes)
+        return buildBox("data", payload.array())
+    }
+
+    private fun injectMp4Metadata(
+        m4aFile: File,
+        title: String,
+        artist: String,
+        coverBytes: ByteArray?
+    ) {
+        if (!m4aFile.exists() || m4aFile.length() < 16) return
+        try {
+            val ilstPayload = java.io.ByteArrayOutputStream()
+            if (title.isNotEmpty()) {
+                ilstPayload.write(buildBox("\u00A9nam", buildTextDataBox(title)))
+            }
+            if (artist.isNotEmpty()) {
+                ilstPayload.write(buildBox("\u00A9ART", buildTextDataBox(artist)))
+            }
+            if (coverBytes != null && coverBytes.isNotEmpty()) {
+                ilstPayload.write(buildBox("covr", buildImageDataBox(coverBytes)))
+            }
+            val ilstBox = buildBox("ilst", ilstPayload.toByteArray())
+
+            val hdlrPayload = java.nio.ByteBuffer.allocate(25).apply {
+                putInt(0)
+                putInt(0)
+                put("mdir".toByteArray(Charsets.US_ASCII))
+                put("appl".toByteArray(Charsets.US_ASCII))
+                putLong(0L)
+                put(0.toByte())
+            }
+            val hdlrBox = buildBox("hdlr", hdlrPayload.array())
+
+            val metaPayload = java.io.ByteArrayOutputStream().apply {
+                write(ByteArray(4))
+                write(hdlrBox)
+                write(ilstBox)
+            }
+            val metaBox = buildBox("meta", metaPayload.toByteArray())
+            val udtaBox = buildBox("udta", metaBox)
+
+            RandomAccessFile(m4aFile, "rw").use { raf ->
+                var pos = 0L
+                val fileLen = raf.length()
+                while (pos < fileLen) {
+                    raf.seek(pos)
+                    val boxSizeInt = raf.readInt()
+                    val typeBytes = ByteArray(4)
+                    raf.readFully(typeBytes)
+                    val boxType = String(typeBytes, Charsets.US_ASCII)
+
+                    val boxSize = if (boxSizeInt == 1) {
+                        raf.readLong()
+                    } else if (boxSizeInt == 0) {
+                        fileLen - pos
+                    } else {
+                        boxSizeInt.toLong() and 0xFFFFFFFFL
+                    }
+
+                    if (boxType == "moov") {
+                        if (pos + boxSize >= fileLen) {
+                            raf.seek(fileLen)
+                            raf.write(udtaBox)
+                            val newMoovSize = boxSize + udtaBox.size
+                            raf.seek(pos)
+                            if (boxSizeInt == 1) {
+                                raf.writeInt(1)
+                                raf.write("moov".toByteArray(Charsets.US_ASCII))
+                                raf.writeLong(newMoovSize)
+                            } else {
+                                raf.writeInt(newMoovSize.toInt())
+                            }
+                            activeBridge?.log("SPOTIFY_ART", "🎨 Injected cover art & ID3 metadata into [${m4aFile.name}]")
+                        }
+                        break
+                    }
+                    pos += boxSize
+                }
+            }
+        } catch (e: Exception) {
+            activeBridge?.log("SPOTIFY_ERR", "Failed injecting MP4 metadata into [${m4aFile.name}]: ${e.message}")
         }
     }
 
@@ -700,7 +862,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     finally {
                         try { mmr.release() } catch (_: Exception) {}
                     }
-                    VaultTrack(file, file.name, file.length(), file.lastModified(), dur)
+                    val baseName = file.name.removeSuffix(".m4a").removeSuffix(".wav")
+                    val cover = File(dir, "$baseName.jpg").takeIf { it.exists() && it.length() > 0 }
+                    VaultTrack(file, file.name, file.length(), file.lastModified(), dur, cover)
                 }
                 ?.sortedByDescending { it.modifiedAt } ?: emptyList()
             vaultFiles = files
@@ -1029,6 +1193,40 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // Dynamic Album Art Thumbnail
+                                val coverBitmap = remember(track.coverFile?.absolutePath) {
+                                    track.coverFile?.let { f ->
+                                        try {
+                                            BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap()
+                                        } catch (_: Exception) {
+                                            null
+                                        }
+                                    }
+                                }
+
+                                if (coverBitmap != null) {
+                                    Image(
+                                        bitmap = coverBitmap,
+                                        contentDescription = track.name,
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFF21262D)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("🎵", fontSize = 18.sp)
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                }
+
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(track.name.removeSuffix(".m4a").removeSuffix(".wav"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1053,6 +1251,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                     IconButton(
                                         onClick = {
                                             track.file.delete()
+                                            track.coverFile?.delete()
                                             reloadVaultList()
                                         },
                                         modifier = Modifier.size(28.dp)
