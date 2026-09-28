@@ -79,7 +79,7 @@ data class VaultTrack(
     val sizeBytes: Long,
     val modifiedAt: Long,
     val durationMs: Long = 0L,
-    val coverFile: File? = null
+    val coverBytes: ByteArray? = null
 )
 
 data class ActiveRecordingTake(
@@ -393,10 +393,12 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
             recordThread = Thread {
                 val buffer = ByteArray(minBuf)
+                var consecutiveErrors = 0
                 try {
                     while (isRecording && audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                         val read = record.read(buffer, 0, buffer.size)
                         if (read > 0) {
+                            consecutiveErrors = 0
                             fos.write(buffer, 0, read)
                             recordedBytesCount += read
 
@@ -411,6 +413,15 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                 stateUpdater?.invoke(EngineState.ARMED_LISTENING)
                                 break
                             }
+                        } else if (read < 0) {
+                            consecutiveErrors++
+                            activeBridge?.log("SPOTIFY_REC_ERR", "⚠️ AudioRecord.read error code: $read ($consecutiveErrors/5)")
+                            if (consecutiveErrors >= 5) {
+                                activeBridge?.log("SPOTIFY_REC_ERR", "🚨 Too many AudioRecord read failures ($read). Aborting take to prevent CPU lock.")
+                                abortAndDiscard("Audio hardware read error ($read)")
+                                break
+                            }
+                            Thread.sleep(25)
                         }
                     }
                 } catch (e: Exception) {
@@ -523,16 +534,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     "⚙️ [TRANSCODE START] Processing '${job.title}' by '${job.artist}' | TrackID: ${job.trackId} | Destination: ${finalM4a.name}"
                 )
 
-                // 1. Fetch High-Res Album Art from Spotify oEmbed
+                // 1. Fetch High-Res Album Art from Spotify oEmbed directly to memory
                 val artworkBytes = fetchArtworkBytes(job.trackId)
                 if (artworkBytes != null && artworkBytes.isNotEmpty()) {
-                    try {
-                        val coverFile = File(job.vaultDir, "$cleanArtist - $cleanTitle.jpg")
-                        coverFile.writeBytes(artworkBytes)
-                        activeBridge?.log("SPOTIFY_ART", "🖼️ Saved cover art for '${job.title}': ${coverFile.name} (${artworkBytes.size / 1024} KB)")
-                    } catch (e: Exception) {
-                        activeBridge?.log("SPOTIFY_ART_ERR", "Failed saving cover file for '${job.title}': ${e.message}")
-                    }
+                    activeBridge?.log("SPOTIFY_ART", "🖼️ In-memory cover art retrieved for '${job.title}' (${artworkBytes.size / 1024} KB). Embedding directly into container.")
                 } else {
                     activeBridge?.log("SPOTIFY_ART", "ℹ️ No cover art retrieved for Track ID: '${job.trackId}'")
                 }
@@ -891,22 +896,65 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         var vaultFiles by remember { mutableStateOf(listOf<VaultTrack>()) }
 
+        fun cleanOrphanedFiles(dir: File) {
+            try {
+                dir.listFiles()?.forEach { f ->
+                    if (f.isFile) {
+                        val n = f.name
+                        if (n.startsWith(".recording_") && n.endsWith(".tmp")) {
+                            f.delete()
+                            activeBridge?.log("SPOTIFY_VAULT", "🧹 Purged orphaned temp file: $n")
+                        } else if (n.endsWith(".jpg", ignoreCase = true) || n.endsWith(".png", ignoreCase = true)) {
+                            f.delete()
+                            activeBridge?.log("SPOTIFY_VAULT", "🧹 Cleaned up redundant thumbnail image: $n")
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        fun playTrack(trackFile: File) {
+            try {
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    trackFile
+                )
+                val mime = if (trackFile.name.endsWith(".wav", ignoreCase = true)) "audio/wav" else "audio/mp4"
+                val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mime)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                val songTitle = trackFile.name.removeSuffix(".m4a").removeSuffix(".wav")
+                val chooser = Intent.createChooser(playIntent, "Play '$songTitle' with").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(chooser)
+                activeBridge?.log("SPOTIFY_PLAY", "Dispatched player chooser for: ${trackFile.name}")
+            } catch (e: Exception) {
+                activeBridge?.log("SPOTIFY_PLAY_ERR", "Player intent error: ${e.message}")
+                bridge.showToast("Could not open player: ${e.message}")
+            }
+        }
+
         fun reloadVaultList() {
             val dir = getVaultDirectory(context)
+            cleanOrphanedFiles(dir)
             val files = dir.listFiles()?.filter { it.isFile && (it.name.endsWith(".m4a") || it.name.endsWith(".wav")) }
                 ?.map { file ->
                     var dur = 0L
+                    var artBytes: ByteArray? = null
                     val mmr = MediaMetadataRetriever()
                     try {
                         mmr.setDataSource(file.absolutePath)
                         dur = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                        artBytes = mmr.embeddedPicture
                     } catch (_: Exception) {}
                     finally {
                         try { mmr.release() } catch (_: Exception) {}
                     }
-                    val baseName = file.name.removeSuffix(".m4a").removeSuffix(".wav")
-                    val cover = File(dir, "$baseName.jpg").takeIf { it.exists() && it.length() > 0 }
-                    VaultTrack(file, file.name, file.length(), file.lastModified(), dur, cover)
+                    VaultTrack(file, file.name, file.length(), file.lastModified(), dur, artBytes)
                 }
                 ?.sortedByDescending { it.modifiedAt } ?: emptyList()
             vaultFiles = files
@@ -1225,8 +1273,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
                         Card(
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
-                            modifier = Modifier.fillMaxWidth()
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { playTrack(track.file) }
                         ) {
                             Row(
                                 modifier = Modifier
@@ -1235,11 +1286,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Dynamic Album Art Thumbnail
-                                val coverBitmap = remember(track.coverFile?.absolutePath) {
-                                    track.coverFile?.let { f ->
+                                // Dynamic Album Art Thumbnail from embedded MP4 picture metadata
+                                val coverBitmap = remember(track.file.absolutePath) {
+                                    track.coverBytes?.let { bytes ->
                                         try {
-                                            BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap()
+                                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
                                         } catch (_: Exception) {
                                             null
                                         }
@@ -1293,7 +1344,6 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                     IconButton(
                                         onClick = {
                                             track.file.delete()
-                                            track.coverFile?.delete()
                                             reloadVaultList()
                                         },
                                         modifier = Modifier.size(28.dp)
