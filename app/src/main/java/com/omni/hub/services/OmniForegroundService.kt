@@ -80,6 +80,14 @@ class OmniForegroundService : Service() {
         if (action == ACTION_START_PROJECTION) {
             val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Audio Stream"
             val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Capturing internal audio..."
+            val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
+            val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+            }
+
             try {
                 createNotificationChannel()
                 val notification = buildNotification(title, message)
@@ -88,8 +96,17 @@ class OmniForegroundService : Service() {
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
+
+                if (resultCode != 0 && data != null) {
+                    val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+                    val projection = mpm.getMediaProjection(resultCode, data)
+                    com.omni.hub.api.MediaProjectionDispatcher.dispatchProjectionReady(projection)
+                } else {
+                    com.omni.hub.api.MediaProjectionDispatcher.dispatchProjectionReady(null)
+                }
             } catch (e: Exception) {
                 com.omni.hub.api.OmniLogger.log("FOREGROUND_ERR", "startProjection error: " + e.message)
+                com.omni.hub.api.MediaProjectionDispatcher.dispatchProjectionReady(null)
             }
             return START_STICKY
         }
@@ -246,6 +263,8 @@ class OmniForegroundService : Service() {
         const val ACTION_STOP = "com.omni.hub.action.STOP_FOREGROUND"
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_MESSAGE = "extra_message"
+        const val EXTRA_RESULT_CODE = "extra_result_code"
+        const val EXTRA_RESULT_DATA = "extra_result_data"
 
         fun startProjection(context: Context, title: String, message: String) {
             val intent = Intent(context, OmniForegroundService::class.java).apply {
