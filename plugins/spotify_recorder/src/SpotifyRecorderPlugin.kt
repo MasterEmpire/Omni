@@ -187,7 +187,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         // 5. Conditions met: Launch Audio Stream Capture
         if (isPlaying && mediaProjection != null) {
-            startAudioRecording(vaultDir, targetName, newLength)
+            startAudioRecording(vaultDir, targetName, newLengthMs)
         }
     }
 
