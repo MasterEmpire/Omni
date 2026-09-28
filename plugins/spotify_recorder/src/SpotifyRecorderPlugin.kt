@@ -433,28 +433,33 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
                 bridge.requestMediaProjection { resultCode, data ->
                     if (resultCode == Activity.RESULT_OK && data != null) {
-                        try {
-                            bridge.startProjectionService("Spotify Recorder Active", "Listening to internal media stream...")
-                            val mp = bridge.getMediaProjectionManager().getMediaProjection(resultCode, data)
-                            mediaProjection = mp
+                        bridge.startProjectionService(
+                            resultCode = resultCode,
+                            data = data,
+                            title = "Spotify Recorder Active",
+                            message = "Listening to internal media stream..."
+                        ) { mp ->
+                            if (mp != null) {
+                                mediaProjection = mp
 
-                            val filter = IntentFilter().apply {
-                                addAction("com.spotify.music.metadatachanged")
-                                addAction("com.spotify.music.playbackstatechanged")
-                            }
+                                val filter = IntentFilter().apply {
+                                    addAction("com.spotify.music.metadatachanged")
+                                    addAction("com.spotify.music.playbackstatechanged")
+                                }
 
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                context.registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    context.registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
+                                } else {
+                                    context.registerReceiver(spotifyReceiver, filter)
+                                }
+
+                                isArmed = true
+                                engineState = EngineState.ARMED_LISTENING
+                                bridge.showToast("Spotify Radar Armed! Play a song in Spotify.")
                             } else {
-                                context.registerReceiver(spotifyReceiver, filter)
+                                bridge.log("SPOTIFY_ERR", "MediaProjection dispatch returned null from foreground service.")
+                                bridge.showToast("Failed to initialize MediaProjection.")
                             }
-
-                            isArmed = true
-                            engineState = EngineState.ARMED_LISTENING
-                            bridge.showToast("Spotify Radar Armed! Play a song in Spotify.")
-                        } catch (e: Exception) {
-                            bridge.log("SPOTIFY_ERR", "Error initializing MediaProjection: ${e.message}")
-                            bridge.showToast("Failed initializing projection: ${e.message}")
                         }
                     } else {
                         bridge.showToast("Media projection consent rejected.")
