@@ -438,7 +438,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
         var trackTitle by remember { mutableStateOf(currentTrackTitle.ifEmpty { "Waiting for playback..." }) }
         var artistName by remember { mutableStateOf(currentArtist.ifEmpty { "Spotify Broadcast Radar" }) }
         var trackLen by remember { mutableLongStateOf(currentLengthMs) }
-        var trackPos by remember { mutableLongStateOf(currentPositionMs) }
+        var anchorPos by remember { mutableLongStateOf(currentPositionMs) }
+        var isPlayingNow by remember { mutableStateOf(isPlayingTrack) }
+        var currentDisplayPos by remember { mutableLongStateOf(currentPositionMs) }
 
         var savedStat by remember { mutableIntStateOf(countSaved) }
         var discardedStat by remember { mutableIntStateOf(countDiscarded) }
@@ -452,15 +454,33 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 ?.map { VaultTrack(it, it.name, it.length(), it.lastModified()) }
                 ?.sortedByDescending { it.modifiedAt } ?: emptyList()
             vaultFiles = files
+            activeBridge?.log("SPOTIFY_VAULT", "Vault refreshed: ${files.size} track(s) discovered in ${dir.absolutePath}")
         }
 
+        // Real-Time Monotonic Position Interpolator
+        LaunchedEffect(isPlayingNow, anchorPos, trackLen) {
+            if (isPlayingNow && trackLen > 0) {
+                val baseTime = SystemClock.elapsedRealtime()
+                while (true) {
+                    val elapsed = SystemClock.elapsedRealtime() - baseTime
+                    val computed = anchorPos + elapsed
+                    currentDisplayPos = if (computed >= trackLen - 1000L) trackLen else computed.coerceAtMost(trackLen)
+                    delay(120)
+                }
+            } else {
+                currentDisplayPos = anchorPos.coerceAtMost(trackLen)
+            }
+        }
+
+        // Mount Passive Spotify Broadcast Listener by default
         LaunchedEffect(Unit) {
             stateUpdater = { engineState = it }
-            trackMetaUpdater = { t, a, l, p ->
+            trackMetaUpdater = { t, a, l, p, isPlay ->
                 trackTitle = t
                 artistName = a
                 trackLen = l
-                trackPos = p
+                anchorPos = p
+                isPlayingNow = isPlay
             }
             statsUpdater = { s, d, ad ->
                 savedStat = s
@@ -468,6 +488,28 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 adsStat = ad
             }
             vaultRefreshTrigger = { reloadVaultList() }
+
+            val filter = IntentFilter().apply {
+                addAction("com.spotify.music.metadatachanged")
+                addAction("com.spotify.music.playbackstatechanged")
+                addAction("com.spotify.music.queuechanged")
+                addAction("com.spotify.mobile.android.metadatachanged")
+                addAction("com.spotify.mobile.android.playbackstatechanged")
+                addAction("com.spotify.mobile.android.queuechanged")
+            }
+
+            val appContext = context.applicationContext
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    appContext.registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
+                } else {
+                    appContext.registerReceiver(spotifyReceiver, filter)
+                }
+                activeBridge?.log("SPOTIFY_RADAR", "Passive broadcast listener mounted successfully.")
+            } catch (e: Exception) {
+                activeBridge?.log("SPOTIFY_ERR", "Error mounting receiver: ${e.message}")
+            }
+
             reloadVaultList()
         }
 
