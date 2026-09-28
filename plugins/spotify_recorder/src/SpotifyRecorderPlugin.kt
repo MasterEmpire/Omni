@@ -215,7 +215,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         // 5. Conditions met: Launch Audio Stream Capture if armed
         if (isArmed && isPlaying && mediaProjection != null) {
-            startAudioRecording(vaultDir, targetName, newLengthMs)
+            startAudioRecording(vaultDir, newLengthMs)
         } else if (!isArmed) {
             stateUpdater?.invoke(EngineState.DISARMED)
         }
@@ -260,7 +260,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         }
     }
 
-    private fun startAudioRecording(vaultDir: File, targetFilename: String, expectedDurationMs: Long) {
+    private fun startAudioRecording(vaultDir: File, expectedDurationMs: Long) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || mediaProjection == null) return
 
         // Freeze active track identity for this recording session
