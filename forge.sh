@@ -85,7 +85,7 @@ elif [ -f "plugin_src/${APP_LABEL}.kt" ]; then
     SRC_TARGET="plugin_src/${APP_LABEL}.kt"
     RES_TARGET="plugin_res"
     MANIFEST_TARGET="plugin_src/plugin.json"
-elif [ -d "plugin_src" ]; then
+elif [ "$SLUG" = "sample_utility" ] && [ -d "plugin_src" ]; then
     SRC_TARGET="plugin_src"
     RES_TARGET="plugin_res"
     MANIFEST_TARGET="plugin_src/plugin.json"
