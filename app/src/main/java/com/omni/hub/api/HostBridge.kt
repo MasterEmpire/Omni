@@ -95,6 +95,11 @@ interface HostBridge {
     fun updateMediaPlayback(title: String, artist: String, isPlaying: Boolean)
     fun stopMediaPlayback()
 
+    // --- Audio & Media Projection ---
+    fun requestMediaProjection(onResult: (resultCode: Int, data: Intent?) -> Unit)
+    fun startProjectionService(title: String, message: String)
+    fun getMediaProjectionManager(): android.media.projection.MediaProjectionManager
+
     // --- Logging ---
     fun log(tag: String, message: String)
 }
@@ -152,6 +157,27 @@ object MediaPlaybackDispatcher {
     fun onAction(shouldPlay: Boolean) {
         Handler(Looper.getMainLooper()).post {
             listener?.invoke(shouldPlay)
+        }
+    }
+}
+
+object ScreenCaptureDispatcher {
+    private var launcher: (((Int, Intent?) -> Unit) -> Unit)? = null
+
+    fun registerLauncher(block: (((Int, Intent?) -> Unit) -> Unit)?) {
+        launcher = block
+    }
+
+    fun requestCapture(callback: (Int, Intent?) -> Unit) {
+        val l = launcher
+        if (l != null) {
+            Handler(Looper.getMainLooper()).post {
+                l(callback)
+            }
+        } else {
+            Handler(Looper.getMainLooper()).post {
+                callback(android.app.Activity.RESULT_CANCELED, null)
+            }
         }
     }
 }
@@ -626,6 +652,18 @@ class HostBridgeImpl(
             }
             context.startService(intent)
         } catch (_: Exception) {}
+    }
+
+    override fun requestMediaProjection(onResult: (Int, Intent?) -> Unit) {
+        ScreenCaptureDispatcher.requestCapture(onResult)
+    }
+
+    override fun startProjectionService(title: String, message: String) {
+        com.omni.hub.services.OmniForegroundService.startProjection(context, title, message)
+    }
+
+    override fun getMediaProjectionManager(): android.media.projection.MediaProjectionManager {
+        return context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
     }
 
     override fun log(tag: String, message: String) {
