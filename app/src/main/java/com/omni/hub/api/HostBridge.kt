@@ -659,7 +659,22 @@ class HostBridgeImpl(
     }
 
     override fun startProjectionService(title: String, message: String) {
-        com.omni.hub.services.OmniForegroundService.startProjection(context, title, message)
+        acquireWakeLock("OmniProjection")
+        try {
+            val intent = Intent().apply {
+                setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
+                action = "com.omni.hub.action.START_PROJECTION"
+                putExtra("extra_title", title)
+                putExtra("extra_message", message)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            OmniLogger.log("PROJECTION_WARN", "Could not start projection service: ${e.message}")
+        }
     }
 
     override fun getMediaProjectionManager(): android.media.projection.MediaProjectionManager {
