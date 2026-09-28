@@ -58,7 +58,7 @@ enum class EngineState(val label: String, val color: Color) {
     RECORDING("CAPTURING CLEAN STREAM", Color(0xFF58A6FF)),
     SKIPPING_AD("AD DETECTED (IGNORING)", Color(0xFFD29922)),
     WAITING_CLEAN_START("JOINED MID-TRACK (WAITING FOR 0:00)", Color(0xFFBC8CFF)),
-    ALREADY_EXISTS("SONG ALREADY IN VAULT", Color(0xFF388BFD)),
+    ALREADY_EXISTS("SONG ALREADY RECORDED", Color(0xFF388BFD)),
     INTERRUPTED_DISCARDED("INTERRUPTED (DISCARDED)", Color(0xFFF85149))
 }
 
@@ -296,7 +296,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
             statsUpdater?.invoke(countSaved, countDiscarded, countAds)
             vaultRefreshTrigger?.invoke()
             activeBridge?.log("SPOTIFY_RECORDER", "✅ [PERFECT TAKE] Saved: ${finalTarget.name} (${finalTarget.length() / 1024} KB)")
-            activeBridge?.showToast("Saved to Vault: ${finalTarget.name}")
+            activeBridge?.showToast("Saved: ${finalTarget.name}")
         } else {
             temp.delete()
             countDiscarded++
@@ -421,7 +421,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
             mediaProjection = null
             bridge.stopForegroundTask()
             engineState = EngineState.DISARMED
-            bridge.showToast("Spotify Vault Disarmed")
+            bridge.showToast("Spotify Recorder Disarmed")
         }
 
         fun armEngine() {
@@ -434,7 +434,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 bridge.requestMediaProjection { resultCode, data ->
                     if (resultCode == Activity.RESULT_OK && data != null) {
                         try {
-                            bridge.startProjectionService("Spotify Vault Active", "Listening to internal media stream...")
+                            bridge.startProjectionService("Spotify Recorder Active", "Listening to internal media stream...")
                             val mp = bridge.getMediaProjectionManager().getMediaProjection(resultCode, data)
                             mediaProjection = mp
 
@@ -488,7 +488,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     }
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text("Spotify Vault", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Spotify Recorder", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text("Autonomous Internal Stream Ripper", fontSize = 11.sp, color = Color(0xFF8B949E))
                     }
                 }
@@ -599,7 +599,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Vault Recordings (${vaultFiles.size})", color = Color(0xFFC9D1D9), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Recorded Tracks (${vaultFiles.size})", color = Color(0xFFC9D1D9), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Text("Music/Omni Spotify", color = Color(0xFF8B949E), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
             }
 
