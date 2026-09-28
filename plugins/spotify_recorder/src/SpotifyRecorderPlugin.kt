@@ -105,6 +105,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
     @Volatile private var recordingArtistName = ""
     @Volatile private var recordingExpectedDurationMs = 0L
 
+    // Ad and Intermission State Tracking
+    @Volatile private var isAdActive = false
+    @Volatile private var adTitle = ""
+    @Volatile private var adArtist = ""
+
     // UI Reactive State Bridges
     private var stateUpdater: ((EngineState) -> Unit)? = null
     private var trackMetaUpdater: ((title: String, artist: String, lengthMs: Long, posMs: Long, isPlaying: Boolean) -> Unit)? = null
@@ -120,18 +125,20 @@ class SpotifyRecorderPlugin : PluginEntry() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action ?: return
             val extrasSummary = intent.extras?.let { bundle ->
-                bundle.keySet().joinToString(", ") { key ->
-                    "$key=${bundle.get(key)}"
+                bundle.keySet().joinToString(" | ") { key ->
+                    val value = bundle.get(key)
+                    val type = value?.javaClass?.simpleName ?: "null"
+                    "$key ($type)=$value"
                 }
             } ?: "no extras"
-            activeBridge?.log("SPOTIFY_RX", "📥 [$action] -> $extrasSummary")
+            activeBridge?.log("SPOTIFY_BROADCAST", "📥 RX [$action] -> $extrasSummary")
 
             when (action) {
                 "com.spotify.music.metadatachanged",
                 "com.spotify.mobile.android.metadatachanged" -> handleMetadataChanged(intent)
                 "com.spotify.music.playbackstatechanged",
                 "com.spotify.mobile.android.playbackstatechanged" -> handlePlaybackStateChanged(intent)
-                else -> activeBridge?.log("SPOTIFY_RX", "Ignored action: $action")
+                else -> activeBridge?.log("SPOTIFY_BROADCAST", "ℹ️ Unhandled broadcast action: $action")
             }
         }
     }
@@ -166,13 +173,53 @@ class SpotifyRecorderPlugin : PluginEntry() {
         val newPos = intent.getIntExtra("playbackPosition", 0).toLong()
         val isPlaying = intent.getBooleanExtra("playing", true)
 
-        activeBridge?.log("SPOTIFY_RADAR", "Metadata: '$newTrack' by '$newArtist' (ID: $newTrackId, Pos: ${newPos}ms, Len: ${newLengthMs}ms, Playing: $isPlaying)")
+        activeBridge?.log(
+            "SPOTIFY_METADATA",
+            "Track Metadata Parsed: Title='$newTrack' | Artist='$newArtist' | ID='$newTrackId' | Pos=${newPos}ms | Len=${newLengthMs}ms | Playing=$isPlaying"
+        )
 
         // 1. If currently recording previous track, finalize & evaluate
         if (isRecording) {
             finalizeCurrentRecording()
         }
 
+        // 2. Comprehensive Ad Detection (Catches 15s, 20s, and standard 30s audio spots)
+        val isExplicitAd = newTrackId.contains(":ad:") ||
+            newTrack.contains("Advertisement", ignoreCase = true) ||
+            newTrack.contains("Spotify", ignoreCase = true) ||
+            newArtist.equals("Spotify", ignoreCase = true)
+
+        val isNonTrackUri = newTrackId.isNotEmpty() && !newTrackId.contains(":track:")
+        val isAdDuration = newLengthMs in 1..35000L && (isExplicitAd || newTrackId.isEmpty() || isNonTrackUri)
+        val isIdentifiedAd = isExplicitAd || isAdDuration
+
+        activeBridge?.log(
+            "SPOTIFY_AD_EVAL",
+            "Ad Heuristics -> isExplicitAd=$isExplicitAd, isNonTrackUri=$isNonTrackUri, isAdDuration=$isAdDuration => isIdentifiedAd=$isIdentifiedAd"
+        )
+
+        if (isIdentifiedAd) {
+            isAdActive = true
+            adTitle = if (newTrack.isNotEmpty() && !newTrack.equals("Unknown Track", true)) newTrack else "Commercial Advertisement"
+            adArtist = if (newArtist.isNotEmpty() && !newArtist.equals("Unknown Artist", true)) newArtist else "Spotify Commercial Stream"
+            currentLengthMs = newLengthMs
+            currentPositionMs = newPos
+            isPlayingTrack = isPlaying
+            lastSyncTimestamp = SystemClock.elapsedRealtime()
+
+            countAds++
+            statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+            stateUpdater?.invoke(EngineState.SKIPPING_AD)
+            trackMetaUpdater?.invoke(adTitle, adArtist, newLengthMs, newPos, isPlaying)
+
+            activeBridge?.log("SPOTIFY_RADAR", "🛡️ Shield engaged for: '$adTitle' by '$adArtist' ($newTrackId). Audio recording suppressed.")
+            return
+        }
+
+        // Legitimate song track confirmed -> reset ad state
+        isAdActive = false
+        adTitle = ""
+        adArtist = ""
         currentTrackId = newTrackId
         currentTrackTitle = newTrack
         currentArtist = newArtist
@@ -181,18 +228,6 @@ class SpotifyRecorderPlugin : PluginEntry() {
         isPlayingTrack = isPlaying
         lastSyncTimestamp = SystemClock.elapsedRealtime()
         trackMetaUpdater?.invoke(newTrack, newArtist, newLengthMs, newPos, isPlaying)
-
-        // 2. Ad Detection (explicit ad ID or short advertisement duration)
-        val isExplicitAd = newTrackId.contains(":ad:") || newTrack.equals("Advertisement", ignoreCase = true)
-        val isShortAd = newLengthMs in 1..25000L && (isExplicitAd || newTrackId.isEmpty() || newTrack.contains("Spotify", ignoreCase = true))
-
-        if (isExplicitAd || isShortAd) {
-            countAds++
-            statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-            stateUpdater?.invoke(EngineState.SKIPPING_AD)
-            activeBridge?.log("SPOTIFY_RADAR", "Shield active: Ad detected ($newTrackId). Skipping.")
-            return
-        }
 
         // 3. Duplicate Vault Check (.m4a and .wav)
         val ctx = activeContext ?: return
@@ -236,8 +271,24 @@ class SpotifyRecorderPlugin : PluginEntry() {
         if (pos >= 0) {
             currentPositionMs = pos
         }
-        trackMetaUpdater?.invoke(currentTrackTitle, currentArtist, currentLengthMs, currentPositionMs, isPlaying)
-        activeBridge?.log("SPOTIFY_RADAR", "State update: playing=$isPlaying, pos=${currentPositionMs}ms, track='$currentTrackTitle'")
+
+        activeBridge?.log(
+            "SPOTIFY_PLAYBACK",
+            "Playback State -> playing=$isPlaying, pos=${currentPositionMs}ms, isAdActive=$isAdActive, currentTrack='$currentTrackTitle'"
+        )
+
+        if (isAdActive) {
+            // Prevent playback ticks from overwriting active ad/intermission status
+            trackMetaUpdater?.invoke(
+                adTitle.ifEmpty { "Commercial Advertisement" },
+                adArtist.ifEmpty { "Ad Shield Active" },
+                currentLengthMs,
+                currentPositionMs,
+                isPlaying
+            )
+        } else {
+            trackMetaUpdater?.invoke(currentTrackTitle, currentArtist, currentLengthMs, currentPositionMs, isPlaying)
+        }
 
         if (isRecording) {
             val recordedMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
@@ -315,8 +366,13 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             if (expectedDurationMs > 0 && recMs >= expectedDurationMs + 1200L) {
                                 activeBridge?.log("SPOTIFY_RECORDER", "🎯 Track duration reached (${recMs}ms >= ${expectedDurationMs}ms). Auto-committing take before ad starts!")
                                 finalizeCurrentRecording()
+                                isAdActive = true
+                                adTitle = "Commercial / Intermission"
+                                adArtist = "Audio Capture Muted (Waiting for next clean 0:00 song)"
+                                currentLengthMs = 0L
+                                currentPositionMs = 0L
                                 stateUpdater?.invoke(EngineState.SKIPPING_AD)
-                                trackMetaUpdater?.invoke("Commercial / Intermission", "Audio Capture Muted (Waiting for next song)", 0L, 0L, false)
+                                trackMetaUpdater?.invoke(adTitle, adArtist, 0L, 0L, false)
                                 break
                             }
                         }
@@ -816,14 +872,14 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
                     // Live Track Info
                     Text(
-                        if (isAdShieldActive) "Commercial Advertisement" else trackTitle,
+                        text = trackTitle,
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         maxLines = 1
                     )
                     Text(
-                        if (isAdShieldActive) "Ad stream blocked — Waiting for next song" else artistName,
+                        text = artistName,
                         color = if (isAdShieldActive) Color(0xFFD29922) else Color(0xFF8B949E),
                         fontSize = 12.sp,
                         maxLines = 1
