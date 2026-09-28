@@ -4,6 +4,13 @@
 
     <queries>
         <package android:name="com.universal.app" />
+        <package android:name="com.spotify.music" />
+        <intent>
+            <action android:name="com.spotify.music.metadatachanged" />
+        </intent>
+        <intent>
+            <action android:name="com.spotify.mobile.android.metadatachanged" />
+        </intent>
     </queries>
 
     <!-- 🌐 Connectivity & Networking -->
