@@ -14,6 +14,7 @@ import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.media.projection.MediaProjection
 import java.io.FileInputStream
@@ -73,7 +74,8 @@ data class VaultTrack(
     val file: File,
     val name: String,
     val sizeBytes: Long,
-    val modifiedAt: Long
+    val modifiedAt: Long,
+    val durationMs: Long = 0L
 )
 
 data class TranscodeJob(
@@ -461,6 +463,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${targetLength}ms, Interrupted: $wasInterrupted)")
                 }
             }
+            Unit
         }
 
         // Asynchronous non-blocking dispatch outside of lock (< 2ms total execution)
@@ -687,7 +690,18 @@ class SpotifyRecorderPlugin : PluginEntry() {
         fun reloadVaultList() {
             val dir = getVaultDirectory(context)
             val files = dir.listFiles()?.filter { it.isFile && (it.name.endsWith(".m4a") || it.name.endsWith(".wav")) }
-                ?.map { VaultTrack(it, it.name, it.length(), it.lastModified()) }
+                ?.map { file ->
+                    var dur = 0L
+                    val mmr = MediaMetadataRetriever()
+                    try {
+                        mmr.setDataSource(file.absolutePath)
+                        dur = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    } catch (_: Exception) {}
+                    finally {
+                        try { mmr.release() } catch (_: Exception) {}
+                    }
+                    VaultTrack(file, file.name, file.length(), file.lastModified(), dur)
+                }
                 ?.sortedByDescending { it.modifiedAt } ?: emptyList()
             vaultFiles = files
             activeBridge?.log("SPOTIFY_VAULT", "Vault refreshed: ${files.size} track(s) discovered in ${dir.absolutePath}")
@@ -1018,6 +1032,16 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(track.name.removeSuffix(".m4a").removeSuffix(".wav"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (track.durationMs > 0) {
+                                            Text(
+                                                formatMs(track.durationMs),
+                                                color = Color(0xFF1DB954),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
                                         val mbStr = String.format(Locale.US, "%.1f MB", track.sizeBytes / (1024.0 * 1024.0))
                                         Text(mbStr, color = Color(0xFF58A6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                         Spacer(Modifier.width(8.dp))
