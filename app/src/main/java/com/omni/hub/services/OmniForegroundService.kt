@@ -77,6 +77,23 @@ class OmniForegroundService : Service() {
             return START_STICKY
         }
 
+        if (action == ACTION_START_PROJECTION) {
+            val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Audio Stream"
+            val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Capturing internal audio..."
+            try {
+                createNotificationChannel()
+                val notification = buildNotification(title, message)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } catch (e: Exception) {
+                com.omni.hub.api.OmniLogger.log("FOREGROUND_ERR", "startProjection error: " + e.message)
+            }
+            return START_STICKY
+        }
+
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Hub Task"
         val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Automation in progress..."
 
@@ -225,9 +242,23 @@ class OmniForegroundService : Service() {
         private const val CHANNEL_ID = "omni_automation_channel"
         private const val NOTIFICATION_ID = 8842
         const val ACTION_START = "com.omni.hub.action.START_FOREGROUND"
+        const val ACTION_START_PROJECTION = "com.omni.hub.action.START_PROJECTION"
         const val ACTION_STOP = "com.omni.hub.action.STOP_FOREGROUND"
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_MESSAGE = "extra_message"
+
+        fun startProjection(context: Context, title: String, message: String) {
+            val intent = Intent(context, OmniForegroundService::class.java).apply {
+                action = ACTION_START_PROJECTION
+                putExtra(EXTRA_TITLE, title)
+                putExtra(EXTRA_MESSAGE, message)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
 
         fun start(context: Context, title: String, message: String) {
             val intent = Intent(context, OmniForegroundService::class.java).apply {
