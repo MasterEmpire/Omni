@@ -97,7 +97,13 @@ interface HostBridge {
 
     // --- Audio & Media Projection ---
     fun requestMediaProjection(onResult: (resultCode: Int, data: Intent?) -> Unit)
-    fun startProjectionService(title: String, message: String)
+    fun startProjectionService(
+        resultCode: Int,
+        data: Intent,
+        title: String,
+        message: String,
+        onReady: (android.media.projection.MediaProjection?) -> Unit
+    )
     fun getMediaProjectionManager(): android.media.projection.MediaProjectionManager
 
     // --- Logging ---
@@ -178,6 +184,22 @@ object ScreenCaptureDispatcher {
             Handler(Looper.getMainLooper()).post {
                 callback(android.app.Activity.RESULT_CANCELED, null)
             }
+        }
+    }
+}
+
+object MediaProjectionDispatcher {
+    @Volatile
+    private var callback: ((android.media.projection.MediaProjection?) -> Unit)? = null
+
+    fun registerCallback(cb: ((android.media.projection.MediaProjection?) -> Unit)?) {
+        callback = cb
+    }
+
+    fun dispatchProjectionReady(projection: android.media.projection.MediaProjection?) {
+        Handler(Looper.getMainLooper()).post {
+            callback?.invoke(projection)
+            callback = null
         }
     }
 }
@@ -658,14 +680,23 @@ class HostBridgeImpl(
         ScreenCaptureDispatcher.requestCapture(onResult)
     }
 
-    override fun startProjectionService(title: String, message: String) {
+    override fun startProjectionService(
+        resultCode: Int,
+        data: Intent,
+        title: String,
+        message: String,
+        onReady: (android.media.projection.MediaProjection?) -> Unit
+    ) {
         acquireWakeLock("OmniProjection")
+        MediaProjectionDispatcher.registerCallback(onReady)
         try {
             val intent = Intent().apply {
                 setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
                 action = "com.omni.hub.action.START_PROJECTION"
                 putExtra("extra_title", title)
                 putExtra("extra_message", message)
+                putExtra("extra_result_code", resultCode)
+                putExtra("extra_result_data", data)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -674,6 +705,7 @@ class HostBridgeImpl(
             }
         } catch (e: Exception) {
             OmniLogger.log("PROJECTION_WARN", "Could not start projection service: ${e.message}")
+            MediaProjectionDispatcher.dispatchProjectionReady(null)
         }
     }
 
