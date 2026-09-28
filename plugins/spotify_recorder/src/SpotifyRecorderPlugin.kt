@@ -82,6 +82,16 @@ data class VaultTrack(
     val coverFile: File? = null
 )
 
+data class ActiveRecordingTake(
+    val trackId: String,
+    val trackTitle: String,
+    val artistName: String,
+    val expectedDurationMs: Long,
+    val tempFile: File,
+    val outputStream: FileOutputStream,
+    val startedAtMs: Long = SystemClock.elapsedRealtime()
+)
+
 data class TranscodeJob(
     val tempPcmFile: File,
     val vaultDir: File,
@@ -103,6 +113,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
     @Volatile private var isRecording = false
     private var recordThread: Thread? = null
 
+    // Immutable Active Take Capsule (Prevents cross-track identity theft)
+    @Volatile private var activeTake: ActiveRecordingTake? = null
+
     // Track Execution State
     @Volatile private var isArmed = false
     @Volatile private var currentTrackId = ""
@@ -113,14 +126,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
     @Volatile private var isPlayingTrack = false
     @Volatile private var lastSyncTimestamp = 0L
     @Volatile private var wasInterrupted = false
-    @Volatile private var tempRecordingFile: File? = null
     @Volatile private var recordedBytesCount = 0L
-
-    // Frozen Track Identity for the active take (Prevents cross-track identity theft)
-    @Volatile private var recordingTrackTitle = ""
-    @Volatile private var recordingArtistName = ""
-    @Volatile private var recordingExpectedDurationMs = 0L
-    @Volatile private var recordingTrackId = ""
 
     // Ad and Intermission State Tracking
     @Volatile private var isAdActive = false
@@ -194,27 +200,34 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         activeBridge?.log(
             "SPOTIFY_METADATA",
-            "Track Metadata Parsed: Title='$newTrack' | Artist='$newArtist' | ID='$newTrackId' | Pos=${newPos}ms | Len=${newLengthMs}ms | Playing=$isPlaying"
+            "📥 [METADATA_IN] Title='$newTrack' | Artist='$newArtist' | ID='$newTrackId' | Pos=${newPos}ms | Len=${newLengthMs}ms | Playing=$isPlaying"
         )
 
-        // 1. If currently recording previous track, finalize & evaluate
-        if (isRecording) {
-            finalizeCurrentRecording()
+        // 1. Ignore blank / intermediate transitional Spotify broadcast glitches
+        if (newTrackId.isEmpty() && (newTrack.isEmpty() || newTrack == "Unknown Track")) {
+            activeBridge?.log("SPOTIFY_RADAR", "ℹ️ Ignored blank transitional intent from Spotify.")
+            return
         }
 
-        // 2. Comprehensive Ad Detection (Catches 15s, 20s, and standard 30s audio spots)
-        val isExplicitAd = newTrackId.contains(":ad:") ||
-            newTrack.contains("Advertisement", ignoreCase = true) ||
-            newTrack.contains("Spotify", ignoreCase = true) ||
-            newArtist.equals("Spotify", ignoreCase = true)
+        // 2. If currently recording previous take, finalize & commit cleanly before moving on
+        if (isRecording) {
+            val previousTakeTitle = activeTake?.trackTitle ?: currentTrackTitle
+            activeBridge?.log("SPOTIFY_RADAR", "🔄 Track advance detected while recording. Finalizing active take: '$previousTakeTitle'")
+            finalizeCurrentRecording(reason = "Advanced to new track '$newTrack'")
+        }
 
-        val isNonTrackUri = newTrackId.isNotEmpty() && !newTrackId.contains(":track:")
-        val isAdDuration = newLengthMs in 1..35000L && (isExplicitAd || newTrackId.isEmpty() || isNonTrackUri)
-        val isIdentifiedAd = isExplicitAd || isAdDuration
+        // 3. Precision Ad Detection (Immune to Spotify Singles, empty transient IDs, and false flags)
+        val isExplicitTrackUri = newTrackId.contains(":track:")
+        val isExplicitAdUri = newTrackId.contains(":ad:")
+        val isAdTitleOrArtist = newTrack.equals("Advertisement", ignoreCase = true) ||
+            newTrack.startsWith("Spotify - ", ignoreCase = true) ||
+            (newArtist.equals("Spotify", ignoreCase = true) && !isExplicitTrackUri)
+
+        val isIdentifiedAd = isExplicitAdUri || (!isExplicitTrackUri && isAdTitleOrArtist)
 
         activeBridge?.log(
             "SPOTIFY_AD_EVAL",
-            "Ad Heuristics -> isExplicitAd=$isExplicitAd, isNonTrackUri=$isNonTrackUri, isAdDuration=$isAdDuration => isIdentifiedAd=$isIdentifiedAd"
+            "🛡️ Ad Evaluation -> isExplicitTrackUri=$isExplicitTrackUri, isExplicitAdUri=$isExplicitAdUri, isAdTitleOrArtist=$isAdTitleOrArtist => isIdentifiedAd=$isIdentifiedAd"
         )
 
         if (isIdentifiedAd) {
@@ -235,7 +248,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
             return
         }
 
-        // Legitimate song track confirmed -> reset ad state
+        // Legitimate song track confirmed -> reset ad state completely
         isAdActive = false
         adTitle = ""
         adArtist = ""
@@ -248,7 +261,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         lastSyncTimestamp = SystemClock.elapsedRealtime()
         trackMetaUpdater?.invoke(newTrack, newArtist, newLengthMs, newPos, isPlaying)
 
-        // 3. Duplicate Vault Check (.m4a and .wav)
+        // 4. Duplicate Vault Check (.m4a and .wav)
         val ctx = activeContext ?: return
         val vaultDir = getVaultDirectory(ctx)
         val baseName = "${sanitizeFilename(newArtist)} - ${sanitizeFilename(newTrack)}"
@@ -256,33 +269,29 @@ class SpotifyRecorderPlugin : PluginEntry() {
         val wavFile = File(vaultDir, "$baseName.wav")
         if ((m4aFile.exists() && m4aFile.length() > 1000) || (wavFile.exists() && wavFile.length() > 44)) {
             stateUpdater?.invoke(EngineState.ALREADY_EXISTS)
-            activeBridge?.log("SPOTIFY_RADAR", "Track already in vault: $baseName")
+            activeBridge?.log("SPOTIFY_RADAR", "Track already in vault: $baseName. Audio recording skipped.")
             return
         }
 
-        // 4. Clean Start Policy (Must begin from the very first second: <= 1200ms)
-        if (newPos > 1200L) {
+        // 5. Clean Start Policy (Allow up to 2500ms to tolerate Android intent propagation latency)
+        if (newPos > 2500L) {
             stateUpdater?.invoke(EngineState.WAITING_CLEAN_START)
-            activeBridge?.log("SPOTIFY_RADAR", "Mid-track start (${newPos}ms). Waiting for next clean 0:00 track.")
+            activeBridge?.log("SPOTIFY_RADAR", "Mid-track start (${newPos}ms > 2500ms). Waiting for next clean 0:00 track.")
             return
         }
 
-        // 5. Conditions met: Launch Audio Stream Capture if armed
+        // 6. Conditions met: Launch Audio Stream Capture if armed
         if (isArmed && isPlaying && mediaProjection != null) {
-            startAudioRecording(vaultDir, newLengthMs)
+            startAudioRecording(vaultDir, newTrackId, newTrack, newArtist, newLengthMs)
         } else if (!isArmed) {
             stateUpdater?.invoke(EngineState.DISARMED)
+            activeBridge?.log("SPOTIFY_RADAR", "Radar disarmed. Track detected but not recording: '$newTrack'")
         }
     }
 
     private fun handlePlaybackStateChanged(intent: Intent) {
         val isPlaying = intent.getBooleanExtra("playing", false)
         val pos = intent.getIntExtra("playbackPosition", -1).toLong()
-
-        val fallbackTrack = intent.getStringExtra("track") ?: intent.getStringExtra("title")
-        val fallbackArtist = intent.getStringExtra("artist")
-        if (!fallbackTrack.isNullOrEmpty()) currentTrackTitle = fallbackTrack
-        if (!fallbackArtist.isNullOrEmpty()) currentArtist = fallbackArtist
 
         isPlayingTrack = isPlaying
         lastSyncTimestamp = SystemClock.elapsedRealtime()
@@ -293,51 +302,48 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         activeBridge?.log(
             "SPOTIFY_PLAYBACK",
-            "Playback State -> playing=$isPlaying, pos=${currentPositionMs}ms, isAdActive=$isAdActive, currentTrack='$currentTrackTitle'"
+            "📻 [PLAYBACK_STATE] playing=$isPlaying, pos=${currentPositionMs}ms, isRecording=$isRecording, isAdActive=$isAdActive"
         )
 
-        if (isAdActive) {
-            // Prevent playback ticks from overwriting active ad/intermission status
-            trackMetaUpdater?.invoke(
-                adTitle.ifEmpty { "Commercial Advertisement" },
-                adArtist.ifEmpty { "Ad Shield Active" },
-                currentLengthMs,
-                currentPositionMs,
-                isPlaying
-            )
-        } else {
+        if (!isAdActive) {
             trackMetaUpdater?.invoke(currentTrackTitle, currentArtist, currentLengthMs, currentPositionMs, isPlaying)
         }
 
         if (isRecording) {
+            val take = activeTake
             val recordedMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
+            val targetLen = take?.expectedDurationMs ?: currentLengthMs
+
             if (!isPlaying) {
                 // Natural end-of-track check: If within 4 seconds of completion, commit rather than discard
-                if (currentLengthMs > 0 && recordedMs >= currentLengthMs - 4000L) {
-                    activeBridge?.log("SPOTIFY_RADAR", "Track paused at natural end (${recordedMs}ms/${currentLengthMs}ms). Finalizing take.")
-                    finalizeCurrentRecording()
+                if (targetLen > 0 && recordedMs >= targetLen - 4000L) {
+                    activeBridge?.log("SPOTIFY_RADAR", "Track paused near completion (${recordedMs}ms/${targetLen}ms). Finalizing take.")
+                    finalizeCurrentRecording(reason = "Paused near natural completion")
                 } else {
-                    activeBridge?.log("SPOTIFY_RADAR", "Playback paused early (${recordedMs}ms of ${currentLengthMs}ms). Discarding.")
-                    abortAndDiscard("Paused early")
+                    activeBridge?.log("SPOTIFY_RADAR", "Playback paused early (${recordedMs}ms of ${targetLen}ms). Discarding take.")
+                    abortAndDiscard("Playback paused early by user")
                 }
-            } else if (pos >= 0 && currentLengthMs > 0) {
+            } else if (pos >= 0 && targetLen > 0) {
                 // If playhead resets to 0:00 while we captured the full song, that is the natural track hand-off!
-                if (pos <= 2000L && recordedMs >= currentLengthMs - 4000L) {
+                if (pos <= 2000L && recordedMs >= targetLen - 4000L) {
                     activeBridge?.log("SPOTIFY_RADAR", "Playhead reset to 0:00 after full play (${recordedMs}ms). Finalizing take.")
-                    finalizeCurrentRecording()
+                    finalizeCurrentRecording(reason = "Playhead reset to 0:00 after full play")
                 }
             }
         }
     }
 
-    private fun startAudioRecording(vaultDir: File, expectedDurationMs: Long) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || mediaProjection == null) return
-
-        // Freeze active track identity for this recording session
-        recordingTrackTitle = currentTrackTitle
-        recordingArtistName = currentArtist
-        recordingExpectedDurationMs = expectedDurationMs
-        recordingTrackId = currentTrackId
+    private fun startAudioRecording(
+        vaultDir: File,
+        trackId: String,
+        trackTitle: String,
+        artistName: String,
+        expectedDurationMs: Long
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || mediaProjection == null) {
+            activeBridge?.log("SPOTIFY_REC_ERR", "Cannot start recording: Android Q or MediaProjection missing.")
+            return
+        }
 
         try {
             val minBuf = AudioRecord.getMinBufferSize(44100, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
@@ -361,15 +367,29 @@ class SpotifyRecorderPlugin : PluginEntry() {
             val fos = FileOutputStream(tempFile)
             fos.write(ByteArray(44)) // 44-byte dummy WAV header placeholder
 
-            audioRecord = record
-            tempRecordingFile = tempFile
-            recordedBytesCount = 0L
-            wasInterrupted = false
-            isRecording = true
+            val take = ActiveRecordingTake(
+                trackId = trackId,
+                trackTitle = trackTitle,
+                artistName = artistName,
+                expectedDurationMs = expectedDurationMs,
+                tempFile = tempFile,
+                outputStream = fos
+            )
+
+            synchronized(recordLock) {
+                audioRecord = record
+                activeTake = take
+                recordedBytesCount = 0L
+                wasInterrupted = false
+                isRecording = true
+            }
 
             record.startRecording()
             stateUpdater?.invoke(EngineState.RECORDING)
-            activeBridge?.log("SPOTIFY_RECORDER", "AudioRecord armed. Capturing stream to ${tempFile.name}")
+            activeBridge?.log(
+                "SPOTIFY_RECORDER",
+                "🎙️ [RECORD_START] Frozen Take Identity: Title='$trackTitle' | Artist='$artistName' | ID='$trackId' | ExpectedLen=${expectedDurationMs}ms | Temp=${tempFile.name}"
+            )
 
             recordThread = Thread {
                 val buffer = ByteArray(minBuf)
@@ -383,21 +403,18 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             // Auto-Commit Guard: Immediate handoff upon reaching song duration
                             val recMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
                             if (expectedDurationMs > 0 && recMs >= expectedDurationMs - 200L) {
-                                activeBridge?.log("SPOTIFY_RECORDER", "🎯 Track complete (${recMs}ms >= ${expectedDurationMs}ms). Immediate background handoff dispatched!")
-                                finalizeCurrentRecording()
-                                isAdActive = true
-                                adTitle = "Commercial / Intermission"
-                                adArtist = "Audio Capture Muted (Waiting for next clean 0:00 song)"
-                                currentLengthMs = 0L
-                                currentPositionMs = 0L
-                                stateUpdater?.invoke(EngineState.SKIPPING_AD)
-                                trackMetaUpdater?.invoke(adTitle, adArtist, 0L, 0L, false)
+                                activeBridge?.log(
+                                    "SPOTIFY_RECORDER",
+                                    "🎯 [AUTO-COMMIT] Track '$trackTitle' reached target duration (${recMs}ms >= ${expectedDurationMs - 200L}ms). Finalizing cleanly."
+                                )
+                                finalizeCurrentRecording(reason = "Reached expected duration (${recMs}ms/${expectedDurationMs}ms)")
+                                stateUpdater?.invoke(EngineState.ARMED_LISTENING)
                                 break
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    activeBridge?.log("SPOTIFY_REC_ERR", "Write buffer exception: ${e.message}")
+                    activeBridge?.log("SPOTIFY_REC_ERR", "Write buffer exception on '$trackTitle': ${e.message}")
                 } finally {
                     try {
                         fos.flush()
@@ -410,18 +427,21 @@ class SpotifyRecorderPlugin : PluginEntry() {
             }
 
         } catch (e: Exception) {
-            activeBridge?.log("SPOTIFY_REC_ERR", "Failed starting AudioRecord: ${e.message}")
+            activeBridge?.log("SPOTIFY_REC_ERR", "Failed starting AudioRecord for '$trackTitle': ${e.message}")
             isRecording = false
             stateUpdater?.invoke(EngineState.ARMED_LISTENING)
         }
     }
 
-    private fun finalizeCurrentRecording() {
+    private fun finalizeCurrentRecording(reason: String = "Normal completion") {
         var jobToTranscode: TranscodeJob? = null
 
         synchronized(recordLock) {
             if (!isRecording) return
             isRecording = false
+
+            val take = activeTake
+            activeTake = null
 
             try {
                 audioRecord?.stop()
@@ -430,34 +450,40 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 recordThread?.join(150)
             } catch (_: Exception) {}
 
-            val temp = tempRecordingFile
-            tempRecordingFile = null
             val recordedBytes = recordedBytesCount
             recordedBytesCount = 0L
 
-            val totalPcmBytes = if (temp != null) (temp.length() - 44L).coerceAtLeast(0L) else 0L
+            if (take == null) {
+                activeBridge?.log("SPOTIFY_RECORDER", "⚠️ finalizeCurrentRecording called but activeTake was null.")
+                return
+            }
+
+            val temp = take.tempFile
+            val totalPcmBytes = (temp.length() - 44L).coerceAtLeast(0L)
             val recordedDurationMs = (totalPcmBytes * 1000L) / (44100 * 2 * 2)
-            val targetLength = if (recordingExpectedDurationMs > 0) recordingExpectedDurationMs else currentLengthMs
+            val targetLength = take.expectedDurationMs
 
             val isDurationComplete = targetLength > 0 && (
                 abs(recordedDurationMs - targetLength) <= 5000L ||
                 recordedDurationMs >= targetLength - 4000L
             )
 
-            if (temp != null && !wasInterrupted && isDurationComplete) {
+            activeBridge?.log(
+                "SPOTIFY_RECORDER",
+                "🏁 [FINALIZE TAKE] Reason: $reason | Track: '${take.trackTitle}' by '${take.artistName}' (ID: ${take.trackId}) | Recorded: ${recordedDurationMs}ms | Target: ${targetLength}ms | isDurationComplete=$isDurationComplete | wasInterrupted=$wasInterrupted"
+            )
+
+            if (!wasInterrupted && isDurationComplete) {
                 val ctx = activeContext
                 val vaultDir = if (ctx != null) getVaultDirectory(ctx) else null
-                val saveArtist = recordingArtistName.ifEmpty { currentArtist }
-                val saveTitle = recordingTrackTitle.ifEmpty { currentTrackTitle }
-                val saveTrackId = recordingTrackId.ifEmpty { currentTrackId }
 
                 if (vaultDir != null) {
                     jobToTranscode = TranscodeJob(
                         tempPcmFile = temp,
                         vaultDir = vaultDir,
-                        artist = saveArtist,
-                        title = saveTitle,
-                        trackId = saveTrackId,
+                        artist = take.artistName,
+                        title = take.trackTitle,
+                        trackId = take.trackId,
                         recordedDurationMs = recordedDurationMs,
                         targetLengthMs = targetLength
                     )
@@ -465,19 +491,22 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     temp.delete()
                 }
             } else {
-                temp?.delete()
-                if (temp != null) {
-                    countDiscarded++
-                    statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-                    activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${targetLength}ms, Interrupted: $wasInterrupted)")
-                }
+                temp.delete()
+                countDiscarded++
+                statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+                activeBridge?.log(
+                    "SPOTIFY_RECORDER",
+                    "❌ Discarded take for '${take.trackTitle}' (Recorded: ${recordedDurationMs}ms vs Expected: ${targetLength}ms, Interrupted: $wasInterrupted)"
+                )
             }
-            Unit
         }
 
         // Asynchronous non-blocking dispatch outside of lock (< 2ms total execution)
         jobToTranscode?.let { job ->
-            activeBridge?.log("SPOTIFY_VAULT", "⚡ Instant handoff of [${job.title}] to background AAC transcode queue.")
+            activeBridge?.log(
+                "SPOTIFY_VAULT",
+                "⚡ [QUEUE TRANSCODE] Instant handoff of '${job.title}' by '${job.artist}' (ID: ${job.trackId}) to background transcode queue."
+            )
             dispatchBackgroundTranscode(job)
         }
     }
@@ -489,17 +518,25 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 val cleanTitle = sanitizeFilename(job.title)
                 val finalM4a = File(job.vaultDir, "$cleanArtist - $cleanTitle.m4a")
 
+                activeBridge?.log(
+                    "SPOTIFY_VAULT",
+                    "⚙️ [TRANSCODE START] Processing '${job.title}' by '${job.artist}' | TrackID: ${job.trackId} | Destination: ${finalM4a.name}"
+                )
+
                 // 1. Fetch High-Res Album Art from Spotify oEmbed
                 val artworkBytes = fetchArtworkBytes(job.trackId)
                 if (artworkBytes != null && artworkBytes.isNotEmpty()) {
                     try {
                         val coverFile = File(job.vaultDir, "$cleanArtist - $cleanTitle.jpg")
                         coverFile.writeBytes(artworkBytes)
-                        activeBridge?.log("SPOTIFY_ART", "🖼️ Saved cover art file: ${coverFile.name} (${artworkBytes.size / 1024} KB)")
-                    } catch (_: Exception) {}
+                        activeBridge?.log("SPOTIFY_ART", "🖼️ Saved cover art for '${job.title}': ${coverFile.name} (${artworkBytes.size / 1024} KB)")
+                    } catch (e: Exception) {
+                        activeBridge?.log("SPOTIFY_ART_ERR", "Failed saving cover file for '${job.title}': ${e.message}")
+                    }
+                } else {
+                    activeBridge?.log("SPOTIFY_ART", "ℹ️ No cover art retrieved for Track ID: '${job.trackId}'")
                 }
 
-                activeBridge?.log("SPOTIFY_VAULT", "⚙️ Background transcoding [${finalM4a.name}] via MediaCodec...")
                 val aacSuccess = encodePcmToAac(job.tempPcmFile, finalM4a, 44100, 2, 192000)
                 val finalFile: File
                 val savedOk: Boolean
@@ -508,10 +545,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     job.tempPcmFile.delete()
                     savedOk = true
                     finalFile = finalM4a
-                    // 2. Inject MP4 metadata & covr atom into M4A container
+                    // 2. Inject MP4 metadata & covr atom into M4A container with frozen job identity
                     injectMp4Metadata(finalM4a, job.title, job.artist, artworkBytes)
                 } else {
-                    activeBridge?.log("SPOTIFY_WARN", "AAC hardware encoder fallback. Preserving WAV...")
+                    activeBridge?.log("SPOTIFY_WARN", "AAC hardware encoder fallback on '${job.title}'. Preserving WAV...")
                     writeWavHeader(job.tempPcmFile, 44100, 2, 16)
                     val finalWav = File(job.vaultDir, "$cleanArtist - $cleanTitle.wav")
                     savedOk = if (job.tempPcmFile.renameTo(finalWav)) true else {
@@ -527,7 +564,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     statsUpdater?.invoke(countSaved, countDiscarded, countAds)
                     vaultRefreshTrigger?.invoke()
                     val mbSize = String.format(Locale.US, "%.1f", finalFile.length() / (1024.0 * 1024.0))
-                    activeBridge?.log("SPOTIFY_VAULT", "✅ [BACKGROUND COMPLETE] ${finalFile.name} (${mbSize} MB, Duration: ${job.recordedDurationMs}ms)")
+                    activeBridge?.log(
+                        "SPOTIFY_VAULT",
+                        "✅ [TRANSCODE SUCCESS] Saved '${finalFile.name}' (${mbSize} MB, Duration: ${job.recordedDurationMs}ms). Verified Artist='${job.artist}', Title='${job.title}'"
+                    )
                     activeBridge?.showToast("Saved: ${finalFile.name} (${mbSize} MB)")
                 } else {
                     activeBridge?.log("SPOTIFY_ERR", "Failed to commit ${finalFile.name} to storage.")
@@ -773,20 +813,22 @@ class SpotifyRecorderPlugin : PluginEntry() {
         wasInterrupted = true
         isRecording = false
 
+        val take = activeTake
+        activeTake = null
+
         try {
             audioRecord?.stop()
             audioRecord?.release()
             audioRecord = null
         } catch (_: Exception) {}
 
-        tempRecordingFile?.delete()
-        tempRecordingFile = null
+        take?.tempFile?.delete()
         recordedBytesCount = 0L
 
         countDiscarded++
         statsUpdater?.invoke(countSaved, countDiscarded, countAds)
         stateUpdater?.invoke(EngineState.INTERRUPTED_DISCARDED)
-        activeBridge?.log("SPOTIFY_RECORDER", "Discard triggered: $reason")
+        activeBridge?.log("SPOTIFY_RECORDER", "⚠️ Discard triggered for '${take?.trackTitle ?: "Unknown"}': $reason")
     }
 
     private fun writeWavHeader(file: File, sampleRate: Int = 44100, channels: Short = 2, bitsPerSample: Short = 16) {
