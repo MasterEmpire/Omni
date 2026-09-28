@@ -11,7 +11,12 @@ import kotlinx.coroutines.delay
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.media.projection.MediaProjection
+import java.io.FileInputStream
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -94,6 +99,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
     @Volatile private var wasInterrupted = false
     @Volatile private var tempRecordingFile: File? = null
     @Volatile private var recordedBytesCount = 0L
+
+    // Frozen Track Identity for the active take (Prevents cross-track identity theft)
+    @Volatile private var recordingTrackTitle = ""
+    @Volatile private var recordingArtistName = ""
+    @Volatile private var recordingExpectedDurationMs = 0L
 
     // UI Reactive State Bridges
     private var stateUpdater: ((EngineState) -> Unit)? = null
@@ -184,14 +194,15 @@ class SpotifyRecorderPlugin : PluginEntry() {
             return
         }
 
-        // 3. Duplicate Vault Check
+        // 3. Duplicate Vault Check (.m4a and .wav)
         val ctx = activeContext ?: return
         val vaultDir = getVaultDirectory(ctx)
-        val targetName = "${sanitizeFilename(newArtist)} - ${sanitizeFilename(newTrack)}.wav"
-        val existingFile = File(vaultDir, targetName)
-        if (existingFile.exists() && existingFile.length() > 44) {
+        val baseName = "${sanitizeFilename(newArtist)} - ${sanitizeFilename(newTrack)}"
+        val m4aFile = File(vaultDir, "$baseName.m4a")
+        val wavFile = File(vaultDir, "$baseName.wav")
+        if ((m4aFile.exists() && m4aFile.length() > 1000) || (wavFile.exists() && wavFile.length() > 44)) {
             stateUpdater?.invoke(EngineState.ALREADY_EXISTS)
-            activeBridge?.log("SPOTIFY_RADAR", "Track already in vault: $targetName")
+            activeBridge?.log("SPOTIFY_RADAR", "Track already in vault: $baseName")
             return
         }
 
@@ -251,6 +262,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
     private fun startAudioRecording(vaultDir: File, targetFilename: String, expectedDurationMs: Long) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || mediaProjection == null) return
+
+        // Freeze active track identity for this recording session
+        recordingTrackTitle = currentTrackTitle
+        recordingArtistName = currentArtist
+        recordingExpectedDurationMs = expectedDurationMs
 
         try {
             val minBuf = AudioRecord.getMinBufferSize(44100, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
@@ -340,52 +356,151 @@ class SpotifyRecorderPlugin : PluginEntry() {
             val temp = tempRecordingFile ?: return
             val totalPcmBytes = (temp.length() - 44L).coerceAtLeast(0L)
             val recordedDurationMs = (totalPcmBytes * 1000L) / (44100 * 2 * 2)
+            val targetLength = if (recordingExpectedDurationMs > 0) recordingExpectedDurationMs else currentLengthMs
 
             // Tolerance window: accommodates Spotify's 1-4s lead-out variance
-            val isDurationComplete = currentLengthMs > 0 && (
-                abs(recordedDurationMs - currentLengthMs) <= 5000L ||
-                recordedDurationMs >= currentLengthMs - 4000L
+            val isDurationComplete = targetLength > 0 && (
+                abs(recordedDurationMs - targetLength) <= 5000L ||
+                recordedDurationMs >= targetLength - 4000L
             )
 
             if (!wasInterrupted && isDurationComplete) {
-                writeWavHeader(temp, 44100, 2, 16)
                 val ctx = activeContext ?: return
                 val vaultDir = getVaultDirectory(ctx)
-                val finalTarget = File(vaultDir, "${sanitizeFilename(currentArtist)} - ${sanitizeFilename(currentTrackTitle)}.wav")
+                val saveArtist = recordingArtistName.ifEmpty { currentArtist }
+                val saveTitle = recordingTrackTitle.ifEmpty { currentTrackTitle }
+                val cleanArtist = sanitizeFilename(saveArtist)
+                val cleanTitle = sanitizeFilename(saveTitle)
 
-                activeBridge?.log("SPOTIFY_VAULT", "Writing WAV header & committing: ${finalTarget.absolutePath} (${temp.length()} bytes)...")
+                val finalM4a = File(vaultDir, "$cleanArtist - $cleanTitle.m4a")
+                activeBridge?.log("SPOTIFY_VAULT", "⚡ Compressing & encoding to AAC (.m4a): ${finalM4a.name}...")
 
-                val savedOk = if (temp.renameTo(finalTarget)) {
-                    true
+                val aacSuccess = encodePcmToAac(temp, finalM4a, 44100, 2, 192000)
+                val savedOk: Boolean
+                val finalFile: File
+
+                if (aacSuccess && finalM4a.exists() && finalM4a.length() > 1000) {
+                    temp.delete()
+                    savedOk = true
+                    finalFile = finalM4a
                 } else {
-                    try {
-                        temp.copyTo(finalTarget, overwrite = true)
-                        temp.delete()
-                        true
-                    } catch (e: Exception) {
-                        activeBridge?.log("SPOTIFY_ERR", "File copy fallback failed: ${e.message}")
-                        false
+                    activeBridge?.log("SPOTIFY_WARN", "AAC encoder fallback triggered. Preserving WAV...")
+                    writeWavHeader(temp, 44100, 2, 16)
+                    val finalWav = File(vaultDir, "$cleanArtist - $cleanTitle.wav")
+                    savedOk = if (temp.renameTo(finalWav)) true else {
+                        try { temp.copyTo(finalWav, overwrite = true); temp.delete(); true } catch (_: Exception) { false }
                     }
+                    finalFile = finalWav
                 }
 
                 if (savedOk) {
                     countSaved++
                     statsUpdater?.invoke(countSaved, countDiscarded, countAds)
                     vaultRefreshTrigger?.invoke()
-                    activeBridge?.log("SPOTIFY_VAULT", "✅ [SAVED TO VAULT] ${finalTarget.name} (${finalTarget.length() / 1024} KB, Recorded: ${recordedDurationMs}ms / Expected: ${currentLengthMs}ms)")
-                    activeBridge?.showToast("Saved: ${finalTarget.name}")
+                    val mbSize = String.format(Locale.US, "%.1f", finalFile.length() / (1024.0 * 1024.0))
+                    activeBridge?.log("SPOTIFY_VAULT", "✅ [SAVED TO VAULT] ${finalFile.name} (${mbSize} MB, Recorded: ${recordedDurationMs}ms / Expected: ${targetLength}ms)")
+                    activeBridge?.showToast("Saved: ${finalFile.name} (${mbSize} MB)")
                 } else {
-                    activeBridge?.log("SPOTIFY_ERR", "Failed to commit ${finalTarget.name} to storage.")
+                    activeBridge?.log("SPOTIFY_ERR", "Failed to commit ${finalFile.name} to storage.")
                 }
             } else {
                 temp.delete()
                 countDiscarded++
                 statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-                activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${currentLengthMs}ms, Interrupted: $wasInterrupted)")
+                activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${targetLength}ms, Interrupted: $wasInterrupted)")
             }
 
             tempRecordingFile = null
             recordedBytesCount = 0L
+        }
+    }
+
+    private fun encodePcmToAac(
+        pcmFile: File,
+        outputM4aFile: File,
+        sampleRate: Int = 44100,
+        channels: Int = 2,
+        bitRate: Int = 192000
+    ): Boolean {
+        var codec: MediaCodec? = null
+        var muxer: MediaMuxer? = null
+        try {
+            val mime = "audio/mp4a-latm"
+            val format = MediaFormat.createAudioFormat(mime, sampleRate, channels).apply {
+                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+            }
+
+            codec = MediaCodec.createEncoderByType(mime)
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            codec.start()
+
+            muxer = MediaMuxer(outputM4aFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            var trackIndex = -1
+            var muxerStarted = false
+
+            FileInputStream(pcmFile).use { fis ->
+                if (pcmFile.length() > 44) {
+                    fis.skip(44)
+                }
+
+                val buffer = ByteArray(4096)
+                val bufferInfo = MediaCodec.BufferInfo()
+                var isEos = false
+                var presentationTimeUs = 0L
+
+                while (true) {
+                    if (!isEos) {
+                        val inIndex = codec.dequeueInputBuffer(5000)
+                        if (inIndex >= 0) {
+                            val inputBuffer = codec.getInputBuffer(inIndex)
+                            inputBuffer?.clear()
+                            val bytesRead = fis.read(buffer)
+                            if (bytesRead <= 0) {
+                                codec.queueInputBuffer(inIndex, 0, 0, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                isEos = true
+                            } else {
+                                inputBuffer?.put(buffer, 0, bytesRead)
+                                codec.queueInputBuffer(inIndex, 0, bytesRead, presentationTimeUs, 0)
+                                presentationTimeUs += (bytesRead * 1_000_000L) / (sampleRate * channels * 2)
+                            }
+                        }
+                    }
+
+                    val outIndex = codec.dequeueOutputBuffer(bufferInfo, 5000)
+                    if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        if (!muxerStarted) {
+                            trackIndex = muxer.addTrack(codec.outputFormat)
+                            muxer.start()
+                            muxerStarted = true
+                        }
+                    } else if (outIndex >= 0) {
+                        val encodedData = codec.getOutputBuffer(outIndex)
+                        if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
+                            encodedData.position(bufferInfo.offset)
+                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                            muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
+                        }
+                        codec.releaseOutputBuffer(outIndex, false)
+                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                            break
+                        }
+                    } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER && isEos) {
+                        break
+                    }
+                }
+            }
+
+            return true
+        } catch (e: Exception) {
+            activeBridge?.log("SPOTIFY_ERR", "AAC Transcode error: ${e.message}")
+            return false
+        } finally {
+            try { codec?.stop() } catch (_: Exception) {}
+            try { codec?.release() } catch (_: Exception) {}
+            try { muxer?.stop() } catch (_: Exception) {}
+            try { muxer?.release() } catch (_: Exception) {}
         }
     }
 
@@ -471,7 +586,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         fun reloadVaultList() {
             val dir = getVaultDirectory(context)
-            val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".wav") }
+            val files = dir.listFiles()?.filter { it.isFile && (it.name.endsWith(".m4a") || it.name.endsWith(".wav")) }
                 ?.map { VaultTrack(it, it.name, it.length(), it.lastModified()) }
                 ?.sortedByDescending { it.modifiedAt } ?: emptyList()
             vaultFiles = files
@@ -801,9 +916,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(track.name.removeSuffix(".wav"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
+                                    Text(track.name.removeSuffix(".m4a").removeSuffix(".wav"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("${track.sizeBytes / (1024 * 1024)} MB", color = Color(0xFF58A6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        val mbStr = String.format(Locale.US, "%.1f MB", track.sizeBytes / (1024.0 * 1024.0))
+                                        Text(mbStr, color = Color(0xFF58A6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                         Spacer(Modifier.width(8.dp))
                                         Text(SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(track.modifiedAt)), color = Color(0xFF8B949E), fontSize = 10.sp)
                                     }
