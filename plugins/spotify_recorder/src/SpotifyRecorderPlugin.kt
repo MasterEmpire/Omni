@@ -7,7 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.os.SystemClock
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
@@ -76,6 +76,15 @@ data class VaultTrack(
     val modifiedAt: Long
 )
 
+data class TranscodeJob(
+    val tempPcmFile: File,
+    val vaultDir: File,
+    val artist: String,
+    val title: String,
+    val recordedDurationMs: Long,
+    val targetLengthMs: Long
+)
+
 class SpotifyRecorderPlugin : PluginEntry() {
 
     private var activeContext: Context? = null
@@ -120,6 +129,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
     private var countDiscarded = 0
     private var countAds = 0
     private val recordLock = Any()
+    private val transcodeScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val transcodeDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     private val spotifyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -360,11 +371,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             fos.write(buffer, 0, read)
                             recordedBytesCount += read
 
-                            // Auto-Commit Guard: Once the full song has played (+1.2s buffer),
-                            // finalize immediately to prevent post-song commercial ads from corrupting the take!
+                            // Auto-Commit Guard: Immediate handoff upon reaching song duration
                             val recMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
-                            if (expectedDurationMs > 0 && recMs >= expectedDurationMs + 1200L) {
-                                activeBridge?.log("SPOTIFY_RECORDER", "🎯 Track duration reached (${recMs}ms >= ${expectedDurationMs}ms). Auto-committing take before ad starts!")
+                            if (expectedDurationMs > 0 && recMs >= expectedDurationMs - 200L) {
+                                activeBridge?.log("SPOTIFY_RECORDER", "🎯 Track complete (${recMs}ms >= ${expectedDurationMs}ms). Immediate background handoff dispatched!")
                                 finalizeCurrentRecording()
                                 isAdActive = true
                                 adTitle = "Commercial / Intermission"
@@ -398,6 +408,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
     }
 
     private fun finalizeCurrentRecording() {
+        var jobToTranscode: TranscodeJob? = null
+
         synchronized(recordLock) {
             if (!isRecording) return
             isRecording = false
@@ -406,68 +418,100 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 audioRecord?.stop()
                 audioRecord?.release()
                 audioRecord = null
-                recordThread?.join(500)
+                recordThread?.join(150)
             } catch (_: Exception) {}
 
-            val temp = tempRecordingFile ?: return
-            val totalPcmBytes = (temp.length() - 44L).coerceAtLeast(0L)
+            val temp = tempRecordingFile
+            tempRecordingFile = null
+            val recordedBytes = recordedBytesCount
+            recordedBytesCount = 0L
+
+            val totalPcmBytes = if (temp != null) (temp.length() - 44L).coerceAtLeast(0L) else 0L
             val recordedDurationMs = (totalPcmBytes * 1000L) / (44100 * 2 * 2)
             val targetLength = if (recordingExpectedDurationMs > 0) recordingExpectedDurationMs else currentLengthMs
 
-            // Tolerance window: accommodates Spotify's 1-4s lead-out variance
             val isDurationComplete = targetLength > 0 && (
                 abs(recordedDurationMs - targetLength) <= 5000L ||
                 recordedDurationMs >= targetLength - 4000L
             )
 
-            if (!wasInterrupted && isDurationComplete) {
-                val ctx = activeContext ?: return
-                val vaultDir = getVaultDirectory(ctx)
+            if (temp != null && !wasInterrupted && isDurationComplete) {
+                val ctx = activeContext
+                val vaultDir = if (ctx != null) getVaultDirectory(ctx) else null
                 val saveArtist = recordingArtistName.ifEmpty { currentArtist }
                 val saveTitle = recordingTrackTitle.ifEmpty { currentTrackTitle }
-                val cleanArtist = sanitizeFilename(saveArtist)
-                val cleanTitle = sanitizeFilename(saveTitle)
 
-                val finalM4a = File(vaultDir, "$cleanArtist - $cleanTitle.m4a")
-                activeBridge?.log("SPOTIFY_VAULT", "⚡ Compressing & encoding to AAC (.m4a): ${finalM4a.name}...")
+                if (vaultDir != null) {
+                    jobToTranscode = TranscodeJob(
+                        tempPcmFile = temp,
+                        vaultDir = vaultDir,
+                        artist = saveArtist,
+                        title = saveTitle,
+                        recordedDurationMs = recordedDurationMs,
+                        targetLengthMs = targetLength
+                    )
+                } else {
+                    temp.delete()
+                }
+            } else {
+                temp?.delete()
+                if (temp != null) {
+                    countDiscarded++
+                    statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+                    activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${targetLength}ms, Interrupted: $wasInterrupted)")
+                }
+            }
+        }
 
-                val aacSuccess = encodePcmToAac(temp, finalM4a, 44100, 2, 192000)
-                val savedOk: Boolean
+        // Asynchronous non-blocking dispatch outside of lock (< 2ms total execution)
+        jobToTranscode?.let { job ->
+            activeBridge?.log("SPOTIFY_VAULT", "⚡ Instant handoff of [${job.title}] to background AAC transcode queue.")
+            dispatchBackgroundTranscode(job)
+        }
+    }
+
+    private fun dispatchBackgroundTranscode(job: TranscodeJob) {
+        transcodeScope.launch(transcodeDispatcher) {
+            try {
+                val cleanArtist = sanitizeFilename(job.artist)
+                val cleanTitle = sanitizeFilename(job.title)
+                val finalM4a = File(job.vaultDir, "$cleanArtist - $cleanTitle.m4a")
+
+                activeBridge?.log("SPOTIFY_VAULT", "⚙️ Background transcoding [${finalM4a.name}] via MediaCodec...")
+                val aacSuccess = encodePcmToAac(job.tempPcmFile, finalM4a, 44100, 2, 192000)
                 val finalFile: File
+                val savedOk: Boolean
 
                 if (aacSuccess && finalM4a.exists() && finalM4a.length() > 1000) {
-                    temp.delete()
+                    job.tempPcmFile.delete()
                     savedOk = true
                     finalFile = finalM4a
                 } else {
-                    activeBridge?.log("SPOTIFY_WARN", "AAC encoder fallback triggered. Preserving WAV...")
-                    writeWavHeader(temp, 44100, 2, 16)
-                    val finalWav = File(vaultDir, "$cleanArtist - $cleanTitle.wav")
-                    savedOk = if (temp.renameTo(finalWav)) true else {
-                        try { temp.copyTo(finalWav, overwrite = true); temp.delete(); true } catch (_: Exception) { false }
+                    activeBridge?.log("SPOTIFY_WARN", "AAC hardware encoder fallback. Preserving WAV...")
+                    writeWavHeader(job.tempPcmFile, 44100, 2, 16)
+                    val finalWav = File(job.vaultDir, "$cleanArtist - $cleanTitle.wav")
+                    savedOk = if (job.tempPcmFile.renameTo(finalWav)) true else {
+                        try { job.tempPcmFile.copyTo(finalWav, overwrite = true); job.tempPcmFile.delete(); true } catch (_: Exception) { false }
                     }
                     finalFile = finalWav
                 }
 
                 if (savedOk) {
-                    countSaved++
+                    synchronized(recordLock) {
+                        countSaved++
+                    }
                     statsUpdater?.invoke(countSaved, countDiscarded, countAds)
                     vaultRefreshTrigger?.invoke()
                     val mbSize = String.format(Locale.US, "%.1f", finalFile.length() / (1024.0 * 1024.0))
-                    activeBridge?.log("SPOTIFY_VAULT", "✅ [SAVED TO VAULT] ${finalFile.name} (${mbSize} MB, Recorded: ${recordedDurationMs}ms / Expected: ${targetLength}ms)")
+                    activeBridge?.log("SPOTIFY_VAULT", "✅ [BACKGROUND COMPLETE] ${finalFile.name} (${mbSize} MB, Duration: ${job.recordedDurationMs}ms)")
                     activeBridge?.showToast("Saved: ${finalFile.name} (${mbSize} MB)")
                 } else {
                     activeBridge?.log("SPOTIFY_ERR", "Failed to commit ${finalFile.name} to storage.")
                 }
-            } else {
-                temp.delete()
-                countDiscarded++
-                statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-                activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${targetLength}ms, Interrupted: $wasInterrupted)")
+            } catch (e: Exception) {
+                activeBridge?.log("SPOTIFY_ERR", "Background transcode error on [${job.title}]: ${e.message}")
+                job.tempPcmFile.delete()
             }
-
-            tempRecordingFile = null
-            recordedBytesCount = 0L
         }
     }
 
@@ -1035,6 +1079,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         }
         mediaProjection?.stop()
         mediaProjection = null
+        try { transcodeScope.cancel() } catch (_: Exception) {}
         activeBridge?.stopForegroundTask()
     }
 }
