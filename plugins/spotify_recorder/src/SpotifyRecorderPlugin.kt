@@ -104,11 +104,18 @@ class SpotifyRecorderPlugin : PluginEntry() {
     private var countSaved = 0
     private var countDiscarded = 0
     private var countAds = 0
+    private val recordLock = Any()
 
     private val spotifyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action ?: return
-            activeBridge?.log("SPOTIFY_RX", "📥 Broadcast [${action}]")
+            val extrasSummary = intent.extras?.let { bundle ->
+                bundle.keySet().joinToString(", ") { key ->
+                    "$key=${bundle.get(key)}"
+                }
+            } ?: "no extras"
+            activeBridge?.log("SPOTIFY_RX", "📥 [$action] -> $extrasSummary")
+
             when (action) {
                 "com.spotify.music.metadatachanged",
                 "com.spotify.mobile.android.metadatachanged" -> handleMetadataChanged(intent)
@@ -226,16 +233,17 @@ class SpotifyRecorderPlugin : PluginEntry() {
             if (!isPlaying) {
                 // Natural end-of-track check: If within 4 seconds of completion, commit rather than discard
                 if (currentLengthMs > 0 && recordedMs >= currentLengthMs - 4000L) {
-                    activeBridge?.log("SPOTIFY_RADAR", "Track reached natural stream end (${recordedMs}ms/${currentLengthMs}ms). Finalizing take.")
+                    activeBridge?.log("SPOTIFY_RADAR", "Track paused at natural end (${recordedMs}ms/${currentLengthMs}ms). Finalizing take.")
                     finalizeCurrentRecording()
                 } else {
                     activeBridge?.log("SPOTIFY_RADAR", "Playback paused early (${recordedMs}ms of ${currentLengthMs}ms). Discarding.")
                     abortAndDiscard("Paused early")
                 }
             } else if (pos >= 0 && currentLengthMs > 0) {
-                if (abs(pos - recordedMs) > 5000L) {
-                    activeBridge?.log("SPOTIFY_RADAR", "Timeline seek scrub detected! Discarding.")
-                    abortAndDiscard("Seek detected")
+                // If playhead resets to 0:00 while we captured the full song, that is the natural track hand-off!
+                if (pos <= 2000L && recordedMs >= currentLengthMs - 4000L) {
+                    activeBridge?.log("SPOTIFY_RADAR", "Playhead reset to 0:00 after full play (${recordedMs}ms). Finalizing take.")
+                    finalizeCurrentRecording()
                 }
             }
         }
@@ -284,6 +292,17 @@ class SpotifyRecorderPlugin : PluginEntry() {
                         if (read > 0) {
                             fos.write(buffer, 0, read)
                             recordedBytesCount += read
+
+                            // Auto-Commit Guard: Once the full song has played (+1.2s buffer),
+                            // finalize immediately to prevent post-song commercial ads from corrupting the take!
+                            val recMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
+                            if (expectedDurationMs > 0 && recMs >= expectedDurationMs + 1200L) {
+                                activeBridge?.log("SPOTIFY_RECORDER", "🎯 Track duration reached (${recMs}ms >= ${expectedDurationMs}ms). Auto-committing take before ad starts!")
+                                finalizeCurrentRecording()
+                                stateUpdater?.invoke(EngineState.SKIPPING_AD)
+                                trackMetaUpdater?.invoke("Commercial / Intermission", "Audio Capture Muted (Waiting for next song)", 0L, 0L, false)
+                                break
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -307,65 +326,67 @@ class SpotifyRecorderPlugin : PluginEntry() {
     }
 
     private fun finalizeCurrentRecording() {
-        if (!isRecording) return
-        isRecording = false
+        synchronized(recordLock) {
+            if (!isRecording) return
+            isRecording = false
 
-        try {
-            audioRecord?.stop()
-            audioRecord?.release()
-            audioRecord = null
-            recordThread?.join(500)
-        } catch (_: Exception) {}
+            try {
+                audioRecord?.stop()
+                audioRecord?.release()
+                audioRecord = null
+                recordThread?.join(500)
+            } catch (_: Exception) {}
 
-        val temp = tempRecordingFile ?: return
-        val totalPcmBytes = (temp.length() - 44L).coerceAtLeast(0L)
-        val recordedDurationMs = (totalPcmBytes * 1000L) / (44100 * 2 * 2)
+            val temp = tempRecordingFile ?: return
+            val totalPcmBytes = (temp.length() - 44L).coerceAtLeast(0L)
+            val recordedDurationMs = (totalPcmBytes * 1000L) / (44100 * 2 * 2)
 
-        // Tolerance window: accommodates Spotify's 1-2s lead-out variance
-        val isDurationComplete = currentLengthMs > 0 && (
-            abs(recordedDurationMs - currentLengthMs) <= 4500L ||
-            recordedDurationMs >= currentLengthMs - 4000L
-        )
+            // Tolerance window: accommodates Spotify's 1-4s lead-out variance
+            val isDurationComplete = currentLengthMs > 0 && (
+                abs(recordedDurationMs - currentLengthMs) <= 5000L ||
+                recordedDurationMs >= currentLengthMs - 4000L
+            )
 
-        if (!wasInterrupted && isDurationComplete) {
-            writeWavHeader(temp, 44100, 2, 16)
-            val ctx = activeContext ?: return
-            val vaultDir = getVaultDirectory(ctx)
-            val finalTarget = File(vaultDir, "${sanitizeFilename(currentArtist)} - ${sanitizeFilename(currentTrackTitle)}.wav")
+            if (!wasInterrupted && isDurationComplete) {
+                writeWavHeader(temp, 44100, 2, 16)
+                val ctx = activeContext ?: return
+                val vaultDir = getVaultDirectory(ctx)
+                val finalTarget = File(vaultDir, "${sanitizeFilename(currentArtist)} - ${sanitizeFilename(currentTrackTitle)}.wav")
 
-            activeBridge?.log("SPOTIFY_VAULT", "Committing audio file to vault: ${finalTarget.absolutePath}...")
+                activeBridge?.log("SPOTIFY_VAULT", "Writing WAV header & committing: ${finalTarget.absolutePath} (${temp.length()} bytes)...")
 
-            val savedOk = if (temp.renameTo(finalTarget)) {
-                true
-            } else {
-                try {
-                    temp.copyTo(finalTarget, overwrite = true)
-                    temp.delete()
+                val savedOk = if (temp.renameTo(finalTarget)) {
                     true
-                } catch (e: Exception) {
-                    activeBridge?.log("SPOTIFY_ERR", "File copy fallback failed: ${e.message}")
-                    false
+                } else {
+                    try {
+                        temp.copyTo(finalTarget, overwrite = true)
+                        temp.delete()
+                        true
+                    } catch (e: Exception) {
+                        activeBridge?.log("SPOTIFY_ERR", "File copy fallback failed: ${e.message}")
+                        false
+                    }
                 }
-            }
 
-            if (savedOk) {
-                countSaved++
-                statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-                vaultRefreshTrigger?.invoke()
-                activeBridge?.log("SPOTIFY_VAULT", "✅ [PERFECT TAKE SAVED] File: ${finalTarget.name} (${finalTarget.length() / 1024} KB, Recorded: ${recordedDurationMs}ms)")
-                activeBridge?.showToast("Saved: ${finalTarget.name}")
+                if (savedOk) {
+                    countSaved++
+                    statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+                    vaultRefreshTrigger?.invoke()
+                    activeBridge?.log("SPOTIFY_VAULT", "✅ [SAVED TO VAULT] ${finalTarget.name} (${finalTarget.length() / 1024} KB, Recorded: ${recordedDurationMs}ms / Expected: ${currentLengthMs}ms)")
+                    activeBridge?.showToast("Saved: ${finalTarget.name}")
+                } else {
+                    activeBridge?.log("SPOTIFY_ERR", "Failed to commit ${finalTarget.name} to storage.")
+                }
             } else {
-                activeBridge?.log("SPOTIFY_ERR", "Failed to commit ${finalTarget.name} to storage.")
+                temp.delete()
+                countDiscarded++
+                statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+                activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${currentLengthMs}ms, Interrupted: $wasInterrupted)")
             }
-        } else {
-            temp.delete()
-            countDiscarded++
-            statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-            activeBridge?.log("SPOTIFY_RECORDER", "❌ Discarded take (Recorded: ${recordedDurationMs}ms vs Expected: ${currentLengthMs}ms, Interrupted: $wasInterrupted)")
-        }
 
-        tempRecordingFile = null
-        recordedBytesCount = 0L
+            tempRecordingFile = null
+            recordedBytesCount = 0L
+        }
     }
 
     private fun abortAndDiscard(reason: String) {
