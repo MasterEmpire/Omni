@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "entryClass": "com.omni.plugin.telealert.TeleAlertPlugin",
   "description": "Ethio Telecom & telebirr Package Expiry Sentinel & Early Warning Alarm",
+  "icon": "📡",
   "permissions": [
     "android.permission.RECEIVE_SMS",
     "android.permission.READ_SMS",
