@@ -42,6 +42,10 @@ object PluginTaskEngine {
         entryClass: String,
         enabled: Boolean
     ) {
+        if (pluginId == "scroll_lock" && !enabled) {
+            OmniLogger.log("TASK_ENGINE", "🛡️ ScrollLock has God-Mode immunity. Deactivation blocked.")
+            return
+        }
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val current = getRegisteredDaemons(context).toMutableMap()
         if (enabled) {
@@ -122,6 +126,10 @@ object PluginTaskEngine {
     }
 
     fun stopTask(context: Context, pluginId: String) {
+        if (pluginId == "scroll_lock") {
+            OmniLogger.log("TASK_ENGINE", "🛡️ ScrollLock has God-Mode immunity. stopTask rejected.")
+            return
+        }
         runningTasks.remove(pluginId)?.cancel()
         activeInstances.remove(pluginId)?.let { (instance, bridge) ->
             try {
