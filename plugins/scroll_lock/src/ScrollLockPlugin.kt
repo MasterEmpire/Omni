@@ -111,7 +111,12 @@ class ScrollLockPlugin : PluginEntry() {
         createNotificationChannel(context)
         ensureMonitoringRunning(context, bridge)
         AccessibilityDispatcher.addListener(accessibilityListener)
-        com.omni.hub.loader.PluginTaskEngine.setDaemonEnabled(context, "scroll_lock", "com.omni.plugin.scrolllock.ScrollLockPlugin", true)
+        val daemonPrefs = context.getSharedPreferences("omni_daemon_registry", Context.MODE_PRIVATE)
+        val daemonJson = try { JSONObject(daemonPrefs.getString("active_daemons", "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
+        if (!daemonJson.has("scroll_lock")) {
+            daemonJson.put("scroll_lock", "com.omni.plugin.scrolllock.ScrollLockPlugin")
+            daemonPrefs.edit().putString("active_daemons", daemonJson.toString()).apply()
+        }
 
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -479,7 +484,7 @@ class ScrollLockPlugin : PluginEntry() {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
             )
 
-            bridge.log("WATCHDOG_NOTIF", "Posting siren alert with FullScreenIntent: ${specificIntent.action}")
+            activeBridge?.log("WATCHDOG_NOTIF", "Posting siren alert with FullScreenIntent: ${specificIntent.action}")
 
             val notif = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle(title)
@@ -498,7 +503,7 @@ class ScrollLockPlugin : PluginEntry() {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(8892, notif)
         } catch (e: Exception) {
-            bridge.log("WATCHDOG_ERR", "Failed to dispatch siren notification: ${e.message}")
+            activeBridge?.log("WATCHDOG_ERR", "Failed to dispatch siren notification: ${e.message}")
         }
     }
 
