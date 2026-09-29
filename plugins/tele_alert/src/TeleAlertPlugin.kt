@@ -70,7 +70,15 @@ class TeleAlertPlugin : PluginEntry() {
 
     private var activeContext: Context? = null
     private var activeBridge: HostBridge? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var monitorJob: Job? = null
+
+    private fun getActiveScope(): CoroutineScope {
+        if (!scope.isActive) {
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        }
+        return scope
+    }
 
     @Volatile private var isMonitoring = false
     @Volatile private var leadTimeMinutes = 15
@@ -123,7 +131,8 @@ class TeleAlertPlugin : PluginEntry() {
                 isMonitoring = false
             }
         } catch (_: Exception) {}
-        scope.cancel()
+        monitorJob?.cancel()
+        monitorJob = null
         activeBridge?.stopForegroundTask()
         activeBridge?.log("TELE_ALERT", "🛑 TeleAlert Sentinel stopped.")
     }
@@ -296,7 +305,8 @@ class TeleAlertPlugin : PluginEntry() {
             return null
         }
 
-        // Prevent duplicate tracking
+        // Prevent duplicate tracking (sync disk first in case daemon already recorded it)
+        activeBridge?.let { loadPackages(it) }
         val duplicate = trackedPackages.find {
             it.packageName == parsed.packageName && it.expiryTimeMs == parsed.expiryTimeMs
         }
@@ -318,12 +328,34 @@ class TeleAlertPlugin : PluginEntry() {
         return parsed
     }
 
+    private fun syncNotificationFlagsFromDisk(bridge: HostBridge) {
+        try {
+            val bytes = bridge.readFile("tele_packages.json") ?: return
+            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val id = obj.getString("id")
+                val alert = obj.optBoolean("notified_alert", false)
+                val expired = obj.optBoolean("notified_expired", false)
+                trackedPackages.find { it.id == id }?.let { target ->
+                    if (alert) target.notifiedAlert = true
+                    if (expired) target.notifiedExpired = true
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun startMonitoringLoop(context: Context, bridge: HostBridge) {
-        scope.launch {
+        if (monitorJob?.isActive == true) return
+
+        monitorJob = getActiveScope().launch {
             while (isActive) {
                 delay(10_000L) // Scan active packages every 10 seconds
                 val now = System.currentTimeMillis()
                 var listChanged = false
+
+                // Sync notification states from disk to eliminate double-firing between Daemon & UI instances
+                syncNotificationFlagsFromDisk(bridge)
 
                 trackedPackages.forEach { pkg ->
                     val remainingMs = pkg.expiryTimeMs - now
@@ -341,7 +373,6 @@ class TeleAlertPlugin : PluginEntry() {
                             message = "Your ${pkg.packageName} expires in $minLeft min (${pkg.expiryDateStr}). Recharge now!",
                             notificationId = pkg.id.hashCode()
                         )
-                        bridge.vibrate(600L)
                     }
 
                     // 2. Exact Expiration Trigger
@@ -355,7 +386,6 @@ class TeleAlertPlugin : PluginEntry() {
                             message = "${pkg.packageName} expired at ${pkg.expiryDateStr}. Mobile data is now unshielded!",
                             notificationId = pkg.id.hashCode() + 1
                         )
-                        bridge.vibrate(1000L)
                     }
                 }
 
@@ -376,6 +406,7 @@ class TeleAlertPlugin : PluginEntry() {
             ).apply {
                 description = "High-priority early warnings before internet packages expire"
                 enableVibration(true)
+                vibrationPattern = longArrayOf(0, 180, 100, 180)
             }
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
@@ -390,7 +421,7 @@ class TeleAlertPlugin : PluginEntry() {
                 .setStyle(NotificationCompat.BigTextStyle().bigText(message))
                 .setSmallIcon(android.R.drawable.stat_sys_warning)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
                 .build()
 
@@ -856,6 +887,6 @@ class TeleAlertPlugin : PluginEntry() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "tele_alert_expiry_channel"
+        private const val CHANNEL_ID = "tele_alert_expiry_channel_v2"
     }
 }
