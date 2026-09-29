@@ -111,6 +111,7 @@ class ScrollLockPlugin : PluginEntry() {
         createNotificationChannel(context)
         ensureMonitoringRunning(context, bridge)
         AccessibilityDispatcher.addListener(accessibilityListener)
+        com.omni.hub.loader.PluginTaskEngine.setDaemonEnabled(context, "scroll_lock", "com.omni.plugin.scrolllock.ScrollLockPlugin", true)
 
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
