@@ -12,7 +12,8 @@ data class PluginMetadata(
     val name: String,
     val description: String,
     val entryClass: String,
-    val installedAt: Long
+    val installedAt: Long,
+    val icon: String? = null
 )
 
 object PluginManager {
@@ -33,7 +34,8 @@ object PluginManager {
                         name = obj.getString("name"),
                         description = obj.optString("description", "Dynamic Plugin"),
                         entryClass = obj.getString("entryClass"),
-                        installedAt = obj.getLong("installedAt")
+                        installedAt = obj.getLong("installedAt"),
+                        icon = obj.optString("icon", null)
                     )
                 )
             }
@@ -69,7 +71,8 @@ object PluginManager {
                 name = loaded.name,
                 description = description,
                 entryClass = loaded.entryClass,
-                installedAt = System.currentTimeMillis()
+                installedAt = System.currentTimeMillis(),
+                icon = loaded.icon
             )
         )
         saveRegistry(context, currentList)
@@ -82,9 +85,10 @@ object PluginManager {
         url: String,
         name: String? = null,
         entryClass: String? = null,
-        description: String = "Remote OTA Plugin"
+        description: String = "Remote OTA Plugin",
+        icon: String? = null
     ): LoadedPlugin {
-        return RemotePluginDownloader.downloadAndInstall(context, url, name, entryClass, description)
+        return RemotePluginDownloader.downloadAndInstall(context, url, name, entryClass, description, icon)
     }
 
     fun deletePlugin(context: Context, pluginId: String) {
@@ -107,6 +111,7 @@ object PluginManager {
                 put("description", p.description)
                 put("entryClass", p.entryClass)
                 put("installedAt", p.installedAt)
+                if (p.icon != null) put("icon", p.icon)
             }
             arr.put(obj)
         }
