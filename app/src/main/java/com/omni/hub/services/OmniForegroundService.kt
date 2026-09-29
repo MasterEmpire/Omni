@@ -20,7 +20,12 @@ class OmniForegroundService : Service() {
         try {
             createNotificationChannel()
             createMediaNotificationChannel()
-            com.omni.hub.loader.PluginTaskEngine.resurrectDaemons(this)
+            val notification = buildNotification(currentTitle, "Omni Hub Background Engine Active")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
         } catch (_: Exception) {}
     }
 
