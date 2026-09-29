@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit
 interface HostBridge {
     // --- UI & Lifecycle ---
     fun close()
+    fun showRecents()
     fun showToast(message: String)
     fun copyToClipboard(text: String)
     fun getClipboardText(): String?
@@ -204,6 +205,20 @@ object MediaProjectionDispatcher {
     }
 }
 
+object RecentsDispatcher {
+    private var launcher: (() -> Unit)? = null
+
+    fun registerLauncher(block: (() -> Unit)?) {
+        launcher = block
+    }
+
+    fun showRecents() {
+        Handler(Looper.getMainLooper()).post {
+            launcher?.invoke()
+        }
+    }
+}
+
 /**
  * Concrete implementation of the HostBridge instantiated by Omni Hub.
  */
@@ -221,6 +236,10 @@ class HostBridgeImpl(
 
     override fun handleBackPressed(): Boolean {
         return backPressedHandler?.invoke() ?: false
+    }
+
+    override fun showRecents() {
+        RecentsDispatcher.showRecents()
     }
 
     override fun pickFiles(mimeType: String, allowMultiple: Boolean, onResult: (List<Uri>) -> Unit) {
