@@ -176,6 +176,17 @@
             </intent-filter>
         </receiver>
 
+        <service
+            android:name=".services.ScrollLockTileService"
+            android:label="ScrollLock Focus"
+            android:icon="@drawable/ic_launcher"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.TileService" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>
