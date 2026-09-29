@@ -22,6 +22,19 @@ class OmniApp : Application() {
             OmniLogger.logTelemetry("CRASH_PANIC", "Hardware/Memory state at crash moment")
             OmniLogger.log("CRASH_FATAL", "💥 UNCAUGHT EXCEPTION on [${thread.name}]: ${throwable.message}\n$stackTrace", forceSync = true)
             OmniLogger.flushSync()
+
+            // Isolate non-UI background worker crashes originating from dynamic code
+            val isMainThread = android.os.Looper.getMainLooper().thread == thread
+            val isDynamicCode = stackTrace.contains("com.omni.plugin") ||
+                stackTrace.contains("dalvik.system.DexClassLoader") ||
+                thread.name.startsWith("omni-") ||
+                thread.name.contains("coroutine", ignoreCase = true)
+
+            if (!isMainThread && isDynamicCode) {
+                OmniLogger.log("CRASH_CONTAINED", "🛡️ Contained fatal crash on dynamic worker thread [${thread.name}]. Host process preserved.")
+                return@setDefaultUncaughtExceptionHandler
+            }
+
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }
