@@ -109,11 +109,15 @@ object OmniTaskManager {
 
     fun killTask(context: Context, taskId: String) {
         val target = activeSessions.find { it.taskId == taskId } ?: return
-        OmniLogger.log("TASK_MANAGER", "Killing task [${target.pluginName}]")
-        try {
-            target.loadedPlugin.instance.onStop(context)
-        } catch (e: Exception) {
-            OmniLogger.log("TASK_MANAGER_ERR", "Error onStop for [${target.pluginName}]: ${e.message}")
+        OmniLogger.log("TASK_MANAGER", "Killing task UI [${target.pluginName}]")
+        if (target.pluginId != "scroll_lock") {
+            try {
+                target.loadedPlugin.instance.onStop(context)
+            } catch (e: Exception) {
+                OmniLogger.log("TASK_MANAGER_ERR", "Error onStop for [${target.pluginName}]: ${e.message}")
+            }
+        } else {
+            OmniLogger.log("TASK_MANAGER", "🛡️ ScrollLock closed from Recents: UI dismissed, but background daemon stays running.")
         }
         if (currentForegroundSession?.taskId == taskId) {
             currentForegroundSession = null
