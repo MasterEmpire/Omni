@@ -24,7 +24,8 @@ object RemotePluginDownloader {
         url: String,
         name: String? = null,
         entryClass: String? = null,
-        description: String = "Remote OTA Plugin"
+        description: String = "Remote OTA Plugin",
+        fallbackIcon: String? = null
     ): LoadedPlugin = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
@@ -53,7 +54,8 @@ object RemotePluginDownloader {
                     name = loaded.name,
                     description = description,
                     entryClass = loaded.entryClass,
-                    installedAt = System.currentTimeMillis()
+                    installedAt = System.currentTimeMillis(),
+                    icon = loaded.icon ?: fallbackIcon
                 )
             )
             PluginManager.saveRegistry(context, currentList)
