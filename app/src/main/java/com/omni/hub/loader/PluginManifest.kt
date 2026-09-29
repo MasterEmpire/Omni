@@ -10,7 +10,8 @@ data class PluginManifest(
     val entryClass: String,
     val description: String,
     val iconPath: String? = null,
-    val permissions: List<String> = emptyList()
+    val permissions: List<String> = emptyList(),
+    val autoStart: Boolean = false
 ) {
     companion object {
         const val MANIFEST_FILE_NAME = "plugin.json"
@@ -32,7 +33,8 @@ data class PluginManifest(
                 entryClass = obj.getString("entryClass"),
                 description = obj.optString("description", "Omni Hub Dynamic Module"),
                 iconPath = obj.optString("icon", null),
-                permissions = permissionsList
+                permissions = permissionsList,
+                autoStart = obj.optBoolean("autoStart", obj.optBoolean("daemon", false))
             )
         }
 
