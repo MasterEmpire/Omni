@@ -156,7 +156,6 @@ fun DashboardScreen(context: Context) {
     var showImportDialog by remember { mutableStateOf(false) }
     var showUrlDialog by remember { mutableStateOf(false) }
     var showLogModal by remember { mutableStateOf(false) }
-    var showTaskManagerModal by remember { mutableStateOf(false) }
     var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
     var runningStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
 
@@ -280,6 +279,9 @@ fun DashboardScreen(context: Context) {
         com.omni.hub.api.ScreenCaptureDispatcher.registerLauncher { cb ->
             activeProjectionCallback = cb
             projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+        }
+        com.omni.hub.api.RecentsDispatcher.registerLauncher {
+            OmniTaskManager.openRecents()
         }
         OmniLogger.log("INIT", "Omni Hub Dashboard loaded. Ensuring shared runtime...")
         PluginTaskEngine.resurrectDaemons(context)
@@ -599,39 +601,31 @@ fun DashboardScreen(context: Context) {
                         if (taskCount > 0) Color(0xFF1F6FEB).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f)
                     ),
                     shadowElevation = 10.dp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(24.dp))
-                        .clickable { showTaskManagerModal = true }
+                                    modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .clickable { OmniTaskManager.openRecents() }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (taskCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF3FB950))
-                            )
+                    if (taskCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF3FB950))
+                        )
 
-                            // Mini-avatar stack of running applets
-                            sessions.take(3).forEach { s ->
-                                val icon = when {
-                                    s.pluginId.contains("browser") || s.pluginName.contains("Chrome", true) -> "🌐"
-                                    s.pluginId.contains("ide") || s.pluginName.contains("IDE", true) -> "💻"
-                                    else -> "⚡"
-                                }
-                                Text(icon, fontSize = 13.sp)
-                            }
+                        Text("⚡", fontSize = 13.sp)
 
-                            Text(
-                                "$taskCount Active",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                        Text(
+                            "$taskCount Active",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                         } else {
                             Text("📱", fontSize = 13.sp)
                             Text(
@@ -802,21 +796,21 @@ fun DashboardScreen(context: Context) {
         )
     }
 
-    if (isHostAlive && showTaskManagerModal) {
+    if (isHostAlive && OmniTaskManager.isRecentsModalOpen) {
         TaskManagerDialog(
             sessions = OmniTaskManager.activeSessions,
             onResumeTask = { session ->
                 OmniTaskManager.resumeSession(session)
-                showTaskManagerModal = false
+                OmniTaskManager.closeRecents()
             },
             onKillTask = { taskId ->
                 OmniTaskManager.killTask(context, taskId)
             },
             onKillAll = {
                 OmniTaskManager.killAllTasks(context)
-                showTaskManagerModal = false
+                OmniTaskManager.closeRecents()
             },
-            onDismiss = { showTaskManagerModal = false }
+            onDismiss = { OmniTaskManager.closeRecents() }
         )
     }
 
