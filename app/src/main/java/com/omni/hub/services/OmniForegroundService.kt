@@ -20,7 +20,7 @@ class OmniForegroundService : Service() {
         try {
             createNotificationChannel()
             createMediaNotificationChannel()
-            val notification = buildNotification(currentTitle, "Omni Hub Background Engine Active")
+            val notification = buildNotification("Omni Hub", "Background engine active")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             } else {
@@ -117,8 +117,8 @@ class OmniForegroundService : Service() {
             return START_STICKY
         }
 
-        val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Hub Task"
-        val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Automation in progress..."
+        val title = "Omni Hub"
+        val message = "Background engine active"
 
         try {
             createNotificationChannel()
