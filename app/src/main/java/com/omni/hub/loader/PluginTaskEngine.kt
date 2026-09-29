@@ -53,8 +53,8 @@ object PluginTaskEngine {
             executeHeadless(context, pluginId, entryClass)
             OmniForegroundService.start(
                 context,
-                "Omni Daemon Active",
-                "Dynamic background sentinels running in memory"
+                "Omni Hub",
+                "Background engine active"
             )
         } else {
             current.remove(pluginId)
@@ -79,8 +79,8 @@ object PluginTaskEngine {
         OmniLogger.log("TASK_ENGINE", "⚡ Resurrecting ${daemons.size} persistent daemon(s)...")
         OmniForegroundService.start(
             context,
-            "Omni Daemon Active",
-            "${daemons.size} dynamic sentinel(s) running"
+            "Omni Hub",
+            "Background engine active"
         )
 
         daemons.forEach { (pluginId, entryClass) ->
