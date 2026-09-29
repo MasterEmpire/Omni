@@ -701,15 +701,19 @@ fun DashboardScreen(context: Context) {
                                     }
                                 },
                                 onDelete = {
-                                    PluginTaskEngine.stopTask(context, plugin.id)
-                                    val activeSession = OmniTaskManager.activeSessions.find { it.pluginId == plugin.id }
-                                    if (activeSession != null) {
-                                        OmniTaskManager.killTask(context, activeSession.taskId)
+                                    if (plugin.id == "scroll_lock") {
+                                        Toast.makeText(context, "🛡️ ScrollLock has God-Mode Immunity: Cannot be deleted!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        PluginTaskEngine.stopTask(context, plugin.id)
+                                        val activeSession = OmniTaskManager.activeSessions.find { it.pluginId == plugin.id }
+                                        if (activeSession != null) {
+                                            OmniTaskManager.killTask(context, activeSession.taskId)
+                                        }
+                                        PluginManager.deletePlugin(context, plugin.id)
+                                        plugins = PluginManager.getInstalledPlugins(context)
+                                        refreshRunningStates()
+                                        Toast.makeText(context, "Deleted ${plugin.name}", Toast.LENGTH_SHORT).show()
                                     }
-                                    PluginManager.deletePlugin(context, plugin.id)
-                                    plugins = PluginManager.getInstalledPlugins(context)
-                                    refreshRunningStates()
-                                    Toast.makeText(context, "Deleted ${plugin.name}", Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }
