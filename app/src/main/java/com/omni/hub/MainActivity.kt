@@ -181,8 +181,8 @@ fun DashboardScreen(context: Context) {
 
         OmniForegroundService.start(
             context,
-            "Omni Hub Keep-Alive Active",
-            "Workspaces, tabs, and background tasks protected in memory"
+            "Omni Hub",
+            "Background engine active"
         )
         Toast.makeText(context, "🛡️ Keep-Alive Active: Process protected", Toast.LENGTH_SHORT).show()
     }
@@ -288,8 +288,8 @@ fun DashboardScreen(context: Context) {
         if (isKeepAliveEnabled) {
             OmniForegroundService.start(
                 context,
-                "Omni Hub Keep-Alive Active",
-                "Workspaces, tabs, and background tasks protected in memory"
+                "Omni Hub",
+                "Background engine active"
             )
         }
         scope.launch {
