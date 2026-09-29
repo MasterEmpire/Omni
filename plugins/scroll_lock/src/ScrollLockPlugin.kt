@@ -39,6 +39,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
+import android.accessibilityservice.AccessibilityService
+import android.view.accessibility.AccessibilityNodeInfo
+import com.omni.hub.api.AccessibilityDispatcher
+import com.omni.hub.api.AccessibilityListener
 import com.omni.hub.api.HostBridge
 import com.omni.hub.api.PluginEntry
 import kotlinx.coroutines.*
@@ -66,6 +70,13 @@ class ScrollLockPlugin : PluginEntry() {
     @Volatile private var sabotageStrikes = 0
     @Volatile private var lastResetDay = -1
     @Volatile private var tamperDetected = false
+    @Volatile private var youtubeSafeBypass = false
+    @Volatile private var shortsDeflectedToday = 0
+    @Volatile private var lastDeflectMs = 0L
+
+    private val accessibilityListener: AccessibilityListener = { event, service ->
+        handleAccessibilityEvent(event, service)
+    }
 
     private val targetPackages = mutableStateListOf(
         "com.zhiliaoapp.musically",      // TikTok Global
@@ -93,6 +104,7 @@ class ScrollLockPlugin : PluginEntry() {
         loadPersistedState(bridge)
         createNotificationChannel(context)
         ensureMonitoringRunning(context, bridge)
+        AccessibilityDispatcher.addListener(accessibilityListener)
 
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -116,11 +128,13 @@ class ScrollLockPlugin : PluginEntry() {
         loadPersistedState(bridge)
         createNotificationChannel(context)
         ensureMonitoringRunning(context, bridge)
+        AccessibilityDispatcher.addListener(accessibilityListener)
         bridge.log("SCROLL_LOCK", "🛡️ ScrollLock Daemon booted in background.")
         bridge.startForegroundTask("ScrollLock Sentinel Armed", "Protecting against doom scrolling")
     }
 
     override fun onStop(context: Context) {
+        AccessibilityDispatcher.removeListener(accessibilityListener)
         monitorJob?.cancel()
         isRunning = false
         scope.cancel()
@@ -241,6 +255,7 @@ class ScrollLockPlugin : PluginEntry() {
                     totalTimeTodayMs = 0L
                     totalEvictionsToday = 0
                     nightBlocksToday = 0
+                    shortsDeflectedToday = 0
                     savePersistedState(bridge)
                 }
 
@@ -270,9 +285,9 @@ class ScrollLockPlugin : PluginEntry() {
                     tamperDetected = false
                 }
 
-                // 2. Poll Active Foreground App
+                // 2. Poll Active Foreground App (with YouTube Safe Bypass support)
                 val fgApp = getForegroundApp(context)
-                val isTargetApp = fgApp != null && targetPackages.contains(fgApp)
+                val isTargetApp = fgApp != null && targetPackages.contains(fgApp) && !(youtubeSafeBypass && fgApp == "com.google.android.youtube")
 
                 if (isTargetApp) {
                     val appName = appDisplayNames[fgApp] ?: fgApp ?: "Target App"
@@ -345,6 +360,56 @@ class ScrollLockPlugin : PluginEntry() {
         }
     }
 
+    private fun handleAccessibilityEvent(event: AccessibilityEvent, service: AccessibilityService) {
+        if (!youtubeSafeBypass) return
+        val pkg = event.packageName?.toString() ?: return
+        if (pkg != "com.google.android.youtube") return
+
+        val now = System.currentTimeMillis()
+        if (now - lastDeflectMs < 1200L) return
+
+        val root = try { service.rootInActiveWindow } catch (_: Exception) { null } ?: return
+        try {
+            val shortsReel = root.findAccessibilityNodeInfosByViewId("com.google.android.youtube:id/reel_watch_fragment_root")
+            val shortsPlayer = if (shortsReel.isNullOrEmpty()) root.findAccessibilityNodeInfosByViewId("com.google.android.youtube:id/reel_recycler") else shortsReel
+            val isShorts = !shortsPlayer.isNullOrEmpty()
+
+            if (isShorts) {
+                lastDeflectMs = now
+                var clicked = false
+
+                // Tier 1: Click Home button on bottom navigation bar
+                val homeNodes = root.findAccessibilityNodeInfosByText("Home")
+                if (!homeNodes.isNullOrEmpty()) {
+                    for (node in homeNodes) {
+                        var target: AccessibilityNodeInfo? = node
+                        while (target != null && !target.isClickable) {
+                            target = target.parent
+                        }
+                        if (target?.isClickable == true) {
+                            target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            clicked = true
+                            break
+                        }
+                    }
+                }
+
+                // Tier 2: Fallback Global Action Back
+                if (!clicked) {
+                    service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                }
+
+                shortsDeflectedToday++
+                activeBridge?.let { savePersistedState(it) }
+                activeBridge?.vibrate(350L)
+                activeBridge?.showToast("🚫 Shorts Deflected! Educational YouTube allowed.")
+                activeBridge?.log("SCROLL_LOCK", "🚫 YouTube Short deflected (Tier: ${if (clicked) "HomeTab" else "GlobalBack"})")
+            }
+        } catch (e: Exception) {
+            activeBridge?.log("SCROLL_LOCK_ERR", "Error in shorts deflector: ${e.message}")
+        }
+    }
+
     private fun sendSirenNotification(context: Context, title: String, message: String) {
         try {
             val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
@@ -386,6 +451,8 @@ class ScrollLockPlugin : PluginEntry() {
             manualLockUntilMs = json.optLong("manual_lock_until_ms", 0L)
             currentSessionMs = json.optLong("current_session_ms", 0L)
             lastActiveAppTimeMs = json.optLong("last_active_app_time_ms", 0L)
+            youtubeSafeBypass = json.optBoolean("youtube_safe_bypass", false)
+            shortsDeflectedToday = json.optInt("shorts_deflected_today", 0)
 
             val targetsArray = json.optJSONArray("target_packages")
             if (targetsArray != null && targetsArray.length() > 0) {
@@ -409,6 +476,8 @@ class ScrollLockPlugin : PluginEntry() {
                 put("manual_lock_until_ms", manualLockUntilMs)
                 put("current_session_ms", currentSessionMs)
                 put("last_active_app_time_ms", lastActiveAppTimeMs)
+                put("youtube_safe_bypass", youtubeSafeBypass)
+                put("shorts_deflected_today", shortsDeflectedToday)
 
                 val arr = JSONArray()
                 targetPackages.forEach { arr.put(it) }
@@ -423,11 +492,13 @@ class ScrollLockPlugin : PluginEntry() {
         var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
         var selectedManualMinutes by remember { mutableIntStateOf(30) }
         var missingPerms by remember { mutableStateOf(getMissingPermissions(context)) }
+        var isA11yActive by remember { mutableStateOf(AccessibilityDispatcher.isServiceActive()) }
 
         LaunchedEffect(Unit) {
             while (true) {
                 currentTimeMs = System.currentTimeMillis()
                 missingPerms = getMissingPermissions(context)
+                isA11yActive = AccessibilityDispatcher.isServiceActive()
                 delay(1000L)
             }
         }
