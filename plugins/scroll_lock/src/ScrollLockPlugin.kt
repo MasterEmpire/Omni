@@ -57,7 +57,15 @@ import java.util.Locale
 
 class ScrollLockPlugin : PluginEntry() {
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private fun getActiveScope(): CoroutineScope {
+        if (!scope.isActive) {
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        }
+        return scope
+    }
+
     private var activeContext: Context? = null
     private var activeBridge: HostBridge? = null
     private var monitorJob: Job? = null
@@ -146,13 +154,9 @@ class ScrollLockPlugin : PluginEntry() {
     }
 
     override fun onStop(context: Context) {
+        // ScrollLock has God-Mode immunity: dismiss siren if needed, but preserve monitorJob and activeScope so the sentinel never dies
         dismissSirenNotification(context)
-        AccessibilityDispatcher.removeListener(accessibilityListener)
-        monitorJob?.cancel()
-        isRunning = false
-        scope.cancel()
-        activeBridge?.stopForegroundTask()
-        activeBridge?.log("SCROLL_LOCK", "🛑 ScrollLock Daemon halted.")
+        activeBridge?.log("SCROLL_LOCK", "🛡️ ScrollLock UI session dismissed. Background sentinel monitoring preserved.")
     }
 
     private fun hasUsageStatsPermission(context: Context): Boolean {
@@ -263,16 +267,17 @@ class ScrollLockPlugin : PluginEntry() {
         if (monitorJob?.isActive == true) return
         isRunning = true
 
-        monitorJob = scope.launch {
+        monitorJob = getActiveScope().launch {
             var lastTickMs = System.currentTimeMillis()
             var lastTamperNagMs = 0L
             var lastTileSyncMs = 0L
 
             while (isActive) {
-                delay(1500L)
-                val now = System.currentTimeMillis()
-                val delta = (now - lastTickMs).coerceIn(0L, 5000L)
-                lastTickMs = now
+                try {
+                    delay(1500L)
+                    val now = System.currentTimeMillis()
+                    val delta = (now - lastTickMs).coerceIn(0L, 5000L)
+                    lastTickMs = now
 
                 // Sync manual lock state if engaged externally via Quick Settings Tile
                 if (now - lastTileSyncMs > 3000L) {
@@ -344,7 +349,8 @@ class ScrollLockPlugin : PluginEntry() {
                 val fgApp = getForegroundApp(context)
                 val isA11yTrulyActive = AccessibilityDispatcher.isServiceActive(context)
                 val canBypassYoutube = youtubeSafeBypass && isA11yTrulyActive
-                val isTargetApp = fgApp != null && targetPackages.contains(fgApp) && !(canBypassYoutube && fgApp == "com.google.android.youtube")
+                val targetsSnapshot = targetPackages.toList()
+                val isTargetApp = fgApp != null && targetsSnapshot.contains(fgApp) && !(canBypassYoutube && fgApp == "com.google.android.youtube")
 
                 if (isTargetApp) {
                     val appName = appDisplayNames[fgApp] ?: fgApp ?: "Target App"
@@ -397,6 +403,12 @@ class ScrollLockPlugin : PluginEntry() {
                     if (now - lastActiveAppTimeMs >= 15 * 60 * 1000L) {
                         currentSessionMs = 0L
                     }
+                }
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (t: Throwable) {
+                    bridge.log("SCROLL_LOCK_ERR", "Sentinel loop auto-recovered from glitch: ${t.message}")
+                    delay(1000L)
                 }
             }
         }
