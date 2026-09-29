@@ -69,6 +69,7 @@ class ScrollLockPlugin : PluginEntry() {
 
     private val targetPackages = mutableStateListOf(
         "com.zhiliaoapp.musically",      // TikTok Global
+        "com.zhiliaoapp.musically.go",   // TikTok Lite
         "com.ss.android.ugc.trill",      // TikTok Alternative
         "com.instagram.android",         // Instagram Reels
         "com.google.android.youtube",    // YouTube Shorts
@@ -78,6 +79,7 @@ class ScrollLockPlugin : PluginEntry() {
 
     private val appDisplayNames = mapOf(
         "com.zhiliaoapp.musically" to "TikTok",
+        "com.zhiliaoapp.musically.go" to "TikTok Lite",
         "com.ss.android.ugc.trill" to "TikTok Asia",
         "com.instagram.android" to "Instagram",
         "com.google.android.youtube" to "YouTube Shorts",
@@ -143,6 +145,31 @@ class ScrollLockPlugin : PluginEntry() {
             )
         }
         return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun hasOverlayPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else true
+    }
+
+    private fun hasNotificationPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+        }
+    }
+
+    private fun getMissingPermissions(context: Context): List<String> {
+        val missing = mutableListOf<String>()
+        if (!hasUsageStatsPermission(context)) missing.add("Usage Access")
+        if (!hasOverlayPermission(context)) missing.add("Display Over Other Apps")
+        if (!hasNotificationPermission(context)) missing.add("Notifications")
+        return missing
     }
 
     private fun isNightCurfew(): Boolean {
@@ -217,24 +244,25 @@ class ScrollLockPlugin : PluginEntry() {
                     savePersistedState(bridge)
                 }
 
-                // 1. Anti-Tamper Watchdog Verification
-                val hasPerm = hasUsageStatsPermission(context)
-                if (!hasPerm) {
+                // 1. Anti-Tamper Watchdog Verification (Usage + Overlay + Notifications)
+                val missingPerms = getMissingPermissions(context)
+                if (missingPerms.isNotEmpty()) {
+                    val missingSummary = missingPerms.joinToString(", ")
                     if (!tamperDetected) {
                         tamperDetected = true
                         sabotageStrikes++
                         savePersistedState(bridge)
-                        bridge.log("SCROLL_LOCK_TAMPER", "🚨 INTEGRITY BREACH: Usage Access revoked! Strike #$sabotageStrikes recorded.")
+                        bridge.log("SCROLL_LOCK_TAMPER", "🚨 INTEGRITY BREACH: [$missingSummary] revoked! Strike #$sabotageStrikes recorded.")
                     }
 
-                    // Pester the user every 30 seconds
+                    // Pester relentlessly every 30 seconds across haptics and siren alerts
                     if (now - lastTamperNagMs > 30_000L) {
                         lastTamperNagMs = now
-                        bridge.vibrate(800L)
+                        bridge.vibrate(900L)
                         sendSirenNotification(
                             context,
-                            "🚨 SCROLLLOCK INTEGRITY BREACH",
-                            "Usage Access was revoked! Sabotage strike #$sabotageStrikes recorded. Restore permission now."
+                            "🚨 SCROLLLOCK PERMISSION BREACH",
+                            "Missing: $missingSummary! Sabotage strike #$sabotageStrikes. Restore all permissions now."
                         )
                     }
                     continue
@@ -361,9 +389,9 @@ class ScrollLockPlugin : PluginEntry() {
 
             val targetsArray = json.optJSONArray("target_packages")
             if (targetsArray != null && targetsArray.length() > 0) {
-                targetPackages.clear()
                 for (i in 0 until targetsArray.length()) {
-                    targetPackages.add(targetsArray.getString(i))
+                    val p = targetsArray.getString(i)
+                    if (!targetPackages.contains(p)) targetPackages.add(p)
                 }
             }
         } catch (_: Exception) {}
@@ -394,12 +422,12 @@ class ScrollLockPlugin : PluginEntry() {
     fun ScrollLockDashboard(context: Context, bridge: HostBridge) {
         var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
         var selectedManualMinutes by remember { mutableIntStateOf(30) }
-        var hasUsagePerm by remember { mutableStateOf(hasUsageStatsPermission(context)) }
+        var missingPerms by remember { mutableStateOf(getMissingPermissions(context)) }
 
         LaunchedEffect(Unit) {
             while (true) {
                 currentTimeMs = System.currentTimeMillis()
-                hasUsagePerm = hasUsageStatsPermission(context)
+                missingPerms = getMissingPermissions(context)
                 delay(1000L)
             }
         }
@@ -441,7 +469,7 @@ class ScrollLockPlugin : PluginEntry() {
                                     .clip(CircleShape)
                                     .background(
                                         when {
-                                            !hasUsagePerm -> Color(0xFFDA3633)
+                                            missingPerms.isNotEmpty() -> Color(0xFFDA3633)
                                             inPenalty || inManualLock || isCurfew -> Color(0xFFD29922)
                                             else -> Color(0xFF238636)
                                         }
@@ -450,7 +478,7 @@ class ScrollLockPlugin : PluginEntry() {
                             Spacer(Modifier.width(5.dp))
                             Text(
                                 when {
-                                    !hasUsagePerm -> "DEFCON 1: TAMPER BREACH"
+                                    missingPerms.isNotEmpty() -> "DEFCON 1: TAMPER BREACH (${missingPerms.size})"
                                     inPenalty -> "PENALTY BOX ACTIVE"
                                     inManualLock -> "FOCUS LOCKOUT ACTIVE"
                                     isCurfew -> "NIGHT CURFEW ENGAGED"
@@ -459,7 +487,7 @@ class ScrollLockPlugin : PluginEntry() {
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = when {
-                                    !hasUsagePerm -> Color(0xFFF85149)
+                                    missingPerms.isNotEmpty() -> Color(0xFFF85149)
                                     inPenalty || inManualLock || isCurfew -> Color(0xFFE3B341)
                                     else -> Color(0xFF3FB950)
                                 }
@@ -481,8 +509,8 @@ class ScrollLockPlugin : PluginEntry() {
 
             Spacer(Modifier.height(14.dp))
 
-            // Tamper Breach Alert Card
-            if (!hasUsagePerm) {
+            // Tamper Breach Alert Card (Usage, Overlay, Notifications)
+            if (missingPerms.isNotEmpty()) {
                 Card(
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF490202)),
@@ -493,27 +521,75 @@ class ScrollLockPlugin : PluginEntry() {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("🚨", fontSize = 20.sp)
                             Spacer(Modifier.width(8.dp))
-                            Text("USAGE ACCESS STRIPPED!", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                            Text("CRITICAL PERMISSIONS MISSING!", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "ScrollLock cannot enforce limits without Usage Access. Periodic alarms are blaring.",
+                            "ScrollLock watchdog detected missing permissions: ${missingPerms.joinToString(", ")}. Haptic nag active.",
                             color = Color(0xFFFFD2D2),
                             fontSize = 11.sp
                         )
                         Spacer(Modifier.height(10.dp))
-                        Button(
-                            onClick = {
-                                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                }
-                                context.startActivity(intent)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().height(36.dp)
-                        ) {
-                            Text("Restore Permission Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+                        if (!hasUsageStatsPermission(context)) {
+                            Button(
+                                onClick = {
+                                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().height(36.dp)
+                            ) {
+                                Text("1. Grant Usage Access", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
+
+                        if (!hasOverlayPermission(context)) {
+                            Button(
+                                onClick = {
+                                    val intent = Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    ).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBC4C00)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().height(36.dp)
+                            ) {
+                                Text("2. Grant Overlay (Draw Over Apps)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
+
+                        if (!hasNotificationPermission(context)) {
+                            Button(
+                                onClick = {
+                                    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                        }
+                                    } else {
+                                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                            data = android.net.Uri.parse("package:${context.packageName}")
+                                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                        }
+                                    }
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8957E5)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().height(36.dp)
+                            ) {
+                                Text("3. Grant Notification Access", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -765,21 +841,25 @@ class ScrollLockPlugin : PluginEntry() {
                                 Text(label, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                 Text(pkg, color = Color(0xFF484F58), fontSize = 10.sp)
                             }
-                            Switch(
-                                checked = isChecked,
-                                onCheckedChange = { active ->
-                                    if (active) {
-                                        if (!targetPackages.contains(pkg)) targetPackages.add(pkg)
-                                    } else {
-                                        targetPackages.remove(pkg)
-                                    }
-                                    savePersistedState(bridge)
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Color(0xFF238636)
-                                )
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF238636).copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, Color(0xFF238636).copy(alpha = 0.4f))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("🔒", fontSize = 10.sp)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        "LOCKED IN",
+                                        color = Color(0xFF3FB950),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
