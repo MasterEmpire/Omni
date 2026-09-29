@@ -20,6 +20,7 @@ class OmniForegroundService : Service() {
         try {
             createNotificationChannel()
             createMediaNotificationChannel()
+            com.omni.hub.loader.PluginTaskEngine.resurrectDaemons(this)
         } catch (_: Exception) {}
     }
 
