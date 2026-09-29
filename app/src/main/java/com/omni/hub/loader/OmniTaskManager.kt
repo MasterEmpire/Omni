@@ -128,9 +128,13 @@ object OmniTaskManager {
     fun killAllTasks(context: Context) {
         OmniLogger.log("TASK_MANAGER", "Clearing all ${activeSessions.size} active sessions")
         activeSessions.forEach { session ->
-            try {
-                session.loadedPlugin.instance.onStop(context)
-            } catch (_: Exception) {}
+            if (session.pluginId != "scroll_lock") {
+                try {
+                    session.loadedPlugin.instance.onStop(context)
+                } catch (_: Exception) {}
+            } else {
+                OmniLogger.log("TASK_MANAGER", "🛡️ ScrollLock closed from Recents: UI dismissed, but background daemon stays running.")
+            }
         }
         currentForegroundSession = null
         activeSessions.clear()
