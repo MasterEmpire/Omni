@@ -114,6 +114,10 @@ object PluginLoader {
         val instance = clazz.getDeclaredConstructor().newInstance() as? PluginEntry
             ?: throw ClassCastException("Class $finalClass does not extend PluginEntry contract.")
 
+        if (manifest?.autoStart == true) {
+            PluginTaskEngine.setDaemonEnabled(context, finalId, finalClass, true)
+        }
+
         return LoadedPlugin(
             id = finalId,
             name = finalName,
