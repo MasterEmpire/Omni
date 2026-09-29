@@ -96,6 +96,7 @@ class ScrollLockPlugin : PluginEntry() {
         "com.tiktok.lite.go",            // TikTok Lite (Alternative)
         "com.ss.android.ugc.trill",      // TikTok Alternative
         "com.instagram.android",         // Instagram Reels
+        "com.instagram.lite",            // Instagram Lite
         "com.google.android.youtube",    // YouTube Shorts
         "com.twitter.android",           // X / Twitter
         "com.reddit.frontpage"           // Reddit
@@ -107,6 +108,7 @@ class ScrollLockPlugin : PluginEntry() {
         "com.tiktok.lite.go" to "TikTok Lite",
         "com.ss.android.ugc.trill" to "TikTok Asia",
         "com.instagram.android" to "Instagram",
+        "com.instagram.lite" to "Instagram Lite",
         "com.google.android.youtube" to "YouTube Shorts",
         "com.twitter.android" to "X (Twitter)",
         "com.reddit.frontpage" to "Reddit"
