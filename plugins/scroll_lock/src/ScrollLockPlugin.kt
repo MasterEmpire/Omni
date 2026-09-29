@@ -254,12 +254,27 @@ class ScrollLockPlugin : PluginEntry() {
         monitorJob = scope.launch {
             var lastTickMs = System.currentTimeMillis()
             var lastTamperNagMs = 0L
+            var lastTileSyncMs = 0L
 
             while (isActive) {
                 delay(1500L)
                 val now = System.currentTimeMillis()
                 val delta = (now - lastTickMs).coerceIn(0L, 5000L)
                 lastTickMs = now
+
+                // Sync manual lock state if engaged externally via Quick Settings Tile
+                if (now - lastTileSyncMs > 3000L) {
+                    lastTileSyncMs = now
+                    try {
+                        val sf = java.io.File(context.getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+                        if (sf.exists()) {
+                            val diskLock = JSONObject(sf.readText(Charsets.UTF_8)).optLong("manual_lock_until_ms", 0L)
+                            if (diskLock > manualLockUntilMs) {
+                                manualLockUntilMs = diskLock
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
 
                 // Check midnight reset
                 val currentDay = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
@@ -364,8 +379,8 @@ class ScrollLockPlugin : PluginEntry() {
                     }
 
                 } else {
-                    // Grace Period: Only reset session if absent from all target apps for >= 5 minutes
-                    if (now - lastActiveAppTimeMs >= 5 * 60 * 1000L) {
+                    // Grace Period: Only reset session if absent from all target apps for >= 15 minutes
+                    if (now - lastActiveAppTimeMs >= 15 * 60 * 1000L) {
                         currentSessionMs = 0L
                     }
                 }
@@ -828,8 +843,8 @@ class ScrollLockPlugin : PluginEntry() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    Text("CURRENT SCROLL SESSION", color = Color(0xFF3FB950), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text("Resets only after 5 min off target apps", color = Color(0xFF8B949E), fontSize = 11.sp)
+                                                                    Text("CURRENT SCROLL SESSION", color = Color(0xFF3FB950), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Resets only after 15 min off target apps", color = Color(0xFF8B949E), fontSize = 11.sp)
                                 }
                                 Text(
                                     "${sessionSec / 60}m / 30m",
