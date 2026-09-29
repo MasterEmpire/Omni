@@ -217,7 +217,7 @@ fun DashboardScreen(context: Context) {
     }
 
     fun refreshRunningStates() {
-        runningStates = plugins.associate { it.id to PluginTaskEngine.isTaskRunning(it.id) }
+        runningStates = plugins.associate { it.id to (PluginTaskEngine.isTaskRunning(it.id) || PluginTaskEngine.isDaemonEnabled(context, it.id)) }
     }
 
     fun loadCloudCatalog() {
@@ -282,6 +282,7 @@ fun DashboardScreen(context: Context) {
             projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
         }
         OmniLogger.log("INIT", "Omni Hub Dashboard loaded. Ensuring shared runtime...")
+        PluginTaskEngine.resurrectDaemons(context)
         if (isKeepAliveEnabled) {
             OmniForegroundService.start(
                 context,
@@ -686,13 +687,13 @@ fun DashboardScreen(context: Context) {
                                     OmniTaskManager.launchOrResume(context, plugin.id, plugin.name, plugin.entryClass)
                                 },
                                 onToggleHeadless = {
-                                    if (isHeadlessRunning) {
-                                        PluginTaskEngine.stopTask(context, plugin.id)
-                                        Toast.makeText(context, "Stopped headless task: ${plugin.name}", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        PluginTaskEngine.executeHeadless(context, plugin.id, plugin.entryClass)
-                                        Toast.makeText(context, "Started headless task: ${plugin.name}", Toast.LENGTH_SHORT).show()
-                                    }
+                                    val willRun = !isHeadlessRunning
+                                    PluginTaskEngine.setDaemonEnabled(context, plugin.id, plugin.entryClass, willRun)
+                                    Toast.makeText(
+                                        context,
+                                        if (willRun) "Daemon Armed: ${plugin.name} active in background" else "Daemon Stopped: ${plugin.name}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                     refreshRunningStates()
                                 },
                                 onDelete = {
@@ -1171,7 +1172,7 @@ fun PluginCard(
                         modifier = Modifier.height(32.dp)
                     ) {
                         Text(
-                            if (isHeadlessRunning) "Stop Task" else "Run Headless",
+                            if (isHeadlessRunning) "Daemon Active" else "Run as Daemon",
                             fontSize = 11.sp
                         )
                     }
