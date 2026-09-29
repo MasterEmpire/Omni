@@ -6,6 +6,7 @@
 -keep class com.omni.hub.api.** { *; }
 -keep interface com.omni.hub.api.** { *; }
 -keep class com.omni.hub.loader.** { *; }
+-keep class com.omni.hub.services.** { *; }
 
 # Kotlin Standard Library & Coroutines
 -keep class kotlin.** { *; }
