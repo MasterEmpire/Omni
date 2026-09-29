@@ -687,14 +687,18 @@ fun DashboardScreen(context: Context) {
                                     OmniTaskManager.launchOrResume(context, plugin.id, plugin.name, plugin.entryClass)
                                 },
                                 onToggleHeadless = {
-                                    val willRun = !isHeadlessRunning
-                                    PluginTaskEngine.setDaemonEnabled(context, plugin.id, plugin.entryClass, willRun)
-                                    Toast.makeText(
-                                        context,
-                                        if (willRun) "Daemon Armed: ${plugin.name} active in background" else "Daemon Stopped: ${plugin.name}",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                    refreshRunningStates()
+                                    if (plugin.id == "scroll_lock") {
+                                        Toast.makeText(context, "🛡️ ScrollLock has God-Mode Immunity: Cannot be stopped!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        val willRun = !isHeadlessRunning
+                                        PluginTaskEngine.setDaemonEnabled(context, plugin.id, plugin.entryClass, willRun)
+                                        Toast.makeText(
+                                            context,
+                                            if (willRun) "Daemon Armed: ${plugin.name} active in background" else "Daemon Stopped: ${plugin.name}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        refreshRunningStates()
+                                    }
                                 },
                                 onDelete = {
                                     PluginTaskEngine.stopTask(context, plugin.id)
