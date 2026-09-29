@@ -9,8 +9,12 @@ class OmniApp : Application() {
         OmniLogger.init(this)
         OmniLogger.log("APP_INIT", "Omni Hub Application process booted")
 
-        // Resurrect all registered dynamic daemons immediately on process boot
-        com.omni.hub.loader.PluginTaskEngine.resurrectDaemons(this)
+        // Resurrect all registered dynamic daemons asynchronously on process boot
+        Thread {
+            try {
+                com.omni.hub.loader.PluginTaskEngine.resurrectDaemons(this)
+            } catch (_: Exception) {}
+        }.start()
 
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
