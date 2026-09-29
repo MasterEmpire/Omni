@@ -1,0 +1,13 @@
+{
+  "id": "scroll_lock",
+  "name": "ScrollLock",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.scrolllock.ScrollLockPlugin",
+  "description": "Zero-cheating anti-doom-scrolling sentinel with 30m limit, night curfew & anti-tamper watchdog",
+  "permissions": [
+    "android.permission.PACKAGE_USAGE_STATS",
+    "android.permission.SYSTEM_ALERT_WINDOW",
+    "android.permission.VIBRATE",
+    "android.permission.POST_NOTIFICATIONS"
+  ]
+}
