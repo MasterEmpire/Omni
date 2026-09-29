@@ -986,20 +986,27 @@ fun TaskManagerDialog(
                                         .background(Color(0xFF0D1117)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    if (session.thumbnail != null) {
-                                        Image(
-                                            bitmap = session.thumbnail!!.asImageBitmap(),
-                                            contentDescription = session.pluginName,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
+                                                                    if (session.thumbnail != null) {
+                                    Image(
+                                        bitmap = session.thumbnail!!.asImageBitmap(),
+                                        contentDescription = session.pluginName,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        DynamicAppIcon(
+                                            id = session.pluginId,
+                                            name = session.pluginName,
+                                            iconSource = session.loadedPlugin.icon,
+                                            size = 36.dp,
+                                            shape = RoundedCornerShape(10.dp),
+                                            fallbackFontSize = 18.sp
                                         )
-                                    } else {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(appIcon, fontSize = 24.sp)
-                                            Spacer(Modifier.height(4.dp))
-                                            Text("Tap to resume", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                        }
+                                        Spacer(Modifier.height(6.dp))
+                                        Text("Tap to resume", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                     }
+                                }
                                 }
                             }
                         }
