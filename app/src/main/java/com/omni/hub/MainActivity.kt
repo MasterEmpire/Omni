@@ -3,6 +3,7 @@ package com.omni.hub
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -80,7 +81,8 @@ data class CloudModule(
     val version: String,
     val entryClass: String,
     val fileName: String,
-    val downloadUrl: String
+    val downloadUrl: String,
+    val icon: String? = null
 )
 
 class MainActivity : ComponentActivity() {
@@ -132,7 +134,8 @@ private suspend fun fetchCloudModules(): Pair<Boolean, List<CloudModule>> = with
                         version = obj.optString("version", "1.0.0"),
                         entryClass = obj.getString("entry_class"),
                         fileName = obj.optString("file_name", ""),
-                        downloadUrl = obj.getString("download_url")
+                        downloadUrl = obj.getString("download_url"),
+                        icon = obj.optString("icon", null) ?: obj.optString("icon_url", null)
                     )
                 )
             }
@@ -409,39 +412,27 @@ fun DashboardScreen(context: Context) {
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             items(cloudModules) { module ->
-                                val isInstalled = plugins.any { it.id == module.id }
-                                val isDownloading = downloadingIds.contains(module.id)
+                                                            val isInstalled = plugins.any { it.id == module.id }
+                            val isDownloading = downloadingIds.contains(module.id)
 
-                                val (modIcon, modGradient) = remember(module.id, module.name) {
-                                    when {
-                                        module.id.contains("browser") || module.name.contains("Chrome", ignoreCase = true) ->
-                                            "🌐" to listOf(Color(0xFF1F6FEB), Color(0xFF58A6FF))
-                                        module.id.contains("ide") || module.name.contains("IDE", ignoreCase = true) ->
-                                            "💻" to listOf(Color(0xFF8957E5), Color(0xFFBC8CFF))
-                                        else ->
-                                            "⚡" to listOf(Color(0xFF238636), Color(0xFF3FB950))
-                                    }
-                                }
-
-                                Card(
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(Brush.linearGradient(modGradient)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(modIcon, fontSize = 18.sp)
-                                            }
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        DynamicAppIcon(
+                                            id = module.id,
+                                            name = module.name,
+                                            iconSource = module.icon,
+                                            size = 36.dp,
+                                            shape = RoundedCornerShape(10.dp),
+                                            fallbackFontSize = 18.sp
+                                        )
 
                                             Spacer(Modifier.width(10.dp))
 
@@ -470,7 +461,7 @@ fun DashboardScreen(context: Context) {
                                                             OmniTaskManager.activeSessions.find { it.pluginId == module.id }?.let { session ->
                                                                 OmniTaskManager.killTask(context, session.taskId)
                                                             }
-                                                            val installed = PluginManager.installPluginFromUrl(context, module.downloadUrl, module.name, module.entryClass)
+                                                            val installed = PluginManager.installPluginFromUrl(context, module.downloadUrl, module.name, module.entryClass, icon = module.icon)
                                                             plugins = PluginManager.getInstalledPlugins(context)
                                                             refreshRunningStates()
 
@@ -938,44 +929,34 @@ fun TaskManagerDialog(
                         .heightIn(max = 420.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(sessions, key = { it.taskId }) { session ->
-                        val (appIcon, appGrad) = when {
-                            session.pluginId.contains("browser") || session.pluginName.contains("Chrome", true) ->
-                                "🌐" to listOf(Color(0xFF1F6FEB), Color(0xFF58A6FF))
-                            session.pluginId.contains("ide") || session.pluginName.contains("IDE", true) ->
-                                "💻" to listOf(Color(0xFF8957E5), Color(0xFFBC8CFF))
-                            else ->
-                                "⚡" to listOf(Color(0xFF238636), Color(0xFF3FB950))
-                        }
-
-                        Card(
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable { onResumeTask(session) }
-                        ) {
-                            Column {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color(0xFF161B22))
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(Brush.linearGradient(appGrad)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(appIcon, fontSize = 12.sp)
-                                        }
+                                    items(sessions, key = { it.taskId }) { session ->
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onResumeTask(session) }
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF161B22))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    DynamicAppIcon(
+                                        id = session.pluginId,
+                                        name = session.pluginName,
+                                        iconSource = session.loadedPlugin.icon,
+                                        size = 24.dp,
+                                        shape = RoundedCornerShape(6.dp),
+                                        fallbackFontSize = 12.sp
+                                    )
                                         Spacer(Modifier.width(8.dp))
                                         Text(
                                             session.pluginName,
@@ -1038,6 +1019,103 @@ fun TaskManagerDialog(
 }
 
 @Composable
+fun DynamicAppIcon(
+    id: String,
+    name: String,
+    iconSource: String?,
+    baseDir: java.io.File? = null,
+    size: androidx.compose.ui.unit.Dp = 44.dp,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(12.dp),
+    fallbackFontSize: androidx.compose.ui.unit.TextUnit = 20.sp
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var bitmap by remember(id, iconSource) { mutableStateOf<Bitmap?>(null) }
+
+    val fallbackGradient = remember(id, name) {
+        when {
+            id.contains("browser") || name.contains("Chrome", true) -> listOf(Color(0xFF1F6FEB), Color(0xFF58A6FF))
+            id.contains("ide") || name.contains("IDE", true) -> listOf(Color(0xFF8957E5), Color(0xFFBC8CFF))
+            id.contains("scroll") -> listOf(Color(0xFFDA3633), Color(0xFFF85149))
+            id.contains("tele") -> listOf(Color(0xFF238636), Color(0xFF3FB950))
+            else -> {
+                val hue = kotlin.math.abs(id.hashCode()) % 360
+                listOf(Color.hsl(hue.toFloat(), 0.65f, 0.45f), Color.hsl((hue + 40f) % 360f, 0.70f, 0.55f))
+            }
+        }
+    }
+
+    val isEmojiOnly = remember(iconSource) {
+        !iconSource.isNullOrBlank() && iconSource.length <= 4 && !iconSource.contains("/") && !iconSource.contains(".")
+    }
+
+    val fallbackSymbol = remember(id, name, iconSource) {
+        when {
+            isEmojiOnly -> iconSource!!
+            id.contains("browser") || name.contains("Chrome", true) -> "🌐"
+            id.contains("ide") || name.contains("IDE", true) -> "💻"
+            id.contains("scroll") -> "🛡️"
+            id.contains("tele") -> "📡"
+            else -> "⚡"
+        }
+    }
+
+    LaunchedEffect(id, iconSource) {
+        if (iconSource.isNullOrBlank() || isEmojiOnly) {
+            bitmap = null
+            return@LaunchedEffect
+        }
+
+        withContext(Dispatchers.IO) {
+            try {
+                if (iconSource.startsWith("http://", true) || iconSource.startsWith("https://", true)) {
+                    val cacheDir = context.getDir("omni_icon_cache", Context.MODE_PRIVATE)
+                    val cacheKey = "ico_" + kotlin.math.abs(iconSource.hashCode()) + ".png"
+                    val cacheFile = java.io.File(cacheDir, cacheKey)
+
+                    if (cacheFile.exists() && cacheFile.length() > 0) {
+                        bitmap = BitmapFactory.decodeFile(cacheFile.absolutePath)
+                    } else {
+                        val req = Request.Builder().url(iconSource).build()
+                        val resp = supabaseHttpClient.newCall(req).execute()
+                        if (resp.isSuccessful) {
+                            val bytes = resp.body?.bytes()
+                            if (bytes != null && bytes.isNotEmpty()) {
+                                cacheFile.writeBytes(bytes)
+                                bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            }
+                        }
+                    }
+                } else {
+                    val localFile = if (baseDir != null) java.io.File(baseDir, iconSource) else java.io.File(context.getDir("plugins", Context.MODE_PRIVATE), "$id/$iconSource")
+                    if (localFile.exists() && localFile.isFile) {
+                        bitmap = BitmapFactory.decodeFile(localFile.absolutePath)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(shape)
+            .background(Brush.linearGradient(fallbackGradient)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Text(fallbackSymbol, fontSize = fallbackFontSize)
+        }
+    }
+}
+
+@Composable
 fun PluginCard(
     plugin: PluginMetadata,
     isHeadlessRunning: Boolean,
@@ -1047,17 +1125,6 @@ fun PluginCard(
 ) {
     val dateStr = remember(plugin.installedAt) {
         SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(plugin.installedAt))
-    }
-
-    val (iconText, iconGradient) = remember(plugin.id, plugin.name) {
-        when {
-            plugin.id.contains("browser") || plugin.name.contains("Chrome", ignoreCase = true) ->
-                "🌐" to listOf(Color(0xFF1F6FEB), Color(0xFF58A6FF))
-            plugin.id.contains("ide") || plugin.name.contains("IDE", ignoreCase = true) ->
-                "💻" to listOf(Color(0xFF8957E5), Color(0xFFBC8CFF))
-            else ->
-                "⚡" to listOf(Color(0xFF238636), Color(0xFF3FB950))
-        }
     }
 
     Card(
@@ -1074,15 +1141,14 @@ fun PluginCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Brush.linearGradient(iconGradient)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(iconText, fontSize = 22.sp)
-                }
+                DynamicAppIcon(
+                    id = plugin.id,
+                    name = plugin.name,
+                    iconSource = plugin.icon,
+                    size = 44.dp,
+                    shape = RoundedCornerShape(12.dp),
+                    fallbackFontSize = 22.sp
+                )
 
                 Spacer(Modifier.width(12.dp))
 
