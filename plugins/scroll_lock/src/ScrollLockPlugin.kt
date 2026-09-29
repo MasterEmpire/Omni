@@ -191,6 +191,18 @@ class ScrollLockPlugin : PluginEntry() {
         }
     }
 
+    private fun isAccessibilityEnabledInSettings(context: Context): Boolean {
+        return try {
+            val enabledServices = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            enabledServices.contains(context.packageName)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun getMissingPermissions(context: Context): List<String> {
         val missing = mutableListOf<String>()
         if (!hasUsageStatsPermission(context)) missing.add("Usage Access")
@@ -330,7 +342,9 @@ class ScrollLockPlugin : PluginEntry() {
 
                 // 2. Poll Active Foreground App (with YouTube Safe Bypass support)
                 val fgApp = getForegroundApp(context)
-                val isTargetApp = fgApp != null && targetPackages.contains(fgApp) && !(youtubeSafeBypass && fgApp == "com.google.android.youtube")
+                val isA11yTrulyActive = AccessibilityDispatcher.isServiceActive(context)
+                val canBypassYoutube = youtubeSafeBypass && isA11yTrulyActive
+                val isTargetApp = fgApp != null && targetPackages.contains(fgApp) && !(canBypassYoutube && fgApp == "com.google.android.youtube")
 
                 if (isTargetApp) {
                     val appName = appDisplayNames[fgApp] ?: fgApp ?: "Target App"
@@ -576,13 +590,15 @@ class ScrollLockPlugin : PluginEntry() {
         var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
         var selectedManualMinutes by remember { mutableIntStateOf(30) }
         var missingPerms by remember { mutableStateOf(getMissingPermissions(context)) }
-        var isA11yActive by remember { mutableStateOf(AccessibilityDispatcher.isServiceActive()) }
+        var isA11yActive by remember { mutableStateOf(AccessibilityDispatcher.isServiceActive(context)) }
+        var isSettingsA11yEnabled by remember { mutableStateOf(isAccessibilityEnabledInSettings(context)) }
 
         LaunchedEffect(Unit) {
             while (true) {
                 currentTimeMs = System.currentTimeMillis()
                 missingPerms = getMissingPermissions(context)
-                isA11yActive = AccessibilityDispatcher.isServiceActive()
+                isA11yActive = AccessibilityDispatcher.isServiceActive(context)
+                isSettingsA11yEnabled = isAccessibilityEnabledInSettings(context)
                 delay(1000L)
             }
         }
@@ -924,36 +940,61 @@ class ScrollLockPlugin : PluginEntry() {
                                     }
                                     context.startActivity(intent)
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8957E5)),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSettingsA11yEnabled) Color(0xFFDA3633) else Color(0xFF8957E5)
+                                ),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                 modifier = Modifier.height(30.dp)
                             ) {
-                                Text("Enable A11y", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (isSettingsA11yEnabled) "Revive (Toggle Off/On)" else "Enable A11y",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
 
                     if (youtubeSafeBypass) {
                         Spacer(Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "🛡️ Long-form YouTube permitted",
-                                color = Color(0xFFBC8CFF),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFF8957E5).copy(alpha = 0.2f)) {
+                        if (isA11yActive) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
-                                    "🚫 $shortsDeflectedToday Deflected",
+                                    "🛡️ Long-form YouTube permitted",
                                     color = Color(0xFFBC8CFF),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFF8957E5).copy(alpha = 0.2f)) {
+                                    Text(
+                                        "🚫 $shortsDeflectedToday Deflected",
+                                        color = Color(0xFFBC8CFF),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFFDA3633).copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, Color(0xFFDA3633).copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    if (isSettingsA11yEnabled)
+                                        "⚠️ Service Zombie Detected: System settings show ON, but Binder IPC is dead. Toggle OFF then ON in Accessibility settings. YouTube is strictly restricted."
+                                    else
+                                        "⚠️ Accessibility permission revoked. YouTube is strictly restricted like TikTok until permission is restored.",
+                                    color = Color(0xFFFFD2D2),
                                     fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    modifier = Modifier.padding(8.dp),
+                                    lineHeight = 14.sp
                                 )
                             }
                         }
