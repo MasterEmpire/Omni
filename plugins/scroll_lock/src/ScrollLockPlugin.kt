@@ -82,6 +82,7 @@ class ScrollLockPlugin : PluginEntry() {
     private val targetPackages = mutableStateListOf(
         "com.zhiliaoapp.musically",      // TikTok Global
         "com.zhiliaoapp.musically.go",   // TikTok Lite
+        "com.tiktok.lite.go",            // TikTok Lite (Alternative)
         "com.ss.android.ugc.trill",      // TikTok Alternative
         "com.instagram.android",         // Instagram Reels
         "com.google.android.youtube",    // YouTube Shorts
@@ -92,6 +93,7 @@ class ScrollLockPlugin : PluginEntry() {
     private val appDisplayNames = mapOf(
         "com.zhiliaoapp.musically" to "TikTok",
         "com.zhiliaoapp.musically.go" to "TikTok Lite",
+        "com.tiktok.lite.go" to "TikTok Lite",
         "com.ss.android.ugc.trill" to "TikTok Asia",
         "com.instagram.android" to "Instagram",
         "com.google.android.youtube" to "YouTube Shorts",
