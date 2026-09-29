@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
 import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityNodeInfo
+import android.net.Uri
 import com.omni.hub.api.AccessibilityDispatcher
 import com.omni.hub.api.AccessibilityListener
 import com.omni.hub.api.HostBridge
@@ -134,6 +135,7 @@ class ScrollLockPlugin : PluginEntry() {
     }
 
     override fun onStop(context: Context) {
+        dismissSirenNotification(context)
         AccessibilityDispatcher.removeListener(accessibilityListener)
         monitorJob?.cancel()
         isRunning = false
@@ -270,19 +272,29 @@ class ScrollLockPlugin : PluginEntry() {
                         bridge.log("SCROLL_LOCK_TAMPER", "🚨 INTEGRITY BREACH: [$missingSummary] revoked! Strike #$sabotageStrikes recorded.")
                     }
 
-                    // Pester relentlessly every 30 seconds across haptics and siren alerts
-                    if (now - lastTamperNagMs > 30_000L) {
+                    // Pester relentlessly every 7 seconds: Haptics, Siren Alert, and Direct Screen Takeover
+                    if (now - lastTamperNagMs > 7_000L) {
                         lastTamperNagMs = now
                         bridge.vibrate(900L)
                         sendSirenNotification(
                             context,
                             "🚨 SCROLLLOCK PERMISSION BREACH",
-                            "Missing: $missingSummary! Sabotage strike #$sabotageStrikes. Restore all permissions now."
+                            "Missing: $missingSummary! Strike #$sabotageStrikes. Tap to restore immediately."
                         )
+                        try {
+                            context.startActivity(createSettingsIntent(context))
+                        } catch (e: Exception) {
+                            bridge.log("SCROLL_LOCK_ERR", "Failed auto-launching settings: ${e.message}")
+                        }
                     }
                     continue
                 } else {
-                    tamperDetected = false
+                    if (tamperDetected) {
+                        tamperDetected = false
+                        dismissSirenNotification(context)
+                        bridge.showToast("✅ ScrollLock Integrity Restored: All permissions active.")
+                        bridge.log("SCROLL_LOCK", "✅ All permissions restored. Siren dismissed.")
+                    }
                 }
 
                 // 2. Poll Active Foreground App (with YouTube Safe Bypass support)
@@ -410,15 +422,49 @@ class ScrollLockPlugin : PluginEntry() {
         }
     }
 
+    private fun createSettingsIntent(context: Context): Intent {
+        return when {
+            !hasUsageStatsPermission(context) -> {
+                Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            }
+            !hasOverlayPermission(context) -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                } else {
+                    Intent(Settings.ACTION_SETTINGS)
+                }
+            }
+            !hasNotificationPermission(context) -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    }
+                } else {
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                }
+            }
+            else -> {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+            }
+        }.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+    }
+
+    private fun dismissSirenNotification(context: Context) {
+        try {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.cancel(8892)
+        } catch (_: Exception) {}
+    }
+
     private fun sendSirenNotification(context: Context, title: String, message: String) {
         try {
-            val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
+            val specificIntent = createSettingsIntent(context)
             val pi = android.app.PendingIntent.getActivity(
                 context,
                 8891,
-                intent,
+                specificIntent,
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
             )
 
@@ -428,9 +474,11 @@ class ScrollLockPlugin : PluginEntry() {
                 .setStyle(NotificationCompat.BigTextStyle().bigText(message))
                 .setSmallIcon(android.R.drawable.stat_sys_warning)
                 .setContentIntent(pi)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setFullScreenIntent(pi, true)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setOngoing(true)
-                .setAutoCancel(false)
+                .setAutoCancel(true)
                 .build()
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
