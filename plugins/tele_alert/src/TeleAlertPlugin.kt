@@ -121,7 +121,7 @@ class TeleAlertPlugin : PluginEntry() {
         activeBridge = bridge
         initSentinel(context, bridge)
         bridge.log("TELE_ALERT", "🚀 Headless Daemon booted. Monitoring Ethio Telecom package expirations.")
-        bridge.startForegroundTask("TeleAlert Sentinel Active", "Monitoring data packages in background")
+        bridge.acquireWakeLock("TeleAlertSentinel")
     }
 
     override fun onStop(context: Context) {
@@ -133,7 +133,7 @@ class TeleAlertPlugin : PluginEntry() {
         } catch (_: Exception) {}
         monitorJob?.cancel()
         monitorJob = null
-        activeBridge?.stopForegroundTask()
+        activeBridge?.releaseWakeLock()
         activeBridge?.log("TELE_ALERT", "🛑 TeleAlert Sentinel stopped.")
     }
 
