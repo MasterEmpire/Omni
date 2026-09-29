@@ -26,6 +26,16 @@ data class AppTaskSession(
 object OmniTaskManager {
     val activeSessions = mutableStateListOf<AppTaskSession>()
     var currentForegroundSession by mutableStateOf<AppTaskSession?>(null)
+    var isRecentsModalOpen by mutableStateOf(false)
+
+    fun openRecents() {
+        currentForegroundSession?.let { captureSnapshot(it) }
+        isRecentsModalOpen = true
+    }
+
+    fun closeRecents() {
+        isRecentsModalOpen = false
+    }
 
     fun launchOrResume(
         context: Context,
