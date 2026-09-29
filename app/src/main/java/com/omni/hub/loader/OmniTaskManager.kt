@@ -102,15 +102,11 @@ object OmniTaskManager {
         val current = currentForegroundSession ?: return
         OmniLogger.log("TASK_MANAGER", "Suspending [${current.pluginName}] to Recents")
         captureSnapshot(current)
+        (current.pluginView.parent as? android.view.ViewGroup)?.removeView(current.pluginView)
         currentForegroundSession = null
     }
 
     fun resumeSession(session: AppTaskSession) {
-        val act = session.pluginView.context as? android.app.Activity
-        if (act != null && (act.isDestroyed || act.isFinishing)) {
-            OmniLogger.log("TASK_MANAGER", "Cannot resume [${session.pluginName}] - activity context is dead.")
-            return
-        }
         OmniLogger.log("TASK_MANAGER", "Resuming [${session.pluginName}] from Recents")
         activeSessions.remove(session)
         activeSessions.add(0, session)
