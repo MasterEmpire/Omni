@@ -566,15 +566,15 @@ class HostBridgeImpl(
 
     override fun acquireWakeLock(tag: String) {
         try {
-            if (wakeLock == null) {
+            if (wakeLock == null || wakeLock?.isHeld == false) {
                 val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
                 wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "omni:$tag").apply {
                     setReferenceCounted(false)
-                    acquire(2 * 60 * 60 * 1000L)
+                    acquire()
                 }
             }
             val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
-            if (wifiLock == null && wm != null) {
+            if ((wifiLock == null || wifiLock?.isHeld == false) && wm != null) {
                 wifiLock = wm.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "omni:$tag").apply {
                     setReferenceCounted(false)
                     acquire()
