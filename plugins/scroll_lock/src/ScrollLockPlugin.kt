@@ -16,6 +16,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -279,15 +281,20 @@ class ScrollLockPlugin : PluginEntry() {
                     if (now - lastTamperNagMs > 7_000L) {
                         lastTamperNagMs = now
                         bridge.vibrate(900L)
+                        val targetIntent = createSettingsIntent(context)
+                        bridge.log("WATCHDOG", "🚨 BREACH ($missingSummary). Target: ${targetIntent.action} | data=${targetIntent.data}")
+
                         sendSirenNotification(
                             context,
                             "🚨 SCROLLLOCK PERMISSION BREACH",
                             "Missing: $missingSummary! Strike #$sabotageStrikes. Tap to restore immediately."
                         )
+
                         try {
-                            context.startActivity(createSettingsIntent(context))
-                        } catch (e: Exception) {
-                            bridge.log("SCROLL_LOCK_ERR", "Failed auto-launching settings: ${e.message}")
+                            context.startActivity(targetIntent)
+                            bridge.log("WATCHDOG", "✅ context.startActivity() invoked successfully.")
+                        } catch (t: Throwable) {
+                            bridge.log("WATCHDOG_ERR", "❌ context.startActivity() blocked/failed: ${t.message}")
                         }
                     }
                     continue
@@ -471,6 +478,8 @@ class ScrollLockPlugin : PluginEntry() {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
             )
 
+            bridge.log("WATCHDOG_NOTIF", "Posting siren alert with FullScreenIntent: ${specificIntent.action}")
+
             val notif = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(message)
@@ -480,13 +489,16 @@ class ScrollLockPlugin : PluginEntry() {
                 .setFullScreenIntent(pi, true)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOngoing(true)
                 .setAutoCancel(true)
                 .build()
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(8892, notif)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            bridge.log("WATCHDOG_ERR", "Failed to dispatch siren notification: ${e.message}")
+        }
     }
 
     private fun loadPersistedState(bridge: HostBridge) {
@@ -558,11 +570,14 @@ class ScrollLockPlugin : PluginEntry() {
         val inManualLock = currentTimeMs < manualLockUntilMs
         val isCurfew = isNightCurfew()
 
+        val scrollState = rememberScrollState()
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xFF0D1117))
                 .statusBarsPadding()
+                .verticalScroll(scrollState)
                 .padding(16.dp)
         ) {
             // Header
@@ -743,7 +758,7 @@ class ScrollLockPlugin : PluginEntry() {
                             ) {
                                 Column {
                                     Text("⛔ 1-HOUR PENALTY BOX", color = Color(0xFFF85149), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    Text("Continuous 30m limit blown. All target apps locked.", color = Color(0xFF8B949E), fontSize = 11.sp)
+                                    Text("Continuous 30m limit blown. Target apps locked.", color = Color(0xFF8B949E), fontSize = 11.sp)
                                 }
                                 Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFF85149).copy(alpha = 0.2f)) {
                                     Text(
@@ -832,6 +847,101 @@ class ScrollLockPlugin : PluginEntry() {
 
             Spacer(Modifier.height(12.dp))
 
+            // YouTube Safe Mode (Shorts Deflector) Card - Prominent High Placement
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
+                border = BorderStroke(
+                    1.dp,
+                    if (youtubeSafeBypass) Color(0xFF8957E5).copy(alpha = 0.8f) else Color.White.copy(alpha = 0.08f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("📺", fontSize = 16.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "YouTube Safe Mode",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "Allow long-form videos & lectures. Deflect Shorts to Home.",
+                                color = Color(0xFF8B949E),
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        if (isA11yActive) {
+                            Switch(
+                                checked = youtubeSafeBypass,
+                                onCheckedChange = { active ->
+                                    youtubeSafeBypass = active
+                                    savePersistedState(bridge)
+                                    bridge.showToast(if (active) "YouTube Safe Mode active: Shorts deflected!" else "YouTube Safe Mode disabled: Strict block armed.")
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF8957E5)
+                                )
+                            )
+                        } else {
+                            Button(
+                                onClick = {
+                                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8957E5)),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("Enable A11y", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (youtubeSafeBypass) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "🛡️ Long-form YouTube permitted",
+                                color = Color(0xFFBC8CFF),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFF8957E5).copy(alpha = 0.2f)) {
+                                Text(
+                                    "🚫 $shortsDeflectedToday Deflected",
+                                    color = Color(0xFFBC8CFF),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             // Telemetry Grid
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MetricCard(
@@ -870,6 +980,64 @@ class ScrollLockPlugin : PluginEntry() {
             }
 
             Spacer(Modifier.height(14.dp))
+
+            // Self-Imposed Lockout Selector
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("Self-Imposed Deep Focus", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                    Text("No cancel button. Once locked, it cannot be undone.", color = Color(0xFF8B949E), fontSize = 11.sp)
+                    Spacer(Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(15, 30, 60, 120).forEach { mins ->
+                            val isSelected = selectedManualMinutes == mins
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Color(0xFF1F6FEB) else Color(0xFF21262D),
+                                border = BorderStroke(1.dp, if (isSelected) Color(0xFF58A6FF) else Color(0xFF30363D)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { selectedManualMinutes = mins }
+                            ) {
+                                Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        if (mins >= 60) "${mins / 60}h" else "${mins}m",
+                                        color = if (isSelected) Color.White else Color(0xFF8B949E),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+
+                    Button(
+                        onClick = {
+                            manualLockUntilMs = System.currentTimeMillis() + (selectedManualMinutes * 60_000L)
+                            savePersistedState(bridge)
+                            bridge.showToast("Locked out of target apps for $selectedManualMinutes minutes!")
+                        },
+                        enabled = !inPenalty && !inManualLock,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                    ) {
+                        Text("Engage Lockout (Irreversible)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            
+            Spacer(Modifier.height(24.dp))
 
             // Self-Imposed Lockout Selector
             Card(
