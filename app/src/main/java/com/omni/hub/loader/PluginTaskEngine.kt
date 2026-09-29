@@ -11,9 +11,14 @@ import java.util.concurrent.ConcurrentHashMap
 
 object PluginTaskEngine {
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val crashHandler = CoroutineExceptionHandler { _, throwable ->
+        OmniLogger.log("TASK_ENGINE_CRASH", "Trapped unhandled coroutine crash in task engine: ${throwable.message}")
+    }
+    private val supervisorScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + crashHandler)
     private val runningTasks = ConcurrentHashMap<String, Job>()
     private val activeInstances = ConcurrentHashMap<String, Pair<PluginEntry, HostBridgeImpl>>()
+    private val retryAttempts = ConcurrentHashMap<String, Int>()
+    private val scheduledRetries = ConcurrentHashMap<String, Job>()
     private const val PREFS_NAME = "omni_daemon_registry"
     private const val KEY_DAEMONS = "active_daemons"
 
@@ -99,7 +104,9 @@ object PluginTaskEngine {
     ) {
         if (isTaskRunning(pluginId)) return
 
-        val job = scope.launch {
+        scheduledRetries.remove(pluginId)?.cancel()
+
+        val job = supervisorScope.launch {
             try {
                 val loadedPlugin = PluginLoader.loadFromDir(context, pluginId, entryClass)
                 val bridge = HostBridgeImpl(context, loadedPlugin.dataDir) {
@@ -111,18 +118,51 @@ object PluginTaskEngine {
 
                 loadedPlugin.instance.onStart(context, bridge, loadedPlugin.baseDir.absolutePath)
 
+                // If running smoothly for 30 seconds, reset retry attempts
+                delay(30_000L)
+                retryAttempts.remove(pluginId)
+
                 if (timeoutMins > 0) {
-                    delay(timeoutMins * 60 * 1000L)
+                    delay((timeoutMins * 60 * 1000L) - 30_000L)
                     bridge.log("TASK_ENGINE", "Task [$pluginId] reached timeout of ${timeoutMins}m. Stopping.")
                     stopTask(context, pluginId)
                 }
-            } catch (e: Exception) {
-                OmniLogger.log("TASK_ENGINE_ERR", "Error in headless task [$pluginId]: ${e.message}\n${e.stackTraceToString()}")
-                stopTask(context, pluginId)
+            } catch (t: Throwable) {
+                OmniLogger.log("TASK_ENGINE_ERR", "💥 Exception in headless task [$pluginId]: ${t.message}\n${t.stackTraceToString()}")
+                cleanupInstance(context, pluginId)
+
+                // Self-Healing Watchdog: Auto-restart daemon with backoff
+                val attempts = (retryAttempts[pluginId] ?: 0) + 1
+                retryAttempts[pluginId] = attempts
+
+                val isDaemon = isDaemonEnabled(context, pluginId)
+                if (isDaemon) {
+                    val backoffMs = (attempts.coerceAtMost(6) * 5_000L)
+                    OmniLogger.log("TASK_ENGINE", "🔄 [SELF-HEAL] Daemon [$pluginId] will auto-resurrect in ${backoffMs / 1000}s (Attempt #$attempts)")
+                    val retryJob = supervisorScope.launch {
+                        delay(backoffMs)
+                        if (isDaemonEnabled(context, pluginId) && !isTaskRunning(pluginId)) {
+                            executeHeadless(context, pluginId, entryClass, timeoutMins)
+                        }
+                    }
+                    scheduledRetries[pluginId] = retryJob
+                }
             }
         }
 
         runningTasks[pluginId] = job
+    }
+
+    private fun cleanupInstance(context: Context, pluginId: String) {
+        runningTasks.remove(pluginId)?.cancel()
+        activeInstances.remove(pluginId)?.let { (instance, bridge) ->
+            try {
+                bridge.log("TASK_ENGINE", "Invoking onStop() for [$pluginId]")
+                instance.onStop(context)
+            } catch (t: Throwable) {
+                android.util.Log.e("PluginTaskEngine", "Error stopping task [$pluginId]", t)
+            }
+        }
     }
 
     fun stopTask(context: Context, pluginId: String) {
@@ -130,14 +170,8 @@ object PluginTaskEngine {
             OmniLogger.log("TASK_ENGINE", "🛡️ ScrollLock has God-Mode immunity. stopTask rejected.")
             return
         }
-        runningTasks.remove(pluginId)?.cancel()
-        activeInstances.remove(pluginId)?.let { (instance, bridge) ->
-            try {
-                bridge.log("TASK_ENGINE", "Invoking onStop() for [$pluginId]")
-                instance.onStop(context)
-            } catch (e: Exception) {
-                android.util.Log.e("PluginTaskEngine", "Error stopping task [$pluginId]", e)
-            }
-        }
+        scheduledRetries.remove(pluginId)?.cancel()
+        retryAttempts.remove(pluginId)
+        cleanupInstance(context, pluginId)
     }
 }
