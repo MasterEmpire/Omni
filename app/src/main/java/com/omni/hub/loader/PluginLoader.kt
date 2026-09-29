@@ -15,7 +15,8 @@ data class LoadedPlugin(
     val instance: PluginEntry,
     val baseDir: File,
     val dataDir: File,
-    val classLoader: ClassLoader
+    val classLoader: ClassLoader,
+    val icon: String? = null
 )
 
 object PluginLoader {
@@ -125,7 +126,8 @@ object PluginLoader {
             instance = instance,
             baseDir = pluginDir,
             dataDir = dataDir,
-            classLoader = loader
+            classLoader = loader,
+            icon = manifest?.iconPath
         )
     }
 
@@ -190,7 +192,8 @@ object PluginLoader {
             instance = instance,
             baseDir = pluginDir,
             dataDir = dataDir,
-            classLoader = loader
+            classLoader = loader,
+            icon = manifest?.iconPath
         )
     }
 }
