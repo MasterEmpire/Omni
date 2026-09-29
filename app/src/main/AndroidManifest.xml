@@ -13,6 +13,10 @@
         </intent>
     </queries>
 
+    <!-- 🛡️ Signature Trampoline Permission -->
+    <permission android:name="com.omni.hub.permission.RESURRECT" android:protectionLevel="signature" />
+    <uses-permission android:name="com.omni.hub.permission.RESURRECT" />
+
     <!-- 🌐 Connectivity & Networking -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -175,6 +179,15 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
+
+        <activity
+            android:name=".services.OmniResurrectActivity"
+            android:permission="com.omni.hub.permission.RESURRECT"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="" />
 
         <service
             android:name=".services.ScrollLockTileService"
