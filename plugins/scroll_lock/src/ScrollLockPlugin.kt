@@ -150,7 +150,7 @@ class ScrollLockPlugin : PluginEntry() {
         ensureMonitoringRunning(context, bridge)
         AccessibilityDispatcher.addListener(accessibilityListener)
         bridge.log("SCROLL_LOCK", "🛡️ ScrollLock Daemon booted in background.")
-        bridge.startForegroundTask("ScrollLock Sentinel Armed", "Protecting against doom scrolling")
+        bridge.acquireWakeLock("ScrollLockSentinel")
     }
 
     override fun onStop(context: Context) {
