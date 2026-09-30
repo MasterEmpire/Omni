@@ -87,6 +87,10 @@ class BrowserStateHolder(
     var containerLayout: FrameLayout? = null
     var currentWebView: WebView? = null
 
+    // Temporary Popup Tab & Opener Tracking
+    val popupTabs = mutableSetOf<String>()
+    val tabOpenerMap = mutableMapOf<String, String>()
+
     // Dialog Visibility States
     var showSettingsDialog by mutableStateOf(false)
     var showDownloadsDialog by mutableStateOf(false)
@@ -537,24 +541,29 @@ class BrowserStateHolder(
         return false
     }
 
-    fun closeTab(targetId: String) {
+    fun closeTab(targetId: String, suppressUndo: Boolean = false) {
         poolManager.purgePending(containerLayout)
 
         if (previousActiveTabId == targetId) {
             previousActiveTabId = null
         }
         val closedTab = tabs.find { it.id == targetId }
-        lastClosedTabsSnapshot = tabs
-        lastActiveTabIdSnapshot = activeTabId
-        val tabTitle = if (closedTab?.url == "about:blank") "New tab" else (closedTab?.title?.take(18) ?: "Tab")
-        undoMessage = "$tabTitle closed"
-        showUndoBanner = true
-        undoJob?.cancel()
-        undoJob = coroutineScope.launch {
-            delay(4500)
-            showUndoBanner = false
-            poolManager.purgePending(containerLayout)
-            lastClosedTabsSnapshot = null
+        val isAutoDismissed = popupTabs.remove(targetId)
+        val openerId = tabOpenerMap.remove(targetId)
+
+        if (!suppressUndo && !isAutoDismissed) {
+            lastClosedTabsSnapshot = tabs
+            lastActiveTabIdSnapshot = activeTabId
+            val tabTitle = if (closedTab?.url == "about:blank") "New tab" else (closedTab?.title?.take(18) ?: "Tab")
+            undoMessage = "$tabTitle closed"
+            showUndoBanner = true
+            undoJob?.cancel()
+            undoJob = coroutineScope.launch {
+                delay(4500)
+                showUndoBanner = false
+                poolManager.purgePending(containerLayout)
+                lastClosedTabsSnapshot = null
+            }
         }
 
         tabProgressMap.remove(targetId)
@@ -577,11 +586,17 @@ class BrowserStateHolder(
         } else {
             tabs = remainingTabs
             if (targetId == activeTabId) {
-                val nextIdx = (currentIdx - 1).coerceAtLeast(0).coerceAtMost(remainingTabs.size - 1)
-                val nextTab = remainingTabs[nextIdx]
-                activeTabId = nextTab.id
-                vaultManager.saveSession(tabs, nextTab.id)
-                attachTabWebView(nextTab.id)
+                val targetNextTab = if (openerId != null && remainingTabs.any { it.id == openerId }) {
+                    remainingTabs.first { it.id == openerId }
+                } else if (previousActiveTabId != null && remainingTabs.any { it.id == previousActiveTabId }) {
+                    remainingTabs.first { it.id == previousActiveTabId }
+                } else {
+                    val nextIdx = (currentIdx - 1).coerceAtLeast(0).coerceAtMost(remainingTabs.size - 1)
+                    remainingTabs[nextIdx]
+                }
+                activeTabId = targetNextTab.id
+                vaultManager.saveSession(tabs, targetNextTab.id)
+                attachTabWebView(targetNextTab.id)
             } else {
                 vaultManager.saveSession(tabs, activeTabId)
             }
@@ -1214,10 +1229,27 @@ class BrowserStateHolder(
         }
     }
 
+    fun checkAndDismissTemporaryTab(view: WebView) {
+        val tabId = poolManager.pool.entries.find { it.value == view }?.key ?: activeTabId
+        val isPopup = popupTabs.contains(tabId) || tabOpenerMap.containsKey(tabId)
+        val currentWvUrl = view.url ?: ""
+        val isBlank = currentWvUrl.isEmpty() || currentWvUrl == "about:blank" || currentUrl == "about:blank"
+        val hasNoHistory = !view.canGoBack() && view.copyBackForwardList().size <= 1
+
+        if (isPopup && (isBlank || hasNoHistory)) {
+            bridge.log("POPUP_CLEANUP", "🧹 Auto-closing temporary blank download tab [$tabId] and recessing back to opener")
+            coroutineScope.launch(Dispatchers.Main) {
+                delay(200) // Brief yield to allow download dispatch to register
+                closeTab(tabId, suppressUndo = true)
+            }
+        }
+    }
+
     override fun onDownloadTriggered(view: WebView, url: String, userAgent: String, contentDisposition: String, mimeType: String) {
         downloadController.triggerFileDownload(view, url, userAgent, contentDisposition, mimeType) { dlId ->
             trackedDownloadIds.add(dlId)
         }
+        checkAndDismissTemporaryTab(view)
     }
 
     override fun onBlobReceived(base64Data: String, mime: String, filename: String) {
@@ -1231,6 +1263,7 @@ class BrowserStateHolder(
                 notifyDownloadCompleted(savedFile)
             }
         }
+        currentWebView?.let { checkAndDismissTemporaryTab(it) }
     }
 
     override fun onNewTabRequested(url: String, sourceTabId: String?) {
@@ -1249,6 +1282,23 @@ class BrowserStateHolder(
         val insertAt = if (parentIdx >= 0) parentIdx + 1 else tabs.size
 
         createNewTab(targetUrl = "about:blank", targetProfileId = inheritedProfileId, insertAtIndex = insertAt)
+        val newId = activeTabId
+        val resolvedParentId = parentTab?.id ?: sourceTabId
+
+        tabOpenerMap[newId] = resolvedParentId
+        popupTabs.add(newId)
+
+        // Watchdog: If a site-opened blank popup never loads real content or triggers navigation within 4s, clean it up
+        coroutineScope.launch {
+            delay(4000)
+            val wv = poolManager.pool[newId]
+            val wvUrl = wv?.url ?: ""
+            if (popupTabs.contains(newId) && (wvUrl.isEmpty() || wvUrl == "about:blank") && wv?.canGoBack() == false) {
+                bridge.log("POPUP_CLEANUP", "🧹 Watchdog auto-dismissing orphaned blank popup tab [$newId]")
+                closeTab(newId, suppressUndo = true)
+            }
+        }
+
         return currentWebView
     }
 
@@ -1257,7 +1307,11 @@ class BrowserStateHolder(
     }
 
     override fun onExternalUri(url: String, view: WebView?): Boolean {
-        return handleExternalUri(context, url, view, bridge)
+        val handled = handleExternalUri(context, url, view, bridge)
+        if (handled && view != null) {
+            checkAndDismissTemporaryTab(view)
+        }
+        return handled
     }
 
     override fun onOpenFileChooser(filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: WebChromeClient.FileChooserParams?) {
