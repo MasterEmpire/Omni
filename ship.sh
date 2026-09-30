@@ -105,6 +105,9 @@ payload = {
     'file_name': target_filename,
     'download_url': download_url
 }
+icon_val = manifest.get('icon') or manifest.get('iconPath')
+if icon_val:
+    payload['icon'] = icon_val
 
 req = urllib.request.Request(
     f"{supabase_url}/rest/v1/omni_modules?on_conflict=id",
