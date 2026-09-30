@@ -126,14 +126,14 @@ private suspend fun fetchCloudModules(): Pair<Boolean, List<CloudModule>> = with
             val arr = JSONArray(jsonStr)
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
+                val rawIcon = when {
+                    !obj.isNull("icon") -> obj.optString("icon")
+                    !obj.isNull("icon_url") -> obj.optString("icon_url")
+                    else -> null
+                }?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+
                 list.add(
                     CloudModule(
-                        val rawIcon = when {
-                            !obj.isNull("icon") -> obj.optString("icon")
-                            !obj.isNull("icon_url") -> obj.optString("icon_url")
-                            else -> null
-                        }?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
-
                         id = obj.getString("id"),
                         name = obj.getString("name"),
                         description = obj.optString("description", "Dynamic Cloud Module"),
