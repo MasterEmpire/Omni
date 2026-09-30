@@ -482,6 +482,7 @@ fun BrowserMenuOverlay(
     onReloadClick: () -> Unit,
     isBackgroundAudioEnabled: Boolean,
     onToggleBackgroundAudio: () -> Unit,
+    onShowRecents: () -> Unit = {},
     onOpenSmartNotes: () -> Unit,
     onOpenAutomation: () -> Unit,
     onOpenLocalIde: () -> Unit,
@@ -607,6 +608,10 @@ fun BrowserMenuOverlay(
                     isBold = true
                 ) {
                     onToggleBackgroundAudio()
+                }
+
+                InLayoutMenuItem("📱 Recents Deck", color = Color(0xFF58A6FF), isBold = true) {
+                    onShowRecents()
                 }
 
                 InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8), isBold = true) {
