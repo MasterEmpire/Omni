@@ -68,39 +68,12 @@ class ScrollLockPlugin : PluginEntry() {
 
     private var activeContext: Context? = null
     private var activeBridge: HostBridge? = null
-    private var monitorJob: Job? = null
-
-    // State Variables
-    @Volatile private var isRunning = false
-    @Volatile private var currentSessionMs = 0L
-    @Volatile private var lastActiveAppTimeMs = 0L
-    @Volatile private var penaltyUntilMs = 0L
-    @Volatile private var manualLockUntilMs = 0L
-    @Volatile private var totalTimeTodayMs = 0L
-    @Volatile private var totalEvictionsToday = 0
-    @Volatile private var nightBlocksToday = 0
-    @Volatile private var sabotageStrikes = 0
-    @Volatile private var lastResetDay = -1
-    @Volatile private var tamperDetected = false
-    @Volatile private var youtubeSafeBypass = false
-    @Volatile private var shortsDeflectedToday = 0
-    @Volatile private var lastDeflectMs = 0L
 
     private val accessibilityListener: AccessibilityListener = { event, service ->
         handleAccessibilityEvent(event, service)
     }
 
-    private val targetPackages = mutableStateListOf(
-        "com.zhiliaoapp.musically",      // TikTok Global
-        "com.zhiliaoapp.musically.go",   // TikTok Lite
-        "com.tiktok.lite.go",            // TikTok Lite (Alternative)
-        "com.ss.android.ugc.trill",      // TikTok Alternative
-        "com.instagram.android",         // Instagram Reels
-        "com.instagram.lite",            // Instagram Lite
-        "com.google.android.youtube",    // YouTube Shorts
-        "com.twitter.android",           // X / Twitter
-        "com.reddit.frontpage"           // Reddit
-    )
+    private val targetPackages = globalTargetPackages
 
     private val appDisplayNames = mapOf(
         "com.zhiliaoapp.musically" to "TikTok",
@@ -157,8 +130,9 @@ class ScrollLockPlugin : PluginEntry() {
 
     override fun onStop(context: Context) {
         // ScrollLock has God-Mode immunity: dismiss siren if needed, but preserve monitorJob and activeScope so the sentinel never dies
+        activeBridge?.let { savePersistedState(it) }
         dismissSirenNotification(context)
-        activeBridge?.log("SCROLL_LOCK", "🛡️ ScrollLock UI session dismissed. Background sentinel monitoring preserved.")
+        activeBridge?.log("SCROLL_LOCK", "🛡️ ScrollLock UI session dismissed. Background sentinel monitoring & session timers preserved.")
     }
 
     private fun hasUsageStatsPermission(context: Context): Boolean {
@@ -266,15 +240,18 @@ class ScrollLockPlugin : PluginEntry() {
     }
 
     private fun ensureMonitoringRunning(context: Context, bridge: HostBridge) {
-        if (monitorJob?.isActive == true) return
-        isRunning = true
+        synchronized(sentinelLock) {
+            if (globalMonitorJob?.isActive == true) return
+            isRunning = true
 
-        monitorJob = getActiveScope().launch {
-            var lastTickMs = System.currentTimeMillis()
-            var lastTamperNagMs = 0L
-            var lastTileSyncMs = 0L
+            globalMonitorJob = getActiveScope().launch {
+                var lastTickMs = System.currentTimeMillis()
+                var lastTamperNagMs = 0L
+                var lastTileSyncMs = 0L
+                var lastDiskSaveMs = 0L
+                var wasInTargetApp = false
 
-            while (isActive) {
+                while (isActive) {
                 try {
                     delay(1500L)
                     val now = System.currentTimeMillis()
@@ -384,28 +361,44 @@ class ScrollLockPlugin : PluginEntry() {
                         continue
                     }
 
-                    // Rule D: Session Accumulation & 30-Minute Cap
-                    currentSessionMs += delta
-                    totalTimeTodayMs += delta
-                    lastActiveAppTimeMs = now
+                                    // Rule D: Session Accumulation & 30-Minute Cap
+                currentSessionMs += delta
+                totalTimeTodayMs += delta
+                lastActiveAppTimeMs = now
 
-                    // 30 Minutes Continuous Limit Reached!
-                    if (currentSessionMs >= 30 * 60 * 1000L) {
+                // Periodic disk flush every 5s while scrolling so task-killing cannot cheat
+                if (now - lastDiskSaveMs >= 5000L) {
+                    lastDiskSaveMs = now
+                    savePersistedState(bridge)
+                }
+
+                // 30 Minutes Continuous Limit Reached!
+                if (currentSessionMs >= 30 * 60 * 1000L) {
+                    currentSessionMs = 0L
+                    penaltyUntilMs = now + (60 * 60 * 1000L) // 1 Hour Penalty
+                    totalEvictionsToday++
+                    savePersistedState(bridge)
+                    bridge.log("SCROLL_LOCK", "⛔ 30m limit hit on $appName! Entering 1-hour penalty box.")
+                    kickToHome(context, bridge, "30-minute scroll limit reached! 1-hour penalty box initiated.")
+                    continue
+                }
+
+            } else {
+                if (wasInTargetApp) {
+                    // Instant disk flush on exiting target app
+                    savePersistedState(bridge)
+                }
+
+                // Grace Period: Only reset session if absent from all target apps for >= 15 continuous minutes
+                if (lastActiveAppTimeMs > 0L && (now - lastActiveAppTimeMs >= 15 * 60 * 1000L)) {
+                    if (currentSessionMs > 0L) {
                         currentSessionMs = 0L
-                        penaltyUntilMs = now + (60 * 60 * 1000L) // 1 Hour Penalty
-                        totalEvictionsToday++
                         savePersistedState(bridge)
-                        bridge.log("SCROLL_LOCK", "⛔ 30m limit hit on $appName! Entering 1-hour penalty box.")
-                        kickToHome(context, bridge, "30-minute scroll limit reached! 1-hour penalty box initiated.")
-                        continue
-                    }
-
-                } else {
-                    // Grace Period: Only reset session if absent from all target apps for >= 15 minutes
-                    if (now - lastActiveAppTimeMs >= 15 * 60 * 1000L) {
-                        currentSessionMs = 0L
+                        bridge.log("SCROLL_LOCK", "⏱️ 15m away from target apps. Session counter cleanly reset.")
                     }
                 }
+            }
+            wasInTargetApp = isTargetApp
                 } catch (ce: CancellationException) {
                     throw ce
                 } catch (t: Throwable) {
@@ -413,6 +406,7 @@ class ScrollLockPlugin : PluginEntry() {
                     delay(1000L)
                 }
             }
+        }
         }
     }
 
@@ -561,8 +555,24 @@ class ScrollLockPlugin : PluginEntry() {
             lastResetDay = json.optInt("last_reset_day", -1)
             penaltyUntilMs = json.optLong("penalty_until_ms", 0L)
             manualLockUntilMs = json.optLong("manual_lock_until_ms", 0L)
-            currentSessionMs = json.optLong("current_session_ms", 0L)
-            lastActiveAppTimeMs = json.optLong("last_active_app_time_ms", 0L)
+
+            val savedSessionMs = json.optLong("current_session_ms", 0L)
+            val savedLastActive = json.optLong("last_active_app_time_ms", 0L)
+            val now = System.currentTimeMillis()
+
+            // Anti-Tamper Session Recovery: If absent for less than 15 mins, restore exact accrued time
+            if (savedLastActive > 0L && (now - savedLastActive < 15 * 60 * 1000L)) {
+                currentSessionMs = savedSessionMs
+                lastActiveAppTimeMs = savedLastActive
+                bridge.log("SCROLL_LOCK", "🛡️ [RECOVERY] Active doom scroll session resumed at ${savedSessionMs / 1000}s (${(now - savedLastActive) / 1000}s since last active). Reset blocked.")
+            } else if (savedLastActive > 0L && (now - savedLastActive >= 15 * 60 * 1000L)) {
+                currentSessionMs = 0L
+                lastActiveAppTimeMs = 0L
+            } else {
+                currentSessionMs = savedSessionMs
+                lastActiveAppTimeMs = savedLastActive
+            }
+
             youtubeSafeBypass = json.optBoolean("youtube_safe_bypass", false)
             shortsDeflectedToday = json.optInt("shorts_deflected_today", 0)
 
@@ -1159,5 +1169,35 @@ class ScrollLockPlugin : PluginEntry() {
 
     companion object {
         private const val CHANNEL_ID = "scroll_lock_alerts_channel"
+        private val sentinelLock = Any()
+        @Volatile private var globalMonitorJob: Job? = null
+
+        // Singleton State Variables across Background Daemon & UI Sessions
+        @Volatile var isRunning = false
+        @Volatile var currentSessionMs = 0L
+        @Volatile var lastActiveAppTimeMs = 0L
+        @Volatile var penaltyUntilMs = 0L
+        @Volatile var manualLockUntilMs = 0L
+        @Volatile var totalTimeTodayMs = 0L
+        @Volatile var totalEvictionsToday = 0
+        @Volatile var nightBlocksToday = 0
+        @Volatile var sabotageStrikes = 0
+        @Volatile var lastResetDay = -1
+        @Volatile var tamperDetected = false
+        @Volatile var youtubeSafeBypass = false
+        @Volatile var shortsDeflectedToday = 0
+        @Volatile var lastDeflectMs = 0L
+
+        val globalTargetPackages = mutableStateListOf(
+            "com.zhiliaoapp.musically",      // TikTok Global
+            "com.zhiliaoapp.musically.go",   // TikTok Lite
+            "com.tiktok.lite.go",            // TikTok Lite (Alternative)
+            "com.ss.android.ugc.trill",      // TikTok Alternative
+            "com.instagram.android",         // Instagram Reels
+            "com.instagram.lite",            // Instagram Lite
+            "com.google.android.youtube",    // YouTube Shorts
+            "com.twitter.android",           // X / Twitter
+            "com.reddit.frontpage"           // Reddit
+        )
     }
 }
