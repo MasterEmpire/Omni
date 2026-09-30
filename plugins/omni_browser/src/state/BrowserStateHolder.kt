@@ -282,7 +282,6 @@ class BrowserStateHolder(
             }
         }
         CookieManager.getInstance().flush()
-        container.removeAllViews()
 
         val targetTab = tabs.find { it.id == targetTabId } ?: return
         selectedProfileId = targetTab.profileId
@@ -313,10 +312,22 @@ class BrowserStateHolder(
             targetWv.loadUrl(targetTab.url)
         }
 
-        (targetWv.parent as? ViewGroup)?.removeView(targetWv)
-        container.addView(targetWv)
+        // Attach new target view BEFORE removing old view to eliminate blank-screen flashing
+        if (targetWv.parent !== container) {
+            (targetWv.parent as? ViewGroup)?.removeView(targetWv)
+            container.addView(targetWv)
+        }
         targetWv.onResume()
         targetWv.visibility = android.view.View.VISIBLE
+
+        // Safely remove sibling views now that targetWv is active on screen
+        for (i in container.childCount - 1 downTo 0) {
+            val child = container.getChildAt(i)
+            if (child !== targetWv) {
+                container.removeViewAt(i)
+            }
+        }
+
         targetWv.requestLayout()
         targetWv.invalidate()
         targetWv.post {
