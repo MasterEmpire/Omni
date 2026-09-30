@@ -60,6 +60,7 @@ fun TabSwitcherScreen(
     val reorderableLazyGridState = rememberReorderableLazyGridState(gridState) { from, to ->
         onReorderTabs(from.index, to.index)
     }
+    val closingTabIds = remember { mutableStateListOf<String>() }
 
     LaunchedEffect(tabs.size, activeTabId) {
         val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
@@ -263,6 +264,26 @@ fun TabSwitcherScreen(
             items(tabs, key = { it.id }) { tab ->
                 val isActive = tab.id == activeTabId
                 val tabProfile = profiles.find { it.id == tab.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF2979FF)
+                val isClosing = closingTabIds.contains(tab.id)
+
+                val closeAlpha by animateFloatAsState(
+                    targetValue = if (isClosing) 0f else 1f,
+                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 200, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "closeAlpha"
+                )
+                val closeScale by animateFloatAsState(
+                    targetValue = if (isClosing) 0.72f else 1f,
+                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 200, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "closeScale"
+                )
+
+                LaunchedEffect(isClosing) {
+                    if (isClosing) {
+                        kotlinx.coroutines.delay(200)
+                        onCloseTab(tab.id)
+                        closingTabIds.remove(tab.id)
+                    }
+                }
 
                 ReorderableItem(reorderableLazyGridState, key = tab.id) { isDragging ->
                     val elevation by animateDpAsState(if (isDragging) 16.dp else 0.dp)
@@ -284,14 +305,15 @@ fun TabSwitcherScreen(
                             .fillMaxWidth()
                             .height(180.dp)
                             .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
+                                scaleX = scale * closeScale
+                                scaleY = scale * closeScale
+                                alpha = closeAlpha
                                 shadowElevation = elevation.toPx()
                                 shape = RoundedCornerShape(12.dp)
                                 clip = true
                             }
                             .longPressDraggableHandle()
-                            .clickable { onSelectTab(tab.id) }
+                            .clickable { if (!isClosing) onSelectTab(tab.id) }
                     ) {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Row(
@@ -321,7 +343,11 @@ fun TabSwitcherScreen(
                             )
 
                             IconButton(
-                                onClick = { onCloseTab(tab.id) },
+                                onClick = {
+                                    if (!closingTabIds.contains(tab.id)) {
+                                        closingTabIds.add(tab.id)
+                                    }
+                                },
                                 modifier = Modifier.size(24.dp)
                             ) {
                                 Icon(
