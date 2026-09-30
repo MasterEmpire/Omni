@@ -80,6 +80,7 @@ class TeleAlertPlugin : PluginEntry() {
     }
 
     @Volatile private var leadTimeMinutes = 15
+    val isMonitoring: Boolean get() = isSmsReceiverRegistered
 
     private val trackedPackages = globalTrackedPackages
     private var uiUpdateTrigger by mutableStateOf(0L)
@@ -971,7 +972,7 @@ class TeleAlertPlugin : PluginEntry() {
         private const val CHANNEL_ID = "tele_alert_expiry_channel_v2"
         private val sentinelLock = Any()
         @Volatile private var globalMonitorJob: Job? = null
-        @Volatile private var isSmsReceiverRegistered = false
+        @Volatile var isSmsReceiverRegistered = false
         @Volatile private var lastNotificationBuzzMs = 0L
         val globalTrackedPackages = mutableStateListOf<TrackedPackage>()
         @Volatile var activePluginInstance: TeleAlertPlugin? = null
