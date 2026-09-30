@@ -71,7 +71,6 @@ class TeleAlertPlugin : PluginEntry() {
     private var activeContext: Context? = null
     private var activeBridge: HostBridge? = null
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var monitorJob: Job? = null
 
     private fun getActiveScope(): CoroutineScope {
         if (!scope.isActive) {
@@ -80,17 +79,16 @@ class TeleAlertPlugin : PluginEntry() {
         return scope
     }
 
-    @Volatile private var isMonitoring = false
     @Volatile private var leadTimeMinutes = 15
 
-    private val trackedPackages = mutableStateListOf<TrackedPackage>()
+    private val trackedPackages = globalTrackedPackages
     private var uiUpdateTrigger by mutableStateOf(0L)
 
     private val smsReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action ?: return
             if (action == "android.provider.Telephony.SMS_RECEIVED") {
-                handleIncomingSms(intent)
+                activePluginInstance?.handleIncomingSms(intent) ?: handleIncomingSms(intent)
             }
         }
     }
@@ -98,6 +96,7 @@ class TeleAlertPlugin : PluginEntry() {
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
         activeContext = context
         activeBridge = bridge
+        activePluginInstance = this
         initSentinel(context, bridge)
 
         return ComposeView(context).apply {
@@ -119,22 +118,17 @@ class TeleAlertPlugin : PluginEntry() {
     override fun onStart(context: Context, bridge: HostBridge, baseDir: String) {
         activeContext = context
         activeBridge = bridge
+        activePluginInstance = this
         initSentinel(context, bridge)
         bridge.log("TELE_ALERT", "🚀 Headless Daemon booted. Monitoring Ethio Telecom package expirations.")
         bridge.acquireWakeLock("TeleAlertSentinel")
     }
 
     override fun onStop(context: Context) {
-        try {
-            if (isMonitoring) {
-                context.applicationContext.unregisterReceiver(smsReceiver)
-                isMonitoring = false
-            }
-        } catch (_: Exception) {}
-        monitorJob?.cancel()
-        monitorJob = null
-        activeBridge?.releaseWakeLock()
-        activeBridge?.log("TELE_ALERT", "🛑 TeleAlert Sentinel stopped.")
+        if (activePluginInstance == this) {
+            activePluginInstance = null
+        }
+        activeBridge?.log("TELE_ALERT", "🛑 TeleAlert UI instance dismissed. Sentinel loop status preserved.")
     }
 
     private fun initSentinel(context: Context, bridge: HostBridge) {
@@ -146,21 +140,26 @@ class TeleAlertPlugin : PluginEntry() {
     }
 
     private fun startSmsListener(context: Context, bridge: HostBridge) {
-        if (isMonitoring) return
-        val filter = IntentFilter("android.provider.Telephony.SMS_RECEIVED").apply {
-            priority = IntentFilter.SYSTEM_HIGH_PRIORITY
-        }
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.applicationContext.registerReceiver(smsReceiver, filter, Context.RECEIVER_EXPORTED)
-            } else {
-                context.applicationContext.registerReceiver(smsReceiver, filter)
+        synchronized(sentinelLock) {
+            if (isSmsReceiverRegistered) {
+                bridge.log("TELE_ALERT", "📡 SMS Broadcast receiver already active globally. Skipping duplicate registration.")
+                return
             }
-            isMonitoring = true
-            bridge.log("TELE_ALERT", "📡 SMS Broadcast receiver mounted. TeleAlert listening for incoming packages.")
-        } catch (e: Exception) {
-            bridge.log("TELE_ALERT_ERR", "Failed registering SMS receiver: ${e.message}")
+            val filter = IntentFilter("android.provider.Telephony.SMS_RECEIVED").apply {
+                priority = IntentFilter.SYSTEM_HIGH_PRIORITY
+            }
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.applicationContext.registerReceiver(smsReceiver, filter, Context.RECEIVER_EXPORTED)
+                } else {
+                    context.applicationContext.registerReceiver(smsReceiver, filter)
+                }
+                isSmsReceiverRegistered = true
+                bridge.log("TELE_ALERT", "📡 SMS Broadcast receiver mounted. TeleAlert listening for incoming packages.")
+            } catch (e: Exception) {
+                bridge.log("TELE_ALERT_ERR", "Failed registering SMS receiver: ${e.message}")
+            }
         }
     }
 
@@ -346,52 +345,101 @@ class TeleAlertPlugin : PluginEntry() {
     }
 
     private fun startMonitoringLoop(context: Context, bridge: HostBridge) {
-        if (monitorJob?.isActive == true) return
+        synchronized(sentinelLock) {
+            if (globalMonitorJob?.isActive == true) {
+                bridge.log("TELE_ALERT", "🔄 Sentinel monitoring loop already active globally. Skipping duplicate launch.")
+                return
+            }
 
-        monitorJob = getActiveScope().launch {
-            while (isActive) {
-                delay(10_000L) // Scan active packages every 10 seconds
-                val now = System.currentTimeMillis()
-                var listChanged = false
+            globalMonitorJob = getActiveScope().launch {
+                bridge.log("TELE_ALERT", "🚀 Global Sentinel monitoring loop launched.")
+                while (isActive) {
+                    delay(10_000L) // Scan active packages every 10 seconds
+                    val now = System.currentTimeMillis()
+                    var listChanged = false
 
-                // Sync notification states from disk to eliminate double-firing between Daemon & UI instances
-                syncNotificationFlagsFromDisk(bridge)
+                    syncNotificationFlagsFromDisk(bridge)
 
-                trackedPackages.forEach { pkg ->
-                    val remainingMs = pkg.expiryTimeMs - now
-                    val alertThresholdMs = leadTimeMinutes * 60_000L
+                    val expiringSoonList = mutableListOf<Pair<TrackedPackage, Long>>()
+                    val expiredNowList = mutableListOf<TrackedPackage>()
 
-                    // 1. Early Warning Trigger (X minutes before expiration)
-                    if (remainingMs in 1..alertThresholdMs && !pkg.notifiedAlert) {
-                        pkg.notifiedAlert = true
-                        listChanged = true
-                        val minLeft = (remainingMs / 60_000L).coerceAtLeast(1)
-                        bridge.log("TELE_ALERT", "🚨 ALERT TRIGGERED: '${pkg.packageName}' expires in $minLeft minutes!")
-                        sendAlertNotification(
-                            context = context,
-                            title = "⚠️ Package Expiring Soon!",
-                            message = "Your ${pkg.packageName} expires in $minLeft min (${pkg.expiryDateStr}). Recharge now!",
-                            notificationId = pkg.id.hashCode()
-                        )
+                    trackedPackages.forEach { pkg ->
+                        val remainingMs = pkg.expiryTimeMs - now
+                        val alertThresholdMs = leadTimeMinutes * 60_000L
+
+                        // 1. Early Warning Trigger (X minutes before expiration)
+                        if (remainingMs in 1..alertThresholdMs && !pkg.notifiedAlert) {
+                            pkg.notifiedAlert = true
+                            listChanged = true
+                            val minLeft = (remainingMs / 60_000L).coerceAtLeast(1)
+                            expiringSoonList.add(pkg to minLeft)
+                        }
+
+                        // 2. Exact Expiration Trigger
+                        if (remainingMs <= 0 && !pkg.notifiedExpired) {
+                            pkg.notifiedExpired = true
+                            listChanged = true
+                            expiredNowList.add(pkg)
+                        }
                     }
 
-                    // 2. Exact Expiration Trigger
-                    if (remainingMs <= 0 && !pkg.notifiedExpired) {
-                        pkg.notifiedExpired = true
-                        listChanged = true
-                        bridge.log("TELE_ALERT", "🛑 EXPIRED: '${pkg.packageName}' has officially expired!")
-                        sendAlertNotification(
-                            context = context,
-                            title = "🛑 Package Expired!",
-                            message = "${pkg.packageName} expired at ${pkg.expiryDateStr}. Mobile data is now unshielded!",
-                            notificationId = pkg.id.hashCode() + 1
-                        )
+                    if (expiringSoonList.isNotEmpty()) {
+                        if (expiringSoonList.size == 1) {
+                            val (pkg, minLeft) = expiringSoonList.first()
+                            bridge.log("TELE_ALERT", "🚨 ALERT TRIGGERED: '${pkg.packageName}' expires in $minLeft minutes!")
+                            sendAlertNotification(
+                                context = context,
+                                bridge = bridge,
+                                title = "⚠️ Package Expiring Soon!",
+                                message = "Your ${pkg.packageName} expires in $minLeft min (${pkg.expiryDateStr}). Recharge now!",
+                                notificationId = pkg.id.hashCode()
+                            )
+                        } else {
+                            val names = expiringSoonList.joinToString { it.first.packageName }
+                            val minLeft = expiringSoonList.minOf { it.second }
+                            bridge.log("TELE_ALERT", "🚨 BATCH ALERT TRIGGERED: ${expiringSoonList.size} packages expiring soon! ($names)")
+                            sendAlertNotification(
+                                context = context,
+                                bridge = bridge,
+                                title = "⚠️ ${expiringSoonList.size} Packages Expiring Soon!",
+                                message = "$names expiring in ~$minLeft min. Recharge now!",
+                                notificationId = 88901,
+                                isBatch = true,
+                                packageCount = expiringSoonList.size
+                            )
+                        }
                     }
-                }
 
-                if (listChanged) {
-                    savePackages(bridge)
-                    uiUpdateTrigger = System.currentTimeMillis()
+                    if (expiredNowList.isNotEmpty()) {
+                        if (expiredNowList.size == 1) {
+                            val pkg = expiredNowList.first()
+                            bridge.log("TELE_ALERT", "🛑 EXPIRED: '${pkg.packageName}' has officially expired!")
+                            sendAlertNotification(
+                                context = context,
+                                bridge = bridge,
+                                title = "🛑 Package Expired!",
+                                message = "${pkg.packageName} expired at ${pkg.expiryDateStr}. Mobile data is now unshielded!",
+                                notificationId = pkg.id.hashCode() + 1
+                            )
+                        } else {
+                            val names = expiredNowList.joinToString { it.packageName }
+                            bridge.log("TELE_ALERT", "🛑 BATCH EXPIRED: ${expiredNowList.size} packages expired! ($names)")
+                            sendAlertNotification(
+                                context = context,
+                                bridge = bridge,
+                                title = "🛑 ${expiredNowList.size} Packages Expired!",
+                                message = "$names have expired. Mobile data is now unshielded!",
+                                notificationId = 88902,
+                                isBatch = true,
+                                packageCount = expiredNowList.size
+                            )
+                        }
+                    }
+
+                    if (listChanged) {
+                        savePackages(bridge)
+                        uiUpdateTrigger = System.currentTimeMillis()
+                    }
                 }
             }
         }
@@ -413,7 +461,32 @@ class TeleAlertPlugin : PluginEntry() {
         }
     }
 
-    private fun sendAlertNotification(context: Context, title: String, message: String, notificationId: Int) {
+    private fun sendAlertNotification(
+        context: Context,
+        bridge: HostBridge?,
+        title: String,
+        message: String,
+        notificationId: Int,
+        isBatch: Boolean = false,
+        packageCount: Int = 1
+    ) {
+        val now = System.currentTimeMillis()
+        val timeSinceLastBuzz = now - lastNotificationBuzzMs
+
+        bridge?.log(
+            "TELE_ALERT_NOTIF",
+            "🔔 [NOTIF_DISPATCH] ID=$notificationId | isBatch=$isBatch | count=$packageCount | Title='$title' | Msg='$message' | DeltaSinceLastBuzz=${timeSinceLastBuzz}ms"
+        )
+
+        // Anti-vibrator cooldown: If high-priority alert buzzed less than 3000ms ago, suppress haptics on subsequent notifications
+        val shouldVibrate = timeSinceLastBuzz > 3000L
+        if (shouldVibrate) {
+            lastNotificationBuzzMs = now
+            bridge?.log("TELE_ALERT_NOTIF", "📳 [BUZZ_FIRED] Haptic vibration pattern allowed for ID=$notificationId (Delta=${timeSinceLastBuzz}ms)")
+        } else {
+            bridge?.log("TELE_ALERT_NOTIF", "🔇 [BUZZ_SUPPRESSED] Haptic vibration muted for ID=$notificationId to prevent hardware buzz loop (Delta=${timeSinceLastBuzz}ms < 3000ms)")
+        }
+
         try {
             val notif = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle(title)
@@ -423,11 +496,19 @@ class TeleAlertPlugin : PluginEntry() {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
+                .apply {
+                    if (!shouldVibrate) {
+                        setSilent(true)
+                    }
+                }
                 .build()
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(notificationId, notif)
-        } catch (_: Exception) {}
+            bridge?.log("TELE_ALERT_NOTIF", "✅ [NOTIF_POSTED] Notification ID=$notificationId posted to Android NotificationManager successfully.")
+        } catch (e: Exception) {
+            bridge?.log("TELE_ALERT_ERR", "❌ [NOTIF_FAILED] Error posting notification ID=$notificationId: ${e.message}")
+        }
     }
 
     private fun loadSettings(bridge: HostBridge) {
@@ -888,5 +969,11 @@ class TeleAlertPlugin : PluginEntry() {
 
     companion object {
         private const val CHANNEL_ID = "tele_alert_expiry_channel_v2"
+        private val sentinelLock = Any()
+        @Volatile private var globalMonitorJob: Job? = null
+        @Volatile private var isSmsReceiverRegistered = false
+        @Volatile private var lastNotificationBuzzMs = 0L
+        val globalTrackedPackages = mutableStateListOf<TrackedPackage>()
+        @Volatile var activePluginInstance: TeleAlertPlugin? = null
     }
 }
