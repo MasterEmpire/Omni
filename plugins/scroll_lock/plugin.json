@@ -5,7 +5,7 @@
   "entryClass": "com.omni.plugin.scrolllock.ScrollLockPlugin",
   "description": "Zero-cheating anti-doom-scrolling sentinel with 30m limit, night curfew & anti-tamper watchdog",
   "autoStart": true,
-  "icon": "🛡️",
+  "icon": "https://vlzgfaqrnyiqfxxxvtas.supabase.co/storage/v1/object/public/omni-modules/scroll_lock.png",
   "permissions": [
     "android.permission.PACKAGE_USAGE_STATS",
     "android.permission.SYSTEM_ALERT_WINDOW",
