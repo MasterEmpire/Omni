@@ -128,6 +128,12 @@ private suspend fun fetchCloudModules(): Pair<Boolean, List<CloudModule>> = with
                 val obj = arr.getJSONObject(i)
                 list.add(
                     CloudModule(
+                        val rawIcon = when {
+                            !obj.isNull("icon") -> obj.optString("icon")
+                            !obj.isNull("icon_url") -> obj.optString("icon_url")
+                            else -> null
+                        }?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+
                         id = obj.getString("id"),
                         name = obj.getString("name"),
                         description = obj.optString("description", "Dynamic Cloud Module"),
@@ -135,7 +141,7 @@ private suspend fun fetchCloudModules(): Pair<Boolean, List<CloudModule>> = with
                         entryClass = obj.getString("entry_class"),
                         fileName = obj.optString("file_name", ""),
                         downloadUrl = obj.getString("download_url"),
-                        icon = obj.optString("icon", null) ?: obj.optString("icon_url", null)
+                        icon = rawIcon
                     )
                 )
             }
@@ -412,27 +418,28 @@ fun DashboardScreen(context: Context) {
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             items(cloudModules) { module ->
-                                                            val isInstalled = plugins.any { it.id == module.id }
-                            val isDownloading = downloadingIds.contains(module.id)
+                                val installedPlugin = plugins.find { it.id == module.id }
+                                val isInstalled = installedPlugin != null
+                                val isDownloading = downloadingIds.contains(module.id)
 
-                            Card(
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        DynamicAppIcon(
-                                            id = module.id,
-                                            name = module.name,
-                                            iconSource = module.icon,
-                                            size = 36.dp,
-                                            shape = RoundedCornerShape(10.dp),
-                                            fallbackFontSize = 18.sp
-                                        )
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            DynamicAppIcon(
+                                                id = module.id,
+                                                name = module.name,
+                                                iconSource = module.icon ?: installedPlugin?.icon,
+                                                size = 36.dp,
+                                                shape = RoundedCornerShape(10.dp),
+                                                fallbackFontSize = 18.sp
+                                            )
 
                                             Spacer(Modifier.width(10.dp))
 
@@ -1051,13 +1058,17 @@ fun DynamicAppIcon(
         }
     }
 
-    val isEmojiOnly = remember(iconSource) {
-        !iconSource.isNullOrBlank() && iconSource.length <= 4 && !iconSource.contains("/") && !iconSource.contains(".")
+    val cleanIcon = remember(iconSource) {
+        iconSource?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
     }
 
-    val fallbackSymbol = remember(id, name, iconSource) {
+    val isEmojiOnly = remember(cleanIcon) {
+        !cleanIcon.isNullOrBlank() && cleanIcon.length <= 4 && !cleanIcon.contains("/") && !cleanIcon.contains(".")
+    }
+
+    val fallbackSymbol = remember(id, name, cleanIcon) {
         when {
-            isEmojiOnly -> iconSource!!
+            isEmojiOnly -> cleanIcon!!
             id.contains("browser") || name.contains("Chrome", true) -> "🌐"
             id.contains("ide") || name.contains("IDE", true) -> "💻"
             id.contains("scroll") -> "🛡️"
@@ -1066,23 +1077,23 @@ fun DynamicAppIcon(
         }
     }
 
-    LaunchedEffect(id, iconSource) {
-        if (iconSource.isNullOrBlank() || isEmojiOnly) {
+    LaunchedEffect(id, cleanIcon) {
+        if (cleanIcon.isNullOrBlank() || isEmojiOnly) {
             bitmap = null
             return@LaunchedEffect
         }
 
         withContext(Dispatchers.IO) {
             try {
-                if (iconSource.startsWith("http://", true) || iconSource.startsWith("https://", true)) {
+                if (cleanIcon.startsWith("http://", true) || cleanIcon.startsWith("https://", true)) {
                     val cacheDir = context.getDir("omni_icon_cache", Context.MODE_PRIVATE)
-                    val cacheKey = "ico_" + kotlin.math.abs(iconSource.hashCode()) + ".png"
+                    val cacheKey = "ico_" + kotlin.math.abs(cleanIcon.hashCode()) + ".png"
                     val cacheFile = java.io.File(cacheDir, cacheKey)
 
                     if (cacheFile.exists() && cacheFile.length() > 0) {
                         bitmap = BitmapFactory.decodeFile(cacheFile.absolutePath)
                     } else {
-                        val req = Request.Builder().url(iconSource).build()
+                        val req = Request.Builder().url(cleanIcon).build()
                         val resp = supabaseHttpClient.newCall(req).execute()
                         if (resp.isSuccessful) {
                             val bytes = resp.body?.bytes()
@@ -1093,7 +1104,7 @@ fun DynamicAppIcon(
                         }
                     }
                 } else {
-                    val localFile = if (baseDir != null) java.io.File(baseDir, iconSource) else java.io.File(context.getDir("plugins", Context.MODE_PRIVATE), "$id/$iconSource")
+                    val localFile = if (baseDir != null) java.io.File(baseDir, cleanIcon) else java.io.File(context.getDir("plugins", Context.MODE_PRIVATE), "$id/$cleanIcon")
                     if (localFile.exists() && localFile.isFile) {
                         bitmap = BitmapFactory.decodeFile(localFile.absolutePath)
                     }
