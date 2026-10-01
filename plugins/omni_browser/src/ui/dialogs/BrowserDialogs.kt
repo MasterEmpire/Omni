@@ -306,17 +306,23 @@ fun SettingsBackupDialog(
     autoSolve: Boolean,
     forceDark: Boolean = false,
     localPort: Int = 8080,
+    isErudaEnabled: Boolean = false,
+    isDesktopMode: Boolean = false,
+    isBackgroundAudioEnabled: Boolean = true,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
-    onSave: (String, Boolean, Boolean, Int) -> Unit,
+    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
     var tempAuto by remember { mutableStateOf(autoSolve) }
     var tempForceDark by remember { mutableStateOf(forceDark) }
     var tempPortText by remember { mutableStateOf(localPort.toString()) }
+    var tempEruda by remember { mutableStateOf(isErudaEnabled) }
+    var tempDesktop by remember { mutableStateOf(isDesktopMode) }
+    var tempAudio by remember { mutableStateOf(isBackgroundAudioEnabled) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -326,7 +332,7 @@ fun SettingsBackupDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("⚙️", fontSize = 20.sp)
                 Spacer(Modifier.width(8.dp))
-                Text("Settings & Backup", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("General Settings", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
         },
         text = {
@@ -338,7 +344,7 @@ fun SettingsBackupDialog(
                     .verticalScroll(rememberScrollState())
             ) {
                 Text("Session & Profile Backup Vault", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Text("Backs up all 10 profiles, tabs, custom shortcuts, solver keys, and local IDE vaults. Auto-mirrored to Documents/.omni_vault/.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
+                Text("Backs up all profiles, tabs, shortcuts, and vaults. Auto-mirrored to Documents/.omni_vault/.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
@@ -357,6 +363,92 @@ fun SettingsBackupDialog(
                         Text("📥 Restore", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+
+                HorizontalDivider(color = Color(0xFF3C4043))
+
+                Text("Browser & Viewport Options", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Desktop Site (1280px Viewport)", color = Color(0xFFE8EAED), fontSize = 12.sp)
+                        Text("Spoofs desktop user agent and layout width", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempDesktop,
+                        onCheckedChange = { tempDesktop = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Background Audio Playback", color = Color(0xFFE8EAED), fontSize = 12.sp)
+                        Text("Keeps media playing when screen is off/switched", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempAudio,
+                        onCheckedChange = { tempAudio = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Force Dark Web Content", color = Color(0xFFE8EAED), fontSize = 12.sp)
+                        Text("Inverts blinding white web pages into dark mode", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempForceDark,
+                        onCheckedChange = { tempForceDark = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                    )
+                }
+
+                HorizontalDivider(color = Color(0xFF3C4043))
+
+                Text("Developer & Diagnostics", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("🛠️ Eruda DevTools Console", color = Color(0xFFE8EAED), fontSize = 12.sp)
+                        Text("Injects floating in-page inspection console on pages", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempEruda,
+                        onCheckedChange = { tempEruda = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                    )
+                }
+
+                OutlinedTextField(
+                    value = tempPortText,
+                    onValueChange = { tempPortText = it.filter { ch -> ch.isDigit() }.take(5) },
+                    label = { Text("Localhost Server Port (e.g. 8080)") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFFE8EAED),
+                        unfocusedTextColor = Color(0xFFE8EAED),
+                        focusedBorderColor = Color(0xFF8AB4F8),
+                        unfocusedBorderColor = Color(0xFF5F6368)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 HorizontalDivider(color = Color(0xFF3C4043))
 
@@ -394,41 +486,6 @@ fun SettingsBackupDialog(
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Force Dark Web Content", color = Color(0xFFE8EAED), fontSize = 12.sp)
-                        Text("Inverts blinding white web pages into dark mode", color = Color(0xFF9AA0A6), fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = tempForceDark,
-                        onCheckedChange = { tempForceDark = it },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
-                    )
-                }
-
-                HorizontalDivider(color = Color(0xFF3C4043))
-
-                Text("Localhost Server (Local Apps & Auth)", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Text("Simulates a secure origin so Web Crypto, service workers, and OAuth logins work offline.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
-
-                OutlinedTextField(
-                    value = tempPortText,
-                    onValueChange = { tempPortText = it.filter { ch -> ch.isDigit() }.take(5) },
-                    label = { Text("Localhost Port (e.g. 8080, 3000, 5173)") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFFE8EAED),
-                        unfocusedTextColor = Color(0xFFE8EAED),
-                        focusedBorderColor = Color(0xFF8AB4F8),
-                        unfocusedBorderColor = Color(0xFF5F6368)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
                 HorizontalDivider(color = Color(0xFF3C4043))
 
                 TextButton(
@@ -443,7 +500,7 @@ fun SettingsBackupDialog(
             Button(
                 onClick = {
                     val portNum = tempPortText.toIntOrNull() ?: 8080
-                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum)
+                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
