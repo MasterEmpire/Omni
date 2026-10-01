@@ -640,6 +640,13 @@ class HostBridgeImpl(
         if (context is android.app.Service) {
             return
         }
+        val keepAlivePrefs = context.getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE)
+        val isKeepAliveEnabled = keepAlivePrefs.getBoolean("key_keep_alive", false)
+        val hasDaemons = com.omni.hub.loader.PluginTaskEngine.getRegisteredDaemons(context).isNotEmpty()
+        if (isKeepAliveEnabled || hasDaemons) {
+            OmniForegroundService.start(context, "Omni Hub", "Background engine active")
+            return
+        }
         try {
             val intent = Intent().apply {
                 setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
