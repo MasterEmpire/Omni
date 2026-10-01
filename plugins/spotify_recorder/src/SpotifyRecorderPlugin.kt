@@ -912,6 +912,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         var isManualRecActive by remember { mutableStateOf(SpotifyRecorderPlugin.isManualRecording) }
         var selectedLimitMin by remember { mutableIntStateOf(0) }
+        var customMinutesText by remember { mutableStateOf("") }
         var manualElapsedMs by remember { mutableLongStateOf(0L) }
 
         var savedStat by remember { mutableIntStateOf(countSaved) }
@@ -1249,8 +1250,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            listOf(0 to "No Limit", 5 to "5m", 15 to "15m", 30 to "30m", 60 to "60m").forEach { (mins, label) ->
-                                val isSel = selectedLimitMin == mins
+                            listOf(0 to "No Limit", 5 to "5m", 15 to "15m", 30 to "30m").forEach { (mins, label) ->
+                                val isSel = selectedLimitMin == mins && customMinutesText.isEmpty()
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = if (isSel) Color(0xFF58A6FF).copy(alpha = 0.25f) else Color(0xFF21262D),
@@ -1258,10 +1259,13 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .clickable { selectedLimitMin = mins }
+                                        .clickable {
+                                            selectedLimitMin = mins
+                                            customMinutesText = ""
+                                        }
                                 ) {
                                     Box(
-                                        modifier = Modifier.padding(vertical = 6.dp),
+                                        modifier = Modifier.padding(vertical = 8.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
@@ -1273,6 +1277,51 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                     }
                                 }
                             }
+
+                            // Custom exact numeric minute input box
+                            OutlinedTextField(
+                                value = customMinutesText,
+                                onValueChange = { newVal ->
+                                    val filtered = newVal.filter { it.isDigit() }.take(4)
+                                    customMinutesText = filtered
+                                    val parsed = filtered.toIntOrNull()
+                                    if (parsed != null && parsed > 0) {
+                                        selectedLimitMin = parsed
+                                    } else if (filtered.isEmpty()) {
+                                        selectedLimitMin = 0
+                                    }
+                                },
+                                placeholder = {
+                                    Text(
+                                        "min",
+                                        fontSize = 10.sp,
+                                        color = Color(0xFF8B949E),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                },
+                                singleLine = true,
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                                ),
+                                modifier = Modifier
+                                    .width(68.dp)
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color(0xFF58A6FF),
+                                    unfocusedBorderColor = if (customMinutesText.isNotEmpty()) Color(0xFF58A6FF) else Color(0xFF30363D),
+                                    focusedContainerColor = Color(0xFF21262D),
+                                    unfocusedContainerColor = Color(0xFF21262D)
+                                ),
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            )
                         }
                         Spacer(Modifier.height(12.dp))
                     }
