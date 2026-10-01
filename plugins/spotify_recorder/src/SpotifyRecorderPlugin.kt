@@ -62,6 +62,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import org.json.JSONObject
 
 enum class EngineState(val label: String, val color: Color) {
     DISARMED("RADAR MONITORING (RECORDING DISARMED)", Color(0xFF8B949E)),
@@ -103,6 +104,22 @@ data class TranscodeJob(
     val targetLengthMs: Long
 )
 
+fun getVaultDirectory(context: Context): File {
+    val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+    val publicVault = File(musicDir, "Omni Spotify")
+    if (!publicVault.exists()) publicVault.mkdirs()
+    if (publicVault.canWrite()) return publicVault
+
+    // Scoped Storage fallback: Guaranteed accessible on Android 10+
+    val appMusic = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+    val appVault = File(appMusic ?: context.filesDir, "Omni Spotify").apply { if (!exists()) mkdirs() }
+    return appVault
+}
+
+fun sanitizeFilename(name: String): String {
+    return name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+}
+
 class SpotifyRecorderPlugin : PluginEntry() {
 
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
@@ -114,12 +131,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
             bridge.acquireWakeLock("SpotifyRecorderSentinel")
         }
 
-        val daemonPrefs = context.getSharedPreferences("omni_daemon_registry", Context.MODE_PRIVATE)
-        val daemonJson = try { JSONObject(daemonPrefs.getString("active_daemons", "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
-        if (!daemonJson.has("spotify_recorder")) {
-            daemonJson.put("spotify_recorder", "com.omni.plugin.spotify.SpotifyRecorderPlugin")
-            daemonPrefs.edit().putString("active_daemons", daemonJson.toString()).apply()
-        }
+        setDaemonState(context, true)
 
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -179,22 +191,6 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 else -> activeBridge?.log("SPOTIFY_BROADCAST", "ℹ️ Unhandled broadcast action: $action")
             }
         }
-    }
-
-    private fun getVaultDirectory(context: Context): File {
-        val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-        val publicVault = File(musicDir, "Omni Spotify")
-        if (!publicVault.exists()) publicVault.mkdirs()
-        if (publicVault.canWrite()) return publicVault
-
-        // Scoped Storage fallback: Guaranteed accessible on Android 10+
-        val appMusic = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
-        val appVault = File(appMusic ?: context.filesDir, "Omni Spotify").apply { if (!exists()) mkdirs() }
-        return appVault
-    }
-
-    private fun sanitizeFilename(name: String): String {
-        return name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
     }
 
     private fun handleMetadataChanged(intent: Intent) {
@@ -1705,6 +1701,20 @@ class SpotifyRecorderPlugin : PluginEntry() {
             bridge.showToast("✅ Audio recording saved to Vault!")
         }
 
+        fun setDaemonState(context: Context, enabled: Boolean) {
+            try {
+                val daemonPrefs = context.getSharedPreferences("omni_daemon_registry", Context.MODE_PRIVATE)
+                val jsonStr = daemonPrefs.getString("active_daemons", "{}") ?: "{}"
+                val json = try { JSONObject(jsonStr) } catch (_: Exception) { JSONObject() }
+                if (enabled) {
+                    json.put("spotify_recorder", "com.omni.plugin.spotify.SpotifyRecorderPlugin")
+                } else {
+                    json.remove("spotify_recorder")
+                }
+                daemonPrefs.edit().putString("active_daemons", json.toString()).apply()
+            } catch (_: Exception) {}
+        }
+
         fun disarmEngine(context: Context, bridge: HostBridge) {
             if (isRecording) activePluginInstance?.finalizeCurrentRecording(reason = "User disarmed engine")
             isArmed = false
@@ -1719,12 +1729,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
             mediaProjection?.stop()
             mediaProjection = null
             bridge.releaseWakeLock()
-            com.omni.hub.loader.PluginTaskEngine.setDaemonEnabled(
-                context,
-                "spotify_recorder",
-                "com.omni.plugin.spotify.SpotifyRecorderPlugin",
-                false
-            )
+            setDaemonState(context, false)
             bridge.showToast("Spotify Recorder Disarmed")
         }
 
@@ -1750,12 +1755,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                 stateUpdater?.invoke(EngineState.ARMED_LISTENING)
                                 ensureReceiverRegistered(context)
                                 bridge.acquireWakeLock("SpotifyRecorderSentinel")
-                                com.omni.hub.loader.PluginTaskEngine.setDaemonEnabled(
-                                    context,
-                                    "spotify_recorder",
-                                    "com.omni.plugin.spotify.SpotifyRecorderPlugin",
-                                    true
-                                )
+                                setDaemonState(context, true)
                                 bridge.showToast("Spotify Radar Armed! Ready to capture in background.")
                             } else {
                                 bridge.showToast("Failed to initialize MediaProjection.")
