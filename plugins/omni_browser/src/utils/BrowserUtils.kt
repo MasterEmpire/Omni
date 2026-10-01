@@ -145,43 +145,49 @@ val BOT_BYPASS_POLYFILL = """
         }
     } catch(e) {}
 
-    // 🛡️ Intelligent Keyboard & Focus Viewport Guard (Scrolls inputs into view above IME)
-    try {
-        function scrollActiveInputIntoView(element) {
-            var el = element || document.activeElement;
-            if (!el) return;
-            var isInput = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('contenteditable') === 'true';
-            if (isInput) {
-                setTimeout(function() {
+            // 🛡️ Intelligent Keyboard & Focus Viewport Guard (Scrolls inputs into view above IME)
+        try {
+            function scrollActiveInputIntoView(element) {
+                var el = element || document.activeElement;
+                if (!el) return;
+                var isInput = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('contenteditable') === 'true';
+                if (!isInput) return;
+
+                function doScroll() {
                     try {
                         el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
                     } catch(_) {
                         try { el.scrollIntoView(false); } catch(_) {}
                     }
-                }, 280);
+                }
+
+                // Multi-pulse scrolling to align perfectly with IME window animation steps
+                doScroll();
+                setTimeout(doScroll, 120);
+                setTimeout(doScroll, 280);
+                setTimeout(doScroll, 480);
             }
-        }
 
-        document.addEventListener('focusin', function(e) {
-            scrollActiveInputIntoView(e.target);
-        }, true);
+            document.addEventListener('focusin', function(e) {
+                scrollActiveInputIntoView(e.target);
+            }, true);
 
-        document.addEventListener('click', function(e) {
-            var target = e.target;
-            if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-                scrollActiveInputIntoView(target);
+            document.addEventListener('click', function(e) {
+                var target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+                    scrollActiveInputIntoView(target);
+                }
+            }, true);
+
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', function() {
+                    scrollActiveInputIntoView();
+                });
             }
-        }, true);
-
-        if (window.visualViewport) {
-            window.visualViewport.addEventListener('resize', function() {
+            window.addEventListener('resize', function() {
                 scrollActiveInputIntoView();
             });
-        }
-        window.addEventListener('resize', function() {
-            scrollActiveInputIntoView();
-        });
-    } catch(e) {}
+        } catch(e) {}
 })();
 """.trimIndent()
 
