@@ -21,6 +21,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -63,6 +65,16 @@ fun OmniBrowserTopBar(
 ) {
     var isSearchFocused by remember { mutableStateOf(false) }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isSearchFocused) {
+        if (isSearchFocused) {
+            if (urlInputText.isEmpty() && currentUrl != "about:blank") {
+                onUrlTextChange(currentUrl)
+            }
+            focusRequester.requestFocus()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -129,6 +141,16 @@ fun OmniBrowserTopBar(
                     .clip(RoundedCornerShape(20.dp))
                     .background(profColor.copy(alpha = 0.15f))
                     .border(1.5.dp, profColor, RoundedCornerShape(20.dp))
+                    .then(
+                        if (!isSearchFocused) {
+                            Modifier.clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                isSearchFocused = true
+                            }
+                        } else Modifier
+                    )
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -154,66 +176,92 @@ fun OmniBrowserTopBar(
 
                     Spacer(Modifier.width(6.dp))
 
-                    BasicTextField(
-                        value = urlInputText,
-                        onValueChange = onUrlTextChange,
-                        singleLine = true,
-                        maxLines = 1,
-                        cursorBrush = SolidColor(profColor),
-                        textStyle = TextStyle(
-                            color = Color(0xFFE8EAED),
-                            fontSize = 13.sp,
-                            lineHeight = 16.sp,
-                            platformStyle = PlatformTextStyle(
-                                includeFontPadding = false
-                            )
-                        ),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Uri,
-                            imeAction = ImeAction.Go
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onGo = {
-                                isSearchFocused = false
-                                focusManager.clearFocus()
-                                onNavigate(urlInputText)
-                            }
-                        ),
-                        decorationBox = { innerTextField ->
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                if (urlInputText.isEmpty()) {
-                                    Text(
-                                        text = "Search or type URL",
-                                        color = Color(0xFF9AA0A6),
-                                        fontSize = 13.sp,
-                                        style = TextStyle(
-                                            platformStyle = PlatformTextStyle(
-                                                includeFontPadding = false
+                    if (isSearchFocused) {
+                        BasicTextField(
+                            value = urlInputText,
+                            onValueChange = onUrlTextChange,
+                            singleLine = true,
+                            maxLines = 1,
+                            cursorBrush = SolidColor(profColor),
+                            textStyle = TextStyle(
+                                color = Color(0xFFE8EAED),
+                                fontSize = 13.sp,
+                                lineHeight = 16.sp,
+                                platformStyle = PlatformTextStyle(
+                                    includeFontPadding = false
+                                )
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Uri,
+                                imeAction = ImeAction.Go
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onGo = {
+                                    isSearchFocused = false
+                                    focusManager.clearFocus()
+                                    onNavigate(urlInputText)
+                                }
+                            ),
+                            decorationBox = { innerTextField ->
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    if (urlInputText.isEmpty()) {
+                                        Text(
+                                            text = "Search or type URL",
+                                            color = Color(0xFF9AA0A6),
+                                            fontSize = 13.sp,
+                                            style = TextStyle(
+                                                platformStyle = PlatformTextStyle(
+                                                    includeFontPadding = false
+                                                )
                                             )
                                         )
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        },
-                                                        modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .wrapContentHeight(Alignment.CenterVertically)
-                                    .onFocusChanged {
-                                        isSearchFocused = it.isFocused
                                     }
-                    )
+                                    innerTextField()
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .wrapContentHeight(Alignment.CenterVertically)
+                                .focusRequester(focusRequester)
+                                .onFocusChanged {
+                                    if (!it.isFocused) {
+                                        isSearchFocused = false
+                                    }
+                                }
+                        )
 
-                    if (urlInputText.isNotEmpty()) {
-                        IconButton(
-                            onClick = { onUrlTextChange("") },
-                            modifier = Modifier.size(24.dp)
+                        if (urlInputText.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onUrlTextChange("") },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .wrapContentHeight(Alignment.CenterVertically),
+                            contentAlignment = Alignment.CenterStart
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
+                            Text(
+                                text = if (urlInputText.isEmpty() || currentUrl == "about:blank") "Search or type URL" else urlInputText,
+                                color = if (urlInputText.isEmpty() || currentUrl == "about:blank") Color(0xFF9AA0A6) else Color(0xFFE8EAED),
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = TextStyle(
+                                    platformStyle = PlatformTextStyle(
+                                        includeFontPadding = false
+                                    )
+                                )
+                            )
                         }
                     }
                 }
