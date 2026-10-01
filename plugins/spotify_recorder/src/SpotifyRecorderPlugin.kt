@@ -67,6 +67,7 @@ enum class EngineState(val label: String, val color: Color) {
     DISARMED("RADAR MONITORING (RECORDING DISARMED)", Color(0xFF8B949E)),
     ARMED_LISTENING("RADAR ARMED (READY TO CAPTURE 0:00)", Color(0xFF1DB954)),
     RECORDING("CAPTURING CLEAN STREAM", Color(0xFF58A6FF)),
+    MANUAL_RECORDING("MANUAL AUDIO CAPTURE ACTIVE", Color(0xFFFF7B72)),
     SKIPPING_AD("AD SHIELD ACTIVE: SKIPPING COMMERCIAL", Color(0xFFD29922)),
     WAITING_CLEAN_START("JOINED MID-TRACK (WAITING FOR NEXT 0:00)", Color(0xFFBC8CFF)),
     ALREADY_EXISTS("SONG ALREADY IN VAULT", Color(0xFF388BFD)),
@@ -197,6 +198,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
     }
 
     private fun handleMetadataChanged(intent: Intent) {
+        if (isManualRecording) {
+            activeBridge?.log("SPOTIFY_RADAR", "ℹ️ Ignored Spotify track metadata: Universal manual recording is active.")
+            return
+        }
         val newTrackId = intent.getStringExtra("id") ?: ""
         val newTrack = intent.getStringExtra("track")
             ?: intent.getStringExtra("title")
@@ -321,6 +326,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         if (!isAdActive) {
             trackMetaUpdater?.invoke(currentTrackTitle, currentArtist, currentLengthMs, currentPositionMs, isPlaying)
+        }
+
+        if (isManualRecording) {
+            return
         }
 
         if (isRecording) {
@@ -500,10 +509,15 @@ class SpotifyRecorderPlugin : PluginEntry() {
             val recordedDurationMs = (totalPcmBytes * 1000L) / (44100 * 2 * 2)
             val targetLength = take.expectedDurationMs
 
-            val isDurationComplete = targetLength > 0 && (
-                abs(recordedDurationMs - targetLength) <= 5000L ||
-                recordedDurationMs >= targetLength - 4000L
-            )
+            val isManual = take.trackId.startsWith("manual_")
+            val isDurationComplete = if (isManual) {
+                recordedDurationMs >= 1000L
+            } else {
+                targetLength > 0 && (
+                    abs(recordedDurationMs - targetLength) <= 5000L ||
+                    recordedDurationMs >= targetLength - 4000L
+                )
+            }
 
             activeBridge?.log(
                 "SPOTIFY_RECORDER",
@@ -896,6 +910,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
         var isPlayingNow by remember { mutableStateOf(isPlayingTrack) }
         var currentDisplayPos by remember { mutableLongStateOf(currentPositionMs) }
 
+        var isManualRecActive by remember { mutableStateOf(SpotifyRecorderPlugin.isManualRecording) }
+        var selectedLimitMin by remember { mutableIntStateOf(0) }
+        var manualElapsedMs by remember { mutableLongStateOf(0L) }
+
         var savedStat by remember { mutableIntStateOf(countSaved) }
         var discardedStat by remember { mutableIntStateOf(countDiscarded) }
         var adsStat by remember { mutableIntStateOf(countAds) }
@@ -967,18 +985,24 @@ class SpotifyRecorderPlugin : PluginEntry() {
             activeBridge?.log("SPOTIFY_VAULT", "Vault refreshed: ${files.size} track(s) discovered in ${dir.absolutePath}")
         }
 
-        // Real-Time Monotonic Position Interpolator
+        // Real-Time Monotonic Position Interpolator & Manual Elapsed Timer
         LaunchedEffect(isPlayingNow, anchorPos, trackLen) {
-            if (isPlayingNow && trackLen > 0) {
-                val baseTime = SystemClock.elapsedRealtime()
-                while (true) {
+            val baseTime = SystemClock.elapsedRealtime()
+            while (true) {
+                isManualRecActive = SpotifyRecorderPlugin.isManualRecording
+                if (isManualRecActive) {
+                    val takeStart = activeTake?.startedAtMs ?: SystemClock.elapsedRealtime()
+                    manualElapsedMs = SystemClock.elapsedRealtime() - takeStart
+                }
+
+                if (isPlayingNow && trackLen > 0) {
                     val elapsed = SystemClock.elapsedRealtime() - baseTime
                     val computed = anchorPos + elapsed
                     currentDisplayPos = if (computed >= trackLen - 1000L) trackLen else computed.coerceAtMost(trackLen)
-                    delay(120)
+                } else {
+                    currentDisplayPos = anchorPos.coerceAtMost(trackLen)
                 }
-            } else {
-                currentDisplayPos = anchorPos.coerceAtMost(trackLen)
+                delay(150)
             }
         }
 
@@ -1158,6 +1182,128 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     ) {
                         Text(formatMs(currentDisplayPos), fontSize = 10.sp, color = Color(0xFF8B949E), fontFamily = FontFamily.Monospace)
                         Text(formatMs(trackLen), fontSize = 10.sp, color = Color(0xFF8B949E), fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Universal Audio Capture Card
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
+                border = BorderStroke(
+                    1.dp,
+                    if (isManualRecActive) Color(0xFFFF7B72) else Color.White.copy(alpha = 0.08f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isManualRecActive) Color(0xFFFF7B72) else Color(0xFF58A6FF))
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (isManualRecActive) "RECORDING DEVICE AUDIO" else "UNIVERSAL AUDIO CAPTURE",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isManualRecActive) Color(0xFFFF7B72) else Color(0xFF58A6FF)
+                            )
+                        }
+
+                        if (isManualRecActive) {
+                            Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFFFF7B72).copy(alpha = 0.2f)) {
+                                Text(
+                                    text = formatMs(manualElapsedMs) + if (selectedLimitMin > 0) " / ${selectedLimitMin}m" else "",
+                                    color = Color(0xFFFF7B72),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Capture whatever audio is playing (YouTube, Browser, Games, Music)",
+                        color = Color(0xFF8B949E),
+                        fontSize = 11.sp
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    if (!isManualRecActive) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf(0 to "No Limit", 5 to "5m", 15 to "15m", 30 to "30m", 60 to "60m").forEach { (mins, label) ->
+                                val isSel = selectedLimitMin == mins
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSel) Color(0xFF58A6FF).copy(alpha = 0.25f) else Color(0xFF21262D),
+                                    border = BorderStroke(1.dp, if (isSel) Color(0xFF58A6FF) else Color(0xFF30363D)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { selectedLimitMin = mins }
+                                ) {
+                                    Box(
+                                        modifier = Modifier.padding(vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            label,
+                                            color = if (isSel) Color(0xFF58A6FF) else Color(0xFFC9D1D9),
+                                            fontSize = 10.sp,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    Button(
+                        onClick = {
+                            if (isManualRecActive) {
+                                stopManualRecording(bridge)
+                            } else {
+                                startManualRecording(context, bridge, selectedLimitMin)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isManualRecActive) Color(0xFFDA3633) else Color(0xFF1F6FEB)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(38.dp)
+                    ) {
+                        Icon(
+                            if (isManualRecActive) Icons.Default.Close else Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = Color.White
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (isManualRecActive) "STOP & SAVE RECORDING" else "START AUDIO RECORDING",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
                 }
             }
@@ -1348,6 +1494,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
         @Volatile var adTitle = ""
         @Volatile var adArtist = ""
 
+        @Volatile var isManualRecording = false
+        @Volatile var manualRecordingLimitMs = 0L
+
         var stateUpdater: ((EngineState) -> Unit)? = null
         var trackMetaUpdater: ((title: String, artist: String, lengthMs: Long, posMs: Long, isPlaying: Boolean) -> Unit)? = null
         var statsUpdater: ((saved: Int, discarded: Int, ads: Int) -> Unit)? = null
@@ -1397,6 +1546,77 @@ class SpotifyRecorderPlugin : PluginEntry() {
             } catch (e: Exception) {
                 activeBridge?.log("SPOTIFY_ERR", "Error mounting receiver: ${e.message}")
             }
+        }
+
+        fun startManualRecording(context: Context, bridge: HostBridge, limitMinutes: Int) {
+            val limitMs = if (limitMinutes > 0) limitMinutes * 60_000L else 0L
+            manualRecordingLimitMs = limitMs
+
+            fun proceedCapture() {
+                val ctx = activeContext ?: context
+                val vaultDir = getVaultDirectory(ctx)
+                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val trackTitle = "Capture_$timeStamp"
+                val artistName = "Device Audio"
+
+                if (isRecording) {
+                    activePluginInstance?.finalizeCurrentRecording(reason = "Switching to manual recording")
+                }
+
+                isManualRecording = true
+                isArmed = true
+                activePluginInstance?.startAudioRecording(
+                    vaultDir = vaultDir,
+                    trackId = "manual_$timeStamp",
+                    trackTitle = trackTitle,
+                    artistName = artistName,
+                    expectedDurationMs = limitMs
+                )
+                engineState = EngineState.MANUAL_RECORDING
+                stateUpdater?.invoke(EngineState.MANUAL_RECORDING)
+                bridge.acquireWakeLock("UniversalAudioCapture")
+                bridge.showToast("🎙️ Capturing internal device audio...")
+            }
+
+            if (mediaProjection != null) {
+                proceedCapture()
+            } else {
+                bridge.requestPermission(android.Manifest.permission.RECORD_AUDIO) { audioGranted ->
+                    if (!audioGranted) {
+                        bridge.showToast("Record Audio permission required for capture.")
+                        return@requestPermission
+                    }
+                    bridge.requestMediaProjection { resultCode, data ->
+                        if (resultCode == Activity.RESULT_OK && data != null) {
+                            bridge.startProjectionService(
+                                resultCode = resultCode,
+                                data = data,
+                                title = "Omni Audio Recorder Active",
+                                message = "Capturing internal audio stream..."
+                            ) { mp ->
+                                if (mp != null) {
+                                    mediaProjection = mp
+                                    proceedCapture()
+                                } else {
+                                    bridge.showToast("Failed to initialize audio capture projection.")
+                                }
+                            }
+                        } else {
+                            bridge.showToast("Media projection consent rejected.")
+                        }
+                    }
+                }
+            }
+        }
+
+        fun stopManualRecording(bridge: HostBridge) {
+            if (!isManualRecording) return
+            isManualRecording = false
+            activePluginInstance?.finalizeCurrentRecording(reason = "User stopped manual recording")
+            engineState = if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED
+            stateUpdater?.invoke(engineState)
+            bridge.releaseWakeLock()
+            bridge.showToast("✅ Audio recording saved to Vault!")
         }
 
         fun disarmEngine(context: Context, bridge: HostBridge) {
