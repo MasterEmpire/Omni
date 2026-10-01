@@ -528,21 +528,15 @@ fun BrowserMenuOverlay(
     onBackClick: () -> Unit,
     onForwardClick: () -> Unit,
     onReloadClick: () -> Unit,
-    isBackgroundAudioEnabled: Boolean,
-    onToggleBackgroundAudio: () -> Unit,
-    onShowRecents: () -> Unit = {},
-    onOpenSmartNotes: () -> Unit,
-    onOpenAutomation: () -> Unit,
+    onNewTab: () -> Unit,
+    onCopyCleanUrl: () -> Unit,
+    onCaptureDomSnapshot: () -> Unit,
     onOpenLocalIde: () -> Unit,
+    onOpenAutomation: () -> Unit,
+    onOpenSmartNotes: () -> Unit,
     activeDownloadsCount: Int,
     onOpenDownloads: () -> Unit,
-    onNewTab: () -> Unit,
-    onCloseTab: () -> Unit,
-    isDesktopMode: Boolean,
-    onToggleDesktopMode: () -> Unit,
-    onCopyCleanUrl: () -> Unit,
-    onInjectEruda: () -> Unit,
-    onCaptureDomSnapshot: () -> Unit,
+    onShowRecents: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onExitBrowser: () -> Unit
 ) {
@@ -566,17 +560,18 @@ fun BrowserMenuOverlay(
             shadowElevation = 10.dp,
             border = BorderStroke(1.dp, Color(0xFF3C4043)),
             modifier = Modifier
-                .width(250.dp)
+                .width(255.dp)
                 .pointerInput(Unit) {
                     detectTapGestures(onTap = { /* Consume taps */ })
                 }
         ) {
             Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                // Quick Controls Header (Back, Forward, Reload, + New Tab)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceAround,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
@@ -619,6 +614,19 @@ fun BrowserMenuOverlay(
                             tint = Color(0xFFE8EAED)
                         )
                     }
+
+                    IconButton(
+                        onClick = {
+                            onDismiss()
+                            onNewTab()
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "New Tab",
+                            tint = Color(0xFF8AB4F8)
+                        )
+                    }
                 }
 
                 HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
@@ -638,7 +646,7 @@ fun BrowserMenuOverlay(
                                 onDismiss()
                                 onClick()
                             }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
@@ -650,67 +658,75 @@ fun BrowserMenuOverlay(
                     }
                 }
 
-                InLayoutMenuItem(
-                    title = if (isBackgroundAudioEnabled) "🔊 Background Audio: ON" else "🔈 Background Audio: OFF",
-                    color = if (isBackgroundAudioEnabled) Color(0xFF00E676) else Color(0xFFE8EAED),
-                    isBold = true
-                ) {
-                    onToggleBackgroundAudio()
+                // Section 1: Page Controls
+                Text(
+                    text = "PAGE",
+                    color = Color(0xFF9AA0A6),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+
+                InLayoutMenuItem("Copy Clean URL") {
+                    onCopyCleanUrl()
                 }
 
-                InLayoutMenuItem("📱 Recents Deck", color = Color(0xFF58A6FF), isBold = true) {
-                    onShowRecents()
+                InLayoutMenuItem("Capture DOM Snapshot") {
+                    onCaptureDomSnapshot()
                 }
 
-                InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8), isBold = true) {
-                    onOpenSmartNotes()
+                HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
+
+                // Section 2: Power Tools
+                Text(
+                    text = "WORKSPACE & TOOLS",
+                    color = Color(0xFF9AA0A6),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+
+                InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) {
+                    onOpenLocalIde()
                 }
 
                 InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) {
                     onOpenAutomation()
                 }
 
-                InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) {
-                    onOpenLocalIde()
+                InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8)) {
+                    onOpenSmartNotes()
                 }
+
+                HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
+
+                // Section 3: Utilities
+                Text(
+                    text = "UTILITIES",
+                    color = Color(0xFF9AA0A6),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
 
                 InLayoutMenuItem(
                     title = if (activeDownloadsCount > 0) "📥 Downloads ($activeDownloadsCount)" else "📥 Downloads",
                     color = if (activeDownloadsCount > 0) Color(0xFF81C995) else Color(0xFF8AB4F8),
-                    isBold = true
+                    isBold = activeDownloadsCount > 0
                 ) {
                     onOpenDownloads()
                 }
 
-                InLayoutMenuItem("+ New Tab", color = Color(0xFF8AB4F8), isBold = true) {
-                    onNewTab()
-                }
-
-                InLayoutMenuItem("Close Tab") {
-                    onCloseTab()
-                }
-
-                InLayoutMenuItem(if (isDesktopMode) "✓ Desktop Site" else "Desktop Site") {
-                    onToggleDesktopMode()
-                }
-
-                InLayoutMenuItem("Copy Clean URL") {
-                    onCopyCleanUrl()
-                }
-
-                InLayoutMenuItem("🛠️ Eruda DevTools (Console)", color = Color(0xFF8AB4F8), isBold = true) {
-                    onInjectEruda()
-                }
-
-                InLayoutMenuItem("Capture DOM Snapshot", color = Color(0xFF8AB4F8)) {
-                    onCaptureDomSnapshot()
-                }
-
-                InLayoutMenuItem("⚙️ Settings & Backup", color = Color(0xFF8AB4F8), isBold = true) {
-                    onOpenSettings()
+                InLayoutMenuItem("📱 Recents Deck", color = Color(0xFF58A6FF)) {
+                    onShowRecents()
                 }
 
                 HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
+
+                // Section 4: System
+                InLayoutMenuItem("⚙️ General Settings", color = Color(0xFF8AB4F8), isBold = true) {
+                    onOpenSettings()
+                }
 
                 InLayoutMenuItem("Exit Omni Chrome", color = Color(0xFFF28B82), isBold = true) {
                     onExitBrowser()
