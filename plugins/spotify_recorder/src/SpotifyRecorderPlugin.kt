@@ -940,23 +940,50 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         fun playTrack(trackFile: File) {
             try {
-                val uri = androidx.core.content.FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    trackFile
-                )
-                val mime = if (trackFile.name.endsWith(".wav", ignoreCase = true)) "audio/wav" else "audio/mp4"
+                if (!trackFile.exists() || trackFile.length() == 0L) {
+                    bridge.showToast("Track file is empty or missing from storage.")
+                    return
+                }
+
+                var uri: Uri? = null
+                try {
+                    uri = androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        trackFile
+                    )
+                } catch (fe: Exception) {
+                    activeBridge?.log("SPOTIFY_PLAY_WARN", "FileProvider failed (${fe.message}). Falling back to StrictMode file URI...")
+                }
+
+                if (uri == null) {
+                    try {
+                        val builder = android.os.StrictMode.VmPolicy.Builder()
+                        android.os.StrictMode.setVmPolicy(builder.build())
+                        uri = Uri.fromFile(trackFile)
+                    } catch (_: Exception) {}
+                }
+
+                if (uri == null) {
+                    bridge.showToast("Could not resolve URI for playback.")
+                    return
+                }
+
+                val mime = if (trackFile.name.endsWith(".wav", ignoreCase = true)) "audio/wav" else "audio/*"
                 val playIntent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, mime)
+                    clipData = android.content.ClipData.newRawUri("Audio", uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 val songTitle = trackFile.name.removeSuffix(".m4a").removeSuffix(".wav")
-                val chooser = Intent.createChooser(playIntent, "Play '$songTitle' with").apply {
+                val chooser = Intent.createChooser(playIntent, "Play '$songTitle'").apply {
+                    clipData = android.content.ClipData.newRawUri("Audio", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(chooser)
-                activeBridge?.log("SPOTIFY_PLAY", "Dispatched player chooser for: ${trackFile.name}")
+                activeBridge?.log("SPOTIFY_PLAY", "✅ Dispatched player chooser for: ${trackFile.name} (URI: $uri)")
             } catch (e: Exception) {
                 activeBridge?.log("SPOTIFY_PLAY_ERR", "Player intent error: ${e.message}")
                 bridge.showToast("Could not open player: ${e.message}")
@@ -1474,7 +1501,17 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                     }
                                 }
 
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = { playTrack(track.file) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = "Play Track", tint = Color(0xFF1DB954), modifier = Modifier.size(18.dp))
+                                    }
+
                                     IconButton(
                                         onClick = {
                                             track.file.delete()
