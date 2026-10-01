@@ -111,6 +111,7 @@ class BrowserStateHolder(
     var solverApiKey by mutableStateOf("")
     var autoSolveEnabled by mutableStateOf(true)
     var forceDarkWebPages by mutableStateOf(false)
+    var isErudaEnabled by mutableStateOf(false)
 
     // Automator States
     var showAutomationDialog by mutableStateOf(false)
@@ -171,6 +172,9 @@ class BrowserStateHolder(
             autoSolveEnabled = config.autoSolve
             forceDarkWebPages = config.forceDark
             localServerPort = config.localPort
+            isErudaEnabled = config.erudaEnabled
+            isDesktopMode = config.desktopMode
+            isBackgroundAudioEnabled = config.backgroundAudio
             poolManager.localPort = config.localPort
             poolManager.updateForceDark(config.forceDark)
         }
@@ -801,6 +805,15 @@ class BrowserStateHolder(
         }
     }
 
+    fun openLocalIdeAsNeighbor() {
+        val targetUrl = resolveIdeUrl()
+        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+        val currentTab = tabs.find { it.id == activeTabId }
+        val targetProfId = currentTab?.profileId ?: selectedProfileId
+        val insertIdx = if (currentIdx >= 0) currentIdx + 1 else tabs.size
+        createNewTab(targetUrl = targetUrl, targetProfileId = targetProfId, insertAtIndex = insertIdx)
+    }
+
     fun resolveIdeUrl(shortcut: ShortcutItem? = null): String {
         val target = shortcut ?: shortcuts.firstOrNull { it.isDefault } ?: shortcuts.firstOrNull {
             it.localSourcePath != null || it.url.contains("/ide/") || it.url.contains("localhost") || it.title.contains("IDE", ignoreCase = true)
@@ -1223,6 +1236,9 @@ class BrowserStateHolder(
         if (activeTabId == tabId) {
             loadProgress = 1f
             isLoading = false
+        }
+        if (isErudaEnabled && url != "about:blank") {
+            injectEruda()
         }
         if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != "about:blank") {
             solveCurrentCaptcha()
