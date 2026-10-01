@@ -109,11 +109,11 @@ icon_val = manifest.get('icon') or manifest.get('iconPath')
 if icon_val:
     payload['icon'] = icon_val
 
-    print(f"📦 Outgoing Payload to Supabase:\n{json.dumps(payload, indent=2)}")
-
+def send_upsert(data):
+    print(f"📦 Upserting payload to Supabase:\n{json.dumps(data, indent=2)}")
     req = urllib.request.Request(
         f"{supabase_url}/rest/v1/omni_modules?on_conflict=id",
-        data=json.dumps(payload).encode('utf-8'),
+        data=json.dumps(data).encode('utf-8'),
         headers={
             'Authorization': f"Bearer {anon_key}",
             'apikey': anon_key,
@@ -122,18 +122,41 @@ if icon_val:
         },
         method='POST'
     )
+    return urllib.request.urlopen(req)
 
-    try:
-        with urllib.request.urlopen(req) as resp:
-            print(f"✅ Omni Hub Cloud Catalog Updated successfully (HTTP {resp.status}).")
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8', errors='replace')
-        print(f"\n❌ Database catalog update FAILED: HTTP {e.code} ({e.reason})", file=sys.stderr)
-        print(f"💥 [RAW SUPABASE ERROR BODY]:\n{err_body}\n", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ Database catalog update FAILED: {e}", file=sys.stderr)
-        sys.exit(1)
-    EOF
+try:
+    resp = send_upsert(payload)
+    print(f"✅ Omni Hub Cloud Catalog Updated successfully (HTTP {resp.status}).")
+except urllib.error.HTTPError as e:
+    err_body = e.read().decode('utf-8', errors='replace')
+    print(f"\n⚠️ Database catalog update returned HTTP {e.code}: {e.reason}", file=sys.stderr)
+    print(f"💥 [RAW SUPABASE ERROR BODY]:\n{err_body}\n", file=sys.stderr)
+
+    # Self-heal schema mismatch: try 'icon_url' or omit icon if column is missing
+    if "icon" in err_body and ("column" in err_body or "schema cache" in err_body):
+        print("🔄 Detected icon column schema conflict. Retrying with 'icon_url'...", file=sys.stderr)
+        if 'icon' in payload:
+            payload['icon_url'] = payload.pop('icon')
+            try:
+                resp = send_upsert(payload)
+                print(f"✅ Omni Hub Cloud Catalog Updated successfully with 'icon_url' (HTTP {resp.status}).")
+                sys.exit(0)
+            except urllib.error.HTTPError as e2:
+                err_body2 = e2.read().decode('utf-8', errors='replace')
+                print(f"💥 [RETRY WITH ICON_URL FAILED]: {err_body2}", file=sys.stderr)
+                if 'icon_url' in payload:
+                    del payload['icon_url']
+                    print("🔄 Retrying without icon field...", file=sys.stderr)
+                    try:
+                        resp = send_upsert(payload)
+                        print(f"✅ Omni Hub Cloud Catalog Updated successfully without icon (HTTP {resp.status}).")
+                        sys.exit(0)
+                    except Exception as e3:
+                        print(f"❌ Final retry failed: {e3}", file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f"❌ Database catalog update FAILED: {e}", file=sys.stderr)
+    sys.exit(1)
+EOF
 
 echo "🎉 [Omni Hub Ship] Successfully forged, uploaded, and cataloged '$APP_LABEL'!"
