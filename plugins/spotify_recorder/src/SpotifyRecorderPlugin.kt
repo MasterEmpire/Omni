@@ -1666,7 +1666,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 engineState = if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED
                 stateUpdater?.invoke(engineState)
                 activeBridge?.releaseWakeLock()
-                com.omni.hub.services.OmniForegroundService.isProjectionActive = false
+                activeBridge?.stopProjectionService()
                 activeBridge?.showToast("⚠️ Capture Disengaged: $reason")
             }
         }
@@ -1820,7 +1820,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
             isVoluntaryProjectionStop = true
             try { mediaProjection?.stop() } catch (_: Exception) {}
             mediaProjection = null
-            com.omni.hub.services.OmniForegroundService.isProjectionActive = false
+            bridge.stopProjectionService()
             bridge.releaseWakeLock()
             setDaemonState(context, false)
             bridge.showToast("Spotify Recorder Disarmed")
