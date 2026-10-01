@@ -3,5 +3,11 @@
   "name": "Spotify Recorder",
   "version": "1.0.0",
   "entryClass": "com.omni.plugin.spotify.SpotifyRecorderPlugin",
-  "description": "Autonomous Spotify Internal Stream Recorder & Clean Archival Engine"
+  "description": "Autonomous Spotify Internal Stream Recorder & Clean Archival Engine",
+  "autoStart": true,
+  "icon": "🎧",
+  "permissions": [
+    "android.permission.RECORD_AUDIO",
+    "android.permission.POST_NOTIFICATIONS"
+  ]
 }
