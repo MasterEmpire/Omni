@@ -151,21 +151,15 @@ val BOT_BYPASS_POLYFILL = """
                 var el = element || document.activeElement;
                 if (!el) return;
                 var isInput = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('contenteditable') === 'true';
-                if (!isInput) return;
-
-                function doScroll() {
-                    try {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-                    } catch(_) {
-                        try { el.scrollIntoView(false); } catch(_) {}
-                    }
+                if (isInput) {
+                    setTimeout(function() {
+                        try {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+                        } catch(_) {
+                            try { el.scrollIntoView(false); } catch(_) {}
+                        }
+                    }, 280);
                 }
-
-                // Multi-pulse scrolling to align perfectly with IME window animation steps
-                doScroll();
-                setTimeout(doScroll, 120);
-                setTimeout(doScroll, 280);
-                setTimeout(doScroll, 480);
             }
 
             document.addEventListener('focusin', function(e) {
