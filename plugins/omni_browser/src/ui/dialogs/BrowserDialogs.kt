@@ -592,7 +592,30 @@ fun EditShortcutDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (com.omni.plugin.browser.utils.isLocalFilePath(editUrl)) {
+                if (com.omni.plugin.browser.utils.isLocalFilePath(editUrl) || shortcut.localSourcePath != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF1F2227),
+                        border = BorderStroke(1.dp, Color(0xFF388BFD).copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("🔄", fontSize = 15.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Auto-Sync on Save", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Tapping Save will re-sync the latest file directly from disk into the vault.",
+                                    color = Color(0xFF8B949E),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
