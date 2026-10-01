@@ -32,6 +32,22 @@ class OmniForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         if (action == ACTION_STOP) {
+            val keepAlivePrefs = getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE)
+            val isKeepAliveEnabled = keepAlivePrefs.getBoolean("key_keep_alive", false)
+            val hasDaemons = com.omni.hub.loader.PluginTaskEngine.getRegisteredDaemons(this).isNotEmpty()
+
+            if (isKeepAliveEnabled || hasDaemons) {
+                com.omni.hub.api.OmniLogger.log("FOREGROUND", "ACTION_STOP intercepted: Keep-Alive or daemons active. Preserving persistent notification.")
+                createNotificationChannel()
+                val notification = buildNotification("Omni Hub", "Background engine active")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+                return START_STICKY
+            }
+
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
@@ -56,6 +72,22 @@ class OmniForegroundService : Service() {
             com.omni.hub.api.OmniLogger.log("MEDIA_SERVICE", "Interactive Notification STOP pressed. Halting media.")
             com.omni.hub.api.MediaPlaybackDispatcher.onAction(false)
             com.omni.hub.api.MediaPlaybackDispatcher.registerListener(null)
+
+            val keepAlivePrefs = getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE)
+            val isKeepAliveEnabled = keepAlivePrefs.getBoolean("key_keep_alive", false)
+            val hasDaemons = com.omni.hub.loader.PluginTaskEngine.getRegisteredDaemons(this).isNotEmpty()
+
+            if (isKeepAliveEnabled || hasDaemons) {
+                createNotificationChannel()
+                val notification = buildNotification("Omni Hub", "Background engine active")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+                return START_STICKY
+            }
+
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
@@ -303,6 +335,13 @@ class OmniForegroundService : Service() {
         }
 
         fun stop(context: Context) {
+            val keepAlivePrefs = context.getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE)
+            val isKeepAliveEnabled = keepAlivePrefs.getBoolean("key_keep_alive", false)
+            val hasDaemons = com.omni.hub.loader.PluginTaskEngine.getRegisteredDaemons(context).isNotEmpty()
+            if (isKeepAliveEnabled || hasDaemons) {
+                start(context, "Omni Hub", "Background engine active")
+                return
+            }
             val intent = Intent(context, OmniForegroundService::class.java).apply {
                 action = ACTION_STOP
             }
