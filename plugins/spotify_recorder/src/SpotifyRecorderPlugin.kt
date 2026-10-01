@@ -425,6 +425,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
             recordThread = Thread {
                 val buffer = ByteArray(minBuf)
                 var consecutiveErrors = 0
+                var normalExit = false
+
                 try {
                     while (isRecording && audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                         val read = record.read(buffer, 0, buffer.size)
@@ -433,30 +435,54 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             fos.write(buffer, 0, read)
                             recordedBytesCount += read
 
-                            // Auto-Commit Guard: Immediate handoff upon reaching song duration
                             val recMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
                             if (expectedDurationMs > 0 && recMs >= expectedDurationMs - 200L) {
                                 activeBridge?.log(
                                     "SPOTIFY_RECORDER",
                                     "🎯 [AUTO-COMMIT] Track '$trackTitle' reached target duration (${recMs}ms >= ${expectedDurationMs - 200L}ms). Finalizing cleanly."
                                 )
+                                normalExit = true
+                                isManualRecording = false
+                                manualRecStateUpdater?.invoke(false)
                                 finalizeCurrentRecording(reason = "Reached expected duration (${recMs}ms/${expectedDurationMs}ms)")
-                                stateUpdater?.invoke(EngineState.ARMED_LISTENING)
+                                stateUpdater?.invoke(if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED)
                                 break
                             }
                         } else if (read < 0) {
                             consecutiveErrors++
-                            activeBridge?.log("SPOTIFY_REC_ERR", "⚠️ AudioRecord.read error code: $read ($consecutiveErrors/5)")
+                            val errLabel = when (read) {
+                                AudioRecord.ERROR_INVALID_OPERATION -> "ERROR_INVALID_OPERATION (-3)"
+                                AudioRecord.ERROR_BAD_VALUE -> "ERROR_BAD_VALUE (-2)"
+                                AudioRecord.ERROR_DEAD_OBJECT -> "ERROR_DEAD_OBJECT (-6, AudioServer / MediaProjection died)"
+                                AudioRecord.ERROR -> "GENERIC_ERROR (-1)"
+                                else -> "UNKNOWN_ERROR ($read)"
+                            }
+                            activeBridge?.log("SPOTIFY_REC_ERR", "⚠️ AudioRecord.read error: $errLabel ($consecutiveErrors/5)")
                             if (consecutiveErrors >= 5) {
-                                activeBridge?.log("SPOTIFY_REC_ERR", "🚨 Too many AudioRecord read failures ($read). Aborting take to prevent CPU lock.")
-                                abortAndDiscard("Audio hardware read error ($read)")
+                                val failReason = "AudioRecord read failed consecutively with $errLabel"
+                                activeBridge?.log("SPOTIFY_REC_ERR", "🚨 Aborting take: $failReason")
+                                normalExit = true
+                                abortAndDiscard(failReason)
                                 break
                             }
                             Thread.sleep(25)
                         }
                     }
+
+                    if (!normalExit && isRecording) {
+                        val state = audioRecord?.recordingState
+                        val exitReason = if (state != AudioRecord.RECORDSTATE_RECORDING) {
+                            "AudioRecord recordingState abruptly changed to $state (expected RECORDSTATE_RECORDING=3)"
+                        } else {
+                            "Loop terminated unexpectedly (isRecording=$isRecording, state=$state)"
+                        }
+                        activeBridge?.log("SPOTIFY_REC_STOPPED", "🛑 [THREAD LOOP EXITED] $exitReason. Flushing and cleaning state.")
+                        abortAndDiscard(exitReason)
+                    }
                 } catch (e: Exception) {
-                    activeBridge?.log("SPOTIFY_REC_ERR", "Write buffer exception on '$trackTitle': ${e.message}")
+                    val excReason = "Write buffer exception on '$trackTitle': ${e.message}"
+                    activeBridge?.log("SPOTIFY_REC_ERR", "💥 $excReason")
+                    abortAndDiscard(excReason)
                 } finally {
                     try {
                         fos.flush()
@@ -519,6 +545,13 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 "SPOTIFY_RECORDER",
                 "🏁 [FINALIZE TAKE] Reason: $reason | Track: '${take.trackTitle}' by '${take.artistName}' (ID: ${take.trackId}) | Recorded: ${recordedDurationMs}ms | Target: ${targetLength}ms | isDurationComplete=$isDurationComplete | wasInterrupted=$wasInterrupted"
             )
+
+            if (isManualRecording) {
+                isManualRecording = false
+                manualRecStateUpdater?.invoke(false)
+                activeBridge?.releaseWakeLock()
+                activeBridge?.log("SPOTIFY_RECORDER", "ℹ️ Manual recording state cleared after finalize ($reason).")
+            }
 
             if (!wasInterrupted && isDurationComplete) {
                 val ctx = activeContext
@@ -854,6 +887,13 @@ class SpotifyRecorderPlugin : PluginEntry() {
         wasInterrupted = true
         isRecording = false
 
+        if (isManualRecording) {
+            isManualRecording = false
+            manualRecStateUpdater?.invoke(false)
+            activeBridge?.releaseWakeLock()
+            activeBridge?.log("SPOTIFY_RECORDER", "ℹ️ Manual recording state cleared after abort ($reason).")
+        }
+
         val take = activeTake
         activeTake = null
 
@@ -1032,6 +1072,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         LaunchedEffect(Unit) {
             stateUpdater = { engineState = it }
+            manualRecStateUpdater = { isManualRecActive = it }
             trackMetaUpdater = { t, a, l, p, isPlay ->
                 trackTitle = t
                 artistName = a
@@ -1578,11 +1619,57 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         @Volatile var isManualRecording = false
         @Volatile var manualRecordingLimitMs = 0L
+        @Volatile var isVoluntaryProjectionStop = false
 
         var stateUpdater: ((EngineState) -> Unit)? = null
+        var manualRecStateUpdater: ((Boolean) -> Unit)? = null
         var trackMetaUpdater: ((title: String, artist: String, lengthMs: Long, posMs: Long, isPlaying: Boolean) -> Unit)? = null
         var statsUpdater: ((saved: Int, discarded: Int, ads: Int) -> Unit)? = null
         var vaultRefreshTrigger: (() -> Unit)? = null
+
+        fun registerProjectionCallback(projection: MediaProjection) {
+            try {
+                val callback = object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        super.onStop()
+                        if (isVoluntaryProjectionStop) {
+                            activeBridge?.log("SPOTIFY_PROJECTION", "ℹ️ MediaProjection onStop() fired voluntarily during disarm.")
+                            isVoluntaryProjectionStop = false
+                            return
+                        }
+                        val stopMsg = "Android OS revoked MediaProjection (Screen locked, permission expired, or FGS downgraded)"
+                        activeBridge?.log("SPOTIFY_PROJECTION_STOP", "🚨 [MEDIA_PROJECTION REVOKED] $stopMsg. wasRecording=$isRecording, isManual=$isManualRecording")
+                        handleProjectionRevoked(stopMsg)
+                    }
+                }
+                projection.registerCallback(callback, android.os.Handler(android.os.Looper.getMainLooper()))
+                activeBridge?.log("SPOTIFY_PROJECTION", "🛡️ Registered MediaProjection.Callback watchdog on active token.")
+            } catch (e: Exception) {
+                activeBridge?.log("SPOTIFY_PROJECTION_ERR", "⚠️ Failed registering projection callback: ${e.message}")
+            }
+        }
+
+        fun handleProjectionRevoked(reason: String) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                val wasManual = isManualRecording
+                val wasRec = isRecording
+                activeBridge?.log("SPOTIFY_RECORDER", "🛑 [PROJECTION CLEANUP] Disengaging pipeline. Reason: $reason (wasManual=$wasManual, wasRecording=$wasRec)")
+
+                if (wasRec) {
+                    activePluginInstance?.abortAndDiscard("Projection revoked: $reason")
+                }
+
+                isManualRecording = false
+                manualRecStateUpdater?.invoke(false)
+                isRecording = false
+                mediaProjection = null
+                engineState = if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED
+                stateUpdater?.invoke(engineState)
+                activeBridge?.releaseWakeLock()
+                com.omni.hub.services.OmniForegroundService.isProjectionActive = false
+                activeBridge?.showToast("⚠️ Capture Disengaged: $reason")
+            }
+        }
 
         var countSaved = 0
         var countDiscarded = 0
@@ -1677,6 +1764,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                                 message = "Capturing internal audio stream..."
                             ) { mp ->
                                 if (mp != null) {
+                                    registerProjectionCallback(mp)
                                     mediaProjection = mp
                                     proceedCapture()
                                 } else {
@@ -1694,6 +1782,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         fun stopManualRecording(bridge: HostBridge) {
             if (!isManualRecording) return
             isManualRecording = false
+            manualRecStateUpdater?.invoke(false)
             activePluginInstance?.finalizeCurrentRecording(reason = "User stopped manual recording")
             engineState = if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED
             stateUpdater?.invoke(engineState)
@@ -1718,6 +1807,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
         fun disarmEngine(context: Context, bridge: HostBridge) {
             if (isRecording) activePluginInstance?.finalizeCurrentRecording(reason = "User disarmed engine")
             isArmed = false
+            isManualRecording = false
+            manualRecStateUpdater?.invoke(false)
             engineState = EngineState.DISARMED
             stateUpdater?.invoke(EngineState.DISARMED)
             pauseDebounceJob?.cancel()
@@ -1726,8 +1817,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 context.applicationContext.unregisterReceiver(spotifyReceiver)
                 isReceiverRegistered = false
             } catch (_: Exception) {}
-            mediaProjection?.stop()
+            isVoluntaryProjectionStop = true
+            try { mediaProjection?.stop() } catch (_: Exception) {}
             mediaProjection = null
+            com.omni.hub.services.OmniForegroundService.isProjectionActive = false
             bridge.releaseWakeLock()
             setDaemonState(context, false)
             bridge.showToast("Spotify Recorder Disarmed")
@@ -1749,6 +1842,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             message = "Listening to internal media stream..."
                         ) { mp ->
                             if (mp != null) {
+                                registerProjectionCallback(mp)
                                 mediaProjection = mp
                                 isArmed = true
                                 engineState = EngineState.ARMED_LISTENING
