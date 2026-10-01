@@ -579,37 +579,12 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 },
-                isBackgroundAudioEnabled = state.isBackgroundAudioEnabled,
-                onToggleBackgroundAudio = { state.toggleBackgroundAudio() },
-                onShowRecents = {
-                    state.showMenu = false
-                    bridge.showRecents()
-                },
-                onOpenSmartNotes = { state.showSmartNotesDialog = true },
-                onOpenAutomation = { state.showAutomationDialog = true },
-                onOpenLocalIde = {
-                    val targetUrl = state.resolveIdeUrl()
-                    state.navigateTo(targetUrl)
-                },
-                activeDownloadsCount = state.trackedDownloadIds.size,
-                onOpenDownloads = {
-                    state.refreshCompletedDownloads()
-                    state.showDownloadsDialog = true
-                },
                 onNewTab = { state.createNewTab() },
-                onCloseTab = { state.closeTab(state.activeTabId) },
-                isDesktopMode = state.isDesktopMode,
-                onToggleDesktopMode = {
-                    state.toggleDesktopMode()
-                },
                 onCopyCleanUrl = {
                     if (state.currentUrl != "about:blank") {
                         val cleanUrl = sanitizeUrlForCopy(state.currentUrl)
                         bridge.copyToClipboard(cleanUrl)
                     }
-                },
-                onInjectEruda = {
-                    state.injectEruda()
                 },
                 onCaptureDomSnapshot = {
                     state.currentWebView?.evaluateJavascript(DOM_SNAPSHOT_SCRIPT) { html ->
@@ -620,6 +595,20 @@ class OmniBrowser : PluginEntry() {
                             saveHtmlSnapshot(context, bridge, rawHtml, "DOM_Dump")
                         }
                     }
+                },
+                onOpenLocalIde = {
+                    state.openLocalIdeAsNeighbor()
+                },
+                onOpenAutomation = { state.showAutomationDialog = true },
+                onOpenSmartNotes = { state.showSmartNotesDialog = true },
+                activeDownloadsCount = state.trackedDownloadIds.size,
+                onOpenDownloads = {
+                    state.refreshCompletedDownloads()
+                    state.showDownloadsDialog = true
+                },
+                onShowRecents = {
+                    state.showMenu = false
+                    bridge.showRecents()
                 },
                 onOpenSettings = { state.showSettingsDialog = true },
                 onExitBrowser = {
@@ -768,6 +757,9 @@ class OmniBrowser : PluginEntry() {
                         autoSolve = state.autoSolveEnabled,
                         forceDark = state.forceDarkWebPages,
                         localPort = state.localServerPort,
+                        isErudaEnabled = state.isErudaEnabled,
+                        isDesktopMode = state.isDesktopMode,
+                        isBackgroundAudioEnabled = state.isBackgroundAudioEnabled,
                         onExportBackup = { state.exportBackup() },
                         onRestoreBackup = {
                             restoreCallback = { uri -> state.restoreBackup(uri) }
@@ -779,15 +771,24 @@ class OmniBrowser : PluginEntry() {
                             state.currentWebView?.clearCache(true)
                             bridge.showToast("Cookies and Cache cleared.")
                         },
-                        onSave = { key, auto, dark, port ->
+                        onSave = { key, auto, dark, port, eruda, desktop, audio ->
                             state.solverApiKey = key
                             state.autoSolveEnabled = auto
                             state.forceDarkWebPages = dark
                             state.localServerPort = port
+                            state.isErudaEnabled = eruda
+                            state.isDesktopMode = desktop
+                            state.isBackgroundAudioEnabled = audio
                             state.poolManager.localPort = port
                             state.poolManager.updateForceDark(dark)
-                            state.vaultManager.saveSolverConfig(key, auto, dark, port)
-                            bridge.showToast("Settings saved (Port: $port)!")
+                            if (desktop != state.tabs.find { it.id == state.activeTabId }?.isDesktop) {
+                                state.toggleDesktopMode()
+                            }
+                            if (eruda) {
+                                state.injectEruda()
+                            }
+                            state.vaultManager.saveSolverConfig(key, auto, dark, port, eruda, desktop, audio)
+                            bridge.showToast("Settings saved!")
                             state.showSettingsDialog = false
                         },
                         onDismiss = { state.showSettingsDialog = false }
