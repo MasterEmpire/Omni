@@ -1,6 +1,7 @@
 package com.omni.hub.api
 
 import android.content.Context
+import com.omni.hub.services.OmniForegroundService
 import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorEvent
