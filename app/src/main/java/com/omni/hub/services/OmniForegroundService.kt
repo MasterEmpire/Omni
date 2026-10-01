@@ -115,6 +115,29 @@ class OmniForegroundService : Service() {
             return START_STICKY
         }
 
+        if (action == ACTION_STOP_PROJECTION) {
+            isProjectionActive = false
+            com.omni.hub.api.OmniLogger.log("FOREGROUND", "ACTION_STOP_PROJECTION received. Projection state cleared.")
+            val keepAlivePrefs = getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE)
+            val isKeepAliveEnabled = keepAlivePrefs.getBoolean("key_keep_alive", false)
+            val hasDaemons = com.omni.hub.loader.PluginTaskEngine.getRegisteredDaemons(this).isNotEmpty()
+
+            if (isKeepAliveEnabled || hasDaemons) {
+                createNotificationChannel()
+                val notification = buildNotification("Omni Hub", "Background engine active")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+                return START_STICKY
+            }
+
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         if (action == ACTION_START_PROJECTION) {
             val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Omni Audio Stream"
             val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Capturing internal audio..."
@@ -306,6 +329,7 @@ class OmniForegroundService : Service() {
         private const val NOTIFICATION_ID = 8842
         const val ACTION_START = "com.omni.hub.action.START_FOREGROUND"
         const val ACTION_START_PROJECTION = "com.omni.hub.action.START_PROJECTION"
+        const val ACTION_STOP_PROJECTION = "com.omni.hub.action.STOP_PROJECTION"
         const val ACTION_STOP = "com.omni.hub.action.STOP_FOREGROUND"
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_MESSAGE = "extra_message"
