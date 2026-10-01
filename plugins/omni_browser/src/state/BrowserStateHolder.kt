@@ -486,7 +486,7 @@ class BrowserStateHolder(
         val currentOffset = tabSwipeOffset.value
         val target = swipeTargetTab
         val screenW = if (swipeScreenWidth > 0) swipeScreenWidth else 1080f
-        val threshold = screenW * 0.22f
+        val threshold = screenW * 0.15f
 
         coroutineScope.launch {
             if (target != null && Math.abs(currentOffset) >= threshold) {
