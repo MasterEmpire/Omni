@@ -305,13 +305,13 @@ class TeleAlertPlugin : PluginEntry() {
             return null
         }
 
-        // Prevent duplicate tracking (sync disk first in case daemon already recorded it)
+        // Prevent duplicate tracking: strictly ignore any package sharing the exact same expiration timestamp
         activeBridge?.let { loadPackages(it) }
         val duplicate = trackedPackages.find {
-            it.packageName == parsed.packageName && it.expiryTimeMs == parsed.expiryTimeMs
+            it.expiryTimeMs == parsed.expiryTimeMs
         }
         if (duplicate != null) {
-            activeBridge?.log("TELE_ALERT", "ℹ️ Package already actively tracked: '${parsed.packageName}'")
+            activeBridge?.log("TELE_ALERT", "ℹ️ Ignored package '${parsed.packageName}': Exact expiration time (${parsed.expiryDateStr}) already tracked by '${duplicate.packageName}'")
             return duplicate
         }
 
@@ -539,8 +539,8 @@ class TeleAlertPlugin : PluginEntry() {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val exp = obj.getLong("expiry_time_ms")
-                // Keep active packages or packages expired in the last 2 hours for record
-                if (exp > now - (2 * 3600_000L)) {
+                // Keep active packages or packages expired in the last 2 hours for record (ignore duplicate expiration timestamps)
+                if (exp > now - (2 * 3600_000L) && trackedPackages.none { it.expiryTimeMs == exp }) {
                     trackedPackages.add(
                         TrackedPackage(
                             id = obj.getString("id"),
