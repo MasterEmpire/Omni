@@ -116,14 +116,14 @@ object OmniTaskManager {
     fun killTask(context: Context, taskId: String) {
         val target = activeSessions.find { it.taskId == taskId } ?: return
         OmniLogger.log("TASK_MANAGER", "Killing task UI [${target.pluginName}]")
-        if (target.pluginId != "scroll_lock") {
+        if (target.pluginId != "scroll_lock" && target.pluginId != "spotify_recorder") {
             try {
                 target.loadedPlugin.instance.onStop(context)
             } catch (e: Exception) {
                 OmniLogger.log("TASK_MANAGER_ERR", "Error onStop for [${target.pluginName}]: ${e.message}")
             }
         } else {
-            OmniLogger.log("TASK_MANAGER", "🛡️ ScrollLock closed from Recents: UI dismissed, but background daemon stays running.")
+            OmniLogger.log("TASK_MANAGER", "🛡️ ${target.pluginName} closed from Recents: UI dismissed, but background engine/daemon stays running.")
         }
         if (currentForegroundSession?.taskId == taskId) {
             currentForegroundSession = null
@@ -134,12 +134,12 @@ object OmniTaskManager {
     fun killAllTasks(context: Context) {
         OmniLogger.log("TASK_MANAGER", "Clearing all ${activeSessions.size} active sessions")
         activeSessions.forEach { session ->
-            if (session.pluginId != "scroll_lock") {
+            if (session.pluginId != "scroll_lock" && session.pluginId != "spotify_recorder") {
                 try {
                     session.loadedPlugin.instance.onStop(context)
                 } catch (_: Exception) {}
             } else {
-                OmniLogger.log("TASK_MANAGER", "🛡️ ScrollLock closed from Recents: UI dismissed, but background daemon stays running.")
+                OmniLogger.log("TASK_MANAGER", "🛡️ ${session.pluginName} closed from Recents: UI dismissed, but background engine/daemon stays running.")
             }
         }
         currentForegroundSession = null
