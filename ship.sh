@@ -79,7 +79,7 @@ echo "🌐 Public CDN URL: $DOWNLOAD_URL"
 # 3. Extract Manifest and Upsert to Cloud Database Catalog
 echo "📝 Extracting manifest metadata from $BUNDLE_PATH and updating cloud catalog..."
 python3 - << EOF
-import zipfile, json, os, urllib.request, sys
+import zipfile, json, os, urllib.request, urllib.error, sys
 
 bundle_file = '$BUNDLE_PATH'
 app_label = '$APP_LABEL'
@@ -109,24 +109,31 @@ icon_val = manifest.get('icon') or manifest.get('iconPath')
 if icon_val:
     payload['icon'] = icon_val
 
-req = urllib.request.Request(
-    f"{supabase_url}/rest/v1/omni_modules?on_conflict=id",
-    data=json.dumps(payload).encode('utf-8'),
-    headers={
-        'Authorization': f"Bearer {anon_key}",
-        'apikey': anon_key,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-    },
-    method='POST'
-)
+    print(f"📦 Outgoing Payload to Supabase:\n{json.dumps(payload, indent=2)}")
 
-try:
-    with urllib.request.urlopen(req) as resp:
-        print(f"✅ Omni Hub Cloud Catalog Updated successfully (HTTP {resp.status}).")
-except Exception as e:
-    print(f"❌ Database catalog update FAILED: {e}", file=sys.stderr)
-    sys.exit(1)
-EOF
+    req = urllib.request.Request(
+        f"{supabase_url}/rest/v1/omni_modules?on_conflict=id",
+        data=json.dumps(payload).encode('utf-8'),
+        headers={
+            'Authorization': f"Bearer {anon_key}",
+            'apikey': anon_key,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+        },
+        method='POST'
+    )
+
+    try:
+        with urllib.request.urlopen(req) as resp:
+            print(f"✅ Omni Hub Cloud Catalog Updated successfully (HTTP {resp.status}).")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8', errors='replace')
+        print(f"\n❌ Database catalog update FAILED: HTTP {e.code} ({e.reason})", file=sys.stderr)
+        print(f"💥 [RAW SUPABASE ERROR BODY]:\n{err_body}\n", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Database catalog update FAILED: {e}", file=sys.stderr)
+        sys.exit(1)
+    EOF
 
 echo "🎉 [Omni Hub Ship] Successfully forged, uploaded, and cataloged '$APP_LABEL'!"
