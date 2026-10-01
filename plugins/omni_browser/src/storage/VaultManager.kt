@@ -26,7 +26,10 @@ data class BrowserConfig(
     val apiKey: String = "",
     val autoSolve: Boolean = true,
     val forceDark: Boolean = false,
-    val localPort: Int = 8080
+    val localPort: Int = 8080,
+    val erudaEnabled: Boolean = false,
+    val desktopMode: Boolean = false,
+    val backgroundAudio: Boolean = true
 )
 
 data class VaultRestoreData(
@@ -293,13 +296,24 @@ class VaultManager(
         }
     }
 
-    fun saveSolverConfig(apiKey: String, autoSolve: Boolean, forceDark: Boolean = false, localPort: Int = 8080) {
+    fun saveSolverConfig(
+        apiKey: String,
+        autoSolve: Boolean,
+        forceDark: Boolean = false,
+        localPort: Int = 8080,
+        erudaEnabled: Boolean = false,
+        desktopMode: Boolean = false,
+        backgroundAudio: Boolean = true
+    ) {
         try {
             val cfg = JSONObject().apply {
                 put("apiKey", apiKey)
                 put("autoSolve", autoSolve)
                 put("forceDark", forceDark)
                 put("localPort", localPort)
+                put("erudaEnabled", erudaEnabled)
+                put("desktopMode", desktopMode)
+                put("backgroundAudio", backgroundAudio)
             }
             bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
@@ -314,7 +328,10 @@ class VaultManager(
                 apiKey = json.optString("apiKey", ""),
                 autoSolve = json.optBoolean("autoSolve", true),
                 forceDark = json.optBoolean("forceDark", false),
-                localPort = json.optInt("localPort", 8080)
+                localPort = json.optInt("localPort", 8080),
+                erudaEnabled = json.optBoolean("erudaEnabled", false),
+                desktopMode = json.optBoolean("desktopMode", false),
+                backgroundAudio = json.optBoolean("backgroundAudio", true)
             )
         } catch (_: Exception) {
             null
