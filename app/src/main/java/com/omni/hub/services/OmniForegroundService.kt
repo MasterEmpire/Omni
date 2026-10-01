@@ -126,11 +126,13 @@ class OmniForegroundService : Service() {
                 intent?.getParcelableExtra(EXTRA_RESULT_DATA)
             }
 
+            isProjectionActive = true
+
             try {
                 createNotificationChannel()
                 val notification = buildNotification(title, message)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
@@ -156,7 +158,12 @@ class OmniForegroundService : Service() {
             createNotificationChannel()
             val notification = buildNotification(title, message)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                val fgsType = if (isProjectionActive) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                }
+                startForeground(NOTIFICATION_ID, notification, fgsType)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
@@ -242,6 +249,7 @@ class OmniForegroundService : Service() {
     }
 
     companion object {
+        @Volatile var isProjectionActive: Boolean = false
         private const val CHANNEL_MEDIA_ID = "omni_media_channel"
         private const val NOTIFICATION_MEDIA_ID = 8846
 
