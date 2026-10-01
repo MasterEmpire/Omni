@@ -104,47 +104,59 @@ data class TranscodeJob(
 
 class SpotifyRecorderPlugin : PluginEntry() {
 
-    private var activeContext: Context? = null
-    private var activeBridge: HostBridge? = null
+    override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
+        activeContext = context
+        activeBridge = bridge
+        activePluginInstance = this
+        ensureReceiverRegistered(context)
+        if (isArmed) {
+            bridge.acquireWakeLock("SpotifyRecorderSentinel")
+        }
 
-    // Projection & Audio
-    private var mediaProjection: MediaProjection? = null
-    private var audioRecord: AudioRecord? = null
-    @Volatile private var isRecording = false
-    private var recordThread: Thread? = null
+        val daemonPrefs = context.getSharedPreferences("omni_daemon_registry", Context.MODE_PRIVATE)
+        val daemonJson = try { JSONObject(daemonPrefs.getString("active_daemons", "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
+        if (!daemonJson.has("spotify_recorder")) {
+            daemonJson.put("spotify_recorder", "com.omni.plugin.spotify.SpotifyRecorderPlugin")
+            daemonPrefs.edit().putString("active_daemons", daemonJson.toString()).apply()
+        }
 
-    // Immutable Active Take Capsule (Prevents cross-track identity theft)
-    @Volatile private var activeTake: ActiveRecordingTake? = null
+        return ComposeView(context).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                MaterialTheme(
+                    colorScheme = darkColorScheme(
+                        background = Color(0xFF0D1117),
+                        surface = Color(0xFF161B22),
+                        primary = Color(0xFF1DB954)
+                    )
+                ) {
+                    SpotifyVaultScreen(context, bridge)
+                }
+            }
+        }
+    }
 
-    // Track Execution State
-    @Volatile private var isArmed = false
-    @Volatile private var currentTrackId = ""
-    @Volatile private var currentTrackTitle = ""
-    @Volatile private var currentArtist = ""
-    @Volatile private var currentLengthMs = 0L
-    @Volatile private var currentPositionMs = 0L
-    @Volatile private var isPlayingTrack = false
-    @Volatile private var lastSyncTimestamp = 0L
-    @Volatile private var wasInterrupted = false
-    @Volatile private var recordedBytesCount = 0L
+    override fun onStart(context: Context, bridge: HostBridge, baseDir: String) {
+        activeContext = context
+        activeBridge = bridge
+        activePluginInstance = this
+        ensureReceiverRegistered(context)
+        if (isArmed) {
+            bridge.acquireWakeLock("SpotifyRecorderSentinel")
+        }
+        bridge.log("SPOTIFY_RECORDER", "🛡️ Spotify Recorder daemon armed. Background sentinel active.")
+    }
 
-    // Ad and Intermission State Tracking
-    @Volatile private var isAdActive = false
-    @Volatile private var adTitle = ""
-    @Volatile private var adArtist = ""
-
-    // UI Reactive State Bridges
-    private var stateUpdater: ((EngineState) -> Unit)? = null
-    private var trackMetaUpdater: ((title: String, artist: String, lengthMs: Long, posMs: Long, isPlaying: Boolean) -> Unit)? = null
-    private var statsUpdater: ((saved: Int, discarded: Int, ads: Int) -> Unit)? = null
-    private var vaultRefreshTrigger: (() -> Unit)? = null
-
-    private var countSaved = 0
-    private var countDiscarded = 0
-    private var countAds = 0
-    private val recordLock = Any()
-    private val transcodeScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val transcodeDispatcher = Dispatchers.IO.limitedParallelism(1)
+    override fun onStop(context: Context) {
+        if (activePluginInstance == this) {
+            activePluginInstance = null
+        }
+        stateUpdater = null
+        trackMetaUpdater = null
+        statsUpdater = null
+        vaultRefreshTrigger = null
+        activeBridge?.log("SPOTIFY_RECORDER", "🛡️ Spotify Recorder UI detached. Background audio capture & radar sentinel remain 100% active!")
+    }
 
     private val spotifyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -193,7 +205,6 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         val rawLength = intent.getIntExtra("length", 0).takeIf { it > 0 }?.toLong()
             ?: intent.getLongExtra("length", 0L)
-        // Normalize length: if <= 10000, Spotify sent duration in seconds -> convert to ms
         val newLengthMs = if (rawLength in 1..10000) rawLength * 1000L else rawLength
         val newPos = intent.getIntExtra("playbackPosition", 0).toLong()
         val isPlaying = intent.getBooleanExtra("playing", true)
@@ -202,6 +213,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
             "SPOTIFY_METADATA",
             "📥 [METADATA_IN] Title='$newTrack' | Artist='$newArtist' | ID='$newTrackId' | Pos=${newPos}ms | Len=${newLengthMs}ms | Playing=$isPlaying"
         )
+
+        pauseDebounceJob?.cancel()
+        pauseDebounceJob = null
 
         // 1. Ignore blank / intermediate transitional Spotify broadcast glitches
         if (newTrackId.isEmpty() && (newTrack.isEmpty() || newTrack == "Unknown Track")) {
@@ -315,19 +329,31 @@ class SpotifyRecorderPlugin : PluginEntry() {
             val targetLen = take?.expectedDurationMs ?: currentLengthMs
 
             if (!isPlaying) {
-                // Natural end-of-track check: If within 4 seconds of completion, commit rather than discard
                 if (targetLen > 0 && recordedMs >= targetLen - 4000L) {
                     activeBridge?.log("SPOTIFY_RADAR", "Track paused near completion (${recordedMs}ms/${targetLen}ms). Finalizing take.")
                     finalizeCurrentRecording(reason = "Paused near natural completion")
                 } else {
-                    activeBridge?.log("SPOTIFY_RADAR", "Playback paused early (${recordedMs}ms of ${targetLen}ms). Discarding take.")
-                    abortAndDiscard("Playback paused early by user")
+                    activeBridge?.log("SPOTIFY_RADAR", "Playback paused (${recordedMs}ms of ${targetLen}ms). Armed 6s grace window before discarding...")
+                    pauseDebounceJob?.cancel()
+                    pauseDebounceJob = transcodeScope.launch {
+                        delay(6000L)
+                        if (!isPlayingTrack && isRecording) {
+                            activeBridge?.log("SPOTIFY_RADAR", "Grace period expired without playback resume. Discarding take.")
+                            abortAndDiscard("Playback remained paused past grace window")
+                        }
+                    }
                 }
-            } else if (pos >= 0 && targetLen > 0) {
-                // If playhead resets to 0:00 while we captured the full song, that is the natural track hand-off!
-                if (pos <= 2000L && recordedMs >= targetLen - 4000L) {
-                    activeBridge?.log("SPOTIFY_RADAR", "Playhead reset to 0:00 after full play (${recordedMs}ms). Finalizing take.")
-                    finalizeCurrentRecording(reason = "Playhead reset to 0:00 after full play")
+            } else {
+                if (pauseDebounceJob?.isActive == true) {
+                    activeBridge?.log("SPOTIFY_RADAR", "Playback resumed within grace period. Cancelled discard timer.")
+                    pauseDebounceJob?.cancel()
+                    pauseDebounceJob = null
+                }
+                if (pos >= 0 && targetLen > 0) {
+                    if (pos <= 2000L && recordedMs >= targetLen - 4000L) {
+                        activeBridge?.log("SPOTIFY_RADAR", "Playhead reset to 0:00 after full play (${recordedMs}ms). Finalizing take.")
+                        finalizeCurrentRecording(reason = "Playhead reset to 0:00 after full play")
+                    }
                 }
             }
         }
@@ -860,29 +886,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
         }
     }
 
-    override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
-        activeContext = context
-        activeBridge = bridge
-
-        return ComposeView(context).apply {
-            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            setContent {
-                MaterialTheme(
-                    colorScheme = darkColorScheme(
-                        background = Color(0xFF0D1117),
-                        surface = Color(0xFF161B22),
-                        primary = Color(0xFF1DB954)
-                    )
-                ) {
-                    SpotifyVaultScreen(context, bridge)
-                }
-            }
-        }
-    }
-
     @Composable
     fun SpotifyVaultScreen(context: Context, bridge: HostBridge) {
-        var engineState by remember { mutableStateOf(if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED) }
+        var engineState by remember { mutableStateOf(SpotifyRecorderPlugin.engineState) }
         var trackTitle by remember { mutableStateOf(currentTrackTitle.ifEmpty { "Waiting for playback..." }) }
         var artistName by remember { mutableStateOf(currentArtist.ifEmpty { "Spotify Broadcast Radar" }) }
         var trackLen by remember { mutableLongStateOf(currentLengthMs) }
@@ -976,7 +982,6 @@ class SpotifyRecorderPlugin : PluginEntry() {
             }
         }
 
-        // Mount Passive Spotify Broadcast Listener by default
         LaunchedEffect(Unit) {
             stateUpdater = { engineState = it }
             trackMetaUpdater = { t, a, l, p, isPlay ->
@@ -993,74 +998,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
             }
             vaultRefreshTrigger = { reloadVaultList() }
 
-            val filter = IntentFilter().apply {
-                addAction("com.spotify.music.metadatachanged")
-                addAction("com.spotify.music.playbackstatechanged")
-                addAction("com.spotify.music.queuechanged")
-                addAction("com.spotify.mobile.android.metadatachanged")
-                addAction("com.spotify.mobile.android.playbackstatechanged")
-                addAction("com.spotify.mobile.android.queuechanged")
-            }
-
-            val appContext = context.applicationContext
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    appContext.registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
-                } else {
-                    appContext.registerReceiver(spotifyReceiver, filter)
-                }
-                activeBridge?.log("SPOTIFY_RADAR", "Passive broadcast listener mounted successfully.")
-            } catch (e: Exception) {
-                activeBridge?.log("SPOTIFY_ERR", "Error mounting receiver: ${e.message}")
-            }
-
+            ensureReceiverRegistered(context)
             reloadVaultList()
-        }
-
-        fun disarmEngine() {
-            if (isRecording) finalizeCurrentRecording()
-            isArmed = false
-            try {
-                context.applicationContext.unregisterReceiver(spotifyReceiver)
-            } catch (_: Exception) {}
-            mediaProjection?.stop()
-            mediaProjection = null
-            bridge.stopForegroundTask()
-            engineState = EngineState.DISARMED
-            bridge.showToast("Spotify Recorder Disarmed")
-        }
-
-        fun armEngine() {
-            bridge.requestPermission(android.Manifest.permission.RECORD_AUDIO) { audioGranted ->
-                if (!audioGranted) {
-                    bridge.showToast("Record Audio permission required for capture.")
-                    return@requestPermission
-                }
-
-                bridge.requestMediaProjection { resultCode, data ->
-                    if (resultCode == Activity.RESULT_OK && data != null) {
-                        bridge.startProjectionService(
-                            resultCode = resultCode,
-                            data = data,
-                            title = "Spotify Recorder Active",
-                            message = "Listening to internal media stream..."
-                        ) { mp ->
-                            if (mp != null) {
-                                mediaProjection = mp
-
-                                isArmed = true
-                                engineState = EngineState.ARMED_LISTENING
-                                bridge.showToast("Spotify Radar Armed! Ready to capture next 0:00 track.")
-                            } else {
-                                bridge.log("SPOTIFY_ERR", "MediaProjection dispatch returned null from foreground service.")
-                                bridge.showToast("Failed to initialize MediaProjection.")
-                            }
-                        }
-                    } else {
-                        bridge.showToast("Media projection consent rejected.")
-                    }
-                }
-            }
         }
 
         Column(
@@ -1137,7 +1076,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                         }
 
                         Button(
-                            onClick = { if (isArmed) disarmEngine() else armEngine() },
+                            onClick = { if (isArmed) disarmEngine(context, bridge) else armEngine(context, bridge) },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isArmed) Color(0xFFDA3633) else Color(0xFF1DB954)
                             ),
@@ -1382,19 +1321,145 @@ class SpotifyRecorderPlugin : PluginEntry() {
         return String.format("%02d:%02d", m, s)
     }
 
-    override fun onStop(context: Context) {
-        if (isArmed) {
+    companion object {
+        @Volatile var activeContext: Context? = null
+        @Volatile var activeBridge: HostBridge? = null
+        @Volatile var activePluginInstance: SpotifyRecorderPlugin? = null
+
+        var mediaProjection: MediaProjection? = null
+        var audioRecord: AudioRecord? = null
+        @Volatile var isRecording = false
+        var recordThread: Thread? = null
+
+        @Volatile var activeTake: ActiveRecordingTake? = null
+
+        @Volatile var isArmed = false
+        @Volatile var currentTrackId = ""
+        @Volatile var currentTrackTitle = ""
+        @Volatile var currentArtist = ""
+        @Volatile var currentLengthMs = 0L
+        @Volatile var currentPositionMs = 0L
+        @Volatile var isPlayingTrack = false
+        @Volatile var lastSyncTimestamp = 0L
+        @Volatile var wasInterrupted = false
+        @Volatile var recordedBytesCount = 0L
+
+        @Volatile var isAdActive = false
+        @Volatile var adTitle = ""
+        @Volatile var adArtist = ""
+
+        var stateUpdater: ((EngineState) -> Unit)? = null
+        var trackMetaUpdater: ((title: String, artist: String, lengthMs: Long, posMs: Long, isPlaying: Boolean) -> Unit)? = null
+        var statsUpdater: ((saved: Int, discarded: Int, ads: Int) -> Unit)? = null
+        var vaultRefreshTrigger: (() -> Unit)? = null
+
+        var countSaved = 0
+        var countDiscarded = 0
+        var countAds = 0
+        val recordLock = Any()
+        val transcodeScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        val transcodeDispatcher = Dispatchers.IO.limitedParallelism(1)
+        @Volatile var pauseDebounceJob: Job? = null
+        @Volatile var isReceiverRegistered = false
+        @Volatile var engineState = EngineState.DISARMED
+
+        val spotifyReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val action = intent.action ?: return
+                when (action) {
+                    "com.spotify.music.metadatachanged",
+                    "com.spotify.mobile.android.metadatachanged" -> activePluginInstance?.handleMetadataChanged(intent)
+                    "com.spotify.music.playbackstatechanged",
+                    "com.spotify.mobile.android.playbackstatechanged" -> activePluginInstance?.handlePlaybackStateChanged(intent)
+                }
+            }
+        }
+
+        fun ensureReceiverRegistered(context: Context) {
+            if (isReceiverRegistered) return
+            val filter = IntentFilter().apply {
+                addAction("com.spotify.music.metadatachanged")
+                addAction("com.spotify.music.playbackstatechanged")
+                addAction("com.spotify.music.queuechanged")
+                addAction("com.spotify.mobile.android.metadatachanged")
+                addAction("com.spotify.mobile.android.playbackstatechanged")
+                addAction("com.spotify.mobile.android.queuechanged")
+            }
+            val appContext = context.applicationContext
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    appContext.registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
+                } else {
+                    appContext.registerReceiver(spotifyReceiver, filter)
+                }
+                isReceiverRegistered = true
+                activeBridge?.log("SPOTIFY_RADAR", "Persistent Spotify broadcast listener registered.")
+            } catch (e: Exception) {
+                activeBridge?.log("SPOTIFY_ERR", "Error mounting receiver: ${e.message}")
+            }
+        }
+
+        fun disarmEngine(context: Context, bridge: HostBridge) {
+            if (isRecording) activePluginInstance?.finalizeCurrentRecording(reason = "User disarmed engine")
+            isArmed = false
+            engineState = EngineState.DISARMED
+            stateUpdater?.invoke(EngineState.DISARMED)
+            pauseDebounceJob?.cancel()
+            pauseDebounceJob = null
             try {
                 context.applicationContext.unregisterReceiver(spotifyReceiver)
+                isReceiverRegistered = false
             } catch (_: Exception) {}
-            isArmed = false
+            mediaProjection?.stop()
+            mediaProjection = null
+            bridge.releaseWakeLock()
+            com.omni.hub.loader.PluginTaskEngine.setDaemonEnabled(
+                context,
+                "spotify_recorder",
+                "com.omni.plugin.spotify.SpotifyRecorderPlugin",
+                false
+            )
+            bridge.showToast("Spotify Recorder Disarmed")
         }
-        if (isRecording) {
-            abortAndDiscard("Plugin container shutdown")
+
+        fun armEngine(context: Context, bridge: HostBridge) {
+            bridge.requestPermission(android.Manifest.permission.RECORD_AUDIO) { audioGranted ->
+                if (!audioGranted) {
+                    bridge.showToast("Record Audio permission required for capture.")
+                    return@requestPermission
+                }
+
+                bridge.requestMediaProjection { resultCode, data ->
+                    if (resultCode == Activity.RESULT_OK && data != null) {
+                        bridge.startProjectionService(
+                            resultCode = resultCode,
+                            data = data,
+                            title = "Spotify Recorder Active",
+                            message = "Listening to internal media stream..."
+                        ) { mp ->
+                            if (mp != null) {
+                                mediaProjection = mp
+                                isArmed = true
+                                engineState = EngineState.ARMED_LISTENING
+                                stateUpdater?.invoke(EngineState.ARMED_LISTENING)
+                                ensureReceiverRegistered(context)
+                                bridge.acquireWakeLock("SpotifyRecorderSentinel")
+                                com.omni.hub.loader.PluginTaskEngine.setDaemonEnabled(
+                                    context,
+                                    "spotify_recorder",
+                                    "com.omni.plugin.spotify.SpotifyRecorderPlugin",
+                                    true
+                                )
+                                bridge.showToast("Spotify Radar Armed! Ready to capture in background.")
+                            } else {
+                                bridge.showToast("Failed to initialize MediaProjection.")
+                            }
+                        }
+                    } else {
+                        bridge.showToast("Media projection consent rejected.")
+                    }
+                }
+            }
         }
-        mediaProjection?.stop()
-        mediaProjection = null
-        try { transcodeScope.cancel() } catch (_: Exception) {}
-        activeBridge?.stopForegroundTask()
     }
 }
