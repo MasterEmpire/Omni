@@ -27,6 +27,12 @@ object OmniTaskManager {
     val activeSessions = mutableStateListOf<AppTaskSession>()
     var currentForegroundSession by mutableStateOf<AppTaskSession?>(null)
     var isRecentsModalOpen by mutableStateOf(false)
+    val sessionHistory = mutableListOf<String>()
+
+    fun pushHistory(taskId: String) {
+        sessionHistory.removeAll { it == taskId }
+        sessionHistory.add(taskId)
+    }
 
     fun openRecents() {
         currentForegroundSession?.let { captureSnapshot(it) }
@@ -50,9 +56,12 @@ object OmniTaskManager {
                 OmniLogger.log("TASK_MANAGER", "Existing session for [$pluginName] has dead activity context. Purging.")
                 killTask(context, existing.taskId)
             } else {
-                OmniLogger.log("TASK_MANAGER", "Resuming existing session for [$pluginName]")
-                currentForegroundSession = existing
-                return existing
+                            OmniLogger.log("TASK_MANAGER", "Resuming existing session for [$pluginName]")
+            if (currentForegroundSession != null && currentForegroundSession?.taskId != existing.taskId) {
+                pushHistory(currentForegroundSession!!.taskId)
+            }
+            currentForegroundSession = existing
+            return existing
             }
         }
 
@@ -77,6 +86,9 @@ object OmniTaskManager {
             loadedPlugin = loaded
         )
 
+        if (currentForegroundSession != null) {
+            pushHistory(currentForegroundSession!!.taskId)
+        }
         activeSessions.add(0, session)
         currentForegroundSession = session
         return session
@@ -98,16 +110,42 @@ object OmniTaskManager {
         }
     }
 
-    fun suspendCurrent() {
+    fun suspendCurrent(returnToDashboard: Boolean = false) {
         val current = currentForegroundSession ?: return
-        OmniLogger.log("TASK_MANAGER", "Suspending [${current.pluginName}] to Recents")
+        OmniLogger.log("TASK_MANAGER", "Suspending [${current.pluginName}]")
         captureSnapshot(current)
         (current.pluginView.parent as? android.view.ViewGroup)?.removeView(current.pluginView)
-        currentForegroundSession = null
+
+        if (returnToDashboard) {
+            sessionHistory.clear()
+            currentForegroundSession = null
+            return
+        }
+
+        var nextSession: AppTaskSession? = null
+        while (sessionHistory.isNotEmpty()) {
+            val prevTaskId = sessionHistory.removeAt(sessionHistory.lastIndex)
+            val found = activeSessions.find { it.taskId == prevTaskId }
+            if (found != null && found.taskId != current.taskId) {
+                nextSession = found
+                break
+            }
+        }
+
+        if (nextSession != null) {
+            OmniLogger.log("TASK_MANAGER", "Navigating back to previous session [${nextSession.pluginName}]")
+            currentForegroundSession = nextSession
+        } else {
+            OmniLogger.log("TASK_MANAGER", "No previous session in stack. Returning to host dashboard.")
+            currentForegroundSession = null
+        }
     }
 
     fun resumeSession(session: AppTaskSession) {
         OmniLogger.log("TASK_MANAGER", "Resuming [${session.pluginName}] from Recents")
+        if (currentForegroundSession != null && currentForegroundSession?.taskId != session.taskId) {
+            pushHistory(currentForegroundSession!!.taskId)
+        }
         activeSessions.remove(session)
         activeSessions.add(0, session)
         currentForegroundSession = session
@@ -116,6 +154,8 @@ object OmniTaskManager {
     fun killTask(context: Context, taskId: String) {
         val target = activeSessions.find { it.taskId == taskId } ?: return
         OmniLogger.log("TASK_MANAGER", "Killing task UI [${target.pluginName}]")
+        sessionHistory.removeAll { it == taskId }
+
         if (target.pluginId != "scroll_lock" && target.pluginId != "spotify_recorder") {
             try {
                 target.loadedPlugin.instance.onStop(context)
@@ -125,14 +165,18 @@ object OmniTaskManager {
         } else {
             OmniLogger.log("TASK_MANAGER", "🛡️ ${target.pluginName} closed from Recents: UI dismissed, but background engine/daemon stays running.")
         }
-        if (currentForegroundSession?.taskId == taskId) {
-            currentForegroundSession = null
-        }
+
+        val isTargetForeground = currentForegroundSession?.taskId == taskId
         activeSessions.remove(target)
+
+        if (isTargetForeground) {
+            suspendCurrent()
+        }
     }
 
     fun killAllTasks(context: Context) {
         OmniLogger.log("TASK_MANAGER", "Clearing all ${activeSessions.size} active sessions")
+        sessionHistory.clear()
         activeSessions.forEach { session ->
             if (session.pluginId != "scroll_lock" && session.pluginId != "spotify_recorder") {
                 try {
@@ -163,7 +207,7 @@ object OmniTaskManager {
 
         val newSession = launchOrResume(context, pluginId, pluginName, entryClass)
         if (!wasForeground && !reopenForeground) {
-            suspendCurrent()
+            suspendCurrent(returnToDashboard = true)
         }
         return newSession
     }
