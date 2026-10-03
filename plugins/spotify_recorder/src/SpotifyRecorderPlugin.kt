@@ -26,6 +26,8 @@ import android.os.Build
 import android.os.Environment
 import android.view.View
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -104,6 +106,18 @@ data class TranscodeJob(
     val targetLengthMs: Long
 )
 
+data class DiscardInfo(
+    val title: String,
+    val reason: String,
+    val timestamp: Long = SystemClock.elapsedRealtime()
+)
+
+data class SavingInfo(
+    val title: String,
+    val artist: String,
+    val isTranscoding: Boolean = true
+)
+
 fun getVaultDirectory(context: Context): File {
     val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
     val publicVault = File(musicDir, "Omni Spotify")
@@ -165,9 +179,12 @@ class SpotifyRecorderPlugin : PluginEntry() {
             activePluginInstance = null
         }
         stateUpdater = null
+        manualRecStateUpdater = null
         trackMetaUpdater = null
         statsUpdater = null
         vaultRefreshTrigger = null
+        discardUpdater = null
+        savingUpdater = null
         activeBridge?.log("SPOTIFY_RECORDER", "🛡️ Spotify Recorder UI detached. Background audio capture & radar sentinel remain 100% active!")
     }
 
@@ -413,7 +430,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 recordedBytesCount = 0L
                 wasInterrupted = false
                 isRecording = true
+                lastDiscardInfo = null
             }
+            discardUpdater?.invoke(null)
 
             record.startRecording()
             stateUpdater?.invoke(EngineState.RECORDING)
@@ -573,10 +592,14 @@ class SpotifyRecorderPlugin : PluginEntry() {
             } else {
                 temp.delete()
                 countDiscarded++
+                val failReason = if (wasInterrupted) "Recording interrupted" else "Duration incomplete (${recordedDurationMs / 1000}s vs ${targetLength / 1000}s expected)"
+                val info = DiscardInfo(take.trackTitle, failReason)
+                lastDiscardInfo = info
+                discardUpdater?.invoke(info)
                 statsUpdater?.invoke(countSaved, countDiscarded, countAds)
                 activeBridge?.log(
                     "SPOTIFY_RECORDER",
-                    "❌ Discarded take for '${take.trackTitle}' (Recorded: ${recordedDurationMs}ms vs Expected: ${targetLength}ms, Interrupted: $wasInterrupted)"
+                    "❌ Discarded take for '${take.trackTitle}' ($failReason)"
                 )
             }
         }
@@ -592,6 +615,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
     }
 
     private fun dispatchBackgroundTranscode(job: TranscodeJob) {
+        val saveInfo = SavingInfo(job.title, job.artist)
+        activeSavingInfo = saveInfo
+        savingUpdater?.invoke(saveInfo)
+
         transcodeScope.launch(transcodeDispatcher) {
             try {
                 val cleanArtist = sanitizeFilename(job.artist)
@@ -649,6 +676,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
             } catch (e: Exception) {
                 activeBridge?.log("SPOTIFY_ERR", "Background transcode error on [${job.title}]: ${e.message}")
                 job.tempPcmFile.delete()
+            } finally {
+                if (activeSavingInfo?.title == job.title) {
+                    activeSavingInfo = null
+                    savingUpdater?.invoke(null)
+                }
             }
         }
     }
@@ -907,9 +939,14 @@ class SpotifyRecorderPlugin : PluginEntry() {
         recordedBytesCount = 0L
 
         countDiscarded++
+        val discardedTitle = take?.trackTitle ?: currentTrackTitle.ifEmpty { "Audio Stream" }
+        val info = DiscardInfo(discardedTitle, reason)
+        lastDiscardInfo = info
+        discardUpdater?.invoke(info)
+
         statsUpdater?.invoke(countSaved, countDiscarded, countAds)
         stateUpdater?.invoke(EngineState.INTERRUPTED_DISCARDED)
-        activeBridge?.log("SPOTIFY_RECORDER", "⚠️ Discard triggered for '${take?.trackTitle ?: "Unknown"}': $reason")
+        activeBridge?.log("SPOTIFY_RECORDER", "⚠️ Discard triggered for '$discardedTitle': $reason")
     }
 
     private fun writeWavHeader(file: File, sampleRate: Int = 44100, channels: Short = 2, bitsPerSample: Short = 16) {
@@ -954,6 +991,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
         var savedStat by remember { mutableIntStateOf(countSaved) }
         var discardedStat by remember { mutableIntStateOf(countDiscarded) }
         var adsStat by remember { mutableIntStateOf(countAds) }
+        var discardInfo by remember { mutableStateOf(lastDiscardInfo) }
+        var savingInfo by remember { mutableStateOf(activeSavingInfo) }
 
         var vaultFiles by remember { mutableStateOf(listOf<VaultTrack>()) }
 
@@ -1085,6 +1124,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 discardedStat = d
                 adsStat = ad
             }
+            discardUpdater = { discardInfo = it }
+            savingUpdater = { savingInfo = it }
             vaultRefreshTrigger = { reloadVaultList() }
 
             ensureReceiverRegistered(context)
@@ -1143,6 +1184,27 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    val isActivelyRecording = isRecording || isManualRecActive
+                    val infiniteTransition = rememberInfiniteTransition(label = "pulseTransition")
+                    val pulseAlpha by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0.25f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(650, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulseAlpha"
+                    )
+                    val pulseScale by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 1.35f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(650, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulseScale"
+                    )
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1152,15 +1214,28 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             Box(
                                 modifier = Modifier
                                     .size(10.dp)
+                                    .graphicsLayer {
+                                        if (isActivelyRecording) {
+                                            scaleX = pulseScale
+                                            scaleY = pulseScale
+                                            alpha = pulseAlpha
+                                        }
+                                    }
                                     .clip(CircleShape)
-                                    .background(engineState.color)
+                                    .background(
+                                        if (isActivelyRecording) Color(0xFFF85149) else engineState.color
+                                    )
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                engineState.label,
+                                text = if (isActivelyRecording) {
+                                    if (isManualRecActive) "REC • MANUAL AUDIO CAPTURE" else "REC • CAPTURING CLEAN STREAM"
+                                } else {
+                                    engineState.label
+                                },
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = engineState.color
+                                color = if (isActivelyRecording) Color(0xFFF85149) else engineState.color
                             )
                         }
 
@@ -1183,6 +1258,92 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     }
 
                     Spacer(Modifier.height(14.dp))
+
+                    // Background Transcoding / Saving Pipeline Banner
+                    AnimatedVisibility(visible = savingInfo != null) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF58A6FF).copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color(0xFF58A6FF).copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("⚙️", fontSize = 13.sp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = "SAVING & ENCODING: ${savingInfo?.title}",
+                                            color = Color(0xFF58A6FF),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "AAC 192k",
+                                        color = Color(0xFF8B949E),
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                LinearProgressIndicator(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp)),
+                                    color = Color(0xFF58A6FF),
+                                    trackColor = Color(0xFF21262D)
+                                )
+                            }
+                        }
+                    }
+
+                    // Contextual Discard Alert HUD
+                    AnimatedVisibility(visible = discardInfo != null && !isActivelyRecording) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFF85149).copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color(0xFFF85149).copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("❌", fontSize = 14.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "DISCARDED: ${discardInfo?.title}",
+                                        color = Color(0xFFF85149),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "Reason: ${discardInfo?.reason}",
+                                        color = Color(0xFFFFD2D2),
+                                        fontSize = 10.sp,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     // Visual Ad Alert Banner
                     if (isAdShieldActive) {
@@ -1626,6 +1787,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
         var trackMetaUpdater: ((title: String, artist: String, lengthMs: Long, posMs: Long, isPlaying: Boolean) -> Unit)? = null
         var statsUpdater: ((saved: Int, discarded: Int, ads: Int) -> Unit)? = null
         var vaultRefreshTrigger: (() -> Unit)? = null
+        @Volatile var lastDiscardInfo: DiscardInfo? = null
+        @Volatile var activeSavingInfo: SavingInfo? = null
+        var discardUpdater: ((DiscardInfo?) -> Unit)? = null
+        var savingUpdater: ((SavingInfo?) -> Unit)? = null
 
         fun registerProjectionCallback(projection: MediaProjection) {
             try {
