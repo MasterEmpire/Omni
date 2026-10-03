@@ -126,8 +126,12 @@ object PluginTaskEngine {
                     delay((timeoutMins * 60 * 1000L) - 30_000L)
                     bridge.log("TASK_ENGINE", "Task [$pluginId] reached timeout of ${timeoutMins}m. Stopping.")
                     stopTask(context, pluginId)
+                } else {
+                    // Perpetual daemon execution: keep job suspended and active indefinitely
+                    awaitCancellation()
                 }
             } catch (t: Throwable) {
+                if (t is CancellationException) return@launch
                 OmniLogger.log("TASK_ENGINE_ERR", "💥 Exception in headless task [$pluginId]: ${t.message}\n${t.stackTraceToString()}")
                 cleanupInstance(context, pluginId)
 
