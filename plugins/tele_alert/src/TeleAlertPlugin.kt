@@ -142,22 +142,28 @@ class TeleAlertPlugin : PluginEntry() {
 
     private fun startSmsListener(context: Context, bridge: HostBridge) {
         synchronized(sentinelLock) {
-            if (isSmsReceiverRegistered) {
-                bridge.log("TELE_ALERT", "📡 SMS Broadcast receiver already active globally. Skipping duplicate registration.")
-                return
+            val appCtx = context.applicationContext
+            if (activeSmsReceiver != null) {
+                try {
+                    appCtx.unregisterReceiver(activeSmsReceiver)
+                    bridge.log("TELE_ALERT", "🧹 Unregistered previous SMS receiver instance.")
+                } catch (_: Exception) {}
+                activeSmsReceiver = null
             }
+
             val filter = IntentFilter("android.provider.Telephony.SMS_RECEIVED").apply {
                 priority = IntentFilter.SYSTEM_HIGH_PRIORITY
             }
 
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    context.applicationContext.registerReceiver(smsReceiver, filter, Context.RECEIVER_EXPORTED)
+                    appCtx.registerReceiver(smsReceiver, filter, Context.RECEIVER_EXPORTED)
                 } else {
-                    context.applicationContext.registerReceiver(smsReceiver, filter)
+                    appCtx.registerReceiver(smsReceiver, filter)
                 }
+                activeSmsReceiver = smsReceiver
                 isSmsReceiverRegistered = true
-                bridge.log("TELE_ALERT", "📡 SMS Broadcast receiver mounted. TeleAlert listening for incoming packages.")
+                bridge.log("TELE_ALERT", "📡 Single guarded SMS Broadcast receiver mounted.")
             } catch (e: Exception) {
                 bridge.log("TELE_ALERT_ERR", "Failed registering SMS receiver: ${e.message}")
             }
@@ -184,111 +190,51 @@ class TeleAlertPlugin : PluginEntry() {
             sender = msg.originatingAddress ?: sender
         }
 
-        val rawBody = fullText.toString()
+        val rawBody = fullText.toString().trim()
         activeBridge?.log("TELE_ALERT", "📨 Received SMS from '$sender' (${rawBody.length} chars)")
 
-        // Heuristic check: Is this a telebirr / Ethio telecom notification?
-        val isRelevant = rawBody.contains("telebirr", ignoreCase = true) ||
-            rawBody.contains("Ethio telecom", ignoreCase = true) ||
-            rawBody.contains("service offer", ignoreCase = true) ||
-            rawBody.contains("expired on", ignoreCase = true) ||
-            sender.contains("telebirr", ignoreCase = true) ||
-            sender.contains("127") ||
-            sender.contains("994")
+        val isStrictTelePackage = rawBody.contains("Dear Customer", ignoreCase = true) &&
+            rawBody.contains("service offer", ignoreCase = true) &&
+            rawBody.contains("from telebirr", ignoreCase = true) &&
+            rawBody.contains("will be expired on", ignoreCase = true) &&
+            rawBody.contains("Ethio telecom", ignoreCase = true)
 
-        if (isRelevant) {
+        if (isStrictTelePackage) {
             processAndTrackSms(rawBody, "SMS Broadcast [$sender]")
+        } else {
+            activeBridge?.log("TELE_ALERT", "ℹ️ Ignored non-package SMS from '$sender'")
         }
     }
 
     fun parsePackageFromText(rawText: String): TrackedPackage? {
-        // 1. Parse Expiration Timestamp
-        val expiryRegex = Regex(
-            """(?:will be expired on|expired on|expires on|expiry(?: date)?:?)\s+([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)""",
-            RegexOption.IGNORE_CASE
-        )
-        val altExpiryRegex = Regex(
-            """(?:will be expired on|expired on|expires on)\s+([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)""",
+        val clean = rawText.replace("\r", "").trim()
+
+        val pattern = Regex(
+            """Dear\s+Customer\s+As\s+per\s+your\s+request\s+the\s+new\s+service\s+offer\s+(.+?)\s+from\s+telebirr\s+to\s+be\s+expired\s+after\s+\d+\s+hours?\s+is\s+added\s+to\s+your\s+service\s+number\s+(\d+)\.\s+The\s+offer\s+is\s+effective\s+as\s+of\s+([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\s+and\s+will\s+be\s+expired\s+on\s+([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\.""",
             RegexOption.IGNORE_CASE
         )
 
-        var parsedExpiryMs = 0L
-        var matchedDateStr = ""
+        val match = pattern.find(clean) ?: return null
 
-        val dateFormats = listOf(
-            SimpleDateFormat("MMM d, yyyy h:mm:ss a", Locale.US),
-            SimpleDateFormat("MMM d, yyyy hh:mm:ss a", Locale.US),
-            SimpleDateFormat("MMM d, yyyy h:mm a", Locale.US),
-            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-        )
+        val packageName = match.groupValues[1].trim()
+        val serviceNum = match.groupValues[2].trim()
+        val effectiveStr = match.groupValues[3].trim()
+        val expiryStr = match.groupValues[4].trim()
 
-        val expMatch = expiryRegex.find(rawText) ?: altExpiryRegex.find(rawText)
-        if (expMatch != null) {
-            matchedDateStr = expMatch.groupValues[1].trim()
-            for (fmt in dateFormats) {
-                try {
-                    val d = fmt.parse(matchedDateStr)
-                    if (d != null) {
-                        parsedExpiryMs = d.time
-                        break
-                    }
-                } catch (_: Exception) {}
-            }
-        }
+        val dateFormat = SimpleDateFormat("MMM d, yyyy h:mm:ss a", Locale.US)
+        val effectiveMs = try { dateFormat.parse(effectiveStr)?.time ?: return null } catch (_: Exception) { return null }
+        val expiryMs = try { dateFormat.parse(expiryStr)?.time ?: return null } catch (_: Exception) { return null }
 
-        // 2. Relative Validity Fallback ("expired after 2 hours")
-        if (parsedExpiryMs == 0L) {
-            val relativeRegex = Regex("""(?:expired after|valid for)\s+(\d+)\s+(hour|hr|minute|min|day)s?""", RegexOption.IGNORE_CASE)
-            val relMatch = relativeRegex.find(rawText)
-            if (relMatch != null) {
-                val amount = relMatch.groupValues[1].toLongOrNull() ?: 1L
-                val unit = relMatch.groupValues[2].lowercase()
-                val deltaMs = when {
-                    unit.startsWith("min") -> amount * 60_000L
-                    unit.startsWith("day") -> amount * 86_400_000L
-                    else -> amount * 3_600_000L
-                }
-                parsedExpiryMs = System.currentTimeMillis() + deltaMs
-                matchedDateStr = SimpleDateFormat("MMM d, yyyy h:mm:ss a", Locale.US).format(Date(parsedExpiryMs))
-            }
-        }
-
-        if (parsedExpiryMs == 0L) return null
-
-        // 3. Parse Effective Timestamp
-        var effectiveMs = System.currentTimeMillis()
-        val effRegex = Regex("""(?:effective as of|effective from)\s+([A-Za-z]{3}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)""", RegexOption.IGNORE_CASE)
-        val effMatch = effRegex.find(rawText)
-        if (effMatch != null) {
-            for (fmt in dateFormats) {
-                try {
-                    val d = fmt.parse(effMatch.groupValues[1].trim())
-                    if (d != null) {
-                        effectiveMs = d.time
-                        break
-                    }
-                } catch (_: Exception) {}
-            }
-        }
-
-        // 4. Parse Package Description
-        val pkgRegex = Regex("""(?:service offer|offer)\s+(.*?)\s+(?:from telebirr|to be expired|is added)""", RegexOption.IGNORE_CASE)
-        val pkgMatch = pkgRegex.find(rawText)
-        val packageName = pkgMatch?.groupValues?.get(1)?.trim() ?: "Telebirr Internet Package"
-
-        // 5. Parse Service Number
-        val numRegex = Regex("""(?:service number|number)\s+([0-9+]{9,13})""", RegexOption.IGNORE_CASE)
-        val numMatch = numRegex.find(rawText)
-        val serviceNum = numMatch?.groupValues?.get(1)?.trim() ?: ""
+        if (expiryMs <= effectiveMs) return null
 
         return TrackedPackage(
             id = "pkg_${UUID.randomUUID().toString().take(8)}",
             packageName = packageName,
             serviceNumber = serviceNum,
             effectiveTimeMs = effectiveMs,
-            expiryTimeMs = parsedExpiryMs,
-            expiryDateStr = matchedDateStr,
-            rawSms = rawText
+            expiryTimeMs = expiryMs,
+            expiryDateStr = expiryStr,
+            rawSms = clean
         )
     }
 
@@ -305,19 +251,19 @@ class TeleAlertPlugin : PluginEntry() {
             return null
         }
 
-        // Prevent duplicate tracking: strictly ignore any package sharing the exact same expiration timestamp
-        activeBridge?.let { loadPackages(it) }
-        val duplicate = trackedPackages.find {
-            it.expiryTimeMs == parsed.expiryTimeMs
-        }
-        if (duplicate != null) {
-            activeBridge?.log("TELE_ALERT", "ℹ️ Ignored package '${parsed.packageName}': Exact expiration time (${parsed.expiryDateStr}) already tracked by '${duplicate.packageName}'")
-            return duplicate
-        }
+        synchronized(sentinelLock) {
+            val duplicate = trackedPackages.find {
+                it.packageName == parsed.packageName && kotlin.math.abs(it.expiryTimeMs - parsed.expiryTimeMs) < 60_000L
+            }
+            if (duplicate != null) {
+                activeBridge?.log("TELE_ALERT", "ℹ️ Ignored duplicate package '${parsed.packageName}' expiring at ${parsed.expiryDateStr}")
+                return duplicate
+            }
 
-        trackedPackages.add(0, parsed)
-        uiUpdateTrigger = System.currentTimeMillis()
-        activeBridge?.let { savePackages(it) }
+            trackedPackages.add(0, parsed)
+            uiUpdateTrigger = System.currentTimeMillis()
+            activeBridge?.let { savePackages(it) }
+        }
 
         val remainingMin = (parsed.expiryTimeMs - now) / 60_000L
         activeBridge?.log(
@@ -530,34 +476,42 @@ class TeleAlertPlugin : PluginEntry() {
     }
 
     private fun loadPackages(bridge: HostBridge) {
-        try {
-            val bytes = bridge.readFile("tele_packages.json") ?: return
-            val arr = JSONArray(String(bytes, Charsets.UTF_8))
-            trackedPackages.clear()
-            val now = System.currentTimeMillis()
+        synchronized(sentinelLock) {
+            try {
+                val bytes = bridge.readFile("tele_packages.json") ?: return
+                val arr = JSONArray(String(bytes, Charsets.UTF_8))
+                trackedPackages.clear()
+                val now = System.currentTimeMillis()
 
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                val exp = obj.getLong("expiry_time_ms")
-                // Keep active packages or packages expired in the last 2 hours for record (ignore duplicate expiration timestamps)
-                if (exp > now - (2 * 3600_000L) && trackedPackages.none { it.expiryTimeMs == exp }) {
-                    trackedPackages.add(
-                        TrackedPackage(
-                            id = obj.getString("id"),
-                            packageName = obj.getString("package_name"),
-                            serviceNumber = obj.optString("service_number", ""),
-                            effectiveTimeMs = obj.optLong("effective_time_ms", now),
-                            expiryTimeMs = exp,
-                            expiryDateStr = obj.getString("expiry_date_str"),
-                            rawSms = obj.optString("raw_sms", ""),
-                            interceptedAtMs = obj.optLong("intercepted_at_ms", now),
-                            notifiedAlert = obj.optBoolean("notified_alert", false),
-                            notifiedExpired = obj.optBoolean("notified_expired", false)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val exp = obj.getLong("expiry_time_ms")
+                    val name = obj.getString("package_name")
+
+                    val isDuplicate = trackedPackages.any {
+                        it.packageName == name && kotlin.math.abs(it.expiryTimeMs - exp) < 60_000L
+                    }
+
+                    if (exp > now - (2 * 3600_000L) && !isDuplicate) {
+                        trackedPackages.add(
+                            TrackedPackage(
+                                id = obj.getString("id"),
+                                packageName = name,
+                                serviceNumber = obj.optString("service_number", ""),
+                                effectiveTimeMs = obj.optLong("effective_time_ms", now),
+                                expiryTimeMs = exp,
+                                expiryDateStr = obj.getString("expiry_date_str"),
+                                rawSms = obj.optString("raw_sms", ""),
+                                interceptedAtMs = obj.optLong("intercepted_at_ms", now),
+                                notifiedAlert = obj.optBoolean("notified_alert", false),
+                                notifiedExpired = obj.optBoolean("notified_expired", false)
+                            )
                         )
-                    )
+                    }
                 }
-            }
-        } catch (_: Exception) {}
+                savePackages(bridge)
+            } catch (_: Exception) {}
+        }
     }
 
     private fun savePackages(bridge: HostBridge) {
@@ -590,7 +544,7 @@ class TeleAlertPlugin : PluginEntry() {
 
         var sampleSmsText by remember {
             mutableStateOf(
-                "Dear Customer \nAs per your request the new service offer Two Birr 480 MB Telegram package from telebirr to be expired after 2 hours is added to your service number 0933407551. The offer is effective as of Sep 28, 2026 5:37:58 PM and will be expired on Sep 28, 2026 7:37:58 PM. \nDownload and use telebirr SuperApp from http://onelink.to/fpgu4m and get 20 percent discount during package purchase. \nEthio telecom"
+                "Dear Customer \nAs per your request the new service offer Two Birr 480 MB Telegram package from telebirr to be expired after 2 hours is added to your service number 0933407551. The offer is effective as of Oct 3, 2026 3:52:28 PM and will be expired on Oct 3, 2026 5:52:28 PM. \nDownload and use telebirr SuperApp from http://onelink.to/fpgu4m and  get 20 percent discount during package purchase. \nEthio telecom"
             )
         }
 
@@ -973,6 +927,7 @@ class TeleAlertPlugin : PluginEntry() {
         private val sentinelLock = Any()
         @Volatile private var globalMonitorJob: Job? = null
         @Volatile var isSmsReceiverRegistered = false
+        @Volatile var activeSmsReceiver: BroadcastReceiver? = null
         @Volatile private var lastNotificationBuzzMs = 0L
         val globalTrackedPackages = mutableStateListOf<TrackedPackage>()
         @Volatile var activePluginInstance: TeleAlertPlugin? = null
