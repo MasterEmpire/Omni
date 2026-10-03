@@ -428,19 +428,23 @@ class BrowserStateHolder(
     val tabSwipeOffset = androidx.compose.animation.core.Animatable(0f)
     var swipeTargetTab by mutableStateOf<BrowserTab?>(null)
     var swipeScreenWidth by mutableFloatStateOf(1080f)
+    private var dragJob: Job? = null
 
     fun onTopBarDragStart() {
         if (tabs.size <= 1) return
         val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
         if (currentIdx == -1) return
 
-        currentWebView?.captureThumbnail()?.let { freshThumb ->
-            tabs = tabs.map { if (it.id == activeTabId) it.copy(thumbnail = freshThumb) else it }
-        }
+        dragJob?.cancel()
+        try {
+            currentWebView?.captureThumbnail()?.let { freshThumb ->
+                tabs = tabs.map { if (it.id == activeTabId) it.copy(thumbnail = freshThumb) else it }
+            }
+        } catch (_: Exception) {}
 
         isTabSwiping = true
         swipeTargetTab = null
-        coroutineScope.launch {
+        dragJob = coroutineScope.launch {
             tabSwipeOffset.snapTo(0f)
         }
     }
@@ -463,7 +467,7 @@ class BrowserStateHolder(
                 appliedOffset = rawNext
             } else {
                 targetTab = null
-                appliedOffset = currentOffset + dragAmount * 0.3f
+                appliedOffset = currentOffset + dragAmount * 0.25f
             }
         } else if (rawNext > 0) {
             val prevIdx = currentIdx - 1
@@ -472,7 +476,7 @@ class BrowserStateHolder(
                 appliedOffset = rawNext
             } else {
                 targetTab = null
-                appliedOffset = currentOffset + dragAmount * 0.3f
+                appliedOffset = currentOffset + dragAmount * 0.25f
             }
         } else {
             targetTab = null
@@ -480,31 +484,35 @@ class BrowserStateHolder(
         }
 
         swipeTargetTab = targetTab
-        coroutineScope.launch {
+        dragJob?.cancel()
+        dragJob = coroutineScope.launch {
             tabSwipeOffset.snapTo(appliedOffset)
         }
     }
 
     fun onTopBarDragEnd() {
         if (!isTabSwiping) return
+        dragJob?.cancel()
         val currentOffset = tabSwipeOffset.value
         val target = swipeTargetTab
         val screenW = if (swipeScreenWidth > 0) swipeScreenWidth else 1080f
-        val threshold = screenW * 0.15f
+        val density = context.resources.displayMetrics.density
+        // Flick-responsive threshold: 55dp or 8% screen width so natural thumb flicks always register
+        val threshold = minOf(55f * density, screenW * 0.08f)
 
         coroutineScope.launch {
             if (target != null && Math.abs(currentOffset) >= threshold) {
                 val settleTarget = if (currentOffset < 0) -screenW else screenW
                 tabSwipeOffset.animateTo(
                     targetValue = settleTarget,
-                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 180, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 140, easing = androidx.compose.animation.core.FastOutSlowInEasing)
                 )
                 switchToTab(target.id)
                 bridge.vibrate(25L)
             } else {
                 tabSwipeOffset.animateTo(
                     targetValue = 0f,
-                    animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f)
+                    animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 450f)
                 )
             }
             tabSwipeOffset.snapTo(0f)
@@ -515,8 +523,9 @@ class BrowserStateHolder(
 
     fun onTopBarDragCancel() {
         if (!isTabSwiping) return
+        dragJob?.cancel()
         coroutineScope.launch {
-            tabSwipeOffset.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f))
+            tabSwipeOffset.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 450f))
             tabSwipeOffset.snapTo(0f)
             swipeTargetTab = null
             isTabSwiping = false
