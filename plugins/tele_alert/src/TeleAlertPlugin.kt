@@ -94,11 +94,27 @@ class TeleAlertPlugin : PluginEntry() {
         }
     }
 
+    private fun isDaemonActive(context: Context): Boolean {
+        val prefs = context.getSharedPreferences("omni_daemon_registry", Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString("active_daemons", "{}") ?: "{}"
+        return jsonStr.contains("\"tele_alert\"")
+    }
+
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
         activeContext = context
         activeBridge = bridge
         activePluginInstance = this
-        initSentinel(context, bridge)
+        loadSettings(bridge)
+        loadPackages(bridge)
+        createNotificationChannel(context)
+
+        // Only start standalone receiver & ticker if background daemon is inactive
+        if (!isDaemonActive(context)) {
+            startSmsListener(context, bridge)
+            startMonitoringLoop(context, bridge)
+        } else {
+            bridge.log("TELE_ALERT", "🛡️ Headless daemon is active. UI attached in spectator mode.")
+        }
 
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -126,10 +142,26 @@ class TeleAlertPlugin : PluginEntry() {
     }
 
     override fun onStop(context: Context) {
+        stopSentinel(context)
         if (activePluginInstance == this) {
             activePluginInstance = null
         }
-        activeBridge?.log("TELE_ALERT", "🛑 TeleAlert UI instance dismissed. Sentinel loop status preserved.")
+        activeBridge?.log("TELE_ALERT", "🛑 TeleAlert instance dismissed and listeners cleanly detached.")
+    }
+
+    private fun stopSentinel(context: Context) {
+        synchronized(sentinelLock) {
+            if (isSmsReceiverRegistered) {
+                try {
+                    context.applicationContext.unregisterReceiver(smsReceiver)
+                } catch (_: Exception) {}
+                isSmsReceiverRegistered = false
+                activeSmsReceiver = null
+            }
+            globalMonitorJob?.cancel()
+            globalMonitorJob = null
+            scope.cancel()
+        }
     }
 
     private fun initSentinel(context: Context, bridge: HostBridge) {
@@ -227,8 +259,11 @@ class TeleAlertPlugin : PluginEntry() {
 
         if (expiryMs <= effectiveMs) return null
 
+        val nameSlug = packageName.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
+        val deterministicId = "pkg_${nameSlug}_${expiryMs}"
+
         return TrackedPackage(
-            id = "pkg_${UUID.randomUUID().toString().take(8)}",
+            id = deterministicId,
             packageName = packageName,
             serviceNumber = serviceNum,
             effectiveTimeMs = effectiveMs,
@@ -435,6 +470,19 @@ class TeleAlertPlugin : PluginEntry() {
         }
 
         try {
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("extra_open_plugin_id", "tele_alert")
+            }
+            val pendingIntent = if (launchIntent != null) {
+                android.app.PendingIntent.getActivity(
+                    context,
+                    notificationId,
+                    launchIntent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+            } else null
+
             val notif = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(message)
@@ -444,6 +492,9 @@ class TeleAlertPlugin : PluginEntry() {
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
                 .apply {
+                    if (pendingIntent != null) {
+                        setContentIntent(pendingIntent)
+                    }
                     if (!shouldVibrate) {
                         setSilent(true)
                     }
