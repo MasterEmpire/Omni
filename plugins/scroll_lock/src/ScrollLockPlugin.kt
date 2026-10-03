@@ -124,14 +124,16 @@ class ScrollLockPlugin : PluginEntry() {
         createNotificationChannel(context)
         ensureMonitoringRunning(context, bridge)
         AccessibilityDispatcher.addListener(accessibilityListener)
-        bridge.log("SCROLL_LOCK", "🛡️ ScrollLock Daemon booted in background.")
-        bridge.acquireWakeLock("ScrollLockSentinel")
+        bridge.log("SCROLL_LOCK", "🛡️ ScrollLock Sentinel armed with Screen-Aware Battery Optimization.")
     }
 
     override fun onStop(context: Context) {
-        // ScrollLock has God-Mode immunity: dismiss siren if needed, but preserve monitorJob and activeScope so the sentinel never dies
         activeBridge?.let { savePersistedState(it) }
         dismissSirenNotification(context)
+        if (isWakeLockHeld) {
+            activeBridge?.releaseWakeLock()
+            isWakeLockHeld = false
+        }
         activeBridge?.log("SCROLL_LOCK", "🛡️ ScrollLock UI session dismissed. Background sentinel monitoring & session timers preserved.")
     }
 
@@ -239,8 +241,74 @@ class ScrollLockPlugin : PluginEntry() {
         }
     }
 
+    private fun checkImmediateEviction(context: Context, bridge: HostBridge) {
+        try {
+            val now = System.currentTimeMillis()
+            val fgApp = getForegroundApp(context)
+            val isA11yTrulyActive = AccessibilityDispatcher.isServiceActive(context)
+            val canBypassYoutube = youtubeSafeBypass && isA11yTrulyActive
+            val targetsSnapshot = targetPackages.toList()
+            val isTargetApp = fgApp != null && targetsSnapshot.contains(fgApp) && !(canBypassYoutube && fgApp == "com.google.android.youtube")
+
+            if (isTargetApp) {
+                val appName = appDisplayNames[fgApp] ?: fgApp ?: "Target App"
+                if (isNightCurfew()) {
+                    kickToHome(context, bridge, "Bedtime Curfew Active (11PM-6AM). Put the phone down!")
+                } else if (now < penaltyUntilMs) {
+                    val rem = ((penaltyUntilMs - now) / 60_000L).coerceAtLeast(1)
+                    kickToHome(context, bridge, "Penalty active! Locked out of $appName for $rem more min.")
+                } else if (now < manualLockUntilMs) {
+                    val rem = ((manualLockUntilMs - now) / 60_000L).coerceAtLeast(1)
+                    kickToHome(context, bridge, "Self-imposed focus lock! $rem more min remaining.")
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun ensureMonitoringRunning(context: Context, bridge: HostBridge) {
         synchronized(sentinelLock) {
+            // Guarded Screen-State Receiver (Enables CPU Deep Sleep when screen is dark)
+            if (screenReceiver == null) {
+                val receiver = object : BroadcastReceiver() {
+                    override fun onReceive(ctx: Context, intent: Intent?) {
+                        when (intent?.action) {
+                            Intent.ACTION_SCREEN_OFF -> {
+                                lastScreenOffTimestamp = System.currentTimeMillis()
+                                if (isWakeLockHeld) {
+                                    bridge.releaseWakeLock()
+                                    isWakeLockHeld = false
+                                    bridge.log("SCROLL_LOCK", "🌙 Screen OFF: WakeLock released. Sentinel hibernating in Deep Sleep.")
+                                }
+                            }
+                            Intent.ACTION_SCREEN_ON,
+                            Intent.ACTION_USER_PRESENT -> {
+                                val now = System.currentTimeMillis()
+                                if (lastScreenOffTimestamp > 0L && (now - lastScreenOffTimestamp >= 15 * 60 * 1000L)) {
+                                    currentSessionMs = 0L
+                                    savePersistedState(bridge)
+                                    bridge.log("SCROLL_LOCK", "⏱️ Screen off >= 15 min. Cleanly reset session counter.")
+                                }
+                                if (!isWakeLockHeld) {
+                                    bridge.acquireWakeLock("ScrollLockSentinel")
+                                    isWakeLockHeld = true
+                                    bridge.log("SCROLL_LOCK", "☀️ Screen ON: WakeLock engaged for active sentinel.")
+                                }
+                                checkImmediateEviction(context, bridge)
+                            }
+                        }
+                    }
+                }
+                val filter = IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_USER_PRESENT)
+                }
+                try {
+                    context.applicationContext.registerReceiver(receiver, filter)
+                    screenReceiver = receiver
+                } catch (_: Exception) {}
+            }
+
             if (globalMonitorJob?.isActive == true) return
             isRunning = true
 
@@ -253,9 +321,35 @@ class ScrollLockPlugin : PluginEntry() {
 
                 while (isActive) {
                 try {
-                    delay(1500L)
+                    delay(5000L) // Relaxed to 5.0 seconds (massive CPU relief)
+
+                    // 1. Verify Display State (Sleep if display is dark)
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                    val isScreenInteractive = pm?.isInteractive ?: true
+                    if (!isScreenInteractive) {
+                        if (isWakeLockHeld) {
+                            bridge.releaseWakeLock()
+                            isWakeLockHeld = false
+                            lastScreenOffTimestamp = System.currentTimeMillis()
+                            bridge.log("SCROLL_LOCK", "🌙 Screen dark: Released WakeLock. Sleeping...")
+                        }
+                        lastTickMs = System.currentTimeMillis()
+                        continue // Skip polling UsageStatsManager! Zero CPU drain!
+                    } else {
+                        if (!isWakeLockHeld) {
+                            bridge.acquireWakeLock("ScrollLockSentinel")
+                            isWakeLockHeld = true
+                            val now = System.currentTimeMillis()
+                            if (lastScreenOffTimestamp > 0L && (now - lastScreenOffTimestamp >= 15 * 60 * 1000L)) {
+                                currentSessionMs = 0L
+                                bridge.log("SCROLL_LOCK", "⏱️ Screen off >= 15 min. Cleanly reset session counter.")
+                            }
+                            bridge.log("SCROLL_LOCK", "☀️ Screen active: WakeLock engaged.")
+                        }
+                    }
+
                     val now = System.currentTimeMillis()
-                    val delta = (now - lastTickMs).coerceIn(0L, 5000L)
+                    val delta = (now - lastTickMs).coerceIn(0L, 8000L)
                     lastTickMs = now
 
                 // Sync manual lock state if engaged externally via Quick Settings Tile
@@ -366,8 +460,8 @@ class ScrollLockPlugin : PluginEntry() {
                 totalTimeTodayMs += delta
                 lastActiveAppTimeMs = now
 
-                // Periodic disk flush every 5s while scrolling so task-killing cannot cheat
-                if (now - lastDiskSaveMs >= 5000L) {
+                // Periodic disk flush every 10s while scrolling so task-killing cannot cheat
+                if (now - lastDiskSaveMs >= 10000L) {
                     lastDiskSaveMs = now
                     savePersistedState(bridge)
                 }
@@ -1187,6 +1281,9 @@ class ScrollLockPlugin : PluginEntry() {
         @Volatile var youtubeSafeBypass = false
         @Volatile var shortsDeflectedToday = 0
         @Volatile var lastDeflectMs = 0L
+        @Volatile var isWakeLockHeld = false
+        @Volatile var lastScreenOffTimestamp = 0L
+        @Volatile var screenReceiver: BroadcastReceiver? = null
 
         val globalTargetPackages = mutableStateListOf(
             "com.zhiliaoapp.musically",      // TikTok Global
