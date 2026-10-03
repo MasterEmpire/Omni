@@ -182,14 +182,14 @@
             </intent-filter>
         </receiver>
 
-        <activity
-            android:name=".services.OmniResurrectActivity"
+        <receiver
+            android:name=".services.OmniResurrectReceiver"
             android:permission="com.omni.hub.permission.RESURRECT"
-            android:exported="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:taskAffinity="" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.omni.hub.action.RESURRECT" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".services.ScrollLockTileService"
