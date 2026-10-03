@@ -92,6 +92,7 @@ object PluginManager {
     }
 
     fun deletePlugin(context: Context, pluginId: String) {
+        PluginLoader.invalidate(pluginId)
         val targetBaseDir = context.getDir("plugins", Context.MODE_PRIVATE)
         File(targetBaseDir, pluginId).deleteRecursively()
 
