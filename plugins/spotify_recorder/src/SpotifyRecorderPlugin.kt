@@ -1188,10 +1188,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
             Spacer(Modifier.height(16.dp))
 
             // Main Radar & Arming Card
+            val isEngineArmed = engineState != EngineState.DISARMED
             val isAdShieldActive = engineState == EngineState.SKIPPING_AD
             val cardBorderColor = when {
                 isAdShieldActive -> Color(0xFFD29922)
-                isArmed -> Color(0xFF1DB954).copy(alpha = 0.8f)
+                isEngineArmed -> Color(0xFF1DB954).copy(alpha = 0.8f)
                 else -> Color.White.copy(alpha = 0.08f)
             }
 
@@ -1258,16 +1259,16 @@ class SpotifyRecorderPlugin : PluginEntry() {
                         }
 
                         Button(
-                            onClick = { if (isArmed) disarmEngine(context, bridge) else armEngine(context, bridge) },
+                            onClick = { if (isEngineArmed) disarmEngine(context, bridge) else armEngine(context, bridge) },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isArmed) Color(0xFFDA3633) else Color(0xFF1DB954)
+                                containerColor = if (isEngineArmed) Color(0xFFDA3633) else Color(0xFF1DB954)
                             ),
                             shape = RoundedCornerShape(10.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                             modifier = Modifier.height(34.dp)
                         ) {
                             Text(
-                                if (isArmed) "DISARM" else "ARM ENGINE",
+                                if (isEngineArmed) "ENGINE ARMED" else "ARM ENGINE",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
