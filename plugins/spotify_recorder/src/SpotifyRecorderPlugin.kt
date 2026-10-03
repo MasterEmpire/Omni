@@ -147,11 +147,20 @@ class SpotifyRecorderPlugin : PluginEntry() {
         activeBridge = bridge
         activePluginInstance = this
         ensureReceiverRegistered(context)
-        if (isArmed) {
-            bridge.acquireWakeLock("SpotifyRecorderSentinel")
-        }
 
-        setDaemonState(context, true)
+        // Ghost State Sentinel: If MediaProjection token is missing, force-purge orphaned FGS streaming icons
+        if (mediaProjection == null) {
+            isArmed = false
+            isRecording = false
+            isManualRecording = false
+            engineState = EngineState.DISARMED
+            bridge.stopProjectionService()
+            bridge.releaseWakeLock()
+            setDaemonState(context, false)
+        } else if (isArmed) {
+            bridge.acquireWakeLock("SpotifyRecorderSentinel")
+            setDaemonState(context, true)
+        }
 
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -1187,8 +1196,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
             Spacer(Modifier.height(16.dp))
 
-            // Main Radar & Arming Card
-            val isEngineArmed = engineState != EngineState.DISARMED
+            // Main Radar & Arming Card: Verified against real MediaProjection token
+            val isEngineArmed = isArmed && mediaProjection != null && engineState != EngineState.DISARMED
             val isAdShieldActive = engineState == EngineState.SKIPPING_AD
             val cardBorderColor = when {
                 isAdShieldActive -> Color(0xFFD29922)
@@ -1203,7 +1212,12 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    val isActivelyRecording = isRecording || isManualRecActive
+                    // Strict hardware check: Only pulse when audio buffers are physically streaming
+                    val isActivelyRecording = (engineState == EngineState.RECORDING || engineState == EngineState.MANUAL_RECORDING) &&
+                        isRecording &&
+                        audioRecord != null &&
+                        audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
+
                     val infiniteTransition = rememberInfiniteTransition(label = "pulseTransition")
                     val pulseAlpha by infiniteTransition.animateFloat(
                         initialValue = 1f,
@@ -1847,10 +1861,16 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 manualRecStateUpdater?.invoke(false)
                 isRecording = false
                 mediaProjection = null
-                engineState = if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED
+                isArmed = false
+                engineState = EngineState.DISARMED
                 stateUpdater?.invoke(engineState)
                 activeBridge?.releaseWakeLock()
                 activeBridge?.stopProjectionService()
+
+                val ctx = activeContext
+                if (ctx != null) {
+                    setDaemonState(ctx, false)
+                }
                 activeBridge?.showToast("⚠️ Capture Disengaged: $reason")
             }
         }
