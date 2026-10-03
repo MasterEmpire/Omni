@@ -130,6 +130,12 @@ fun getVaultDirectory(context: Context): File {
     return appVault
 }
 
+fun getStagingDirectory(context: Context): File {
+    val stagingDir = File(context.cacheDir, "spotify_staging")
+    if (!stagingDir.exists()) stagingDir.mkdirs()
+    return stagingDir
+}
+
 fun sanitizeFilename(name: String): String {
     return name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
 }
@@ -314,7 +320,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         // 6. Conditions met: Launch Audio Stream Capture if armed
         if (isArmed && isPlaying && mediaProjection != null) {
-            startAudioRecording(vaultDir, newTrackId, newTrack, newArtist, newLengthMs)
+            val stagingDir = getStagingDirectory(ctx)
+            startAudioRecording(stagingDir, newTrackId, newTrack, newArtist, newLengthMs)
         } else if (!isArmed) {
             stateUpdater?.invoke(EngineState.DISARMED)
             activeBridge?.log("SPOTIFY_RADAR", "Radar disarmed. Track detected but not recording: '$newTrack'")
@@ -382,7 +389,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
     }
 
     private fun startAudioRecording(
-        vaultDir: File,
+        stagingDir: File,
         trackId: String,
         trackTitle: String,
         artistName: String,
@@ -411,7 +418,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 .setBufferSizeInBytes(minBuf * 2)
                 .build()
 
-            val tempFile = File(vaultDir, ".recording_${System.currentTimeMillis()}.tmp")
+            val tempFile = File(stagingDir, ".recording_${System.currentTimeMillis()}.tmp")
             val fos = FileOutputStream(tempFile)
             fos.write(ByteArray(44)) // 44-byte dummy WAV header placeholder
 
@@ -998,15 +1005,25 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
         fun cleanOrphanedFiles(dir: File) {
             try {
+                val now = System.currentTimeMillis()
+                val activeTempName = activeTake?.tempFile?.name
+                val activeTempPath = activeTake?.tempFile?.absolutePath
+
                 dir.listFiles()?.forEach { f ->
                     if (f.isFile) {
                         val n = f.name
                         if (n.startsWith(".recording_") && n.endsWith(".tmp")) {
-                            f.delete()
-                            activeBridge?.log("SPOTIFY_VAULT", "🧹 Purged orphaned temp file: $n")
+                            val isActiveTake = f.name == activeTempName || f.absolutePath == activeTempPath
+                            val isStale = (now - f.lastModified()) > 30 * 60 * 1000L
+                            if (!isActiveTake && isStale) {
+                                f.delete()
+                                activeBridge?.log("SPOTIFY_VAULT", "🧹 Purged stale orphaned temp file: $n")
+                            }
                         } else if (n.endsWith(".jpg", ignoreCase = true) || n.endsWith(".png", ignoreCase = true)) {
-                            f.delete()
-                            activeBridge?.log("SPOTIFY_VAULT", "🧹 Cleaned up redundant thumbnail image: $n")
+                            if ((now - f.lastModified()) > 5 * 60 * 1000L) {
+                                f.delete()
+                                activeBridge?.log("SPOTIFY_VAULT", "🧹 Cleaned up redundant thumbnail image: $n")
+                            }
                         }
                     }
                 }
@@ -1068,6 +1085,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         fun reloadVaultList() {
             val dir = getVaultDirectory(context)
             cleanOrphanedFiles(dir)
+            cleanOrphanedFiles(getStagingDirectory(context))
             val files = dir.listFiles()?.filter { it.isFile && (it.name.endsWith(".m4a") || it.name.endsWith(".wav")) }
                 ?.map { file ->
                     var dur = 0L
@@ -1899,8 +1917,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
                 isManualRecording = true
                 isArmed = true
+                val stagingDir = getStagingDirectory(ctx)
                 activePluginInstance?.startAudioRecording(
-                    vaultDir = vaultDir,
+                    stagingDir = stagingDir,
                     trackId = "manual_$timeStamp",
                     trackTitle = trackTitle,
                     artistName = artistName,
