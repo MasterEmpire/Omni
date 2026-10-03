@@ -88,6 +88,7 @@ data class CloudModule(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleOpenPluginIntent(intent)
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -98,6 +99,22 @@ class MainActivity : ComponentActivity() {
             ) {
                 DashboardScreen(this)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleOpenPluginIntent(intent)
+    }
+
+    private fun handleOpenPluginIntent(intent: Intent?) {
+        val targetId = intent?.getStringExtra("extra_open_plugin_id") ?: return
+        intent.removeExtra("extra_open_plugin_id")
+        val plugins = PluginManager.getInstalledPlugins(this)
+        val target = plugins.find { it.id == targetId }
+        if (target != null) {
+            OmniTaskManager.launchOrResume(this, target.id, target.name, target.entryClass)
         }
     }
 }
