@@ -225,6 +225,64 @@ class SpotifyRecorderPlugin : PluginEntry() {
         }
     }
 
+    private fun evaluateAndEngageStream(triggerSource: String) {
+        if (isManualRecording) return
+
+        // 1. Commercial Ad Shield
+        if (isAdActive) {
+            stateUpdater?.invoke(EngineState.SKIPPING_AD)
+            return
+        }
+
+        // 2. Hardware / Arming verification
+        if (!isArmed || mediaProjection == null) {
+            if (!isRecording) {
+                stateUpdater?.invoke(EngineState.DISARMED)
+            }
+            return
+        }
+
+        // 3. Authentic Track Verification
+        if (currentTrackId.isEmpty() || !currentTrackId.contains(":track:")) {
+            activeBridge?.log("SPOTIFY_RADAR", "[$triggerSource] Waiting for authentic track URI (Current ID: '$currentTrackId')")
+            return
+        }
+
+        // 4. Duplicate Vault Check (.m4a and .wav)
+        val ctx = activeContext ?: return
+        val vaultDir = getVaultDirectory(ctx)
+        val baseName = "${sanitizeFilename(currentArtist)} - ${sanitizeFilename(currentTrackTitle)}"
+        val m4aFile = File(vaultDir, "$baseName.m4a")
+        val wavFile = File(vaultDir, "$baseName.wav")
+        if ((m4aFile.exists() && m4aFile.length() > 1000) || (wavFile.exists() && wavFile.length() > 44)) {
+            if (!isRecording) {
+                stateUpdater?.invoke(EngineState.ALREADY_EXISTS)
+            }
+            activeBridge?.log("SPOTIFY_RADAR", "[$triggerSource] Track already in vault: $baseName. Audio recording skipped.")
+            return
+        }
+
+        // 5. Clean 0:00 Start Policy (Tolerance up to 2500ms for broadcast latency)
+        if (currentPositionMs > 2500L) {
+            if (!isRecording) {
+                stateUpdater?.invoke(EngineState.WAITING_CLEAN_START)
+                activeBridge?.log("SPOTIFY_RADAR", "[$triggerSource] Mid-track start (${currentPositionMs}ms > 2500ms). Waiting for next clean 0:00 start.")
+            }
+            return
+        }
+
+        // 6. Launch capture if playing from 0:00 and not currently recording
+        if (isPlayingTrack && !isRecording) {
+            lastDiscardInfo = null
+            discardUpdater?.invoke(null)
+            val stagingDir = getStagingDirectory(ctx)
+            activeBridge?.log("SPOTIFY_RADAR", "🎯 [$triggerSource] Engaging clean 0:00 stream capture for '$currentTrackTitle' by '$currentArtist'")
+            startAudioRecording(stagingDir, currentTrackId, currentTrackTitle, currentArtist, currentLengthMs)
+        } else if (!isPlayingTrack && !isRecording) {
+            stateUpdater?.invoke(EngineState.ARMED_LISTENING)
+        }
+    }
+
     private fun handleMetadataChanged(intent: Intent) {
         if (isManualRecording) {
             activeBridge?.log("SPOTIFY_RADAR", "ℹ️ Ignored Spotify track metadata: Universal manual recording is active.")
@@ -250,34 +308,22 @@ class SpotifyRecorderPlugin : PluginEntry() {
         pauseDebounceJob?.cancel()
         pauseDebounceJob = null
 
-        // 1. Ignore blank / intermediate transitional Spotify broadcast glitches
-        if (newTrackId.isEmpty() && (newTrack.isEmpty() || newTrack == "Unknown Track")) {
-            activeBridge?.log("SPOTIFY_RADAR", "ℹ️ Ignored blank transitional intent from Spotify.")
-            return
-        }
-
-        // 2. If currently recording previous take, finalize & commit cleanly before moving on
-        if (isRecording) {
-            val previousTakeTitle = activeTake?.trackTitle ?: currentTrackTitle
-            activeBridge?.log("SPOTIFY_RADAR", "🔄 Track advance detected while recording. Finalizing active take: '$previousTakeTitle'")
-            finalizeCurrentRecording(reason = "Advanced to new track '$newTrack'")
-        }
-
-        // 3. Precision Ad Detection (Immune to Spotify Singles, empty transient IDs, and false flags)
+        // 1. Explicit Commercial Ad & Null Evaluation on every incoming metadata broadcast
         val isExplicitTrackUri = newTrackId.contains(":track:")
-        val isExplicitAdUri = newTrackId.contains(":ad:")
+        val isExplicitAdUri = newTrackId.contains(":ad:") || newTrackId.startsWith("spotify:ad")
         val isAdTitleOrArtist = newTrack.equals("Advertisement", ignoreCase = true) ||
             newTrack.startsWith("Spotify - ", ignoreCase = true) ||
             (newArtist.equals("Spotify", ignoreCase = true) && !isExplicitTrackUri)
+        val isNullOrTransient = newTrackId.isEmpty() && (newTrack.isEmpty() || newTrack == "Unknown Track")
 
         val isIdentifiedAd = isExplicitAdUri || (!isExplicitTrackUri && isAdTitleOrArtist)
 
-        activeBridge?.log(
-            "SPOTIFY_AD_EVAL",
-            "🛡️ Ad Evaluation -> isExplicitTrackUri=$isExplicitTrackUri, isExplicitAdUri=$isExplicitAdUri, isAdTitleOrArtist=$isAdTitleOrArtist => isIdentifiedAd=$isIdentifiedAd"
-        )
-
         if (isIdentifiedAd) {
+            if (isRecording) {
+                activeBridge?.log("SPOTIFY_RADAR", "🛑 Ad commercial cut into active recording. Discarding take immediately.")
+                abortAndDiscard("Commercial advertisement began")
+            }
+
             isAdActive = true
             adTitle = if (newTrack.isNotEmpty() && !newTrack.equals("Unknown Track", true)) newTrack else "Commercial Advertisement"
             adArtist = if (newArtist.isNotEmpty() && !newArtist.equals("Unknown Artist", true)) newArtist else "Spotify Commercial Stream"
@@ -291,14 +337,31 @@ class SpotifyRecorderPlugin : PluginEntry() {
             stateUpdater?.invoke(EngineState.SKIPPING_AD)
             trackMetaUpdater?.invoke(adTitle, adArtist, newLengthMs, newPos, isPlaying)
 
-            activeBridge?.log("SPOTIFY_RADAR", "🛡️ Shield engaged for: '$adTitle' by '$adArtist' ($newTrackId). Audio recording suppressed.")
+            activeBridge?.log("SPOTIFY_RADAR", "🛡️ Commercial Ad Shield engaged for: '$adTitle' ($newTrackId). Actively waiting for real track.")
             return
         }
 
-        // Legitimate song track confirmed -> reset ad state completely
+        if (isNullOrTransient) {
+            activeBridge?.log("SPOTIFY_RADAR", "ℹ️ Ignored blank transitional intent from Spotify.")
+            return
+        }
+
+        // Real track validated -> reset ad shield
         isAdActive = false
         adTitle = ""
         adArtist = ""
+
+        // If recording previous take, finalize and commit cleanly before moving on
+        if (isRecording && activeTake?.trackId != newTrackId) {
+            val previousTakeTitle = activeTake?.trackTitle ?: currentTrackTitle
+            activeBridge?.log("SPOTIFY_RADAR", "🔄 Track advance detected while recording. Finalizing active take: '$previousTakeTitle'")
+            finalizeCurrentRecording(reason = "Advanced to new track '$newTrack'")
+        }
+
+        // Dismiss any lingering discard warning from previous tracks upon arrival of fresh track
+        lastDiscardInfo = null
+        discardUpdater?.invoke(null)
+
         currentTrackId = newTrackId
         currentTrackTitle = newTrack
         currentArtist = newArtist
@@ -308,33 +371,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         lastSyncTimestamp = SystemClock.elapsedRealtime()
         trackMetaUpdater?.invoke(newTrack, newArtist, newLengthMs, newPos, isPlaying)
 
-        // 4. Duplicate Vault Check (.m4a and .wav)
-        val ctx = activeContext ?: return
-        val vaultDir = getVaultDirectory(ctx)
-        val baseName = "${sanitizeFilename(newArtist)} - ${sanitizeFilename(newTrack)}"
-        val m4aFile = File(vaultDir, "$baseName.m4a")
-        val wavFile = File(vaultDir, "$baseName.wav")
-        if ((m4aFile.exists() && m4aFile.length() > 1000) || (wavFile.exists() && wavFile.length() > 44)) {
-            stateUpdater?.invoke(EngineState.ALREADY_EXISTS)
-            activeBridge?.log("SPOTIFY_RADAR", "Track already in vault: $baseName. Audio recording skipped.")
-            return
-        }
-
-        // 5. Clean Start Policy (Allow up to 2500ms to tolerate Android intent propagation latency)
-        if (newPos > 2500L) {
-            stateUpdater?.invoke(EngineState.WAITING_CLEAN_START)
-            activeBridge?.log("SPOTIFY_RADAR", "Mid-track start (${newPos}ms > 2500ms). Waiting for next clean 0:00 track.")
-            return
-        }
-
-        // 6. Conditions met: Launch Audio Stream Capture if armed
-        if (isArmed && isPlaying && mediaProjection != null) {
-            val stagingDir = getStagingDirectory(ctx)
-            startAudioRecording(stagingDir, newTrackId, newTrack, newArtist, newLengthMs)
-        } else if (!isArmed) {
-            stateUpdater?.invoke(EngineState.DISARMED)
-            activeBridge?.log("SPOTIFY_RADAR", "Radar disarmed. Track detected but not recording: '$newTrack'")
-        }
+        evaluateAndEngageStream("Metadata Broadcast")
     }
 
     private fun handlePlaybackStateChanged(intent: Intent) {
@@ -368,8 +405,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
 
             if (!isPlaying) {
                 if (targetLen > 0 && recordedMs >= targetLen - 4000L) {
-                    activeBridge?.log("SPOTIFY_RADAR", "Track paused near completion (${recordedMs}ms/${targetLen}ms). Finalizing take.")
+                    activeBridge?.log("SPOTIFY_RADAR", "Track paused near natural completion (${recordedMs}ms/${targetLen}ms). Finalizing take.")
                     finalizeCurrentRecording(reason = "Paused near natural completion")
+                    stateUpdater?.invoke(if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED)
                 } else {
                     activeBridge?.log("SPOTIFY_RADAR", "Playback paused (${recordedMs}ms of ${targetLen}ms). Armed 6s grace window before discarding...")
                     pauseDebounceJob?.cancel()
@@ -389,10 +427,17 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 }
                 if (pos >= 0 && targetLen > 0) {
                     if (pos <= 2000L && recordedMs >= targetLen - 4000L) {
-                        activeBridge?.log("SPOTIFY_RADAR", "Playhead reset to 0:00 after full play (${recordedMs}ms). Finalizing take.")
+                        activeBridge?.log("SPOTIFY_RADAR", "Playhead reset to 0:00 after full play (${recordedMs}ms). Finalizing take and re-engaging stream.")
                         finalizeCurrentRecording(reason = "Playhead reset to 0:00 after full play")
+                        evaluateAndEngageStream("Playhead loop reset")
                     }
                 }
+            }
+        } else {
+            // Evaluates same-track replays from 0:00 and buffering resume (playing=false -> playing=true)
+            if (isPlaying && currentPositionMs in 0..2500L) {
+                activeBridge?.log("SPOTIFY_RADAR", "🔄 Playhead at 0:00 while not recording (pos=${currentPositionMs}ms). Triggering stream evaluation.")
+                evaluateAndEngageStream("Playback state reset to 0:00")
             }
         }
     }
