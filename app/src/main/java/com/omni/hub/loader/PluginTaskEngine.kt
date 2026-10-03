@@ -16,6 +16,7 @@ object PluginTaskEngine {
     }
     private val supervisorScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + crashHandler)
     private val runningTasks = ConcurrentHashMap<String, Job>()
+    private val executionLock = Any()
     private val activeInstances = ConcurrentHashMap<String, Pair<PluginEntry, HostBridgeImpl>>()
     private val retryAttempts = ConcurrentHashMap<String, Int>()
     private val scheduledRetries = ConcurrentHashMap<String, Job>()
@@ -102,11 +103,15 @@ object PluginTaskEngine {
         entryClass: String,
         timeoutMins: Long = 0L
     ) {
-        if (isTaskRunning(pluginId)) return
+        synchronized(executionLock) {
+            if (isTaskRunning(pluginId)) {
+                OmniLogger.log("TASK_ENGINE", "Daemon [$pluginId] already actively running. Skipping duplicate spawn.")
+                return
+            }
 
-        scheduledRetries.remove(pluginId)?.cancel()
+            scheduledRetries.remove(pluginId)?.cancel()
 
-        val job = supervisorScope.launch {
+            val job = supervisorScope.launch {
             try {
                 val loadedPlugin = PluginLoader.loadFromDir(context, pluginId, entryClass)
                 val bridge = HostBridgeImpl(context, loadedPlugin.dataDir) {
@@ -154,7 +159,8 @@ object PluginTaskEngine {
             }
         }
 
-        runningTasks[pluginId] = job
+            runningTasks[pluginId] = job
+        }
     }
 
     private fun cleanupInstance(context: Context, pluginId: String) {
