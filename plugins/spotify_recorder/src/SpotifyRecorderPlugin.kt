@@ -225,6 +225,49 @@ class SpotifyRecorderPlugin : PluginEntry() {
         }
     }
 
+    private fun scheduleAdWatchdog(lengthMs: Long, positionMs: Long, timeSentMs: Long = -1L) {
+        adWatchdogJob?.cancel()
+        adWatchdogJob = null
+
+        if (!isPlayingTrack || lengthMs <= 0 || isManualRecording) return
+
+        val now = System.currentTimeMillis()
+        val latency = if (timeSentMs > 0 && now >= timeSentMs) (now - timeSentMs).coerceAtMost(5000L) else 0L
+        val remainingMs = (lengthMs - positionMs - latency).coerceAtLeast(0L)
+
+        // Mutify Dead-Man Switch: Remaining song duration + 1200ms grace window
+        val delayMs = remainingMs + 1200L
+
+        activeBridge?.log("SPOTIFY_RADAR", "⏱️ [AD WATCHDOG ARMED] Countdown ${delayMs}ms (~${delayMs / 1000}s) until track completion.")
+
+        adWatchdogJob = transcodeScope.launch {
+            delay(delayMs)
+            if (isActive && isPlayingTrack && !isManualRecording && !isAdActive) {
+                activeBridge?.log("SPOTIFY_RADAR", "🚨 [DEAD-MAN SWITCH DETONATED] Song '$currentTrackTitle' ended with zero incoming broadcasts. Ad break engaged!")
+                onAdBreakStarted()
+            }
+        }
+    }
+
+    private fun onAdBreakStarted() {
+        if (isRecording) {
+            val takeTitle = activeTake?.trackTitle ?: currentTrackTitle
+            activeBridge?.log("SPOTIFY_RADAR", "🛑 Finalizing take '$takeTitle' as ad break commences.")
+            finalizeCurrentRecording(reason = "Track duration elapsed, ad break started")
+        }
+
+        isAdActive = true
+        adTitle = "Commercial Advertisement"
+        adArtist = "Spotify Ad Break"
+        currentLengthMs = 0L
+        currentPositionMs = 0L
+
+        countAds++
+        statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+        stateUpdater?.invoke(EngineState.SKIPPING_AD)
+        trackMetaUpdater?.invoke(adTitle, adArtist, 0L, 0L, true)
+    }
+
     private fun evaluateAndEngageStream(triggerSource: String) {
         if (isManualRecording) return
 
@@ -299,6 +342,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         val newLengthMs = if (rawLength in 1..10000) rawLength * 1000L else rawLength
         val newPos = intent.getIntExtra("playbackPosition", 0).toLong()
         val isPlaying = intent.getBooleanExtra("playing", true)
+        val timeSent = intent.getLongExtra("timeSent", -1L)
 
         activeBridge?.log(
             "SPOTIFY_METADATA",
@@ -346,7 +390,12 @@ class SpotifyRecorderPlugin : PluginEntry() {
             return
         }
 
-        // Real track validated -> reset ad shield
+        // Real track validated -> cancel dead-man watchdog and reset ad shield
+        adWatchdogJob?.cancel()
+        adWatchdogJob = null
+        if (isAdActive) {
+            activeBridge?.log("SPOTIFY_RADAR", "🎵 [AD BREAK ENDED] Real track arrived: '$newTrack' by '$newArtist'")
+        }
         isAdActive = false
         adTitle = ""
         adArtist = ""
@@ -372,11 +421,16 @@ class SpotifyRecorderPlugin : PluginEntry() {
         trackMetaUpdater?.invoke(newTrack, newArtist, newLengthMs, newPos, isPlaying)
 
         evaluateAndEngageStream("Metadata Broadcast")
+
+        if (isPlaying && newLengthMs > 0) {
+            scheduleAdWatchdog(newLengthMs, newPos, timeSent)
+        }
     }
 
     private fun handlePlaybackStateChanged(intent: Intent) {
         val isPlaying = intent.getBooleanExtra("playing", false)
         val pos = intent.getIntExtra("playbackPosition", -1).toLong()
+        val timeSent = intent.getLongExtra("timeSent", -1L)
 
         isPlayingTrack = isPlaying
         lastSyncTimestamp = SystemClock.elapsedRealtime()
@@ -404,6 +458,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
             val targetLen = take?.expectedDurationMs ?: currentLengthMs
 
             if (!isPlaying) {
+                adWatchdogJob?.cancel()
+                adWatchdogJob = null
                 if (targetLen > 0 && recordedMs >= targetLen - 4000L) {
                     activeBridge?.log("SPOTIFY_RADAR", "Track paused near natural completion (${recordedMs}ms/${targetLen}ms). Finalizing take.")
                     finalizeCurrentRecording(reason = "Paused near natural completion")
@@ -420,6 +476,9 @@ class SpotifyRecorderPlugin : PluginEntry() {
                     }
                 }
             } else {
+                if (!isAdActive && currentLengthMs > 0) {
+                    scheduleAdWatchdog(currentLengthMs, if (pos >= 0) pos else currentPositionMs, timeSent)
+                }
                 if (pauseDebounceJob?.isActive == true) {
                     activeBridge?.log("SPOTIFY_RADAR", "Playback resumed within grace period. Cancelled discard timer.")
                     pauseDebounceJob?.cancel()
@@ -434,6 +493,12 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 }
             }
         } else {
+            if (!isPlaying) {
+                adWatchdogJob?.cancel()
+                adWatchdogJob = null
+            } else if (!isAdActive && currentLengthMs > 0) {
+                scheduleAdWatchdog(currentLengthMs, if (pos >= 0) pos else currentPositionMs, timeSent)
+            }
             // Evaluates same-track replays from 0:00 and buffering resume (playing=false -> playing=true)
             if (isPlaying && currentPositionMs in 0..2500L) {
                 activeBridge?.log("SPOTIFY_RADAR", "🔄 Playhead at 0:00 while not recording (pos=${currentPositionMs}ms). Triggering stream evaluation.")
@@ -1927,6 +1992,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         val transcodeScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         val transcodeDispatcher = Dispatchers.IO.limitedParallelism(1)
         @Volatile var pauseDebounceJob: Job? = null
+        @Volatile var adWatchdogJob: Job? = null
         @Volatile var isReceiverRegistered = false
         @Volatile var engineState = EngineState.DISARMED
 
@@ -2063,6 +2129,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
             stateUpdater?.invoke(EngineState.DISARMED)
             pauseDebounceJob?.cancel()
             pauseDebounceJob = null
+            adWatchdogJob?.cancel()
+            adWatchdogJob = null
+            isAdActive = false
+            adTitle = ""
+            adArtist = ""
             try {
                 context.applicationContext.unregisterReceiver(spotifyReceiver)
                 isReceiverRegistered = false
