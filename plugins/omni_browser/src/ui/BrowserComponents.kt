@@ -64,7 +64,9 @@ fun OmniBrowserTopBar(
     onTopBarDragCancel: () -> Unit = {}
 ) {
     var isSearchFocused by remember { mutableStateOf(false) }
+    var hasGainedFocus by remember { mutableStateOf(false) }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(isSearchFocused) {
@@ -72,7 +74,11 @@ fun OmniBrowserTopBar(
             if (urlInputText.isEmpty() && currentUrl != "about:blank") {
                 onUrlTextChange(currentUrl)
             }
+            kotlinx.coroutines.delay(40)
             focusRequester.requestFocus()
+            keyboardController?.show()
+        } else {
+            hasGainedFocus = false
         }
     }
 
@@ -122,7 +128,9 @@ fun OmniBrowserTopBar(
                 IconButton(
                     onClick = {
                         isSearchFocused = false
+                        hasGainedFocus = false
                         focusManager.clearFocus()
+                        keyboardController?.hide()
                     },
                     modifier = Modifier.size(36.dp)
                 ) {
@@ -198,7 +206,9 @@ fun OmniBrowserTopBar(
                             keyboardActions = KeyboardActions(
                                 onGo = {
                                     isSearchFocused = false
+                                    hasGainedFocus = false
                                     focusManager.clearFocus()
+                                    keyboardController?.hide()
                                     onNavigate(urlInputText)
                                 }
                             ),
@@ -228,8 +238,11 @@ fun OmniBrowserTopBar(
                                 .wrapContentHeight(Alignment.CenterVertically)
                                 .focusRequester(focusRequester)
                                 .onFocusChanged {
-                                    if (!it.isFocused) {
+                                    if (it.isFocused) {
+                                        hasGainedFocus = true
+                                    } else if (hasGainedFocus) {
                                         isSearchFocused = false
+                                        hasGainedFocus = false
                                     }
                                 }
                         )
