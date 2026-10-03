@@ -21,6 +21,18 @@ data class LoadedPlugin(
 
 object PluginLoader {
 
+    private val pluginCache = java.util.concurrent.ConcurrentHashMap<String, LoadedPlugin>()
+
+    fun invalidate(pluginId: String) {
+        pluginCache.remove(pluginId)
+        OmniLogger.log("LOADER", "🧹 Invalidated singleton cache for plugin [$pluginId]")
+    }
+
+    fun clearCache() {
+        pluginCache.clear()
+        OmniLogger.log("LOADER", "🧹 Cleared entire plugin singleton cache")
+    }
+
     /**
      * Unpacks a bundle.zip into an isolated directory, parses the auto-discovery plugin.json,
      * enforces Android 14 DCL read-only security, and instantiates the PluginEntry class.
@@ -67,6 +79,7 @@ object PluginLoader {
         if (activeSession != null) {
             OmniTaskManager.killTask(context, activeSession.taskId)
         }
+        invalidate(finalId)
 
         val targetBaseDir = context.getDir("plugins", Context.MODE_PRIVATE)
         val pluginDir = File(targetBaseDir, finalId)
@@ -119,7 +132,7 @@ object PluginLoader {
             PluginTaskEngine.setDaemonEnabled(context, finalId, finalClass, true)
         }
 
-        return LoadedPlugin(
+        val loaded = LoadedPlugin(
             id = finalId,
             name = finalName,
             entryClass = finalClass,
@@ -129,6 +142,8 @@ object PluginLoader {
             classLoader = loader,
             icon = manifest?.iconPath
         )
+        pluginCache[finalId] = loaded
+        return loaded
     }
 
     /**
@@ -139,6 +154,11 @@ object PluginLoader {
         pluginId: String,
         fallbackEntryClass: String? = null
     ): LoadedPlugin {
+        // Fast-path: Return cached singleton instance if already loaded
+        pluginCache[pluginId]?.let { cached ->
+            return cached
+        }
+
         val targetBaseDir = context.getDir("plugins", Context.MODE_PRIVATE)
         val pluginDir = File(targetBaseDir, pluginId)
         val dexFile = File(pluginDir, "classes.dex")
@@ -185,7 +205,7 @@ object PluginLoader {
         val instance = clazz.getDeclaredConstructor().newInstance() as? PluginEntry
             ?: throw ClassCastException("Class $finalClass does not extend PluginEntry contract.")
 
-        return LoadedPlugin(
+        val loaded = LoadedPlugin(
             id = pluginId,
             name = finalName,
             entryClass = finalClass,
@@ -195,5 +215,7 @@ object PluginLoader {
             classLoader = loader,
             icon = manifest?.iconPath
         )
+        pluginCache[pluginId] = loaded
+        return loaded
     }
 }
