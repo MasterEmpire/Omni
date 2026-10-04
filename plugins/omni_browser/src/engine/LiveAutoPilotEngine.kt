@@ -73,13 +73,44 @@ object LiveAutoPilotEngine {
         success: Boolean,
         output: String
     ) {
-        val prefix = if (success) "[Python Output]:\n" else "[Python Error]:\n"
-        val fullText = prefix + output
-        val escaped = JSONObject.quote(fullText)
+        var cleanOutput = output
+        var attachedFileName: String? = null
+        var attachedBase64: String? = null
+        var attachedMime: String? = null
 
-        bridge.log("LIVE_AUTO", "Delivering result back to live AI Studio page (${output.length} chars)")
+        // Detect ATTACH_FILE: /path/to/file marker
+        val marker = "ATTACH_FILE:"
+        if (output.contains(marker)) {
+            val lines = output.lines()
+            val fileLine = lines.find { it.trim().startsWith(marker) }
+            if (fileLine != null) {
+                val filePath = fileLine.substringAfter(marker).trim()
+                val targetFile = java.io.File(filePath)
+                if (targetFile.exists() && targetFile.isFile) {
+                    try {
+                        val bytes = targetFile.readBytes()
+                        attachedBase64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        attachedFileName = targetFile.name
+                        attachedMime = com.omni.plugin.browser.utils.resolveMimeType(targetFile)
+                        bridge.log("LIVE_AUTO", "📎 Ingested attachment: ${targetFile.name} (${bytes.size} bytes)")
+                        cleanOutput = lines.filter { !it.trim().startsWith(marker) }.joinToString("\n").trim()
+                    } catch (e: Exception) {
+                        bridge.log("LIVE_AUTO_ERR", "Failed reading attachment: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        val prefix = if (success) "[Python Output]:\n" else "[Python Error]:\n"
+        val fullText = prefix + cleanOutput
+        val escapedText = JSONObject.quote(fullText)
+        val escapedName = if (attachedFileName != null) JSONObject.quote(attachedFileName) else "null"
+        val escapedB64 = if (attachedBase64 != null) JSONObject.quote(attachedBase64) else "null"
+        val escapedMime = if (attachedMime != null) JSONObject.quote(attachedMime) else "null"
+
+        bridge.log("LIVE_AUTO", "Delivering result to AI Studio (${cleanOutput.length} chars, file=$attachedFileName)")
         webView.evaluateJavascript(
-            "if (window.__omniDeliverPythonResult) { window.__omniDeliverPythonResult($escaped); }",
+            "if (window.__omniDeliverPythonResult) { window.__omniDeliverPythonResult($escapedText, $escapedName, $escapedB64, $escapedMime); }",
             null
         )
     }
@@ -116,20 +147,16 @@ object LiveAutoPilotEngine {
                 }
 
                 function performAutoscroll() {
-                    let scrolled = false;
-                    const containers = document.querySelectorAll('ms-autoscroll-container, .chat-view-container, cdk-virtual-scroll-viewport, .chat-history-container, ms-chat-view');
-                    containers.forEach(c => {
-                        if (c.scrollHeight > c.clientHeight) {
-                            c.scrollTop = c.scrollHeight;
-                            scrolled = true;
+                    try {
+                        const autoscroll = document.querySelector('ms-autoscroll-container, .chat-view-container');
+                        if (autoscroll) {
+                            autoscroll.scrollTop = autoscroll.scrollHeight;
                         }
-                    });
-                    const bottomAnchor = document.querySelector('ms-prompt-box, ms-chat-turn:last-of-type, .chat-turn-container:last-of-type');
-                    if (bottomAnchor) {
-                        try { bottomAnchor.scrollIntoView({ block: 'end', inline: 'nearest' }); scrolled = true; } catch(_) {}
+                        window.scrollTo(0, document.body.scrollHeight);
+                        return true;
+                    } catch(_) {
+                        return false;
                     }
-                    window.scrollTo(0, document.body.scrollHeight);
-                    return scrolled;
                 }
 
                 function getScreenText(turnEl) {
@@ -196,23 +223,45 @@ object LiveAutoPilotEngine {
                     }
                 }
 
-                window.__omniDeliverPythonResult = async function(textResult) {
-                    const promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
-                    if (promptArea) {
-                        safeInjectText(promptArea, textResult);
-                        await delay(800);
-                        let readyWait = 0;
-                        while (readyWait < 20) {
-                            const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
-                            if (submitBtn && isRunButtonReady(submitBtn)) {
-                                submitBtn.click();
-                                break;
+                            window.__omniDeliverPythonResult = async function(textResult, fileName, fileBase64, mimeType) {
+                // 1. If a generated file was produced by Python, attach it via DataTransfer
+                if (fileName && fileBase64) {
+                    try {
+                        const fileInput = document.querySelector('input[data-test-upload-file-input], input[type="file"].file-input, input[type="file"]');
+                        if (fileInput) {
+                            const dt = new DataTransfer();
+                            const byteChars = atob(fileBase64);
+                            const byteArray = new Uint8Array(byteChars.length);
+                            for (let i = 0; i < byteChars.length; i++) {
+                                byteArray[i] = byteChars.charCodeAt(i);
                             }
-                            await delay(300);
-                            readyWait++;
+                            const blob = new Blob([byteArray], { type: mimeType || 'application/octet-stream' });
+                            const file = new File([blob], fileName, { type: mimeType || 'application/octet-stream' });
+                            dt.items.add(file);
+                            fileInput.files = dt.files;
+                            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            await delay(1600);
                         }
+                    } catch(e) {}
+                }
+
+                // 2. Inject text into textarea
+                const promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                if (promptArea) {
+                    safeInjectText(promptArea, textResult);
+                    await delay(800);
+                    let readyWait = 0;
+                    while (readyWait < 25) {
+                        const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
+                        if (submitBtn && isRunButtonReady(submitBtn)) {
+                            submitBtn.click();
+                            break;
+                        }
+                        await delay(300);
+                        readyWait++;
                     }
-                };
+                }
+            };
 
                 setInterval(() => {
                     if (!window.__omniLiveAutoPilotActive) return;
