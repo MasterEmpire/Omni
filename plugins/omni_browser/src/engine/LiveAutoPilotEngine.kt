@@ -146,19 +146,6 @@ object LiveAutoPilotEngine {
                     return false;
                 }
 
-                function performAutoscroll() {
-                    try {
-                        const autoscroll = document.querySelector('ms-autoscroll-container, .chat-view-container');
-                        if (autoscroll) {
-                            autoscroll.scrollTop = autoscroll.scrollHeight;
-                        }
-                        window.scrollTo(0, document.body.scrollHeight);
-                        return true;
-                    } catch(_) {
-                        return false;
-                    }
-                }
-
                 function getScreenText(turnEl) {
                     if (!turnEl) return '';
                     try {
@@ -266,21 +253,8 @@ object LiveAutoPilotEngine {
                 setInterval(() => {
                     if (!window.__omniLiveAutoPilotActive) return;
 
-                    const isGen = checkUiGenerating();
-
-                    // Conditional Autoscroll: keeps DOM mounted during generation only
-                    if (isGen) {
-                        const didScroll = performAutoscroll();
-                        window.__omniScrollTicks = (window.__omniScrollTicks || 0) + 1;
-                        if (window.__omniScrollTicks % 5 === 0) {
-                            if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
-                                window.OmniPythonBridge.log('AUTOSCROLL_DIAG', 'Generating: true | Autoscroll triggered: ' + didScroll);
-                            }
-                        }
-                        return;
-                    } else {
-                        window.__omniScrollTicks = 0;
-                    }
+                    // If model is generating, yield until the turn finishes without hijacking scroll
+                    if (checkUiGenerating()) return;
 
                     const allModelTurns = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
                     if (allModelTurns.length === 0) return;
