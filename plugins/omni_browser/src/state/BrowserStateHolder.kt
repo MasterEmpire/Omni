@@ -791,11 +791,11 @@ class BrowserStateHolder(
         bridge.log("AUTOPILOT_PIPELINE", "🚀 [STAGE 2: HOST ROUTE] CXP XML received (${xml.length} chars). Identifying Conduit IDE tab...")
         bridge.showToast("⚡ Beaming CXP patch to Conduit IDE...")
 
-        var ideTab = tabs.find { isIdeTab(it) }
+        var ideTab = getMostRecentIdeTab()
         if (ideTab == null) {
             bridge.log("AUTOPILOT_PIPELINE", "📂 [STAGE 2: SPAWN IDE] Conduit IDE tab not open. Opening neighbor tab...")
             openLocalIdeAsNeighbor()
-            ideTab = tabs.find { isIdeTab(it) }
+            ideTab = getMostRecentIdeTab()
         }
 
         val targetTabId = ideTab?.id ?: activeTabId
@@ -806,17 +806,38 @@ class BrowserStateHolder(
         cxpPillDismissJob?.cancel()
 
         val escapedXml = org.json.JSONObject.quote(xml)
-        val script = "if (window.__conduitAutoIngestAndCommit) { window.__conduitAutoIngestAndCommit($escapedXml); }"
+        val probeScript = """
+            (function() {
+                const payload = $escapedXml;
+                let attempts = 0;
+                function tryIngest() {
+                    if (window.__conduitAutoIngestAndCommit) {
+                        window.__conduitAutoIngestAndCommit(payload);
+                    } else if (attempts < 20) {
+                        attempts++;
+                        setTimeout(tryIngest, 250);
+                    } else {
+                        if (window.OmniIdeBridge && window.OmniIdeBridge.reportPatchResult) {
+                            window.OmniIdeBridge.reportPatchResult('FAILED', 'Conduit IDE not ready after 5s');
+                        }
+                    }
+                }
+                tryIngest();
+            })();
+        """.trimIndent()
 
         val ideWv = poolManager.pool[targetTabId]
         if (ideWv != null) {
-            bridge.log("AUTOPILOT_PIPELINE", "💉 [STAGE 2: INJECT] Injected __conduitAutoIngestAndCommit into active IDE tab [$targetTabId].")
-            ideWv.evaluateJavascript(script, null)
+            ideWv.onResume()
+            bridge.log("AUTOPILOT_PIPELINE", "💉 [STAGE 2: INJECT] Dispatched probe into IDE tab [$targetTabId].")
+            ideWv.evaluateJavascript(probeScript, null)
         } else {
-            bridge.log("AUTOPILOT_PIPELINE", "⏳ [STAGE 2: INJECT QUEUE] IDE tab [$targetTabId] warming up. Evaluating after 600ms...")
+            bridge.log("AUTOPILOT_PIPELINE", "⏳ [STAGE 2: INJECT QUEUE] IDE tab [$targetTabId] warming up. Polling injection...")
             coroutineScope.launch {
                 delay(600)
-                poolManager.pool[targetTabId]?.evaluateJavascript(script, null)
+                val wv = poolManager.pool[targetTabId]
+                wv?.onResume()
+                wv?.evaluateJavascript(probeScript, null)
             }
         }
     }
@@ -900,7 +921,19 @@ class BrowserStateHolder(
     }
 
     fun isIdeTab(tab: BrowserTab): Boolean {
-        return tab.url.contains("/ide/") || tab.url.contains("index.html") || tab.title.contains("IDE", ignoreCase = true)
+        val u = tab.url.lowercase(java.util.Locale.US)
+        val t = tab.title.lowercase(java.util.Locale.US)
+        return u.contains("localhost:$localServerPort") ||
+               u.contains("127.0.0.1:$localServerPort") ||
+               u.contains("/ide") ||
+               u.contains("vault_") ||
+               (u.endsWith(".html") && (t.contains("conduit") || t.contains("ide"))) ||
+               t.contains("ide") ||
+               t.contains("conduit")
+    }
+
+    fun getMostRecentIdeTab(): BrowserTab? {
+        return tabs.filter { isIdeTab(it) }.maxByOrNull { it.lastAccessedTime }
     }
 
     fun getLocalShortcuts(): List<ShortcutItem> {
