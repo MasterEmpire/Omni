@@ -552,6 +552,7 @@ fun BrowserMenuOverlay(
     activeDownloadsCount: Int,
     onOpenDownloads: () -> Unit,
     onShowRecents: () -> Unit = {},
+    onShowDiagnostics: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onExitBrowser: () -> Unit
 ) {
@@ -742,6 +743,10 @@ fun BrowserMenuOverlay(
 
                 InLayoutMenuItem("📱 Recents Deck", color = Color(0xFF58A6FF)) {
                     onShowRecents()
+                }
+
+                InLayoutMenuItem("📋 Diagnostics Console", color = Color(0xFF58A6FF)) {
+                    onShowDiagnostics()
                 }
 
                 HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
