@@ -114,6 +114,27 @@ class OmniPythonBridge(
     }
 }
 
+class OmniIdeBridge(
+    private val onCxpDispatched: (xml: String) -> Unit,
+    private val onPatchReported: (status: String, details: String) -> Unit,
+    private val onLog: (tag: String, message: String) -> Unit
+) {
+    @JavascriptInterface
+    fun dispatchCxpToIde(xml: String) {
+        onCxpDispatched(xml)
+    }
+
+    @JavascriptInterface
+    fun reportPatchResult(status: String, details: String) {
+        onPatchReported(status, details)
+    }
+
+    @JavascriptInterface
+    fun log(tag: String, msg: String) {
+        onLog(tag, msg)
+    }
+}
+
 data class ActiveDownloadItem(
     val downloadId: Long,
     val filename: String,
