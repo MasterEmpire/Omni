@@ -94,6 +94,26 @@ class OmniClipboardBridge(
     }
 }
 
+class OmniPythonBridge(
+    private val bridge: com.omni.hub.api.HostBridge,
+    private val onLiveExecutionRequested: (code: String) -> Unit = {}
+) {
+    @JavascriptInterface
+    fun isAvailable(): Boolean {
+        return bridge.isPythonEngineAvailable()
+    }
+
+    @JavascriptInterface
+    fun executeFromLivePage(code: String) {
+        onLiveExecutionRequested(code)
+    }
+
+    @JavascriptInterface
+    fun log(tag: String, msg: String) {
+        bridge.log(tag, msg)
+    }
+}
+
 data class ActiveDownloadItem(
     val downloadId: Long,
     val filename: String,
