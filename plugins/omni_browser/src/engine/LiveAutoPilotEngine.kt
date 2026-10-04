@@ -48,15 +48,20 @@ object LiveAutoPilotEngine {
         bridge.showToast("🐍 Running Python script on Nexus...")
         bridge.log("LIVE_AUTO", "Executing Python on Nexus:\n$code")
 
+        val streamBuffer = StringBuilder()
+
         bridge.executePython(
             code = code,
             onOutput = { chunk ->
+                streamBuffer.append(chunk)
                 bridge.log("LIVE_PYTHON_STREAM", chunk)
             },
             onComplete = { success, output ->
                 coroutineScope.launch(Dispatchers.Main) {
                     onStatusChanged("Watching")
-                    deliverPythonResult(webView, bridge, success, output)
+                    val effectiveOutput = if (output.isNotBlank()) output.trim() else streamBuffer.toString().trim()
+                    bridge.log("LIVE_AUTO", "Python finished (success=$success, outputLen=${effectiveOutput.length})")
+                    deliverPythonResult(webView, bridge, success, effectiveOutput)
                 }
             }
         )
@@ -88,16 +93,17 @@ object LiveAutoPilotEngine {
                 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
                 function checkUiGenerating() {
-                    const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits');
+                    const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[aria-label*="Stop"], button.stoppable');
                     if (runBtn) {
+                        const aria = (runBtn.getAttribute('aria-label') || '').toLowerCase();
+                        const label = (runBtn.querySelector('.run-button-label')?.textContent || '').toLowerCase();
                         if (runBtn.classList.contains('stoppable') ||
                             runBtn.querySelector('.stoppable-spinner, .stoppable-stop, svg[class*="stoppable"]') ||
-                            (runBtn.getAttribute('aria-label') || '').toLowerCase().includes('stop') ||
-                            (runBtn.querySelector('.run-button-label')?.textContent || '').toLowerCase().includes('stop')) {
+                            aria.includes('stop') || label.includes('stop')) {
                             return true;
                         }
                     }
-                    if (document.querySelector('.run-button.stoppable, ms-run-button .stoppable-spinner, ms-run-button .stoppable-stop, button.stoppable, button[aria-label*="Stop"]')) {
+                    if (document.querySelector('.run-button.stoppable, ms-run-button .stoppable-spinner, ms-run-button .stoppable-stop, button.stoppable')) {
                         return true;
                     }
                     if (document.querySelector('.thinking-progress-icon.in-progress, ms-thought-chunk .in-progress, [class*="thinking-progress-icon"][class*="in-progress"]')) {
@@ -107,6 +113,23 @@ object LiveAutoPilotEngine {
                         return true;
                     }
                     return false;
+                }
+
+                function performAutoscroll() {
+                    let scrolled = false;
+                    const containers = document.querySelectorAll('ms-autoscroll-container, .chat-view-container, cdk-virtual-scroll-viewport, .chat-history-container, ms-chat-view');
+                    containers.forEach(c => {
+                        if (c.scrollHeight > c.clientHeight) {
+                            c.scrollTop = c.scrollHeight;
+                            scrolled = true;
+                        }
+                    });
+                    const bottomAnchor = document.querySelector('ms-prompt-box, ms-chat-turn:last-of-type, .chat-turn-container:last-of-type');
+                    if (bottomAnchor) {
+                        try { bottomAnchor.scrollIntoView({ block: 'end', inline: 'nearest' }); scrolled = true; } catch(_) {}
+                    }
+                    window.scrollTo(0, document.body.scrollHeight);
+                    return scrolled;
                 }
 
                 function getScreenText(turnEl) {
@@ -198,10 +221,16 @@ object LiveAutoPilotEngine {
 
                     // Conditional Autoscroll: keeps DOM mounted during generation only
                     if (isGen) {
-                        const autoscroll = document.querySelector('ms-autoscroll-container, .chat-view-container');
-                        if (autoscroll) autoscroll.scrollTop = autoscroll.scrollHeight;
-                        window.scrollTo(0, document.body.scrollHeight);
+                        const didScroll = performAutoscroll();
+                        window.__omniScrollTicks = (window.__omniScrollTicks || 0) + 1;
+                        if (window.__omniScrollTicks % 5 === 0) {
+                            if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                                window.OmniPythonBridge.log('AUTOSCROLL_DIAG', 'Generating: true | Autoscroll triggered: ' + didScroll);
+                            }
+                        }
                         return;
+                    } else {
+                        window.__omniScrollTicks = 0;
                     }
 
                     const allModelTurns = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
