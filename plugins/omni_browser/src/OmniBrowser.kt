@@ -998,6 +998,27 @@ class OmniBrowser : PluginEntry() {
                     .zIndex(35f)
             )
 
+            CxpIngestionPillBanner(
+                visible = state.showCxpPill,
+                status = state.cxpPillStatus,
+                message = state.cxpPillMessage,
+                onOpenIde = {
+                    state.showCxpPill = false
+                    val ideId = state.cxpPillIdeTabId ?: state.tabs.find { state.isIdeTab(it) }?.id
+                    if (ideId != null) {
+                        state.switchToTab(ideId)
+                    } else {
+                        state.openLocalIdeAsNeighbor()
+                    }
+                },
+                onDismiss = { state.showCxpPill = false },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 58.dp)
+                    .zIndex(40f)
+            )
+
             UndoBanner(
                 visible = state.showUndoBanner,
                 message = state.undoMessage,
