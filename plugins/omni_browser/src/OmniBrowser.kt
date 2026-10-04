@@ -397,6 +397,7 @@ class OmniBrowser : PluginEntry() {
                     },
                     showMenu = state.showMenu,
                     onMenuToggle = { state.showMenu = !state.showMenu },
+                    isAutoPilotActive = state.isLiveAutoPilotEnabled,
                     onTopBarDragStart = { state.onTopBarDragStart() },
                     onTopBarDrag = { state.onTopBarDrag(it) },
                     onTopBarDragEnd = { state.onTopBarDragEnd() },
@@ -936,53 +937,7 @@ class OmniBrowser : PluginEntry() {
                 }
             }
 
-            // Floating Live Auto-Pilot Glassmorphic Pill
-            AnimatedVisibility(
-                visible = state.isLiveAutoPilotEnabled,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
-                exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 54.dp)
-                    .zIndex(25f)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFF161B22).copy(alpha = 0.94f),
-                    border = BorderStroke(1.2.dp, Color(0xFF00E5FF)),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .clickable { state.toggleLiveAutoPilot() }
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF00E5FF))
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "Auto-Pilot: ${state.liveAutoPilotStatus}",
-                            color = Color(0xFF00E5FF),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "✕ Pause",
-                            color = Color(0xFF8B949E),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
+
 
             DownloadCompletedPillBanner(
                 visible = state.showDownloadBanner,
