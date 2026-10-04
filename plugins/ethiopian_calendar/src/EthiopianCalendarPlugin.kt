@@ -3,7 +3,10 @@ package com.omni.plugin.calendar
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.media.RingtoneManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -166,6 +169,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
         private val remindersLock = Any()
         val allReminders = mutableStateListOf<CalendarReminder>()
         @Volatile var isDaemonRunning = false
+        @Volatile var onReminderDueListener: ((CalendarReminder) -> Unit)? = null
 
         fun loadReminders(bridge: HostBridge) {
             try {
@@ -306,6 +310,9 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     if (dueReminders.isNotEmpty()) {
                         dueReminders.forEach { r ->
                             dispatchNotification(context, bridge, r)
+                            Handler(Looper.getMainLooper()).post {
+                                onReminderDueListener?.invoke(r)
+                            }
                         }
                     }
 
@@ -330,6 +337,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
             val timeLabel = String.format(Locale.US, "%s %d:%02d", period, eHour, eMin)
             val dateLabel = "$monthName ${reminder.ethDay}፣ ${reminder.ethYear} ዓ.ም ($timeLabel)"
 
+            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             val notif = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle("⏰ ${reminder.title}")
                 .setContentText("${reminder.note.ifEmpty { "ማስታወሻ" }} • $dateLabel")
@@ -337,6 +345,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
                 .setSmallIcon(android.R.drawable.ic_popup_reminder)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setSound(soundUri)
                 .setVibrate(longArrayOf(0, 450, 150, 450, 150, 900))
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
@@ -360,8 +369,15 @@ class EthiopianCalendarPlugin : PluginEntry() {
         var viewingMonth by remember { mutableIntStateOf(todayEth.month) }
         var selectedDay by remember { mutableIntStateOf(todayEth.day) }
 
+        var remindersFilterDate by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+        var activeDuePopUpReminder by remember { mutableStateOf<CalendarReminder?>(null) }
         var reminderBeingEdited by remember { mutableStateOf<CalendarReminder?>(null) }
         var showReminderDialog by remember { mutableStateOf(false) }
+
+        DisposableEffect(Unit) {
+            onReminderDueListener = { activeDuePopUpReminder = it }
+            onDispose { onReminderDueListener = null }
+        }
 
         ModalNavigationDrawer(
             drawerState = drawerState,
@@ -464,9 +480,9 @@ class EthiopianCalendarPlugin : PluginEntry() {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 val currentMonthName = EthiopianDateMath.MONTH_NAMES[viewingMonth - 1]
                                 Text(
-                                    "$currentMonthName $viewingYear",
+                                    "$currentMonthName $selectedDay፣ $viewingYear",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 19.sp,
+                                    fontSize = 18.sp,
                                     color = Color.White
                                 )
                             }
@@ -550,6 +566,10 @@ class EthiopianCalendarPlugin : PluginEntry() {
                             selectedDay = selectedDay,
                             todayEth = todayEth,
                             onSelectDay = { selectedDay = it },
+                            onOpenFilteredReminders = {
+                                remindersFilterDate = Triple(viewingYear, viewingMonth, selectedDay)
+                                currentScreen = "reminders"
+                            },
                             onEditReminder = { rem ->
                                 reminderBeingEdited = rem
                                 showReminderDialog = true
@@ -562,6 +582,8 @@ class EthiopianCalendarPlugin : PluginEntry() {
                             }
                         )
                         "reminders" -> RemindersListView(
+                            filterDate = remindersFilterDate,
+                            onClearFilter = { remindersFilterDate = null },
                             onEditReminder = { rem ->
                                 reminderBeingEdited = rem
                                 showReminderDialog = true
@@ -627,7 +649,63 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     saveReminders(bridge)
                     showReminderDialog = false
                     reminderBeingEdited = null
-                    bridge.showToast(if (id != null) "Reminder Updated!" else "Reminder Saved!")
+
+                    // Smart duration toast calculation
+                    val countdownStr = calculateTimeRemaining(y, m, d, gregHour, min)
+                    bridge.showToast(if (id != null) "Updated! Reminding in $countdownStr" else "Saved! Reminding in $countdownStr")
+                }
+            )
+        }
+
+        // Live In-App Reminder Pop-Up Modal
+        activeDuePopUpReminder?.let { due ->
+            val monthName = EthiopianDateMath.MONTH_NAMES.getOrElse(due.ethMonth - 1) { "" }
+            val (eHour, eMin, period) = EthiopianDateMath.gregorianToEthiopianTime(due.hour, due.minute)
+            val timeLabel = String.format(Locale.US, "%s %d:%02d", period, eHour, eMin)
+
+            AlertDialog(
+                onDismissRequest = { activeDuePopUpReminder = null },
+                containerColor = Color(0xFF161B22),
+                shape = RoundedCornerShape(16.dp),
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⏰", fontSize = 22.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(due.title, color = Color(0xFFE5A93C), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (due.note.isNotEmpty()) {
+                            Text(due.note, color = Color.White, fontSize = 14.sp)
+                        }
+                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF0D1117)) {
+                            Text(
+                                text = "$monthName ${due.ethDay}፣ ${due.ethYear} ዓ.ም • $timeLabel",
+                                color = Color(0xFF8B949E),
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            remindersFilterDate = Triple(due.ethYear, due.ethMonth, due.ethDay)
+                            currentScreen = "reminders"
+                            activeDuePopUpReminder = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE5A93C))
+                    ) {
+                        Text("View", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { activeDuePopUpReminder = null }) {
+                        Text("Dismiss", color = Color(0xFF8B949E))
+                    }
                 }
             )
         }
@@ -640,6 +718,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
         selectedDay: Int,
         todayEth: EthiopicDate,
         onSelectDay: (Int) -> Unit,
+        onOpenFilteredReminders: () -> Unit,
         onEditReminder: (CalendarReminder) -> Unit,
         onDeleteReminder: (String) -> Unit
     ) {
@@ -786,15 +865,23 @@ class EthiopianCalendarPlugin : PluginEntry() {
 
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF21262D)
+                        color = if (dayReminders.isNotEmpty()) Color(0xFFE5A93C).copy(alpha = 0.2f) else Color(0xFF21262D),
+                        border = BorderStroke(1.dp, if (dayReminders.isNotEmpty()) Color(0xFFE5A93C) else Color.White.copy(alpha = 0.08f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onOpenFilteredReminders() }
                     ) {
-                        Text(
-                            text = "${dayReminders.size} Reminders",
-                            fontSize = 11.sp,
-                            color = Color(0xFFC9D1D9),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "${dayReminders.size} Reminders ➔",
+                                fontSize = 11.sp,
+                                color = if (dayReminders.isNotEmpty()) Color(0xFFE5A93C) else Color(0xFFC9D1D9),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -901,28 +988,63 @@ class EthiopianCalendarPlugin : PluginEntry() {
 
     @Composable
     fun RemindersListView(
+        filterDate: Triple<Int, Int, Int>? = null,
+        onClearFilter: () -> Unit = {},
         onEditReminder: (CalendarReminder) -> Unit,
         onDeleteReminder: (String) -> Unit
     ) {
+        val filteredList = remember(allReminders.size, filterDate) {
+            if (filterDate != null) {
+                allReminders.filter {
+                    it.ethYear == filterDate.first && it.ethMonth == filterDate.second && it.ethDay == filterDate.third
+                }
+            } else {
+                allReminders
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
-            Text(
-                "All Scheduled Reminders (${allReminders.size})",
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                color = Color.White,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        if (filterDate != null) "Filtered Reminders (${filteredList.size})" else "All Scheduled Reminders (${allReminders.size})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color.White
+                    )
+                    if (filterDate != null) {
+                        val mName = EthiopianDateMath.MONTH_NAMES.getOrElse(filterDate.second - 1) { "" }
+                        Text(
+                            "$mName ${filterDate.third}፣ ${filterDate.first} ዓ.ም",
+                            fontSize = 12.sp,
+                            color = Color(0xFFE5A93C)
+                        )
+                    }
+                }
 
-            if (allReminders.isEmpty()) {
+                if (filterDate != null) {
+                    TextButton(onClick = onClearFilter) {
+                        Text("Show All", color = Color(0xFF58A6FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            if (filteredList.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("🔔", fontSize = 28.sp)
                         Spacer(Modifier.height(6.dp))
-                        Text("No reminders registered", color = Color(0xFF8B949E), fontSize = 13.sp)
+                        Text(if (filterDate != null) "No reminders for this specific day" else "No reminders registered", color = Color(0xFF8B949E), fontSize = 13.sp)
                     }
                 }
             } else {
@@ -930,7 +1052,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(allReminders, key = { it.id }) { rem ->
+                    items(filteredList, key = { it.id }) { rem ->
                         val mName = EthiopianDateMath.MONTH_NAMES.getOrElse(rem.ethMonth - 1) { "" }
                         val dateHeader = "$mName ${rem.ethDay}፣ ${rem.ethYear} ዓ.ም"
                         val (eHour, eMin, period) = EthiopianDateMath.gregorianToEthiopianTime(rem.hour, rem.minute)
@@ -1159,6 +1281,40 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     }
                 }
             }
+        }
+    }
+
+    private fun calculateTimeRemaining(ethYear: Int, ethMonth: Int, ethDay: Int, gregHour: Int, min: Int): String {
+        return try {
+            val jdn = EthiopianDateMath.ethiopianToJdn(ethYear, ethMonth, ethDay)
+            val (gy, gm, gd) = EthiopianDateMath.jdnToGregorian(jdn)
+            val targetCal = Calendar.getInstance().apply {
+                set(Calendar.YEAR, gy)
+                set(Calendar.MONTH, gm - 1)
+                set(Calendar.DAY_OF_MONTH, gd)
+                set(Calendar.HOUR_OF_DAY, gregHour)
+                set(Calendar.MINUTE, min)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val diffMs = targetCal.timeInMillis - System.currentTimeMillis()
+            if (diffMs <= 0) return "due now"
+
+            val totalMins = diffMs / (60 * 1000L)
+            val days = totalMins / (24 * 60)
+            val hours = (totalMins % (24 * 60)) / 60
+            val mins = totalMins % 60
+
+            when {
+                days > 0 && hours > 0 -> "${days}d ${hours}h"
+                days > 0 -> "${days}d"
+                hours > 0 && mins > 0 -> "${hours}h ${mins}m"
+                hours > 0 -> "${hours}h"
+                mins > 0 -> "${mins}m"
+                else -> "< 1m"
+            }
+        } catch (_: Exception) {
+            "soon"
         }
     }
 
