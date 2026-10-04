@@ -175,6 +175,17 @@ class AiStudioAutomator(
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                     val msg = consoleMessage?.message() ?: ""
+                    if (msg.isEmpty()) return true
+
+                    // Silence noisy Google AI Studio preload warnings and internal Drive/Gapi sync noise
+                    if (msg.contains("preloaded using link preload", ignoreCase = true) ||
+                        msg.contains("Failed to upload to drive", ignoreCase = true) ||
+                        msg.contains("GapiService.upload failed", ignoreCase = true) ||
+                        msg.contains("has an appropriate `as` value", ignoreCase = true)
+                    ) {
+                        return true
+                    }
+
                     val lvl = consoleMessage?.messageLevel()?.name ?: "LOG"
                     val line = consoleMessage?.lineNumber() ?: 0
                     val src = consoleMessage?.sourceId() ?: ""
