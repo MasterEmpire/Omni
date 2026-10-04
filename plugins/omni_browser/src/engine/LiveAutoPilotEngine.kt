@@ -118,8 +118,9 @@ object LiveAutoPilotEngine {
     fun buildSentinelScript(): String {
         return """
             (function() {
-                if (window.__omniLiveSentinelLoaded) return;
-                window.__omniLiveSentinelLoaded = true;
+                if (window.__omniSentinelInterval) {
+                    clearInterval(window.__omniSentinelInterval);
+                }
 
                 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -146,26 +147,34 @@ object LiveAutoPilotEngine {
                     return false;
                 }
 
-                function isCxpBalanced(text) {
-                    if (!text) return false;
-                    const tag = (name) => new RegExp('<' + name, 'gi');
-                    const endTag = (name) => new RegExp('<\\/' + name + '>', 'gi');
-                    const openReplace = (text.match(tag('replace' + '_block')) || []).length;
-                    const closeReplace = (text.match(endTag('replace' + '_block')) || []).length;
-                    const openCreate = (text.match(tag('create' + '_file')) || []).length;
-                    const closeCreate = (text.match(endTag('create' + '_file')) || []).length;
-                    const openComment = (text.match(tag('comment')) || []).length;
-                    const closeComment = (text.match(endTag('comment')) || []).length;
-                    if (openReplace === 0 && openCreate === 0 && openComment === 0) return false;
-                    return openReplace === closeReplace && openCreate === closeCreate && openComment === closeComment;
-                }
-
                 function extractCxpBlock(text) {
                     if (!text) return null;
+
+                    // Strategy A: Extract inside markdown code fence (```xml ... ```) to isolate from conversation
+                    const fenceMatch = text.match(/```(?:xml|cxp)?\s*([\s\S]*?)(?:```|$)/i);
+                    const candidate = fenceMatch ? fenceMatch[1].trim() : text;
+
+                    // Strategy B: Match from first tag to last tag
                     const tagNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file'].join('|');
-                    const pattern = '(<(?:' + tagNames + ')[\\s\\S]*<\\/(?:' + tagNames + ')>)';
-                    const match = text.match(new RegExp(pattern, 'i'));
+                    const pattern = '(<(?:' + tagNames + ')[\\s\\S]*>)';
+                    const match = candidate.match(new RegExp(pattern, 'i'));
                     return match ? match[1].trim() : null;
+                }
+
+                function isCxpBalanced(rawPayload) {
+                    if (!rawPayload) return false;
+                    const tag = (name) => new RegExp('<' + name, 'gi');
+                    const endTag = (name) => new RegExp('<\\/' + name + '>', 'gi');
+
+                    const openReplace = (rawPayload.match(tag('replace' + '_block')) || []).length;
+                    const closeReplace = (rawPayload.match(endTag('replace' + '_block')) || []).length;
+                    const openCreate = (rawPayload.match(tag('create' + '_file')) || []).length;
+                    const closeCreate = (rawPayload.match(endTag('create' + '_file')) || []).length;
+                    const openComment = (rawPayload.match(tag('comment')) || []).length;
+                    const closeComment = (rawPayload.match(endTag('comment')) || []).length;
+
+                    if (openReplace === 0 && openCreate === 0 && openComment === 0) return false;
+                    return openReplace === closeReplace && openCreate === closeCreate && openComment === closeComment;
                 }
 
                 function getScreenText(turnEl) {
@@ -272,7 +281,7 @@ object LiveAutoPilotEngine {
                 }
             };
 
-                setInterval(() => {
+                window.__omniSentinelInterval = setInterval(() => {
                     if (!window.__omniLiveAutoPilotActive) return;
 
                     const isGen = checkUiGenerating();
@@ -297,15 +306,21 @@ object LiveAutoPilotEngine {
 
                     // 1. Detect & Auto-Bridge CXP Patch Markup to Conduit IDE
                     if (latestTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
-                        if (isCxpBalanced(screenText)) {
-                            const cxpPayload = extractCxpBlock(screenText);
-                            if (cxpPayload) {
+                        const cxpPayload = extractCxpBlock(screenText);
+                        if (cxpPayload) {
+                            const balanced = isCxpBalanced(cxpPayload);
+                            if (balanced) {
                                 latestTurn.setAttribute('data-omni-cxp-executed', 'true');
                                 if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [STAGE 1: SCRAPED] Balanced CXP extracted (' + cxpPayload.length + ' chars). First 80 chars: ' + cxpPayload.substring(0, 80).replace(/\n/g, ' '));
+                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [STAGE 1: SCRAPED] Balanced CXP extracted (' + cxpPayload.length + ' chars). Beaming to Conduit IDE...');
                                 }
                                 if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
                                     window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
+                                }
+                            } else {
+                                window.__cxpTicks = (window.__cxpTicks || 0) + 1;
+                                if (window.__cxpTicks % 5 === 0 && window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '⏳ [STAGE 1: WAITING CLOSURES] Detected CXP but tags still streaming. Length: ' + cxpPayload.length);
                                 }
                             }
                         }
