@@ -35,6 +35,7 @@ interface WebViewEventListener {
     fun onOpenFileChooser(filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: WebChromeClient.FileChooserParams?)
     fun onRenderProcessKilled(tabId: String)
     fun onMediaStateChanged(tabId: String, title: String, artist: String, isPlaying: Boolean)
+    fun onLivePythonRequested(code: String)
 }
 
 class WebViewPoolManager(
@@ -275,6 +276,11 @@ class WebViewPoolManager(
 
             val clipboardBridge = com.omni.plugin.browser.models.OmniClipboardBridge(bridge)
             addJavascriptInterface(clipboardBridge, "OmniClipboardBridge")
+
+            val pythonBridge = com.omni.plugin.browser.models.OmniPythonBridge(bridge) { code ->
+                listener.onLivePythonRequested(code)
+            }
+            addJavascriptInterface(pythonBridge, "OmniPythonBridge")
 
             val rawUA = settings.userAgentString
             val cleanMobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
