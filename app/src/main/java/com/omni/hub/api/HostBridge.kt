@@ -334,9 +334,9 @@ class HostBridgeImpl(
 
                 // Attach Lifecycle and SavedState owners so Compose works inside WindowManager
                 val lifecycleOwner = OverlayLifecycleOwner()
-                setViewTreeLifecycleOwner(view, lifecycleOwner)
-                setViewTreeViewModelStoreOwner(view, lifecycleOwner)
-                setViewTreeSavedStateRegistryOwner(view, lifecycleOwner)
+                view.setViewTreeLifecycleOwner(lifecycleOwner)
+                view.setViewTreeViewModelStoreOwner(lifecycleOwner)
+                view.setViewTreeSavedStateRegistryOwner(lifecycleOwner)
 
                 var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
