@@ -134,6 +134,14 @@ interface HostBridge {
 
     // --- Logging ---
     fun log(tag: String, message: String)
+
+    // --- Python Engine Bridge (Nexus Microkernel) ---
+    fun isPythonEngineAvailable(): Boolean
+    fun executePython(
+        code: String,
+        onOutput: (String) -> Unit = {},
+        onComplete: (success: Boolean, output: String) -> Unit
+    )
 }
 
 object PermissionDispatcher {
@@ -240,6 +248,155 @@ object RecentsDispatcher {
     fun showRecents() {
         Handler(Looper.getMainLooper()).post {
             launcher?.invoke()
+        }
+    }
+}
+
+/**
+ * Client-side IPC controller connecting Omni Hub to the Nexus Python Engine.
+ */
+object NexusPythonClient {
+    private const val NEXUS_PACKAGE = "com.conduit.nexus"
+    private const val BIND_ACTION = "com.conduit.nexus.action.BIND_PYTHON_BRIDGE"
+
+    private const val MSG_EXECUTE_CODE = 100
+    private const val MSG_STREAM_OUTPUT = 101
+    private const val MSG_EXECUTION_SUCCESS = 102
+    private const val MSG_EXECUTION_ERROR = 103
+
+    private const val KEY_CODE = "key_code"
+    private const val KEY_EXEC_ID = "key_exec_id"
+    private const val KEY_OUTPUT_CHUNK = "key_chunk"
+    private const val KEY_FINAL_RESULT = "key_result"
+    private const val KEY_ERROR_MESSAGE = "key_error"
+
+    @Volatile private var serviceMessenger: android.os.Messenger? = null
+    @Volatile private var isBound = false
+
+    private data class RequestCallbacks(
+        val onOutput: (String) -> Unit,
+        val onComplete: (Boolean, String) -> Unit
+    )
+
+    private val pendingRequests = java.util.concurrent.ConcurrentHashMap<String, RequestCallbacks>()
+    private val readyQueue = java.util.Collections.synchronizedList(mutableListOf<(android.os.Messenger) -> Unit>())
+
+    private val clientMessenger = android.os.Messenger(object : Handler(Looper.getMainLooper()) {
+        override fun handleMessage(msg: android.os.Message) {
+            val bundle = msg.data ?: return
+            val execId = bundle.getString(KEY_EXEC_ID) ?: return
+            val callbacks = pendingRequests[execId] ?: return
+
+            when (msg.what) {
+                MSG_STREAM_OUTPUT -> {
+                    val chunk = bundle.getString(KEY_OUTPUT_CHUNK) ?: ""
+                    callbacks.onOutput(chunk)
+                }
+                MSG_EXECUTION_SUCCESS -> {
+                    val result = bundle.getString(KEY_FINAL_RESULT) ?: ""
+                    pendingRequests.remove(execId)
+                    callbacks.onComplete(true, result)
+                }
+                MSG_EXECUTION_ERROR -> {
+                    val error = bundle.getString(KEY_ERROR_MESSAGE) ?: "Python execution failure"
+                    pendingRequests.remove(execId)
+                    callbacks.onComplete(false, error)
+                }
+            }
+        }
+    })
+
+    private val serviceConnection = object : android.content.ServiceConnection {
+        override fun onServiceConnected(name: android.content.ComponentName?, service: android.os.IBinder?) {
+            val messenger = android.os.Messenger(service)
+            serviceMessenger = messenger
+            isBound = true
+            OmniLogger.log("NEXUS_IPC", "🤝 Bound to Nexus Python Bridge Service.")
+
+            val pending = synchronized(readyQueue) {
+                val copy = readyQueue.toList()
+                readyQueue.clear()
+                copy
+            }
+            pending.forEach { action ->
+                try { action(messenger) } catch (_: Exception) {}
+            }
+        }
+
+        override fun onServiceDisconnected(name: android.content.ComponentName?) {
+            serviceMessenger = null
+            isBound = false
+            OmniLogger.log("NEXUS_IPC", "Disconnected from Nexus Python Service.")
+
+            val orphaned = pendingRequests.toMap()
+            pendingRequests.clear()
+            orphaned.values.forEach { it.onComplete(false, "Nexus process disconnected unexpectedly.") }
+        }
+    }
+
+    fun isAvailable(context: Context): Boolean {
+        return try {
+            val pm = context.packageManager
+            pm.getPackageInfo(NEXUS_PACKAGE, 0)
+            pm.checkSignatures(context.packageName, NEXUS_PACKAGE) == android.content.pm.PackageManager.SIGNATURE_MATCH
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun execute(
+        context: Context,
+        code: String,
+        onOutput: (String) -> Unit,
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        if (!isAvailable(context)) {
+            onComplete(false, "Nexus is not installed or signature check failed.")
+            return
+        }
+
+        val execId = "exec_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}"
+        pendingRequests[execId] = RequestCallbacks(onOutput, onComplete)
+
+        ensureBound(context) { messenger ->
+            try {
+                val msg = android.os.Message.obtain(null, MSG_EXECUTE_CODE).apply {
+                    replyTo = clientMessenger
+                    data = android.os.Bundle().apply {
+                        putString(KEY_CODE, code)
+                        putString(KEY_EXEC_ID, execId)
+                    }
+                }
+                messenger.send(msg)
+            } catch (e: Exception) {
+                pendingRequests.remove(execId)
+                onComplete(false, "Failed dispatching execution to Nexus: ${e.message}")
+            }
+        }
+    }
+
+    private fun ensureBound(context: Context, onReady: (android.os.Messenger) -> Unit) {
+        val current = serviceMessenger
+        if (current != null && isBound) {
+            onReady(current)
+            return
+        }
+
+        readyQueue.add(onReady)
+
+        val intent = Intent(BIND_ACTION).apply {
+            setPackage(NEXUS_PACKAGE)
+        }
+
+        try {
+            val bound = context.applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+            if (!bound) {
+                readyQueue.clear()
+                OmniLogger.log("NEXUS_IPC_ERR", "bindService to Nexus returned false.")
+            }
+        } catch (e: Exception) {
+            readyQueue.clear()
+            OmniLogger.log("NEXUS_IPC_ERR", "Exception binding to Nexus: ${e.message}")
         }
     }
 }
@@ -937,5 +1094,17 @@ class HostBridgeImpl(
 
     override fun log(tag: String, message: String) {
         OmniLogger.log(tag, message)
+    }
+
+    override fun isPythonEngineAvailable(): Boolean {
+        return NexusPythonClient.isAvailable(context)
+    }
+
+    override fun executePython(
+        code: String,
+        onOutput: (String) -> Unit,
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        NexusPythonClient.execute(context, code, onOutput, onComplete)
     }
 }
