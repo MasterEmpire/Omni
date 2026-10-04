@@ -615,6 +615,10 @@ class OmniBrowser : PluginEntry() {
                     state.showMenu = false
                     bridge.showRecents()
                 },
+                onShowDiagnostics = {
+                    state.showMenu = false
+                    bridge.showDiagnostics()
+                },
                 onOpenSettings = { state.showSettingsDialog = true },
                 onExitBrowser = {
                     state.showMenu = false
