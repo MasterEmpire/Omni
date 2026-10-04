@@ -1,0 +1,13 @@
+{
+  "id": "ethiopian_calendar",
+  "name": "Ethiopian Calendar",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.calendar.EthiopianCalendarPlugin",
+  "description": "Clean 13-month Ethiopian Calendar with side drawer, date converter & background reminder sentinel",
+  "autoStart": true,
+  "icon": "📅",
+  "permissions": [
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.VIBRATE"
+  ]
+}
