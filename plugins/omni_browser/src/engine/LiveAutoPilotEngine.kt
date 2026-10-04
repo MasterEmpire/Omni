@@ -16,7 +16,7 @@ object LiveAutoPilotEngine {
     fun arm(webView: WebView?, bridge: HostBridge) {
         if (webView == null) return
         bridge.showToast("⚡ Live AI Auto-Pilot Armed!")
-        bridge.log("LIVE_AUTO", "Live AI Auto-Pilot armed.")
+        bridge.log("AUTOPILOT_PIPELINE", "🟢 [ARMED] Live Auto-Pilot is now ACTIVE and watching AI Studio.")
         webView.evaluateJavascript(buildSentinelScript(), null)
         webView.evaluateJavascript("window.__omniLiveAutoPilotActive = true;", null)
     }
@@ -24,7 +24,7 @@ object LiveAutoPilotEngine {
     fun disarm(webView: WebView?, bridge: HostBridge) {
         if (webView == null) return
         bridge.showToast("Live Auto-Pilot Disarmed")
-        bridge.log("LIVE_AUTO", "Live AI Auto-Pilot disarmed.")
+        bridge.log("AUTOPILOT_PIPELINE", "🔴 [DISARMED] Live Auto-Pilot deactivated. All scrapers silenced.")
         webView.evaluateJavascript("window.__omniLiveAutoPilotActive = false;", null)
     }
 
@@ -275,8 +275,18 @@ object LiveAutoPilotEngine {
                 setInterval(() => {
                     if (!window.__omniLiveAutoPilotActive) return;
 
-                    // If model is generating, yield until the turn finishes without hijacking scroll
-                    if (checkUiGenerating()) return;
+                    const isGen = checkUiGenerating();
+                    if (isGen) {
+                        window.__omniWasGenerating = true;
+                        return;
+                    }
+
+                    if (window.__omniWasGenerating) {
+                        window.__omniWasGenerating = false;
+                        if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                            window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '🔍 [STAGE 1: SETTLED] Generation finished. Inspecting DOM for balanced CXP / Python tags...');
+                        }
+                    }
 
                     const allModelTurns = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
                     if (allModelTurns.length === 0) return;
@@ -286,15 +296,17 @@ object LiveAutoPilotEngine {
                     if (!screenText) return;
 
                     // 1. Detect & Auto-Bridge CXP Patch Markup to Conduit IDE
-                    if (latestTurn.getAttribute('data-omni-cxp-executed') !== 'true' && isCxpBalanced(screenText)) {
-                        const cxpPayload = extractCxpBlock(screenText);
-                        if (cxpPayload) {
-                            latestTurn.setAttribute('data-omni-cxp-executed', 'true');
-                            if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
-                                if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
-                                    window.OmniPythonBridge.log('LIVE_AUTO', 'Captured balanced CXP patch (' + cxpPayload.length + ' chars). Auto-committing to Conduit IDE...');
+                    if (latestTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
+                        if (isCxpBalanced(screenText)) {
+                            const cxpPayload = extractCxpBlock(screenText);
+                            if (cxpPayload) {
+                                latestTurn.setAttribute('data-omni-cxp-executed', 'true');
+                                if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [STAGE 1: SCRAPED] Balanced CXP extracted (' + cxpPayload.length + ' chars). First 80 chars: ' + cxpPayload.substring(0, 80).replace(/\n/g, ' '));
                                 }
-                                window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
+                                if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
+                                    window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
+                                }
                             }
                         }
                     }
