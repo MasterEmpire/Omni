@@ -150,16 +150,29 @@ object LiveAutoPilotEngine {
                 function extractCxpBlock(text) {
                     if (!text) return null;
 
-                    // Strict Markdown code fence match: MUST have both opening and closing triple backticks!
-                    const fenceMatch = text.match(/```(?:xml|cxp)?\s*([\s\S]*?)```/i);
-                    if (!fenceMatch) return null;
-                    const candidate = fenceMatch[1].trim();
+                    // Strategy 1: Explicit unique wrapper tag <cxp>...</cxp> or <patch>...</patch> (Immune to rich-mode backtick stripping)
+                    const tagMatch = text.match(/<(?:cxp|omni_cxp|patch)>([\s\S]*?)<\/(?:cxp|omni_cxp|patch)>/i);
+                    if (tagMatch) {
+                        return tagMatch[1].trim();
+                    }
 
-                    // Match from first tag to last tag
+                    // Strategy 2: Markdown code fence match (if in raw mode or unstripped)
+                    const fenceMatch = text.match(/```(?:xml|cxp)?\s*([\s\S]*?)```/i);
+                    if (fenceMatch) {
+                        const candidate = fenceMatch[1].trim();
+                        const innerMatch = candidate.match(/<(?:cxp|omni_cxp|patch)>([\s\S]*?)<\/(?:cxp|omni_cxp|patch)>/i);
+                        return innerMatch ? innerMatch[1].trim() : candidate;
+                    }
+
+                    // Strategy 3: Direct structural CXP boundary match (first tag to last closing tag)
                     const tagNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
-                    const pattern = '(<(?:' + tagNames + ')[\\s\\S]*>)';
-                    const match = candidate.match(new RegExp(pattern, 'i'));
-                    return match ? match[1].trim() : candidate;
+                    const pattern = '(<(?:' + tagNames + ')[\\s\\S]*<\\/(?:' + tagNames + ')>)';
+                    const rawTagMatch = text.match(new RegExp(pattern, 'i'));
+                    if (rawTagMatch) {
+                        return rawTagMatch[1].trim();
+                    }
+
+                    return null;
                 }
 
                 function isCxpBalanced(rawPayload) {
