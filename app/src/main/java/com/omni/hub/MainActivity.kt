@@ -309,6 +309,9 @@ fun DashboardScreen(context: Context) {
         com.omni.hub.api.RecentsDispatcher.registerLauncher {
             OmniTaskManager.openRecents()
         }
+        com.omni.hub.api.DiagnosticsDispatcher.registerLauncher {
+            showLogModal = true
+        }
         OmniLogger.log("INIT", "Omni Hub Dashboard loaded. Ensuring shared runtime...")
         PluginTaskEngine.resurrectDaemons(context)
         if (isKeepAliveEnabled) {
