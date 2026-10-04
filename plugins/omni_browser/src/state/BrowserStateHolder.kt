@@ -133,6 +133,13 @@ class BrowserStateHolder(
     var isLiveAutoPilotEnabled by mutableStateOf(false)
     var liveAutoPilotStatus by mutableStateOf("Watching")
     var automationStatus by mutableStateOf("Idle")
+
+    // CXP Auto-Commit Banner State
+    var cxpPillStatus by mutableStateOf<String?>(null)
+    var cxpPillMessage by mutableStateOf("")
+    var cxpPillIdeTabId by mutableStateOf<String?>(null)
+    var showCxpPill by mutableStateOf(false)
+    private var cxpPillDismissJob: Job? = null
     var automationThoughts by mutableStateOf("")
     var automationResult by mutableStateOf("")
     var automationError by mutableStateOf<String?>(null)
@@ -770,6 +777,54 @@ class BrowserStateHolder(
             coroutineScope = coroutineScope,
             onStatusChanged = { liveAutoPilotStatus = it }
         )
+    }
+
+    override fun onCxpDispatched(xml: String) {
+        bridge.log("CXP_INGEST", "CXP XML received from AI Studio (${xml.length} chars). Routing to Conduit IDE...")
+        bridge.showToast("⚡ Beaming CXP patch to Conduit IDE...")
+
+        var ideTab = tabs.find { isIdeTab(it) }
+        if (ideTab == null) {
+            openLocalIdeAsNeighbor()
+            ideTab = tabs.find { isIdeTab(it) }
+        }
+
+        val targetTabId = ideTab?.id ?: activeTabId
+        cxpPillIdeTabId = targetTabId
+        cxpPillStatus = "PATCHING"
+        cxpPillMessage = "Committing patch to Conduit IDE..."
+        showCxpPill = true
+        cxpPillDismissJob?.cancel()
+
+        val escapedXml = org.json.JSONObject.quote(xml)
+        val script = "if (window.__conduitAutoIngestAndCommit) { window.__conduitAutoIngestAndCommit($escapedXml); }"
+
+        val ideWv = poolManager.pool[targetTabId]
+        if (ideWv != null) {
+            ideWv.evaluateJavascript(script, null)
+        } else {
+            coroutineScope.launch {
+                delay(600)
+                poolManager.pool[targetTabId]?.evaluateJavascript(script, null)
+            }
+        }
+    }
+
+    override fun onPatchReported(status: String, details: String) {
+        bridge.log("CXP_INGEST", "Patch result reported from IDE: status=$status, details='$details'")
+        cxpPillStatus = status.uppercase(java.util.Locale.US)
+        cxpPillMessage = when (cxpPillStatus) {
+            "SUCCESS" -> "Patch Committed to Git!"
+            "PARTIAL" -> "Committed with AI Healing"
+            "FAILED" -> details.ifEmpty { "Patch Failed" }
+            else -> details
+        }
+        showCxpPill = true
+        cxpPillDismissJob?.cancel()
+        cxpPillDismissJob = coroutineScope.launch {
+            delay(5500)
+            showCxpPill = false
+        }
     }
 
     fun injectEruda() {
