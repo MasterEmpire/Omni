@@ -146,6 +146,28 @@ object LiveAutoPilotEngine {
                     return false;
                 }
 
+                function isCxpBalanced(text) {
+                    if (!text) return false;
+                    const tag = (name) => new RegExp('<' + name, 'gi');
+                    const endTag = (name) => new RegExp('<\\/' + name + '>', 'gi');
+                    const openReplace = (text.match(tag('replace' + '_block')) || []).length;
+                    const closeReplace = (text.match(endTag('replace' + '_block')) || []).length;
+                    const openCreate = (text.match(tag('create' + '_file')) || []).length;
+                    const closeCreate = (text.match(endTag('create' + '_file')) || []).length;
+                    const openComment = (text.match(tag('comment')) || []).length;
+                    const closeComment = (text.match(endTag('comment')) || []).length;
+                    if (openReplace === 0 && openCreate === 0 && openComment === 0) return false;
+                    return openReplace === closeReplace && openCreate === closeCreate && openComment === closeComment;
+                }
+
+                function extractCxpBlock(text) {
+                    if (!text) return null;
+                    const tagNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file'].join('|');
+                    const pattern = '(<(?:' + tagNames + ')[\\s\\S]*<\\/(?:' + tagNames + ')>)';
+                    const match = text.match(new RegExp(pattern, 'i'));
+                    return match ? match[1].trim() : null;
+                }
+
                 function getScreenText(turnEl) {
                     if (!turnEl) return '';
                     try {
@@ -257,6 +279,25 @@ object LiveAutoPilotEngine {
                     if (checkUiGenerating()) return;
 
                     const allModelTurns = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
+                    if (allModelTurns.length === 0) return;
+                    const latestTurn = allModelTurns[allModelTurns.length - 1];
+
+                    const screenText = getScreenText(latestTurn);
+                    if (!screenText) return;
+
+                    // 1. Detect & Auto-Bridge CXP Patch Markup to Conduit IDE
+                    if (latestTurn.getAttribute('data-omni-cxp-executed') !== 'true' && isCxpBalanced(screenText)) {
+                        const cxpPayload = extractCxpBlock(screenText);
+                        if (cxpPayload) {
+                            latestTurn.setAttribute('data-omni-cxp-executed', 'true');
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
+                                if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                                    window.OmniPythonBridge.log('LIVE_AUTO', 'Captured balanced CXP patch (' + cxpPayload.length + ' chars). Auto-committing to Conduit IDE...');
+                                }
+                                window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
+                            }
+                        }
+                    }
                     if (allModelTurns.length === 0) return;
                     const latestTurn = allModelTurns[allModelTurns.length - 1];
 
