@@ -54,19 +54,62 @@ class VaultManager(
         val cleanInput = sourcePath.trim()
         bridge.log("IDE_SYNC", "Attempting sync for source: $cleanInput")
 
+        // Prompt for All Files Access on Android 11+ if not yet granted
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && !android.os.Environment.isExternalStorageManager()) {
+            try {
+                val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                bridge.showToast("🛡️ Please grant 'All files access' to sync local files")
+            } catch (_: Exception) {}
+        }
+
         try {
             var bytes: ByteArray? = null
+            val cleanPath = normalizeLocalFilePath(cleanInput)
+
             if (cleanInput.startsWith("content://")) {
                 val uri = Uri.parse(cleanInput)
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    bytes = input.readBytes()
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        bytes = input.readBytes()
+                    }
+                } catch (secEx: Exception) {
+                    bridge.log("IDE_SYNC_WARN", "Content URI direct stream failed: ${secEx.message}")
+                    // Fallback: Resolve document ID to direct storage path
+                    try {
+                        if (android.provider.DocumentsContract.isDocumentUri(context, uri)) {
+                            val docId = android.provider.DocumentsContract.getDocumentId(uri)
+                            val rawPath = when {
+                                docId.startsWith("raw:") -> docId.removePrefix("raw:")
+                                docId.contains(":") -> {
+                                    val parts = docId.split(":")
+                                    if (parts[0].equals("primary", true)) "/storage/emulated/0/${parts[1]}" else null
+                                }
+                                else -> null
+                            }
+                            if (rawPath != null) {
+                                val f = File(rawPath)
+                                if (f.exists() && f.isFile) bytes = f.readBytes()
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
-            } else {
-                val cleanPath = normalizeLocalFilePath(cleanInput)
+            }
+
+            if (bytes == null) {
                 val srcFile = File(cleanPath)
                 if (srcFile.exists() && srcFile.isFile) {
-                    bytes = srcFile.readBytes()
-                } else {
+                    try {
+                        bytes = srcFile.readBytes()
+                    } catch (ioEx: Exception) {
+                        bridge.log("IDE_SYNC_WARN", "File read failed ($cleanPath): ${ioEx.message}")
+                    }
+                }
+
+                if (bytes == null) {
                     try {
                         val uri = Uri.parse(if (cleanInput.startsWith("file://")) cleanInput else "file://$cleanPath")
                         context.contentResolver.openInputStream(uri)?.use { input ->
@@ -74,6 +117,25 @@ class VaultManager(
                         }
                     } catch (_: Exception) {}
                 }
+
+                if (bytes == null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    try {
+                        val queryUri = android.provider.MediaStore.Files.getContentUri("external")
+                        val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+                        val selection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+                        val args = arrayOf(cleanPath)
+                        context.contentResolver.query(queryUri, projection, selection, args, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val id = cursor.getLong(0)
+                                val cUri = android.content.ContentUris.withAppendedId(queryUri, id)
+                                context.contentResolver.openInputStream(cUri)?.use { input ->
+                                    bytes = input.readBytes()
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
                 if (bytes == null && !srcFile.exists()) {
                     val errMsg = "File not found at: $cleanPath"
                     bridge.log("IDE_SYNC_ERR", errMsg)
