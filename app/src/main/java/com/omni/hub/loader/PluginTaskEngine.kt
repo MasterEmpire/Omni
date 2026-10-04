@@ -82,7 +82,6 @@ object PluginTaskEngine {
         val daemons = getRegisteredDaemons(context)
         if (daemons.isEmpty()) return
 
-        OmniLogger.log("TASK_ENGINE", "⚡ Resurrecting ${daemons.size} persistent daemon(s)...")
         OmniForegroundService.start(
             context,
             "Omni Hub",
