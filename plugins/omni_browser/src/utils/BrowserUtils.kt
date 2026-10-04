@@ -1827,16 +1827,14 @@ val BACKGROUND_MEDIA_SCRIPT = """
         Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
     } catch(e) {}
 
-    // Trap listener registrations that pause background video
+    // Trap listener registrations that pause background video silently
     const origAddEvent = EventTarget.prototype.addEventListener;
     EventTarget.prototype.addEventListener = function(type, listener, options) {
         if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
-            hostLog('MEDIA_JS', 'Suppressed visibilitychange listener on ' + this.constructor.name);
             return;
         }
         if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
             if (this === window || this === document) {
-                hostLog('MEDIA_JS', 'Suppressed ' + type + ' listener on window/document');
                 return;
             }
         }
