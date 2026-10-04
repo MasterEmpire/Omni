@@ -959,8 +959,8 @@ class OmniBrowser : PluginEntry() {
                 message = state.cxpPillMessage,
                 onOpenIde = {
                     state.showCxpPill = false
-                    val ideId = state.cxpPillIdeTabId ?: state.tabs.find { state.isIdeTab(it) }?.id
-                    if (ideId != null) {
+                    val ideId = state.cxpPillIdeTabId ?: state.getMostRecentIdeTab()?.id
+                    if (ideId != null && state.tabs.any { it.id == ideId }) {
                         state.switchToTab(ideId)
                     } else {
                         state.openLocalIdeAsNeighbor()
