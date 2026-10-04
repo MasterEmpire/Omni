@@ -761,9 +761,13 @@ class BrowserStateHolder(
 
     fun toggleLiveAutoPilot() {
         isLiveAutoPilotEnabled = !isLiveAutoPilotEnabled
+        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot: enabled=$isLiveAutoPilotEnabled")
         if (isLiveAutoPilotEnabled) {
             com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge)
         } else {
+            showCxpPill = false
+            cxpPillStatus = null
+            cxpPillDismissJob?.cancel()
             com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
         }
     }
@@ -780,11 +784,16 @@ class BrowserStateHolder(
     }
 
     override fun onCxpDispatched(xml: String) {
-        bridge.log("CXP_INGEST", "CXP XML received from AI Studio (${xml.length} chars). Routing to Conduit IDE...")
+        if (!isLiveAutoPilotEnabled) {
+            bridge.log("AUTOPILOT_PIPELINE", "🛑 [BLOCKED] onCxpDispatched ignored because Live Auto-Pilot is OFF.")
+            return
+        }
+        bridge.log("AUTOPILOT_PIPELINE", "🚀 [STAGE 2: HOST ROUTE] CXP XML received (${xml.length} chars). Identifying Conduit IDE tab...")
         bridge.showToast("⚡ Beaming CXP patch to Conduit IDE...")
 
         var ideTab = tabs.find { isIdeTab(it) }
         if (ideTab == null) {
+            bridge.log("AUTOPILOT_PIPELINE", "📂 [STAGE 2: SPAWN IDE] Conduit IDE tab not open. Opening neighbor tab...")
             openLocalIdeAsNeighbor()
             ideTab = tabs.find { isIdeTab(it) }
         }
@@ -801,8 +810,10 @@ class BrowserStateHolder(
 
         val ideWv = poolManager.pool[targetTabId]
         if (ideWv != null) {
+            bridge.log("AUTOPILOT_PIPELINE", "💉 [STAGE 2: INJECT] Injected __conduitAutoIngestAndCommit into active IDE tab [$targetTabId].")
             ideWv.evaluateJavascript(script, null)
         } else {
+            bridge.log("AUTOPILOT_PIPELINE", "⏳ [STAGE 2: INJECT QUEUE] IDE tab [$targetTabId] warming up. Evaluating after 600ms...")
             coroutineScope.launch {
                 delay(600)
                 poolManager.pool[targetTabId]?.evaluateJavascript(script, null)
@@ -811,7 +822,11 @@ class BrowserStateHolder(
     }
 
     override fun onPatchReported(status: String, details: String) {
-        bridge.log("CXP_INGEST", "Patch result reported from IDE: status=$status, details='$details'")
+        if (!isLiveAutoPilotEnabled) {
+            bridge.log("AUTOPILOT_PIPELINE", "🛑 [BLOCKED] onPatchReported ignored because Live Auto-Pilot is OFF (Status: $status, Details: '$details').")
+            return
+        }
+        bridge.log("AUTOPILOT_PIPELINE", "🏁 [STAGE 4: HOST AUDIT] Outcome received from Conduit: Status=$status | Details='$details'")
         cxpPillStatus = status.uppercase(java.util.Locale.US)
         cxpPillMessage = when (cxpPillStatus) {
             "SUCCESS" -> "Patch Committed to Git!"
@@ -824,6 +839,7 @@ class BrowserStateHolder(
         cxpPillDismissJob = coroutineScope.launch {
             delay(5500)
             showCxpPill = false
+            bridge.log("AUTOPILOT_PIPELINE", "🧹 [STAGE 5: DISMISSED] Pill banner auto-dismissed.")
         }
     }
 
