@@ -76,6 +76,8 @@ data class CalendarReminder(
     val ethDay: Int,
     val hour: Int = 9, // Gregorian 24h hour for background matching
     val minute: Int = 0,
+    val repeatMode: String = "NONE", // NONE, DAILY, MONTHLY, YEARLY
+    val lastNotifiedDate: String = "",
     val isNotified: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
@@ -200,6 +202,8 @@ class EthiopianCalendarPlugin : PluginEntry() {
                                 ethDay = obj.getInt("ethDay"),
                                 hour = obj.optInt("hour", 9),
                                 minute = obj.optInt("minute", 0),
+                                repeatMode = obj.optString("repeatMode", "NONE"),
+                                lastNotifiedDate = obj.optString("lastNotifiedDate", ""),
                                 isNotified = obj.optBoolean("isNotified", false),
                                 createdAt = obj.optLong("createdAt", System.currentTimeMillis())
                             )
@@ -223,6 +227,8 @@ class EthiopianCalendarPlugin : PluginEntry() {
                             put("ethDay", r.ethDay)
                             put("hour", r.hour)
                             put("minute", r.minute)
+                            put("repeatMode", r.repeatMode)
+                            put("lastNotifiedDate", r.lastNotifiedDate)
                             put("isNotified", r.isNotified)
                             put("createdAt", r.createdAt)
                         }
@@ -294,7 +300,13 @@ class EthiopianCalendarPlugin : PluginEntry() {
         val monthName = EthiopianDateMath.MONTH_NAMES.getOrElse(reminder.ethMonth - 1) { "ወር" }
         val (eHour, eMin, period) = EthiopianDateMath.gregorianToEthiopianTime(reminder.hour, reminder.minute)
         val timeLabel = String.format(Locale.US, "%s %d:%02d", period, eHour, eMin)
-        val dateLabel = "$monthName ${reminder.ethDay}፣ ${reminder.ethYear} ዓ.ም"
+        val repeatSuffix = when (reminder.repeatMode) {
+            "DAILY" -> " • 🔄 በየቀኑ"
+            "MONTHLY" -> " • 🔄 በየወሩ"
+            "YEARLY" -> " • 🔄 በየዓመቱ"
+            else -> ""
+        }
+        val dateLabel = "$monthName ${reminder.ethDay}፣ ${reminder.ethYear} ዓ.ም$repeatSuffix"
 
         // 1. Root Container
         val root = LinearLayout(appContext).apply {
@@ -460,31 +472,77 @@ class EthiopianCalendarPlugin : PluginEntry() {
                 try {
                     delay(30_000L)
                     val todayEth = EthiopianDateMath.getTodayEthiopian()
+                    val todayKey = "${todayEth.year}-${todayEth.month}-${todayEth.day}"
                     val cal = Calendar.getInstance()
                     val curHour = cal.get(Calendar.HOUR_OF_DAY)
                     val curMin = cal.get(Calendar.MINUTE)
 
                     var changed = false
-                    val dueReminders = mutableListOf<Pair<CalendarReminder, Boolean>>() // Reminder to isMissed
+                    val dueReminders = mutableListOf<Pair<CalendarReminder, Boolean>>()
 
                     synchronized(remindersLock) {
                         for (i in 0 until allReminders.size) {
                             val r = allReminders[i]
-                            if (!r.isNotified) {
-                                val isPastDay = r.ethYear < todayEth.year ||
-                                    (r.ethYear == todayEth.year && (r.ethMonth < todayEth.month || (r.ethMonth == todayEth.month && r.ethDay < todayEth.day)))
-                                val isTodayDue = r.ethYear == todayEth.year && r.ethMonth == todayEth.month && r.ethDay == todayEth.day &&
-                                    (curHour > r.hour || (curHour == r.hour && curMin >= r.minute))
+                            val isTimeReached = (curHour > r.hour || (curHour == r.hour && curMin >= r.minute))
 
-                                if (isPastDay || isTodayDue) {
-                                    val scheduledTotalMins = r.hour * 60 + r.minute
-                                    val currentTotalMins = curHour * 60 + curMin
-                                    val isMissed = isPastDay || (currentTotalMins - scheduledTotalMins > 5)
+                            var isDue = false
+                            var isMissed = false
 
-                                    dueReminders.add(Pair(r, isMissed))
-                                    allReminders[i] = r.copy(isNotified = true)
-                                    changed = true
+                            when (r.repeatMode) {
+                                "DAILY" -> {
+                                    if (r.lastNotifiedDate != todayKey && isTimeReached) {
+                                        isDue = true
+                                        val scheduledMins = r.hour * 60 + r.minute
+                                        val currentMins = curHour * 60 + curMin
+                                        isMissed = (currentMins - scheduledMins > 10)
+                                        allReminders[i] = r.copy(lastNotifiedDate = todayKey)
+                                        changed = true
+                                    }
                                 }
+                                "MONTHLY" -> {
+                                    val maxD = EthiopianDateMath.daysInMonth(todayEth.year, todayEth.month)
+                                    val targetDay = if (r.ethDay > maxD) maxD else r.ethDay
+                                    if (todayEth.day == targetDay && r.lastNotifiedDate != todayKey && isTimeReached) {
+                                        isDue = true
+                                        val scheduledMins = r.hour * 60 + r.minute
+                                        val currentMins = curHour * 60 + curMin
+                                        isMissed = (currentMins - scheduledMins > 10)
+                                        allReminders[i] = r.copy(lastNotifiedDate = todayKey)
+                                        changed = true
+                                    }
+                                }
+                                "YEARLY" -> {
+                                    val maxD = EthiopianDateMath.daysInMonth(todayEth.year, r.ethMonth)
+                                    val targetDay = if (r.ethDay > maxD) maxD else r.ethDay
+                                    if (todayEth.month == r.ethMonth && todayEth.day == targetDay && r.lastNotifiedDate != todayKey && isTimeReached) {
+                                        isDue = true
+                                        val scheduledMins = r.hour * 60 + r.minute
+                                        val currentMins = curHour * 60 + curMin
+                                        isMissed = (currentMins - scheduledMins > 10)
+                                        allReminders[i] = r.copy(lastNotifiedDate = todayKey)
+                                        changed = true
+                                    }
+                                }
+                                else -> {
+                                    if (!r.isNotified) {
+                                        val isPastDay = r.ethYear < todayEth.year ||
+                                            (r.ethYear == todayEth.year && (r.ethMonth < todayEth.month || (r.ethMonth == todayEth.month && r.ethDay < todayEth.day)))
+                                        val isTodayDue = r.ethYear == todayEth.year && r.ethMonth == todayEth.month && r.ethDay == todayEth.day && isTimeReached
+
+                                        if (isPastDay || isTodayDue) {
+                                            isDue = true
+                                            val scheduledMins = r.hour * 60 + r.minute
+                                            val currentMins = curHour * 60 + curMin
+                                            isMissed = isPastDay || (currentMins - scheduledMins > 5)
+                                            allReminders[i] = r.copy(isNotified = true, lastNotifiedDate = todayKey)
+                                            changed = true
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (isDue) {
+                                dueReminders.add(Pair(allReminders[i], isMissed))
                             }
                         }
                     }
@@ -518,7 +576,13 @@ class EthiopianCalendarPlugin : PluginEntry() {
             val monthName = EthiopianDateMath.MONTH_NAMES.getOrElse(reminder.ethMonth - 1) { "ወር" }
             val (eHour, eMin, period) = EthiopianDateMath.gregorianToEthiopianTime(reminder.hour, reminder.minute)
             val timeLabel = String.format(Locale.US, "%s %d:%02d", period, eHour, eMin)
-            val dateLabel = "$monthName ${reminder.ethDay}፣ ${reminder.ethYear} ዓ.ም ($timeLabel)"
+            val repeatSuffix = when (reminder.repeatMode) {
+                "DAILY" -> " [በየቀኑ]"
+                "MONTHLY" -> " [በየወሩ]"
+                "YEARLY" -> " [በየዓመቱ]"
+                else -> ""
+            }
+            val dateLabel = "$monthName ${reminder.ethDay}፣ ${reminder.ethYear} ዓ.ም ($timeLabel)$repeatSuffix"
 
             val titlePrefix = if (isMissed) "⚠️ [ያመለጠ]" else "⏰"
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
@@ -812,7 +876,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     showReminderDialog = false
                     reminderBeingEdited = null
                 },
-                onSave = { id, title, note, y, m, d, gregHour, min ->
+                onSave = { id, title, note, y, m, d, gregHour, min, repMode ->
                     synchronized(remindersLock) {
                         if (id != null) {
                             val idx = allReminders.indexOfFirst { it.id == id }
@@ -826,6 +890,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
                                     ethDay = d,
                                     hour = gregHour,
                                     minute = min,
+                                    repeatMode = repMode,
                                     isNotified = false
                                 )
                             }
@@ -841,6 +906,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
                                     ethDay = d,
                                     hour = gregHour,
                                     minute = min,
+                                    repeatMode = repMode,
                                     isNotified = false
                                 )
                             )
@@ -850,9 +916,14 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     showReminderDialog = false
                     reminderBeingEdited = null
 
-                    // Smart duration toast calculation
+                    val repeatMsg = when (repMode) {
+                        "DAILY" -> " (በየቀኑ)"
+                        "MONTHLY" -> " (በየወሩ)"
+                        "YEARLY" -> " (በየዓመቱ)"
+                        else -> ""
+                    }
                     val countdownStr = calculateTimeRemaining(y, m, d, gregHour, min)
-                    bridge.showToast(if (id != null) "Updated! Reminding in $countdownStr" else "Saved! Reminding in $countdownStr")
+                    bridge.showToast(if (id != null) "Updated$repeatMsg! Reminding in $countdownStr" else "Saved$repeatMsg! Reminding in $countdownStr")
                 }
             )
         }
@@ -933,7 +1004,15 @@ class EthiopianCalendarPlugin : PluginEntry() {
         }
 
         val dayReminders = allReminders.filter {
-            it.ethYear == year && it.ethMonth == month && it.ethDay == selectedDay
+            when (it.repeatMode) {
+                "DAILY" -> true
+                "MONTHLY" -> {
+                    val maxD = EthiopianDateMath.daysInMonth(year, month)
+                    it.ethDay == selectedDay || (it.ethDay > maxD && selectedDay == maxD)
+                }
+                "YEARLY" -> it.ethMonth == month && it.ethDay == selectedDay
+                else -> it.ethYear == year && it.ethMonth == month && it.ethDay == selectedDay
+            }
         }
 
         Column(
@@ -979,7 +1058,15 @@ class EthiopianCalendarPlugin : PluginEntry() {
                         val isToday = (year == todayEth.year && month == todayEth.month && dayNum == todayEth.day)
                         val isSelected = (dayNum == selectedDay)
                         val hasReminders = allReminders.any {
-                            it.ethYear == year && it.ethMonth == month && it.ethDay == dayNum
+                            when (it.repeatMode) {
+                                "DAILY" -> true
+                                "MONTHLY" -> {
+                                    val maxD = EthiopianDateMath.daysInMonth(year, month)
+                                    it.ethDay == dayNum || (it.ethDay > maxD && dayNum == maxD)
+                                }
+                                "YEARLY" -> it.ethMonth == month && it.ethDay == dayNum
+                                else -> it.ethYear == year && it.ethMonth == month && it.ethDay == dayNum
+                            }
                         }
 
                         Surface(
@@ -1160,8 +1247,14 @@ class EthiopianCalendarPlugin : PluginEntry() {
                         )
                     }
                     Spacer(Modifier.height(4.dp))
+                    val repeatBadge = when (rem.repeatMode) {
+                        "DAILY" -> " • 🔄 በየቀኑ"
+                        "MONTHLY" -> " • 🔄 በየወሩ"
+                        "YEARLY" -> " • 🔄 በየዓመቱ"
+                        else -> ""
+                    }
                     Text(
-                        text = "Time: $timeLabel",
+                        text = "Time: $timeLabel$repeatBadge",
                         color = Color(0xFFE5A93C),
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
@@ -1196,7 +1289,15 @@ class EthiopianCalendarPlugin : PluginEntry() {
         val filteredList = remember(allReminders.size, filterDate) {
             if (filterDate != null) {
                 allReminders.filter {
-                    it.ethYear == filterDate.first && it.ethMonth == filterDate.second && it.ethDay == filterDate.third
+                    when (it.repeatMode) {
+                        "DAILY" -> true
+                        "MONTHLY" -> {
+                            val maxD = EthiopianDateMath.daysInMonth(filterDate.first, filterDate.second)
+                            it.ethDay == filterDate.third || (it.ethDay > maxD && filterDate.third == maxD)
+                        }
+                        "YEARLY" -> it.ethMonth == filterDate.second && it.ethDay == filterDate.third
+                        else -> it.ethYear == filterDate.first && it.ethMonth == filterDate.second && it.ethDay == filterDate.third
+                    }
                 }
             } else {
                 allReminders
@@ -1277,8 +1378,14 @@ class EthiopianCalendarPlugin : PluginEntry() {
                                         Text(rem.note, color = Color(0xFF8B949E), fontSize = 12.sp)
                                     }
                                     Spacer(Modifier.height(4.dp))
+                                    val repeatBadge = when (rem.repeatMode) {
+                                        "DAILY" -> " • 🔄 በየቀኑ"
+                                        "MONTHLY" -> " • 🔄 በየወሩ"
+                                        "YEARLY" -> " • 🔄 በየዓመቱ"
+                                        else -> ""
+                                    }
                                     Text(
-                                        "$dateHeader • $timeLabel",
+                                        "$dateHeader • $timeLabel$repeatBadge",
                                         color = Color(0xFFE5A93C),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold
@@ -1525,10 +1632,17 @@ class EthiopianCalendarPlugin : PluginEntry() {
         defaultEthMonth: Int,
         defaultEthDay: Int,
         onDismiss: () -> Unit,
-        onSave: (id: String?, title: String, note: String, y: Int, m: Int, d: Int, gregHour: Int, min: Int) -> Unit
+        onSave: (id: String?, title: String, note: String, y: Int, m: Int, d: Int, gregHour: Int, min: Int, repMode: String) -> Unit
     ) {
         var title by remember { mutableStateOf(existingReminder?.title ?: "") }
         var note by remember { mutableStateOf(existingReminder?.note ?: "") }
+        var repeatMode by remember { mutableStateOf(existingReminder?.repeatMode ?: "NONE") }
+        val repeatOptions = listOf(
+            "NONE" to "አይደገምም",
+            "DAILY" to "በየቀኑ",
+            "MONTHLY" to "በየወሩ",
+            "YEARLY" to "በየዓመቱ"
+        )
 
         val initialEthTime = remember(existingReminder) {
             if (existingReminder != null) {
@@ -1579,6 +1693,35 @@ class EthiopianCalendarPlugin : PluginEntry() {
                         label = { Text("Note / Description (ዝርዝር)") },
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
                     )
+
+                    // Repetition Mode Selector
+                    Text("ድግግሞሽ (Repeat)", fontSize = 11.sp, color = Color(0xFF8B949E), fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        repeatOptions.forEach { (mode, label) ->
+                            val isSel = repeatMode == mode
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) Color(0xFFE5A93C) else Color(0xFF21262D),
+                                border = BorderStroke(1.dp, if (isSel) Color(0xFFE5A93C) else Color.White.copy(alpha = 0.05f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { repeatMode = mode }
+                            ) {
+                                Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        label,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSel) Color.Black else Color.White
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     // Period Selector Chips (ጠዋት, ከሰዓት, ማታ, ሌሊት)
                     Text("ክፍለ ጊዜ (Period)", fontSize = 11.sp, color = Color(0xFF8B949E), fontWeight = FontWeight.SemiBold)
@@ -1670,7 +1813,8 @@ class EthiopianCalendarPlugin : PluginEntry() {
                                 defaultEthMonth,
                                 defaultEthDay,
                                 gregHour,
-                                gregMin
+                                gregMin,
+                                repeatMode
                             )
                         }
                     },
