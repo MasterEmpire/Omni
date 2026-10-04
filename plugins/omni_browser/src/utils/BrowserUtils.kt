@@ -1809,8 +1809,6 @@ val BACKGROUND_MEDIA_SCRIPT = """
         } catch(_) {}
     }
 
-    hostLog('MEDIA_JS', 'Stealth Background Media Script engaged on: ' + window.location.hostname);
-
     // 1. Defang Visibility & Focus Snitches
     try {
         Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
@@ -1864,7 +1862,6 @@ val BACKGROUND_MEDIA_SCRIPT = """
                 return new OrigIO(wrappedCallback, options);
             };
             window.IntersectionObserver.prototype = OrigIO.prototype;
-            hostLog('MEDIA_JS', 'Armed IntersectionObserver spoofing for media elements');
         } catch(e) {}
     }
 
