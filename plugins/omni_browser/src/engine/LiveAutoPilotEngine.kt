@@ -157,18 +157,19 @@ object LiveAutoPilotEngine {
                     };
 
                     // Strategy 1: Explicit unique wrapper tag <cxp>...</cxp> or <patch>...</patch>
-                    // Scans all candidates in turn and picks the bottom-most block containing real CXP tags
-                    const wrapperRegex = /<(?:cxp|omni_cxp|patch)>([\s\S]*?)<\/(?:cxp|omni_cxp|patch)>/gi;
+                    // Retains the full tag wrapper (wMatch[0]) so downstream IDE can parse attributes like project="..."
+                    const wrapperRegex = /<(?:cxp|omni_cxp|patch)[^>]*>[\s\S]*?<\/(?:cxp|omni_cxp|patch)>/gi;
                     const wrapperCandidates = [];
                     let wMatch;
                     while ((wMatch = wrapperRegex.exec(text)) !== null) {
-                        const candidate = wMatch[1].trim();
+                        const candidate = wMatch[0].trim();
                         if (hasValidCxpTag(candidate)) {
                             wrapperCandidates.push(candidate);
                         }
                     }
                     if (wrapperCandidates.length > 0) {
-                        return wrapperCandidates[wrapperCandidates.length - 1];
+                        // Join all valid blocks to support sequential multi-project patching!
+                        return wrapperCandidates.join('\n\n');
                     }
 
                     // Strategy 2: Markdown code fence match (if in raw mode)
