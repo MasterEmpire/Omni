@@ -538,6 +538,8 @@ fun BrowserMenuOverlay(
     canGoBack: Boolean,
     canGoForward: Boolean,
     currentUrl: String,
+    isLiveAutoPilotEnabled: Boolean = false,
+    onToggleLiveAutoPilot: () -> Unit = {},
     onBackClick: () -> Unit,
     onForwardClick: () -> Unit,
     onReloadClick: () -> Unit,
@@ -701,6 +703,14 @@ fun BrowserMenuOverlay(
 
                 InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) {
                     onOpenLocalIde()
+                }
+
+                InLayoutMenuItem(
+                    title = if (isLiveAutoPilotEnabled) "⚡ Live Auto-Pilot (ARMED)" else "⚡ Live Auto-Pilot (Off)",
+                    color = if (isLiveAutoPilotEnabled) Color(0xFF00E5FF) else Color(0xFF8AB4F8),
+                    isBold = isLiveAutoPilotEnabled
+                ) {
+                    onToggleLiveAutoPilot()
                 }
 
                 InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) {
