@@ -132,8 +132,9 @@ interface HostBridge {
     fun stopProjectionService()
     fun getMediaProjectionManager(): android.media.projection.MediaProjectionManager
 
-    // --- Logging ---
+    // --- Logging & Diagnostics ---
     fun log(tag: String, message: String)
+    fun showDiagnostics()
 
     // --- Python Engine Bridge (Nexus Microkernel) ---
     fun isPythonEngineAvailable(): Boolean
@@ -246,6 +247,20 @@ object RecentsDispatcher {
     }
 
     fun showRecents() {
+        Handler(Looper.getMainLooper()).post {
+            launcher?.invoke()
+        }
+    }
+}
+
+object DiagnosticsDispatcher {
+    private var launcher: (() -> Unit)? = null
+
+    fun registerLauncher(block: (() -> Unit)?) {
+        launcher = block
+    }
+
+    fun showDiagnostics() {
         Handler(Looper.getMainLooper()).post {
             launcher?.invoke()
         }
@@ -1162,6 +1177,10 @@ class HostBridgeImpl(
 
     override fun log(tag: String, message: String) {
         OmniLogger.log(tag, message)
+    }
+
+    override fun showDiagnostics() {
+        DiagnosticsDispatcher.showDiagnostics()
     }
 
     override fun isPythonEngineAvailable(): Boolean {
