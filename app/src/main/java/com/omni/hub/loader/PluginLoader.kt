@@ -105,7 +105,7 @@ object PluginLoader {
             dexFile.absolutePath
         }
 
-        OmniLogger.log("LOADER", "Initializing DexClassLoader with classpath: $combinedDexPath")
+        OmniLogger.log("LOADER", "Initializing DexClassLoader for [$finalId]")
 
         val optDir = context.getDir("dex_opt", Context.MODE_PRIVATE)
         if (!optDir.exists()) {
@@ -189,7 +189,7 @@ object PluginLoader {
             dexFile.absolutePath
         }
 
-        OmniLogger.log("LOADER", "Loading directory plugin [$pluginId] with classpath: $combinedDexPath")
+        OmniLogger.log("LOADER", "Loading directory plugin [$pluginId]")
 
         val dataBaseDir = context.getDir("plugins_data", Context.MODE_PRIVATE)
         val dataDir = File(dataBaseDir, pluginId).apply { if (!exists()) mkdirs() }
