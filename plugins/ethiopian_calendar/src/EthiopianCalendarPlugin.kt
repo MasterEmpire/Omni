@@ -175,12 +175,11 @@ class EthiopianCalendarPlugin : PluginEntry() {
 
     companion object {
         private const val CHANNEL_ID = "omni_ethiopian_calendar_reminders"
+        private const val OVERLAY_TAG = "eth_calendar_due_alert"
         private val remindersLock = Any()
         val allReminders = mutableStateListOf<CalendarReminder>()
         @Volatile var isDaemonRunning = false
         @Volatile var onReminderDueListener: ((CalendarReminder) -> Unit)? = null
-        @Volatile var activeOverlayView: View? = null
-        private val overlayHandler = Handler(Looper.getMainLooper())
 
         fun loadReminders(bridge: HostBridge) {
             try {
@@ -265,28 +264,6 @@ class EthiopianCalendarPlugin : PluginEntry() {
     override fun onStop(context: Context) {
         daemonJob?.cancel()
         isDaemonRunning = false
-        dismissActiveOverlay(context)
-    }
-
-    private fun dismissActiveOverlay(context: Context) {
-        overlayHandler.removeCallbacksAndMessages(null)
-        val action = Runnable {
-            try {
-                val appContext = context.applicationContext
-                val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-                activeOverlayView?.let { view ->
-                    if (view.isAttachedToWindow) {
-                        wm?.removeView(view)
-                    }
-                    activeOverlayView = null
-                }
-            } catch (_: Exception) {}
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            action.run()
-        } else {
-            overlayHandler.post(action)
-        }
     }
 
     private fun wakeScreenTransiently(context: Context) {
@@ -297,193 +274,163 @@ class EthiopianCalendarPlugin : PluginEntry() {
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
                 "omni:calendar_transient_wake"
             )
-            // Hold screen on for only 7 seconds; zero passive battery consumption
             wl.acquire(7000L)
         } catch (_: Exception) {}
     }
 
     private fun showSystemOverlayAlert(context: Context, bridge: HostBridge, reminder: CalendarReminder, isMissed: Boolean = false) {
         val appContext = context.applicationContext
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(appContext)) {
+        if (!bridge.canDrawOverlays()) {
             bridge.log("CALENDAR", "Overlay permission not granted. Skipping system alert window.")
             return
         }
 
-        // Forcefully wake the sleeping display without draining battery
         wakeScreenTransiently(appContext)
 
-        Handler(Looper.getMainLooper()).post {
-            try {
-                // Must use Application Context WindowManager so Android doesn't kill it when MainActivity is in background!
-                val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return@post
-                dismissActiveOverlay(appContext)
+        val density = appContext.resources.displayMetrics.density
+        fun dp(px: Float): Int = (px * density).toInt()
 
-                val density = appContext.resources.displayMetrics.density
-                fun dp(px: Float): Int = (px * density).toInt()
+        val monthName = EthiopianDateMath.MONTH_NAMES.getOrElse(reminder.ethMonth - 1) { "ወር" }
+        val (eHour, eMin, period) = EthiopianDateMath.gregorianToEthiopianTime(reminder.hour, reminder.minute)
+        val timeLabel = String.format(Locale.US, "%s %d:%02d", period, eHour, eMin)
+        val dateLabel = "$monthName ${reminder.ethDay}፣ ${reminder.ethYear} ዓ.ም"
 
-                val monthName = EthiopianDateMath.MONTH_NAMES.getOrElse(reminder.ethMonth - 1) { "ወር" }
-                val (eHour, eMin, period) = EthiopianDateMath.gregorianToEthiopianTime(reminder.hour, reminder.minute)
-                val timeLabel = String.format(Locale.US, "%s %d:%02d", period, eHour, eMin)
-                val dateLabel = "$monthName ${reminder.ethDay}፣ ${reminder.ethYear} ዓ.ም"
+        // 1. Root Container
+        val root = LinearLayout(appContext).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18f), dp(16f), dp(18f), dp(16f))
+            val bg = GradientDrawable().apply {
+                setColor(android.graphics.Color.parseColor("#161B22"))
+                cornerRadius = dp(16f).toFloat()
+                setStroke(dp(1.5f), android.graphics.Color.parseColor("#E5A93C"))
+            }
+            background = bg
+            elevation = dp(16f).toFloat()
+        }
 
-                // 1. Root Container using Application Context
-                val root = LinearLayout(appContext).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(18f), dp(16f), dp(18f), dp(16f))
-                    val bg = GradientDrawable().apply {
-                        setColor(android.graphics.Color.parseColor("#161B22"))
-                        cornerRadius = dp(16f).toFloat()
-                        setStroke(dp(1.5f), android.graphics.Color.parseColor("#E5A93C"))
-                    }
-                    background = bg
-                    elevation = dp(16f).toFloat()
-                }
+        // 2. Header Row
+        val headerRow = LinearLayout(appContext).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
 
-                // 2. Header Row (Icon + Title + Dismiss 'X')
-                val headerRow = LinearLayout(appContext).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                }
+        val bellIcon = TextView(appContext).apply {
+            text = if (isMissed) "⚠️ " else "⏰ "
+            textSize = 18f
+        }
 
-                val bellIcon = TextView(appContext).apply {
-                    text = if (isMissed) "⚠️ " else "⏰ "
-                    textSize = 18f
-                }
+        val titleView = TextView(appContext).apply {
+            text = reminder.title
+            textSize = 16f
+            setTextColor(android.graphics.Color.WHITE)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
 
-                val titleView = TextView(appContext).apply {
-                    text = reminder.title
-                    textSize = 16f
-                    setTextColor(android.graphics.Color.WHITE)
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                }
+        val closeBtn = TextView(appContext).apply {
+            text = "✕"
+            textSize = 16f
+            setTextColor(android.graphics.Color.parseColor("#8B949E"))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(8f), dp(4f), dp(4f), dp(4f))
+            setOnClickListener { bridge.dismissOverlay(OVERLAY_TAG) }
+        }
 
-                val closeBtn = TextView(appContext).apply {
-                    text = "✕"
-                    textSize = 16f
-                    setTextColor(android.graphics.Color.parseColor("#8B949E"))
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    setPadding(dp(8f), dp(4f), dp(4f), dp(4f))
-                    setOnClickListener { dismissActiveOverlay(appContext) }
-                }
+        headerRow.addView(bellIcon)
+        headerRow.addView(titleView)
+        headerRow.addView(closeBtn)
+        root.addView(headerRow)
 
-                headerRow.addView(bellIcon)
-                headerRow.addView(titleView)
-                headerRow.addView(closeBtn)
-                root.addView(headerRow)
+        // 3. Note Text
+        if (reminder.note.isNotEmpty()) {
+            val noteView = TextView(appContext).apply {
+                text = reminder.note
+                textSize = 13f
+                setTextColor(android.graphics.Color.parseColor("#C9D1D9"))
+                setPadding(0, dp(6f), 0, dp(4f))
+                maxLines = 2
+            }
+            root.addView(noteView)
+        }
 
-                // 3. Note Text (if present)
-                if (reminder.note.isNotEmpty()) {
-                    val noteView = TextView(appContext).apply {
-                        text = reminder.note
-                        textSize = 13f
-                        setTextColor(android.graphics.Color.parseColor("#C9D1D9"))
-                        setPadding(0, dp(6f), 0, dp(4f))
-                        maxLines = 2
-                    }
-                    root.addView(noteView)
-                }
-
-                // 4. Ethiopian Date & Time Badge (With Catch-up Detection)
-                val badgeView = TextView(appContext).apply {
-                    text = if (isMissed) "⚠️ ያመለጠ ማስታወሻ: $dateLabel • $timeLabel" else "🔔 $dateLabel • $timeLabel"
-                    textSize = 11f
-                    setTextColor(android.graphics.Color.parseColor(if (isMissed) "#FF7B72" else "#E5A93C"))
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    val badgeBg = GradientDrawable().apply {
-                        setColor(android.graphics.Color.parseColor("#0D1117"))
-                        cornerRadius = dp(8f).toFloat()
-                    }
-                    background = badgeBg
-                    setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply {
-                        setMargins(0, dp(8f), 0, dp(12f))
-                    }
-                }
-                root.addView(badgeView)
-
-                // 5. Actions Row (Dismiss & Open)
-                val actionsRow = LinearLayout(appContext).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                }
-
-                val dismissTextBtn = TextView(appContext).apply {
-                    text = "Dismiss"
-                    textSize = 12f
-                    setTextColor(android.graphics.Color.parseColor("#8B949E"))
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
-                    setOnClickListener { dismissActiveOverlay(appContext) }
-                }
-
-                val openBtn = TextView(appContext).apply {
-                    text = "Open App"
-                    textSize = 12f
-                    setTextColor(android.graphics.Color.BLACK)
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    val btnBg = GradientDrawable().apply {
-                        setColor(android.graphics.Color.parseColor("#E5A93C"))
-                        cornerRadius = dp(8f).toFloat()
-                    }
-                    background = btnBg
-                    setPadding(dp(16f), dp(8f), dp(16f), dp(8f))
-                    setOnClickListener {
-                        dismissActiveOverlay(appContext)
-                        try {
-                            val launchIntent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)?.apply {
-                                putExtra("extra_open_plugin_id", "ethiopian_calendar")
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                            }
-                            appContext.startActivity(launchIntent)
-                        } catch (_: Exception) {}
-                    }
-                }
-
-                actionsRow.addView(dismissTextBtn)
-                actionsRow.addView(openBtn)
-                root.addView(actionsRow)
-
-                // 6. Window Layout Specs (Armed with FLAG_NOT_FOCUSABLE & FLAG_LAYOUT_IN_SCREEN)
-                val screenWidth = appContext.resources.displayMetrics.widthPixels
-                val params = WindowManager.LayoutParams(
-                    (screenWidth * 0.92f).toInt(),
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    else
-                        @Suppress("DEPRECATION")
-                        WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
-                    android.graphics.PixelFormat.TRANSLUCENT
-                ).apply {
-                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    y = dp(50f)
-                }
-
-                wm.addView(root, params)
-                activeOverlayView = root
-                bridge.vibrate(800L)
-                bridge.log("CALENDAR", "🚀 System window overlay active across all apps for: ${reminder.title}")
-
-                // Auto-dismiss after 25s if untouched
-                overlayHandler.removeCallbacksAndMessages(null)
-                overlayHandler.postDelayed({
-                    dismissActiveOverlay(context)
-                }, 25000L)
-
-            } catch (e: Exception) {
-                bridge.log("CALENDAR_ERR", "Failed creating system alert overlay: ${e.message}")
+        // 4. Ethiopian Date & Time Badge
+        val badgeView = TextView(appContext).apply {
+            text = if (isMissed) "⚠️ ያመለጠ ማስታወሻ: $dateLabel • $timeLabel" else "🔔 $dateLabel • $timeLabel"
+            textSize = 11f
+            setTextColor(android.graphics.Color.parseColor(if (isMissed) "#FF7B72" else "#E5A93C"))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            val badgeBg = GradientDrawable().apply {
+                setColor(android.graphics.Color.parseColor("#0D1117"))
+                cornerRadius = dp(8f).toFloat()
+            }
+            background = badgeBg
+            setPadding(dp(10f), dp(6f), dp(10f), dp(6f))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(8f), 0, dp(12f))
             }
         }
+        root.addView(badgeView)
+
+        // 5. Actions Row
+        val actionsRow = LinearLayout(appContext).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+
+        val dismissTextBtn = TextView(appContext).apply {
+            text = "Dismiss"
+            textSize = 12f
+            setTextColor(android.graphics.Color.parseColor("#8B949E"))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
+            setOnClickListener { bridge.dismissOverlay(OVERLAY_TAG) }
+        }
+
+        val openBtn = TextView(appContext).apply {
+            text = "Open App"
+            textSize = 12f
+            setTextColor(android.graphics.Color.BLACK)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            val btnBg = GradientDrawable().apply {
+                setColor(android.graphics.Color.parseColor("#E5A93C"))
+                cornerRadius = dp(8f).toFloat()
+            }
+            background = btnBg
+            setPadding(dp(16f), dp(8f), dp(16f), dp(8f))
+            setOnClickListener {
+                bridge.dismissOverlay(OVERLAY_TAG)
+                try {
+                    val launchIntent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)?.apply {
+                        putExtra("extra_open_plugin_id", "ethiopian_calendar")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    }
+                    appContext.startActivity(launchIntent)
+                } catch (_: Exception) {}
+            }
+        }
+
+        actionsRow.addView(dismissTextBtn)
+        actionsRow.addView(openBtn)
+        root.addView(actionsRow)
+
+        val screenWidth = appContext.resources.displayMetrics.widthPixels
+
+        bridge.showOverlay(
+            tag = OVERLAY_TAG,
+            view = root,
+            width = (screenWidth * 0.92f).toInt(),
+            height = ViewGroup.LayoutParams.WRAP_CONTENT,
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+            y = dp(50f),
+            focusable = false,
+            touchable = true,
+            autoDismissMs = 25000L
+        )
+
+        bridge.vibrate(800L)
     }
 
     private fun createNotificationChannel(context: Context) {
