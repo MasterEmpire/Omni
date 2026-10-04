@@ -5,6 +5,7 @@
     <queries>
         <package android:name="com.universal.app" />
         <package android:name="com.spotify.music" />
+        <package android:name="com.conduit.nexus" />
         <intent>
             <action android:name="com.spotify.music.metadatachanged" />
         </intent>
@@ -16,6 +17,9 @@
     <!-- 🛡️ Signature Trampoline Permission -->
     <permission android:name="com.omni.hub.permission.RESURRECT" android:protectionLevel="signature" />
     <uses-permission android:name="com.omni.hub.permission.RESURRECT" />
+
+    <!-- 🐍 Nexus Python Microkernel Permission -->
+    <uses-permission android:name="com.conduit.nexus.permission.EXECUTE_PYTHON" />
 
     <!-- 🌐 Connectivity & Networking -->
     <uses-permission android:name="android.permission.INTERNET" />
