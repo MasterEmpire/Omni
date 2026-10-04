@@ -9,6 +9,7 @@ import android.media.RingtoneManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -279,11 +280,27 @@ class EthiopianCalendarPlugin : PluginEntry() {
         }
     }
 
-    private fun showSystemOverlayAlert(context: Context, bridge: HostBridge, reminder: CalendarReminder) {
+    private fun wakeScreenTransiently(context: Context) {
+        try {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            @Suppress("DEPRECATION")
+            val wl = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                "omni:calendar_transient_wake"
+            )
+            // Hold screen on for only 7 seconds; zero passive battery consumption
+            wl.acquire(7000L)
+        } catch (_: Exception) {}
+    }
+
+    private fun showSystemOverlayAlert(context: Context, bridge: HostBridge, reminder: CalendarReminder, isMissed: Boolean = false) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
             bridge.log("CALENDAR", "Overlay permission not granted. Skipping system alert window.")
             return
         }
+
+        // Forcefully wake the sleeping display without draining battery
+        wakeScreenTransiently(context)
 
         Handler(Looper.getMainLooper()).post {
             try {
@@ -318,7 +335,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
                 }
 
                 val bellIcon = TextView(context).apply {
-                    text = "⏰ "
+                    text = if (isMissed) "⚠️ " else "⏰ "
                     textSize = 18f
                 }
 
@@ -356,11 +373,11 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     root.addView(noteView)
                 }
 
-                // 4. Ethiopian Date & Time Badge
+                // 4. Ethiopian Date & Time Badge (With Catch-up Detection)
                 val badgeView = TextView(context).apply {
-                    text = "🔔 $dateLabel • $timeLabel"
+                    text = if (isMissed) "⚠️ ያመለጠ ማስታወሻ: $dateLabel • $timeLabel" else "🔔 $dateLabel • $timeLabel"
                     textSize = 11f
-                    setTextColor(android.graphics.Color.parseColor("#E5A93C"))
+                    setTextColor(android.graphics.Color.parseColor(if (isMissed) "#FF7B72" else "#E5A93C"))
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                     val badgeBg = GradientDrawable().apply {
                         setColor(android.graphics.Color.parseColor("#0D1117"))
@@ -487,7 +504,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     val curMin = cal.get(Calendar.MINUTE)
 
                     var changed = false
-                    val dueReminders = mutableListOf<CalendarReminder>()
+                    val dueReminders = mutableListOf<Pair<CalendarReminder, Boolean>>() // Reminder to isMissed
 
                     synchronized(remindersLock) {
                         for (i in 0 until allReminders.size) {
@@ -499,7 +516,11 @@ class EthiopianCalendarPlugin : PluginEntry() {
                                     (curHour > r.hour || (curHour == r.hour && curMin >= r.minute))
 
                                 if (isPastDay || isTodayDue) {
-                                    dueReminders.add(r)
+                                    val scheduledTotalMins = r.hour * 60 + r.minute
+                                    val currentTotalMins = curHour * 60 + curMin
+                                    val isMissed = isPastDay || (currentTotalMins - scheduledTotalMins > 5)
+
+                                    dueReminders.add(Pair(r, isMissed))
                                     allReminders[i] = r.copy(isNotified = true)
                                     changed = true
                                 }
@@ -508,9 +529,9 @@ class EthiopianCalendarPlugin : PluginEntry() {
                     }
 
                     if (dueReminders.isNotEmpty()) {
-                        dueReminders.forEach { r ->
-                            dispatchNotification(context, bridge, r)
-                            showSystemOverlayAlert(context, bridge, r)
+                        dueReminders.forEach { (r, isMissed) ->
+                            dispatchNotification(context, bridge, r, isMissed)
+                            showSystemOverlayAlert(context, bridge, r, isMissed)
                             Handler(Looper.getMainLooper()).post {
                                 onReminderDueListener?.invoke(r)
                             }
@@ -530,7 +551,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
         }
     }
 
-    private fun dispatchNotification(context: Context, bridge: HostBridge, reminder: CalendarReminder) {
+    private fun dispatchNotification(context: Context, bridge: HostBridge, reminder: CalendarReminder, isMissed: Boolean = false) {
         try {
             bridge.vibrate(700L)
             val monthName = EthiopianDateMath.MONTH_NAMES.getOrElse(reminder.ethMonth - 1) { "ወር" }
@@ -538,11 +559,12 @@ class EthiopianCalendarPlugin : PluginEntry() {
             val timeLabel = String.format(Locale.US, "%s %d:%02d", period, eHour, eMin)
             val dateLabel = "$monthName ${reminder.ethDay}፣ ${reminder.ethYear} ዓ.ም ($timeLabel)"
 
+            val titlePrefix = if (isMissed) "⚠️ [ያመለጠ]" else "⏰"
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             val notif = NotificationCompat.Builder(context, CHANNEL_ID)
-                .setContentTitle("⏰ ${reminder.title}")
+                .setContentTitle("$titlePrefix ${reminder.title}")
                 .setContentText("${reminder.note.ifEmpty { "ማስታወሻ" }} • $dateLabel")
-                .setStyle(NotificationCompat.BigTextStyle().bigText("${reminder.note.ifEmpty { "ማስታወሻ" }}\n$dateLabel"))
+                .setStyle(NotificationCompat.BigTextStyle().bigText("${if (isMissed) "ስልክዎ ጠፍቶ ስለነበር ያመለጠ ማስታወሻ!\n" else ""}${reminder.note.ifEmpty { "ማስታወሻ" }}\n$dateLabel"))
                 .setSmallIcon(android.R.drawable.ic_popup_reminder)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
@@ -554,7 +576,7 @@ class EthiopianCalendarPlugin : PluginEntry() {
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             manager?.notify(reminder.id.hashCode(), notif)
-            bridge.log("CALENDAR", "🔔 Heads-Up Alert dispatched for: ${reminder.title} ($dateLabel)")
+            bridge.log("CALENDAR", "🔔 Alert dispatched (isMissed=$isMissed) for: ${reminder.title} ($dateLabel)")
         } catch (_: Exception) {}
     }
 
