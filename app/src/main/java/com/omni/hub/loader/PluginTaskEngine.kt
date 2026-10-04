@@ -167,6 +167,7 @@ object PluginTaskEngine {
         runningTasks.remove(pluginId)?.cancel()
         activeInstances.remove(pluginId)?.let { (instance, bridge) ->
             try {
+                bridge.dismissAllOverlays()
                 bridge.log("TASK_ENGINE", "Invoking onStop() for [$pluginId]")
                 instance.onStop(context)
             } catch (t: Throwable) {
