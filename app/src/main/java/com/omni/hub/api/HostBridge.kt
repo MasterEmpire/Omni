@@ -335,13 +335,75 @@ object NexusPythonClient {
     }
 
     fun isAvailable(context: Context): Boolean {
-        return try {
-            val pm = context.packageManager
-            pm.getPackageInfo(NEXUS_PACKAGE, 0)
-            pm.checkSignatures(context.packageName, NEXUS_PACKAGE) == android.content.pm.PackageManager.SIGNATURE_MATCH
-        } catch (_: Exception) {
-            false
+        val pm = context.packageManager
+        OmniLogger.log("NEXUS_DIAG", "🔍 Probing Nexus availability for target [$NEXUS_PACKAGE]...")
+
+        // 1. Package Visibility Check
+        val nexusInfo = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(NEXUS_PACKAGE, android.content.pm.PackageManager.PackageInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(NEXUS_PACKAGE, 0)
+            }
+        } catch (e: Exception) {
+            OmniLogger.log("NEXUS_DIAG", "❌ getPackageInfo FAILED for '$NEXUS_PACKAGE': ${e.javaClass.simpleName} - ${e.message}")
+            if (e is android.content.pm.PackageManager.NameNotFoundException) {
+                OmniLogger.log("NEXUS_DIAG", "💡 REASON: Either Nexus is NOT installed, or Omni Hub base APK lacks <queries><package android:name=\"$NEXUS_PACKAGE\"/></queries> in its AndroidManifest!")
+            }
+            return false
         }
+
+        OmniLogger.log("NEXUS_DIAG", "✅ Nexus Package FOUND! Version: ${nexusInfo.versionName} (Code: ${nexusInfo.versionCode})")
+
+        // 2. Signature Check
+        val sigResult = try {
+            pm.checkSignatures(context.packageName, NEXUS_PACKAGE)
+        } catch (e: Exception) {
+            OmniLogger.log("NEXUS_DIAG", "❌ checkSignatures exception: ${e.message}")
+            -99
+        }
+
+        val sigStatusText = when (sigResult) {
+            android.content.pm.PackageManager.SIGNATURE_MATCH -> "SIGNATURE_MATCH (0) -> Perfect signature match!"
+            android.content.pm.PackageManager.SIGNATURE_NO_MATCH -> "SIGNATURE_NO_MATCH (-3) -> DIFFERENT KEYSTORES USED!"
+            android.content.pm.PackageManager.SIGNATURE_UNKNOWN_PACKAGE -> "SIGNATURE_UNKNOWN_PACKAGE (-4) -> Unknown package"
+            android.content.pm.PackageManager.SIGNATURE_NEITHER_SIGNED -> "SIGNATURE_NEITHER_SIGNED (-1) -> Neither signed"
+            android.content.pm.PackageManager.SIGNATURE_FIRST_NOT_SIGNED -> "SIGNATURE_FIRST_NOT_SIGNED (-2)"
+            android.content.pm.PackageManager.SIGNATURE_SECOND_NOT_SIGNED -> "SIGNATURE_SECOND_NOT_SIGNED (-2)"
+            else -> "UNKNOWN_STATUS_CODE ($sigResult)"
+        }
+
+        OmniLogger.log("NEXUS_DIAG", "🔐 checkSignatures result: $sigStatusText")
+
+        // 3. Dump raw certificate hashes for visual comparison
+        try {
+            fun getSigHash(pkg: String): String {
+                return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val pInfo = pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+                    val sigs = pInfo.signingInfo?.apkContentsSigners ?: emptyArray()
+                    sigs.joinToString { it.hashCode().toString(16) }
+                } else {
+                    @Suppress("DEPRECATION")
+                    val pInfo = pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_SIGNATURES)
+                    @Suppress("DEPRECATION")
+                    val sigs = pInfo.signatures ?: emptyArray()
+                    sigs.joinToString { it.hashCode().toString(16) }
+                }
+            }
+            val omniSig = getSigHash(context.packageName)
+            val nexusSig = getSigHash(NEXUS_PACKAGE)
+            OmniLogger.log("NEXUS_DIAG", "🔑 Omni Keystore Hash : [$omniSig]")
+            OmniLogger.log("NEXUS_DIAG", "🔑 Nexus Keystore Hash: [$nexusSig]")
+        } catch (e: Exception) {
+            OmniLogger.log("NEXUS_DIAG", "⚠️ Could not extract certificate fingerprints: ${e.message}")
+        }
+
+        val isMatch = (sigResult == android.content.pm.PackageManager.SIGNATURE_MATCH)
+        if (!isMatch) {
+            OmniLogger.log("NEXUS_DIAG", "🚨 SECURITY GATE REJECTED: Certificates do not match. Re-sign Nexus and Omni with the exact same release.jks!")
+        }
+        return isMatch
     }
 
     fun execute(
@@ -350,8 +412,10 @@ object NexusPythonClient {
         onOutput: (String) -> Unit,
         onComplete: (Boolean, String) -> Unit
     ) {
+        OmniLogger.log("NEXUS_IPC", "🚀 execute() requested for Python script (${code.length} chars)")
         if (!isAvailable(context)) {
-            onComplete(false, "Nexus is not installed or signature check failed.")
+            val diagMsg = "Nexus IPC check failed. Open Diagnostics Console (📋 button in Omni Hub) to view diagnostic logs."
+            onComplete(false, diagMsg)
             return
         }
 
@@ -360,6 +424,7 @@ object NexusPythonClient {
 
         ensureBound(context) { messenger ->
             try {
+                OmniLogger.log("NEXUS_IPC", "📤 Sending MSG_EXECUTE_CODE [ID: $execId] to Nexus Messenger...")
                 val msg = android.os.Message.obtain(null, MSG_EXECUTE_CODE).apply {
                     replyTo = clientMessenger
                     data = android.os.Bundle().apply {
@@ -370,6 +435,7 @@ object NexusPythonClient {
                 messenger.send(msg)
             } catch (e: Exception) {
                 pendingRequests.remove(execId)
+                OmniLogger.log("NEXUS_IPC_ERR", "💥 Failed sending message to Nexus: ${e.message}")
                 onComplete(false, "Failed dispatching execution to Nexus: ${e.message}")
             }
         }
@@ -389,14 +455,16 @@ object NexusPythonClient {
         }
 
         try {
+            OmniLogger.log("NEXUS_IPC", "Connecting to Nexus via bindService ($BIND_ACTION)...")
             val bound = context.applicationContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+            OmniLogger.log("NEXUS_IPC", "bindService call returned: $bound")
             if (!bound) {
                 readyQueue.clear()
-                OmniLogger.log("NEXUS_IPC_ERR", "bindService to Nexus returned false.")
+                OmniLogger.log("NEXUS_IPC_ERR", "❌ bindService returned FALSE. Nexus is rejecting bind or service not declared!")
             }
         } catch (e: Exception) {
             readyQueue.clear()
-            OmniLogger.log("NEXUS_IPC_ERR", "Exception binding to Nexus: ${e.message}")
+            OmniLogger.log("NEXUS_IPC_ERR", "💥 Exception binding to Nexus: ${e.message}")
         }
     }
 }
