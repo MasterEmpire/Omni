@@ -765,6 +765,86 @@ fun BrowserMenuOverlay(
 }
 
 @Composable
+fun CxpIngestionPillBanner(
+    visible: Boolean,
+    status: String?,
+    message: String,
+    onOpenIde: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible && status != null,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
+        modifier = modifier
+    ) {
+        val (borderColor, icon, titleText) = when (status) {
+            "SUCCESS" -> Triple(Color(0xFF238636), "✅", "Success")
+            "PARTIAL" -> Triple(Color(0xFFD29922), "✨", "AI Healed")
+            "FAILED" -> Triple(Color(0xFFDA3633), "❌", "Failed")
+            else -> Triple(Color(0xFF58A6FF), "⏳", "Committing")
+        }
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF161B22),
+            border = BorderStroke(1.2.dp, borderColor),
+            shadowElevation = 12.dp,
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .wrapContentWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(icon, fontSize = 16.sp)
+
+                Column(modifier = Modifier.widthIn(max = 160.dp)) {
+                    Text(
+                        text = titleText,
+                        color = borderColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = message,
+                        color = Color(0xFFE8EAED),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Button(
+                    onClick = onOpenIde,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text("Open IDE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Dismiss",
+                        tint = Color(0xFF8B949E),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun DownloadCompletedPillBanner(
     visible: Boolean,
     file: java.io.File?,
