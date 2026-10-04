@@ -36,6 +36,8 @@ interface WebViewEventListener {
     fun onRenderProcessKilled(tabId: String)
     fun onMediaStateChanged(tabId: String, title: String, artist: String, isPlaying: Boolean)
     fun onLivePythonRequested(code: String)
+    fun onCxpDispatched(xml: String)
+    fun onPatchReported(status: String, details: String)
 }
 
 class WebViewPoolManager(
@@ -281,6 +283,21 @@ class WebViewPoolManager(
                 listener.onLivePythonRequested(code)
             }
             addJavascriptInterface(pythonBridge, "OmniPythonBridge")
+
+            val ideBridge = com.omni.plugin.browser.models.OmniIdeBridge(
+                onCxpDispatched = { xml ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onCxpDispatched(xml)
+                    }
+                },
+                onPatchReported = { status, details ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onPatchReported(status, details)
+                    }
+                },
+                onLog = { tag, msg -> bridge.log(tag, msg) }
+            )
+            addJavascriptInterface(ideBridge, "OmniIdeBridge")
 
             val rawUA = settings.userAgentString
             val cleanMobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
