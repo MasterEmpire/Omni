@@ -269,15 +269,23 @@ class EthiopianCalendarPlugin : PluginEntry() {
     }
 
     private fun dismissActiveOverlay(context: Context) {
-        Handler(Looper.getMainLooper()).post {
+        overlayHandler.removeCallbacksAndMessages(null)
+        val action = Runnable {
             try {
                 val appContext = context.applicationContext
                 val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
                 activeOverlayView?.let { view ->
-                    wm?.removeView(view)
+                    if (view.isAttachedToWindow) {
+                        wm?.removeView(view)
+                    }
                     activeOverlayView = null
                 }
             } catch (_: Exception) {}
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action.run()
+        } else {
+            overlayHandler.post(action)
         }
     }
 
@@ -566,6 +574,19 @@ class EthiopianCalendarPlugin : PluginEntry() {
 
             val titlePrefix = if (isMissed) "⚠️ [ያመለጠ]" else "⏰"
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                putExtra("extra_open_plugin_id", "ethiopian_calendar")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            val pendingIntent = if (launchIntent != null) {
+                android.app.PendingIntent.getActivity(
+                    context,
+                    reminder.id.hashCode(),
+                    launchIntent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+            } else null
+
             val notif = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle("$titlePrefix ${reminder.title}")
                 .setContentText("${reminder.note.ifEmpty { "ማስታወሻ" }} • $dateLabel")
@@ -577,6 +598,9 @@ class EthiopianCalendarPlugin : PluginEntry() {
                 .setVibrate(longArrayOf(0, 450, 150, 450, 150, 900))
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
+                .apply {
+                    if (pendingIntent != null) setContentIntent(pendingIntent)
+                }
                 .build()
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
