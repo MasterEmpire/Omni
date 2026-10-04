@@ -128,6 +128,10 @@ class BrowserStateHolder(
     var autoUserPrompt by mutableStateOf("")
     var promptSteps by mutableStateOf(listOf(SequentialPromptStep(prompt = "")))
     var isAutomating by mutableStateOf(false)
+
+    // Live On-Screen Auto-Pilot State
+    var isLiveAutoPilotEnabled by mutableStateOf(false)
+    var liveAutoPilotStatus by mutableStateOf("Watching")
     var automationStatus by mutableStateOf("Idle")
     var automationThoughts by mutableStateOf("")
     var automationResult by mutableStateOf("")
@@ -748,6 +752,51 @@ class BrowserStateHolder(
         }
     }
 
+    fun toggleLiveAutoPilot() {
+        isLiveAutoPilotEnabled = !isLiveAutoPilotEnabled
+        val wv = currentWebView ?: return
+        if (isLiveAutoPilotEnabled) {
+            bridge.showToast("⚡ Live AI Auto-Pilot Armed!")
+            bridge.log("LIVE_AUTO", "Live AI Auto-Pilot enabled for tab: $activeTabId")
+            wv.evaluateJavascript(buildLiveAiStudioSentinelScript(), null)
+            wv.evaluateJavascript("window.__omniLiveAutoPilotActive = true;", null)
+        } else {
+            bridge.showToast("Live Auto-Pilot Disarmed")
+            bridge.log("LIVE_AUTO", "Live AI Auto-Pilot disabled.")
+            wv.evaluateJavascript("window.__omniLiveAutoPilotActive = false;", null)
+        }
+    }
+
+    override fun onLivePythonRequested(code: String) {
+        if (!isLiveAutoPilotEnabled) return
+        liveAutoPilotStatus = "Executing on Nexus..."
+        bridge.showToast("🐍 Running Python script on Nexus...")
+        bridge.log("LIVE_AUTO", "Executing Python on Nexus:\n$code")
+
+        bridge.executePython(
+            code = code,
+            onOutput = { chunk ->
+                bridge.log("LIVE_PYTHON_STREAM", chunk)
+            },
+            onComplete = { success, output ->
+                coroutineScope.launch(Dispatchers.Main) {
+                    liveAutoPilotStatus = "Watching"
+                    deliverPythonResultToLivePage(success, output)
+                }
+            }
+        )
+    }
+
+    private fun deliverPythonResultToLivePage(success: Boolean, output: String) {
+        val wv = currentWebView ?: return
+        val prefix = if (success) "[Python Output]:\n" else "[Python Error]:\n"
+        val fullText = prefix + output
+        val escaped = org.json.JSONObject.quote(fullText)
+
+        bridge.log("LIVE_AUTO", "Delivering result back to live AI Studio page (${output.length} chars)")
+        wv.evaluateJavascript("if (window.__omniDeliverPythonResult) { window.__omniDeliverPythonResult($escaped); }", null)
+    }
+
     fun injectEruda() {
         val wv = currentWebView ?: return
         if (currentUrl == "about:blank") return
@@ -1248,6 +1297,12 @@ class BrowserStateHolder(
         }
         if (isErudaEnabled && url != "about:blank") {
             injectEruda()
+        }
+        if (url != null && url.contains("aistudio.google.com")) {
+            currentWebView?.evaluateJavascript(buildLiveAiStudioSentinelScript(), null)
+            if (isLiveAutoPilotEnabled) {
+                currentWebView?.evaluateJavascript("window.__omniLiveAutoPilotActive = true;", null)
+            }
         }
         if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != "about:blank") {
             solveCurrentCaptcha()
