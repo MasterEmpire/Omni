@@ -829,6 +829,18 @@ class BrowserStateHolder(
         val ideWv = poolManager.pool[targetTabId]
         if (ideWv != null) {
             ideWv.onResume()
+            
+            // 🛡️ ANTI-THROTTLE GUARD: Unfreeze background fetch() promises
+            // Chromium severely throttles or pauses network requests in detached WebViews.
+            // By silently attaching the IDE tab at the very bottom of the Z-stack (Index 0),
+            // we force Chromium to treat it as alive, executing the patch instantly in the background.
+            containerLayout?.let { container ->
+                if (ideWv.parent !== container) {
+                    (ideWv.parent as? android.view.ViewGroup)?.removeView(ideWv)
+                    container.addView(ideWv, 0)
+                }
+            }
+
             bridge.log("AUTOPILOT_PIPELINE", "💉 [STAGE 2: INJECT] Dispatched probe into IDE tab [$targetTabId].")
             ideWv.evaluateJavascript(probeScript, null)
         } else {
