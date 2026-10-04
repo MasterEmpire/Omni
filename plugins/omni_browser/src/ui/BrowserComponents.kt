@@ -58,6 +58,7 @@ fun OmniBrowserTopBar(
     onTabSwitcherClick: () -> Unit,
     showMenu: Boolean,
     onMenuToggle: () -> Unit,
+    isAutoPilotActive: Boolean = false,
     onTopBarDragStart: () -> Unit = {},
     onTopBarDrag: (Float) -> Unit = {},
     onTopBarDragEnd: () -> Unit = {},
@@ -326,11 +327,22 @@ fun OmniBrowserTopBar(
                         onClick = onMenuToggle,
                         modifier = Modifier.size(36.dp)
                     ) {
-                        Icon(
-                            Icons.Default.MoreVert,
-                            contentDescription = "Menu",
-                            tint = if (showMenu) profColor else Color(0xFF9AA0A6)
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "Menu",
+                                tint = if (showMenu) profColor else Color(0xFF9AA0A6)
+                            )
+                            if (isAutoPilotActive) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .align(Alignment.TopEnd)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF00E5FF))
+                                )
+                            }
+                        }
                     }
                 }
             }
