@@ -155,7 +155,7 @@ object LiveAutoPilotEngine {
                     const candidate = fenceMatch ? fenceMatch[1].trim() : text;
 
                     // Strategy B: Match from first tag to last tag
-                    const tagNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file'].join('|');
+                    const tagNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
                     const pattern = '(<(?:' + tagNames + ')[\\s\\S]*>)';
                     const match = candidate.match(new RegExp(pattern, 'i'));
                     return match ? match[1].trim() : null;
@@ -173,7 +173,7 @@ object LiveAutoPilotEngine {
                     const openComment = (rawPayload.match(tag('comment')) || []).length;
                     const closeComment = (rawPayload.match(endTag('comment')) || []).length;
 
-                    if (openReplace === 0 && openCreate === 0 && openComment === 0) return false;
+                    if (openReplace === 0 && openCreate === 0 && openComment === 0 && !rawPayload.includes('<export_files') && !rawPayload.includes('<delete_file') && !rawPayload.includes('<rename_file')) return false;
                     return openReplace === closeReplace && openCreate === closeCreate && openComment === closeComment;
                 }
 
@@ -297,9 +297,23 @@ object LiveAutoPilotEngine {
                         }
                     }
 
-                    const allModelTurns = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
-                    if (allModelTurns.length === 0) return;
-                    const latestTurn = allModelTurns[allModelTurns.length - 1];
+                    const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"], [data-turn-role="model" i], ms-chat-turn:not(.user)'));
+                    if (allModelContainers.length === 0) return;
+
+                    // Battle-tested turn selection from AiStudioAutomator: scan backwards for the turn containing mounted answer nodes
+                    let latestTurn = null;
+                    for (let i = allModelContainers.length - 1; i >= 0; i--) {
+                        const t = allModelContainers[i];
+                        const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+                            .some(el => !el.closest('ms-thought-chunk'));
+                        if (hasRealAnswer) {
+                            latestTurn = t;
+                            break;
+                        }
+                    }
+                    if (!latestTurn) {
+                        latestTurn = allModelContainers[allModelContainers.length - 1];
+                    }
 
                     const screenText = getScreenText(latestTurn);
                     if (!screenText) return;
@@ -325,23 +339,19 @@ object LiveAutoPilotEngine {
                             }
                         }
                     }
-                    if (allModelTurns.length === 0) return;
-                    const latestTurn = allModelTurns[allModelTurns.length - 1];
 
-                    if (latestTurn.getAttribute('data-omni-executed') === 'true') return;
+                    // 2. Detect & Auto-Bridge Python Tool Execution to Nexus
+                    if (latestTurn.getAttribute('data-omni-executed') !== 'true') {
+                        const match = screenText.match(/<(?:omni_action\s+name=["']execute_python["']|execute_python)>([\s\S]*?)<\/(?:omni_action|execute_python)>/i);
 
-                    const screenText = getScreenText(latestTurn);
-                    if (!screenText) return;
+                        if (match && match[1]) {
+                            latestTurn.setAttribute('data-omni-executed', 'true');
+                            const pythonScript = match[1].trim();
 
-                    const match = screenText.match(/<(?:omni_action\s+name=["']execute_python["']|execute_python)>([\s\S]*?)<\/(?:omni_action|execute_python)>/i);
-
-                    if (match && match[1]) {
-                        latestTurn.setAttribute('data-omni-executed', 'true');
-                        const pythonScript = match[1].trim();
-
-                        if (window.OmniPythonBridge && window.OmniPythonBridge.executeFromLivePage) {
-                            window.OmniPythonBridge.log('LIVE_AUTO', 'Captured Python block from chat turn. Executing on Nexus...');
-                            window.OmniPythonBridge.executeFromLivePage(pythonScript);
+                            if (window.OmniPythonBridge && window.OmniPythonBridge.executeFromLivePage) {
+                                window.OmniPythonBridge.log('LIVE_AUTO', 'Captured Python block from chat turn. Executing on Nexus...');
+                                window.OmniPythonBridge.executeFromLivePage(pythonScript);
+                            }
                         }
                     }
                 }, 600);
