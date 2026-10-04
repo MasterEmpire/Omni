@@ -156,7 +156,7 @@ object OmniTaskManager {
         OmniLogger.log("TASK_MANAGER", "Killing task UI [${target.pluginName}]")
         sessionHistory.removeAll { it == taskId }
 
-        if (target.pluginId != "scroll_lock" && target.pluginId != "spotify_recorder") {
+        if (target.pluginId != "scroll_lock" && target.pluginId != "spotify_recorder" && target.pluginId != "ethiopian_calendar") {
             try {
                 target.loadedPlugin.instance.onStop(context)
             } catch (e: Exception) {
@@ -178,7 +178,7 @@ object OmniTaskManager {
         OmniLogger.log("TASK_MANAGER", "Clearing all ${activeSessions.size} active sessions")
         sessionHistory.clear()
         activeSessions.forEach { session ->
-            if (session.pluginId != "scroll_lock" && session.pluginId != "spotify_recorder") {
+            if (session.pluginId != "scroll_lock" && session.pluginId != "spotify_recorder" && session.pluginId != "ethiopian_calendar") {
                 try {
                     session.loadedPlugin.instance.onStop(context)
                 } catch (_: Exception) {}
