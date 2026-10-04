@@ -9,7 +9,7 @@ import java.util.Locale
 
 object OmniLogger {
     private val logBuffer = Collections.synchronizedList(mutableListOf<String>())
-    private const val MAX_LOGS = 800
+    private const val MAX_LOGS = 400
     private var logFile: File? = null
     private var blackBoxFile: File? = null
     private var appContext: Context? = null
@@ -103,8 +103,14 @@ object OmniLogger {
     private fun trimDiskFile() {
         Thread {
             try {
-                val lines = logFile?.readLines()?.takeLast(300) ?: return@Thread
-                logFile?.writeText(lines.joinToString("\n") + "\n")
+                fun trimFile(file: File?, maxLines: Int = 250) {
+                    if (file?.exists() == true && file.length() > 64 * 1024L) {
+                        val lines = file.readLines().takeLast(maxLines)
+                        file.writeText(lines.joinToString("\n") + "\n")
+                    }
+                }
+                trimFile(logFile)
+                trimFile(blackBoxFile)
             } catch (_: Exception) {}
         }.start()
     }
