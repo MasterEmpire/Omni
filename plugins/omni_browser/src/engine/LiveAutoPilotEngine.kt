@@ -150,15 +150,16 @@ object LiveAutoPilotEngine {
                 function extractCxpBlock(text) {
                     if (!text) return null;
 
-                    // Strategy A: Extract inside markdown code fence (```xml ... ```) to isolate from conversation
-                    const fenceMatch = text.match(/```(?:xml|cxp)?\s*([\s\S]*?)(?:```|$)/i);
-                    const candidate = fenceMatch ? fenceMatch[1].trim() : text;
+                    // Strict Markdown code fence match: MUST have both opening and closing triple backticks!
+                    const fenceMatch = text.match(/```(?:xml|cxp)?\s*([\s\S]*?)```/i);
+                    if (!fenceMatch) return null;
+                    const candidate = fenceMatch[1].trim();
 
-                    // Strategy B: Match from first tag to last tag
+                    // Match from first tag to last tag
                     const tagNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
                     const pattern = '(<(?:' + tagNames + ')[\\s\\S]*>)';
                     const match = candidate.match(new RegExp(pattern, 'i'));
-                    return match ? match[1].trim() : null;
+                    return match ? match[1].trim() : candidate;
                 }
 
                 function isCxpBalanced(rawPayload) {
@@ -287,6 +288,7 @@ object LiveAutoPilotEngine {
                     const isGen = checkUiGenerating();
                     if (isGen) {
                         window.__omniWasGenerating = true;
+                        window.__omniStillTicks = 0;
                         return;
                     }
 
@@ -317,6 +319,24 @@ object LiveAutoPilotEngine {
 
                     const screenText = getScreenText(latestTurn);
                     if (!screenText) return;
+
+                    // Stillness Watchdog: Track character growth on active turn
+                    window.__omniLastText = window.__omniLastText || '';
+                    window.__omniStillTicks = window.__omniStillTicks || 0;
+
+                    if (screenText.length > window.__omniLastText.length) {
+                        window.__omniStillTicks = 0;
+                        window.__omniLastText = screenText;
+                        return;
+                    } else {
+                        window.__omniStillTicks++;
+                        window.__omniLastText = screenText;
+                    }
+
+                    // Require at least 4 stillness ticks (2.4s of zero text growth)
+                    if (window.__omniStillTicks < 4) {
+                        return;
+                    }
 
                     // 1. Detect & Auto-Bridge CXP Patch Markup to Conduit IDE
                     if (latestTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
