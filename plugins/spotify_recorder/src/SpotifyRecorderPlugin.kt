@@ -109,7 +109,7 @@ data class TranscodeJob(
 data class DiscardInfo(
     val title: String,
     val reason: String,
-    val timestamp: Long = SystemClock.elapsedRealtime()
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 data class SavingInfo(
@@ -721,6 +721,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 val failReason = if (wasInterrupted) "Recording interrupted" else "Duration incomplete (${recordedDurationMs / 1000}s vs ${targetLength / 1000}s expected)"
                 val info = DiscardInfo(take.trackTitle, failReason)
                 lastDiscardInfo = info
+                synchronized(discardedHistory) {
+                    discardedHistory.add(0, info)
+                    if (discardedHistory.size > 100) discardedHistory.removeAt(discardedHistory.lastIndex)
+                }
                 discardUpdater?.invoke(info)
                 statsUpdater?.invoke(countSaved, countDiscarded, countAds)
                 activeBridge?.log(
@@ -1068,6 +1072,10 @@ class SpotifyRecorderPlugin : PluginEntry() {
         val discardedTitle = take?.trackTitle ?: currentTrackTitle.ifEmpty { "Audio Stream" }
         val info = DiscardInfo(discardedTitle, reason)
         lastDiscardInfo = info
+        synchronized(discardedHistory) {
+            discardedHistory.add(0, info)
+            if (discardedHistory.size > 100) discardedHistory.removeAt(discardedHistory.lastIndex)
+        }
         discardUpdater?.invoke(info)
 
         statsUpdater?.invoke(countSaved, countDiscarded, countAds)
@@ -1119,6 +1127,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         var adsStat by remember { mutableIntStateOf(countAds) }
         var discardInfo by remember { mutableStateOf(lastDiscardInfo) }
         var savingInfo by remember { mutableStateOf(activeSavingInfo) }
+        var showDiscardedDialog by remember { mutableStateOf(false) }
 
         var vaultFiles by remember { mutableStateOf(listOf<VaultTrack>()) }
 
@@ -1462,6 +1471,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 10.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { showDiscardedDialog = true }
                         ) {
                             Row(
                                 modifier = Modifier.padding(10.dp),
@@ -1733,7 +1744,13 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 MetricCard("Saved Perfect", "$savedStat", Color(0xFF1DB954), Modifier.weight(1f))
-                MetricCard("Discarded (Seek/Cut)", "$discardedStat", Color(0xFFF85149), Modifier.weight(1f))
+                MetricCard(
+                    title = "Discarded (Seek/Cut)",
+                    value = "$discardedStat",
+                    accent = Color(0xFFF85149),
+                    modifier = Modifier.weight(1f),
+                    onClick = { showDiscardedDialog = true }
+                )
                 MetricCard("Ads Skipped", "$adsStat", Color(0xFFD29922), Modifier.weight(1f))
             }
 
@@ -1750,6 +1767,127 @@ class SpotifyRecorderPlugin : PluginEntry() {
             }
 
             Spacer(Modifier.height(8.dp))
+
+            // Discarded Takes Audit Modal
+            if (showDiscardedDialog) {
+                val historySnapshot = remember(discardedStat) { synchronized(discardedHistory) { discardedHistory.toList() } }
+                AlertDialog(
+                    onDismissRequest = { showDiscardedDialog = false },
+                    containerColor = Color(0xFF161B22),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Discarded Takes", color = Color(0xFFF85149), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF21262D)) {
+                                    Text(
+                                        "${historySnapshot.size}",
+                                        color = Color(0xFFC9D1D9),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            if (historySnapshot.isNotEmpty()) {
+                                TextButton(
+                                    onClick = {
+                                        synchronized(discardedHistory) { discardedHistory.clear() }
+                                        lastDiscardInfo = null
+                                        discardInfo = null
+                                        showDiscardedDialog = false
+                                    }
+                                ) {
+                                    Text("Clear Log", color = Color(0xFF8B949E), fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    },
+                    text = {
+                        if (historySnapshot.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(130.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("🎯", fontSize = 24.sp)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text("Zero discarded takes recorded", color = Color(0xFF8B949E), fontSize = 13.sp)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text("All recorded tracks completed cleanly.", color = Color(0xFF484F58), fontSize = 11.sp)
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 380.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(historySnapshot) { item ->
+                                    val timeStr = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(item.timestamp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color(0xFF0D1117),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = item.title,
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    maxLines = 1,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    text = timeStr,
+                                                    color = Color(0xFF8B949E),
+                                                    fontSize = 10.sp,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+                                            Spacer(Modifier.height(4.dp))
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("⚠️", fontSize = 11.sp)
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = item.reason,
+                                                    color = Color(0xFFFF7B72),
+                                                    fontSize = 11.sp,
+                                                    lineHeight = 14.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { showDiscardedDialog = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D))
+                        ) {
+                            Text("Close", color = Color(0xFFC9D1D9))
+                        }
+                    }
+                )
+            }
 
             // Vault Recordings List
             if (vaultFiles.isEmpty()) {
@@ -1872,12 +2010,20 @@ class SpotifyRecorderPlugin : PluginEntry() {
     }
 
     @Composable
-    private fun MetricCard(title: String, value: String, accent: Color, modifier: Modifier = Modifier) {
+    private fun MetricCard(
+        title: String,
+        value: String,
+        accent: Color,
+        modifier: Modifier = Modifier,
+        onClick: (() -> Unit)? = null
+    ) {
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = Color(0xFF161B22),
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)),
-            modifier = modifier
+            modifier = modifier.then(
+                if (onClick != null) Modifier.clip(RoundedCornerShape(12.dp)).clickable { onClick() } else Modifier
+            )
         ) {
             Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(value, color = accent, fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -1931,6 +2077,7 @@ class SpotifyRecorderPlugin : PluginEntry() {
         var statsUpdater: ((saved: Int, discarded: Int, ads: Int) -> Unit)? = null
         var vaultRefreshTrigger: (() -> Unit)? = null
         @Volatile var lastDiscardInfo: DiscardInfo? = null
+        val discardedHistory = java.util.Collections.synchronizedList(mutableListOf<DiscardInfo>())
         @Volatile var activeSavingInfo: SavingInfo? = null
         var discardUpdater: ((DiscardInfo?) -> Unit)? = null
         var savingUpdater: ((SavingInfo?) -> Unit)? = null
