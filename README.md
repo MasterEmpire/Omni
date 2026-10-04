@@ -1,1 +1,1 @@
-# Omni
+# Omni Hub - Dynamic Microkernel (Auto-Pilot Stress Tested)
