@@ -150,25 +150,48 @@ object LiveAutoPilotEngine {
                 function extractCxpBlock(text) {
                     if (!text) return null;
 
-                    // Strategy 1: Explicit unique wrapper tag <cxp>...</cxp> or <patch>...</patch> (Immune to rich-mode backtick stripping)
-                    const tagMatch = text.match(/<(?:cxp|omni_cxp|patch)>([\s\S]*?)<\/(?:cxp|omni_cxp|patch)>/i);
-                    if (tagMatch) {
-                        return tagMatch[1].trim();
+                    const hasValidCxpTag = (str) => {
+                        if (!str || str.length < 15) return false;
+                        const tNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
+                        return new RegExp('<(?:' + tNames + ')\\b', 'i').test(str);
+                    };
+
+                    // Strategy 1: Explicit unique wrapper tag <cxp>...</cxp> or <patch>...</patch>
+                    // Scans all candidates in turn and picks the bottom-most block containing real CXP tags
+                    const wrapperRegex = /<(?:cxp|omni_cxp|patch)>([\s\S]*?)<\/(?:cxp|omni_cxp|patch)>/gi;
+                    const wrapperCandidates = [];
+                    let wMatch;
+                    while ((wMatch = wrapperRegex.exec(text)) !== null) {
+                        const candidate = wMatch[1].trim();
+                        if (hasValidCxpTag(candidate)) {
+                            wrapperCandidates.push(candidate);
+                        }
+                    }
+                    if (wrapperCandidates.length > 0) {
+                        return wrapperCandidates[wrapperCandidates.length - 1];
                     }
 
-                    // Strategy 2: Markdown code fence match (if in raw mode or unstripped)
-                    const fenceMatch = text.match(/```(?:xml|cxp)?\s*([\s\S]*?)```/i);
-                    if (fenceMatch) {
-                        const candidate = fenceMatch[1].trim();
+                    // Strategy 2: Markdown code fence match (if in raw mode)
+                    const fenceRegex = /```(?:xml|cxp)?\s*([\s\S]*?)```/gi;
+                    const fenceCandidates = [];
+                    let fMatch;
+                    while ((fMatch = fenceRegex.exec(text)) !== null) {
+                        let candidate = fMatch[1].trim();
                         const innerMatch = candidate.match(/<(?:cxp|omni_cxp|patch)>([\s\S]*?)<\/(?:cxp|omni_cxp|patch)>/i);
-                        return innerMatch ? innerMatch[1].trim() : candidate;
+                        if (innerMatch) candidate = innerMatch[1].trim();
+                        if (hasValidCxpTag(candidate)) {
+                            fenceCandidates.push(candidate);
+                        }
+                    }
+                    if (fenceCandidates.length > 0) {
+                        return fenceCandidates[fenceCandidates.length - 1];
                     }
 
                     // Strategy 3: Direct structural CXP boundary match (first tag to last closing tag)
                     const tagNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
                     const pattern = '(<(?:' + tagNames + ')[\\s\\S]*<\\/(?:' + tagNames + ')>)';
                     const rawTagMatch = text.match(new RegExp(pattern, 'i'));
-                    if (rawTagMatch) {
+                    if (rawTagMatch && hasValidCxpTag(rawTagMatch[1])) {
                         return rawTagMatch[1].trim();
                     }
 
