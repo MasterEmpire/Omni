@@ -8,7 +8,6 @@ import com.omni.hub.loader.PluginTaskEngine
 
 class OmniResurrectReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        OmniLogger.log("RESURRECT", "⚡ Headless broadcast trigger received from peer. Resurrecting daemons.")
         try {
             PluginTaskEngine.resurrectDaemons(context.applicationContext)
         } catch (e: Exception) {
