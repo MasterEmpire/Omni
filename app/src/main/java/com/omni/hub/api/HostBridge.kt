@@ -19,8 +19,14 @@ import android.os.Vibrator
 import android.os.VibrationEffect
 import android.provider.Settings
 import android.util.DisplayMetrics
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -71,6 +77,24 @@ interface HostBridge {
 
     // --- Sensors ---
     fun sampleSensors(): String
+
+    // --- System Overlays & Floating Windows (Window Canvas) ---
+    fun canDrawOverlays(): Boolean
+    fun requestOverlayPermission()
+    fun showOverlay(
+        tag: String,
+        view: View,
+        width: Int = ViewGroup.LayoutParams.WRAP_CONTENT,
+        height: Int = ViewGroup.LayoutParams.WRAP_CONTENT,
+        gravity: Int = Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+        x: Int = 0,
+        y: Int = 0,
+        focusable: Boolean = false,
+        touchable: Boolean = true,
+        autoDismissMs: Long = 0L
+    ): Boolean
+    fun dismissOverlay(tag: String): Boolean
+    fun dismissAllOverlays()
 
     // --- Isolated File System ---
     fun getPluginDir(): String
@@ -223,6 +247,32 @@ object RecentsDispatcher {
 /**
  * Concrete implementation of the HostBridge instantiated by Omni Hub.
  */
+class OverlayLifecycleOwner : androidx.lifecycle.LifecycleOwner,
+    androidx.savedstate.SavedStateRegistryOwner,
+    androidx.lifecycle.ViewModelStoreOwner {
+    private val lifecycleRegistry = androidx.lifecycle.LifecycleRegistry(this)
+    private val savedStateRegistryController = androidx.savedstate.SavedStateRegistryController.create(this)
+    private val store = androidx.lifecycle.ViewModelStore()
+
+    init {
+        savedStateRegistryController.performRestore(null)
+        lifecycleRegistry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_CREATE)
+        lifecycleRegistry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_START)
+        lifecycleRegistry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_RESUME)
+    }
+
+    fun destroy() {
+        lifecycleRegistry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_PAUSE)
+        lifecycleRegistry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_STOP)
+        lifecycleRegistry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_DESTROY)
+        store.clear()
+    }
+
+    override val lifecycle: androidx.lifecycle.Lifecycle get() = lifecycleRegistry
+    override val savedStateRegistry: androidx.savedstate.SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
+    override val viewModelStore: androidx.lifecycle.ViewModelStore get() = store
+}
+
 class HostBridgeImpl(
     private val context: Context,
     private val pluginDir: File,
@@ -230,6 +280,147 @@ class HostBridgeImpl(
 ) : HostBridge {
 
     private var backPressedHandler: (() -> Boolean)? = null
+    private val activeOverlays = java.util.concurrent.ConcurrentHashMap<String, Pair<View, OverlayLifecycleOwner?>>()
+    private val overlayHandler = Handler(Looper.getMainLooper())
+
+    override fun canDrawOverlays(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+    }
+
+    override fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${context.packageName}")
+                ).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                OmniLogger.log("OVERLAY_ERR", "Failed launching overlay permission settings: ${e.message}")
+            }
+        }
+    }
+
+    override fun showOverlay(
+        tag: String,
+        view: View,
+        width: Int,
+        height: Int,
+        gravity: Int,
+        x: Int,
+        y: Int,
+        focusable: Boolean,
+        touchable: Boolean,
+        autoDismissMs: Long
+    ): Boolean {
+        if (!canDrawOverlays()) {
+            OmniLogger.log("OVERLAY_WARN", "Cannot show overlay [$tag]: Overlay permission not granted.")
+            return false
+        }
+
+        val action = Runnable {
+            try {
+                val appContext = context.applicationContext
+                val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return@Runnable
+
+                // Synchronously clear previous view under this tag
+                dismissOverlay(tag)
+
+                // Attach Lifecycle and SavedState owners so Compose works inside WindowManager
+                val lifecycleOwner = OverlayLifecycleOwner()
+                setViewTreeLifecycleOwner(view, lifecycleOwner)
+                setViewTreeViewModelStoreOwner(view, lifecycleOwner)
+                setViewTreeSavedStateRegistryOwner(view, lifecycleOwner)
+
+                var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+
+                if (!focusable) {
+                    flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                }
+                if (!touchable) {
+                    flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                } else {
+                    flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                }
+
+                val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_PHONE
+                }
+
+                val params = WindowManager.LayoutParams(
+                    width,
+                    height,
+                    windowType,
+                    flags,
+                    android.graphics.PixelFormat.TRANSLUCENT
+                ).apply {
+                    this.gravity = gravity
+                    this.x = x
+                    this.y = y
+                }
+
+                wm.addView(view, params)
+                activeOverlays[tag] = Pair(view, lifecycleOwner)
+                OmniLogger.log("OVERLAY", "🚀 System overlay mounted: [$tag]")
+
+                if (autoDismissMs > 0L) {
+                    overlayHandler.postDelayed({
+                        dismissOverlay(tag)
+                    }, autoDismissMs)
+                }
+            } catch (e: Exception) {
+                OmniLogger.log("OVERLAY_ERR", "Failed showing overlay [$tag]: ${e.message}")
+            }
+        }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action.run()
+        } else {
+            Handler(Looper.getMainLooper()).post(action)
+        }
+        return true
+    }
+
+    override fun dismissOverlay(tag: String): Boolean {
+        val entry = activeOverlays.remove(tag) ?: return false
+        val (view, lifecycleOwner) = entry
+        val action = Runnable {
+            try {
+                val appContext = context.applicationContext
+                val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+                if (view.isAttachedToWindow) {
+                    wm?.removeView(view)
+                }
+                lifecycleOwner?.destroy()
+                OmniLogger.log("OVERLAY", "🧹 System overlay dismissed: [$tag]")
+            } catch (e: Exception) {
+                OmniLogger.log("OVERLAY_ERR", "Error removing overlay [$tag]: ${e.message}")
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action.run()
+        } else {
+            Handler(Looper.getMainLooper()).post(action)
+        }
+        return true
+    }
+
+    override fun dismissAllOverlays() {
+        val tags = activeOverlays.keys().toList()
+        tags.forEach { dismissOverlay(it) }
+    }
 
     override fun setOnBackPressedHandler(handler: (() -> Boolean)?) {
         backPressedHandler = handler
