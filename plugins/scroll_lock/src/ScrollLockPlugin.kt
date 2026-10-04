@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
@@ -202,27 +204,41 @@ class ScrollLockPlugin : PluginEntry() {
 
     private fun getForegroundApp(context: Context): String? {
         try {
-            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
-            val endTime = System.currentTimeMillis()
-            val beginTime = endTime - 1000 * 10
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return lastKnownForegroundApp
+            val now = System.currentTimeMillis()
 
-            val events = usm.queryEvents(beginTime, endTime)
-            var lastPackage: String? = null
+            // Sliding window: query recent slice or retrospective 15m if uninitialized
+            val beginTime = if (lastEventQueryTimeMs > 0L && (now - lastEventQueryTimeMs) < 60_000L) {
+                (lastEventQueryTimeMs - 5000L).coerceAtLeast(now - 15 * 60 * 1000L)
+            } else {
+                now - 15 * 60 * 1000L
+            }
+
+            val events = usm.queryEvents(beginTime, now)
+            lastEventQueryTimeMs = now
+
             val event = UsageEvents.Event()
+            var latestPackage: String? = null
+            var latestTimestamp = 0L
+
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
                     event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                    lastPackage = event.packageName
+                    if (event.timeStamp >= latestTimestamp) {
+                        latestTimestamp = event.timeStamp
+                        latestPackage = event.packageName
+                    }
                 }
             }
-            if (lastPackage != null) return lastPackage
 
-            val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime)
-            val sorted = stats.filter { it.lastTimeUsed > 0 }.maxByOrNull { it.lastTimeUsed }
-            return sorted?.packageName
+            if (latestPackage != null) {
+                lastKnownForegroundApp = latestPackage
+            }
+
+            return lastKnownForegroundApp
         } catch (_: Exception) {
-            return null
+            return lastKnownForegroundApp
         }
     }
 
@@ -274,6 +290,7 @@ class ScrollLockPlugin : PluginEntry() {
                         when (intent?.action) {
                             Intent.ACTION_SCREEN_OFF -> {
                                 lastScreenOffTimestamp = System.currentTimeMillis()
+                                lastEventQueryTimeMs = 0L
                                 if (isWakeLockHeld) {
                                     bridge.releaseWakeLock()
                                     isWakeLockHeld = false
@@ -282,6 +299,7 @@ class ScrollLockPlugin : PluginEntry() {
                             }
                             Intent.ACTION_SCREEN_ON,
                             Intent.ACTION_USER_PRESENT -> {
+                                lastEventQueryTimeMs = 0L
                                 val now = System.currentTimeMillis()
                                 if (lastScreenOffTimestamp > 0L && (now - lastScreenOffTimestamp >= 15 * 60 * 1000L)) {
                                     currentSessionMs = 0L
@@ -323,15 +341,19 @@ class ScrollLockPlugin : PluginEntry() {
                 try {
                     delay(5000L) // Relaxed to 5.0 seconds (massive CPU relief)
 
-                    // 1. Verify Display State (Sleep if display is dark)
+                    // 1. Verify Display State & Lockscreen (Sleep if dark or keyguard engaged)
                     val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                    val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
                     val isScreenInteractive = pm?.isInteractive ?: true
-                    if (!isScreenInteractive) {
+                    val isLocked = km?.isKeyguardLocked ?: false
+
+                    if (!isScreenInteractive || isLocked) {
                         if (isWakeLockHeld) {
                             bridge.releaseWakeLock()
                             isWakeLockHeld = false
                             lastScreenOffTimestamp = System.currentTimeMillis()
-                            bridge.log("SCROLL_LOCK", "🌙 Screen dark: Released WakeLock. Sleeping...")
+                            lastEventQueryTimeMs = 0L
+                            bridge.log("SCROLL_LOCK", "🌙 Screen dark or locked: Released WakeLock. Sleeping...")
                         }
                         lastTickMs = System.currentTimeMillis()
                         continue // Skip polling UsageStatsManager! Zero CPU drain!
@@ -1284,6 +1306,8 @@ class ScrollLockPlugin : PluginEntry() {
         @Volatile var isWakeLockHeld = false
         @Volatile var lastScreenOffTimestamp = 0L
         @Volatile var screenReceiver: BroadcastReceiver? = null
+        @Volatile var lastKnownForegroundApp: String? = null
+        @Volatile var lastEventQueryTimeMs = 0L
 
         val globalTargetPackages = mutableStateListOf(
             "com.zhiliaoapp.musically",      // TikTok Global
