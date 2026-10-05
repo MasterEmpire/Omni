@@ -876,6 +876,94 @@ class BrowserStateHolder(
         }
     }
 
+    var activeAiStudioTabId by mutableStateOf<String?>(null)
+
+    override fun onFilePullRequested(xml: String) {
+        if (!isLiveAutoPilotEnabled) return
+        activeAiStudioTabId = activeTabId
+        bridge.log("AUTOPILOT_PULL", "🔍 [STAGE 1: REQUEST] AI Studio requested project files. Routing to Conduit IDE...")
+        bridge.showToast("📂 AI requesting project files from Conduit...")
+
+        var ideTab = getMostRecentIdeTab()
+        if (ideTab == null) {
+            openLocalIdeAsNeighbor()
+            ideTab = getMostRecentIdeTab()
+        }
+
+        val targetTabId = ideTab?.id ?: return
+        val ideWv = poolManager.pool[targetTabId]
+        val escapedXml = org.json.JSONObject.quote(xml)
+        val pullScript = """
+            (function() {
+                const req = $escapedXml;
+                let attempts = 0;
+                function tryPull() {
+                    if (window.__conduitPullFiles) {
+                        window.__conduitPullFiles(req);
+                    } else if (attempts < 20) {
+                        attempts++;
+                        setTimeout(tryPull, 250);
+                    } else {
+                        if (window.OmniIdeBridge && window.OmniIdeBridge.deliverPulledFiles) {
+                            window.OmniIdeBridge.deliverPulledFiles('[ERROR: Conduit IDE not ready to fulfill pull]', 0);
+                        }
+                    }
+                }
+                tryPull();
+            })();
+        """.trimIndent()
+
+        if (ideWv != null) {
+            ideWv.onResume()
+            containerLayout?.let { container ->
+                if (ideWv.parent !== container) {
+                    (ideWv.parent as? android.view.ViewGroup)?.removeView(ideWv)
+                    container.addView(ideWv, 0)
+                }
+            }
+            ideWv.evaluateJavascript(pullScript, null)
+        } else {
+            coroutineScope.launch {
+                delay(600)
+                val wv = poolManager.pool[targetTabId]
+                wv?.onResume()
+                wv?.evaluateJavascript(pullScript, null)
+            }
+        }
+    }
+
+    override fun onFilesPulled(dumpText: String, fileCount: Int) {
+        if (!isLiveAutoPilotEnabled) return
+        val studioTabId = activeAiStudioTabId ?: tabs.find { it.url.contains("aistudio.google.com") }?.id ?: return
+        val studioWv = poolManager.pool[studioTabId] ?: return
+        bridge.log("AUTOPILOT_PULL", "📦 [STAGE 3: DELIVER] Pulled $fileCount file(s) from IDE (${dumpText.length} chars). Enforcing 700KB gate...")
+
+        val bytes = dumpText.toByteArray(Charsets.UTF_8)
+        val threshold = 700 * 1024 // 700KB
+
+        if (bytes.size > threshold) {
+            bridge.log("AUTOPILOT_PULL", "📎 Size ${bytes.size} bytes > 700KB. Attaching file directly into AI Studio...")
+            bridge.showToast("📎 Pulled files > 700KB: Attaching as context file...")
+            val ts = System.currentTimeMillis()
+            val filename = "project_context_$ts.txt"
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val summaryPrompt = "[Project Files Attached: $filename (${fileCount} files, ${(bytes.size / 1024)} KB). The requested files are attached above.]"
+            val escapedPrompt = org.json.JSONObject.quote(summaryPrompt)
+            val escapedName = org.json.JSONObject.quote(filename)
+            val escapedB64 = org.json.JSONObject.quote(b64)
+
+            val deliveryScript = "if (window.__omniDeliverPythonResult) { window.__omniDeliverPythonResult($escapedPrompt, $escapedName, $escapedB64, 'text/plain'); }"
+            studioWv.evaluateJavascript(deliveryScript, null)
+        } else {
+            bridge.log("AUTOPILOT_PULL", "📝 Size ${bytes.size} bytes <= 700KB. Injecting text into prompt...")
+            bridge.showToast("📝 Injecting $fileCount project file(s)...")
+            val fullPrompt = "[Project Files Delivered (${fileCount} files)]:\n\n$dumpText"
+            val escapedPrompt = org.json.JSONObject.quote(fullPrompt)
+            val deliveryScript = "if (window.__omniDeliverPythonResult) { window.__omniDeliverPythonResult($escapedPrompt, null, null, null); }"
+            studioWv.evaluateJavascript(deliveryScript, null)
+        }
+    }
+
     fun injectEruda() {
         val wv = currentWebView ?: return
         if (currentUrl == "about:blank") return
