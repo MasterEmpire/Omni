@@ -552,6 +552,8 @@ fun BrowserMenuOverlay(
     currentUrl: String,
     isLiveAutoPilotEnabled: Boolean = false,
     onToggleLiveAutoPilot: () -> Unit = {},
+    isAutoPilotConfirmEnabled: Boolean = false,
+    onToggleAutoPilotConfirm: () -> Unit = {},
     onBackClick: () -> Unit,
     onForwardClick: () -> Unit,
     onReloadClick: () -> Unit,
@@ -726,6 +728,32 @@ fun BrowserMenuOverlay(
                     onToggleLiveAutoPilot()
                 }
 
+                if (isLiveAutoPilotEnabled) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🛡️ Require Confirmation",
+                            color = if (isAutoPilotConfirmEnabled) Color(0xFF00E5FF) else Color(0xFF9AA0A6),
+                            fontSize = 11.sp,
+                            fontWeight = if (isAutoPilotConfirmEnabled) FontWeight.Bold else FontWeight.Normal
+                        )
+                        Switch(
+                            checked = isAutoPilotConfirmEnabled,
+                            onCheckedChange = { onToggleAutoPilotConfirm() },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(0xFF00E5FF),
+                                checkedTrackColor = Color(0xFF00E5FF).copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier.height(22.dp)
+                        )
+                    }
+                }
+
                 InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) {
                     onOpenAutomation()
                 }
@@ -794,6 +822,7 @@ fun CxpIngestionPillBanner(
         val (borderColor, icon, titleText) = when (status) {
             "SUCCESS" -> Triple(Color(0xFF238636), "✅", "Success")
             "PARTIAL" -> Triple(Color(0xFFD29922), "✨", "AI Healed")
+            "PARTIAL_PARSE_BLOCKED" -> Triple(Color(0xFFFF9800), "⚠️", "Parse Blocked")
             "FAILED" -> Triple(Color(0xFFDA3633), "❌", "Failed")
             else -> Triple(Color(0xFF58A6FF), "⏳", "Committing")
         }
