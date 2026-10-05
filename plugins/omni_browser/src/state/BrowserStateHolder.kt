@@ -977,6 +977,46 @@ class BrowserStateHolder(
         }
     }
 
+    override fun onSyncFavoriteIde(content: String): Boolean {
+        if (content.isBlank()) return false
+        return try {
+            val bytes = content.toByteArray(Charsets.UTF_8)
+            val target = shortcuts.firstOrNull { it.isDefault }
+                ?: shortcuts.firstOrNull { it.localSourcePath != null || it.url.contains("vault_") || it.title.contains("IDE", ignoreCase = true) }
+                ?: shortcuts.firstOrNull { isLocalFilePath(it.url) }
+
+            val targetId = target?.id
+            val isolatedSubPath = if (targetId != null) "ide/vault_$targetId/index.html" else "ide/index.html"
+
+            bridge.saveFile(isolatedSubPath, bytes)
+            bridge.saveFile("ide/index.html", bytes)
+
+            val localSrc = target?.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
+            try {
+                val localFile = File(localSrc)
+                if (localFile.exists() && localFile.canWrite()) {
+                    localFile.writeBytes(bytes)
+                    bridge.log("IDE_SYNC", "✅ Mirrored synced IDE to storage: $localSrc")
+                }
+            } catch (e: Exception) {
+                bridge.log("IDE_SYNC_WARN", "Failed writing to storage file $localSrc: ${e.message}")
+            }
+
+            vaultManager.autoMirrorVaultToDocuments()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                bridge.showToast("✅ Synced IDE into local vault & storage (${bytes.size / 1024} KB)")
+            }
+            bridge.log("IDE_SYNC", "✅ Favorite IDE (${target?.title ?: "Default"}) updated from GitHub ($isolatedSubPath)")
+            true
+        } catch (e: Exception) {
+            bridge.log("IDE_SYNC_ERR", "Failed to sync favorite IDE: ${e.message}")
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                bridge.showToast("❌ IDE sync error: ${e.message}")
+            }
+            false
+        }
+    }
+
     override fun onFilesPulled(dumpText: String, fileCount: Int) {
         if (!isLiveAutoPilotEnabled) return
         val studioTabId = activeAiStudioTabId ?: tabs.find { it.url.contains("aistudio.google.com") }?.id ?: return
