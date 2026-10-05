@@ -1109,14 +1109,14 @@ class BrowserStateHolder(
         if (!isLiveAutoPilotEnabled) return
         val studioTabId = activeAiStudioTabId ?: tabs.find { it.url.contains("aistudio.google.com") }?.id ?: return
         val studioWv = poolManager.pool[studioTabId] ?: return
-        bridge.log("AUTOPILOT_PULL", "📦 [STAGE 3: DELIVER] Pulled $fileCount file(s) from IDE (${dumpText.length} chars). Enforcing 700KB gate...")
+        bridge.log("AUTOPILOT_PULL", "📦 [STAGE 3: DELIVER] Pulled $fileCount file(s) from IDE (${dumpText.length} chars). Enforcing 30KB gate...")
 
         val bytes = dumpText.toByteArray(Charsets.UTF_8)
-        val threshold = 700 * 1024 // 700KB
+        val threshold = 30 * 1024 // 30KB
 
         if (bytes.size > threshold) {
-            bridge.log("AUTOPILOT_PULL", "📎 Size ${bytes.size} bytes > 700KB. Attaching file directly into AI Studio...")
-            bridge.showToast("📎 Pulled files > 700KB: Attaching as context file...")
+            bridge.log("AUTOPILOT_PULL", "📎 Size ${bytes.size} bytes > 30KB. Attaching file directly into AI Studio...")
+            bridge.showToast("📎 Pulled files > 30KB: Attaching as context file...")
             val ts = System.currentTimeMillis()
             val filename = "project_context_$ts.txt"
             val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
