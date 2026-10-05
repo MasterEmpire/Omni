@@ -800,6 +800,7 @@ class BrowserStateHolder(
     fun approveAutoPilotAction() {
         val payload = pendingAutoPilotPayload ?: return
         val type = pendingAutoPilotActionType ?: "CXP"
+        bridge.log("AUTOPILOT_DEBUG", "👍 [ACTION APPROVED] User approved '$type' payload (${payload.length} chars). Routing to executor...")
         showAutoPilotConfirmDialog = false
         pendingAutoPilotPayload = null
         pendingAutoPilotActionType = null
@@ -862,17 +863,29 @@ class BrowserStateHolder(
     }
 
     fun commitCxpToIde(xml: String) {
-        bridge.log("AUTOPILOT_PIPELINE", "🚀 [STAGE 2: HOST ROUTE] CXP XML received (${xml.length} chars). Identifying Conduit IDE tab...")
-        bridge.showToast("⚡ Beaming CXP patch to Conduit IDE...")
+        val fav = getFavoriteIdeShortcut()
+        bridge.log("AUTOPILOT_DEBUG", "🚀 [STAGE 2: ROUTING START] commitCxpToIde called. XML length: ${xml.length}. Current activeTabId: '$activeTabId'.")
+        bridge.log("AUTOPILOT_DEBUG", "🔍 [FAVORITE IDE CONFIG] id='${fav?.id}', title='${fav?.title}', url='${fav?.url}', sourcePath='${fav?.localSourcePath}'")
+
+        val tabsAudit = tabs.mapIndexed { idx, t ->
+            val matches = isMatchingIdeTab(t, fav)
+            "[$idx] id='${t.id}', title='${t.title}', url='${t.url}', isMatchingIde=$matches, inHotPool=${poolManager.pool.containsKey(t.id)}"
+        }.joinToString(" | ")
+        bridge.log("AUTOPILOT_DEBUG", "📋 [OPEN TABS DUMP] $tabsAudit")
 
         var ideTab = getMostRecentIdeTab()
         if (ideTab == null) {
-            bridge.log("AUTOPILOT_PIPELINE", "📂 [STAGE 2: SPAWN IDE] Conduit IDE tab not open. Opening neighbor tab...")
+            bridge.log("AUTOPILOT_DEBUG", "⚠️ [ROUTER] getMostRecentIdeTab returned NULL! Opening neighbor IDE tab...")
             openLocalIdeAsNeighbor()
             ideTab = getMostRecentIdeTab()
+            bridge.log("AUTOPILOT_DEBUG", "📂 [ROUTER] After openLocalIdeAsNeighbor, resolved ideTab: id='${ideTab?.id}', url='${ideTab?.url}'")
+        } else {
+            bridge.log("AUTOPILOT_DEBUG", "🎯 [ROUTER] Matched IDE tab: id='${ideTab.id}', title='${ideTab.title}', url='${ideTab.url}', lastAccessed=${ideTab.lastAccessedTime}")
         }
 
         val targetTabId = ideTab?.id ?: activeTabId
+        bridge.log("AUTOPILOT_DEBUG", "🎯 [ROUTER TARGET] Final injection targetTabId: '$targetTabId' (ideTab.id was '${ideTab?.id}', activeTabId was '$activeTabId')")
+
         cxpPillIdeTabId = targetTabId
         cxpPillStatus = "PATCHING"
         cxpPillMessage = "Committing patch to Conduit IDE..."
@@ -884,15 +897,43 @@ class BrowserStateHolder(
             (function() {
                 const payload = $escapedXml;
                 let attempts = 0;
+                const loc = window.location.href;
+                const ready = document.readyState;
+                const title = document.title;
+                if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                    window.OmniIdeBridge.log('AUTOPILOT_PROBE', '💉 ProbeScript entered window. loc: ' + loc + ' | readyState: ' + ready + ' | title: ' + title);
+                }
                 function tryIngest() {
+                    const fnType = typeof window.__conduitAutoIngestAndCommit;
                     if (window.__conduitAutoIngestAndCommit) {
-                        window.__conduitAutoIngestAndCommit(payload);
+                        if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                            window.OmniIdeBridge.log('AUTOPILOT_PROBE', '✅ Found window.__conduitAutoIngestAndCommit at attempt ' + attempts + '! Invoking with ' + payload.length + ' chars...');
+                        }
+                        try {
+                            window.__conduitAutoIngestAndCommit(payload);
+                        } catch (err) {
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                                window.OmniIdeBridge.log('AUTOPILOT_PROBE_ERR', '💥 Exception calling window.__conduitAutoIngestAndCommit: ' + err.message);
+                            }
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.reportPatchResult) {
+                                window.OmniIdeBridge.reportPatchResult('FAILED', 'Error executing ingest: ' + err.message);
+                            }
+                        }
                     } else if (attempts < 20) {
                         attempts++;
+                        if (attempts % 4 === 0 && window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                            window.OmniIdeBridge.log('AUTOPILOT_PROBE', '⏳ Waiting for window.__conduitAutoIngestAndCommit (attempt ' + attempts + '/20, typeof=' + fnType + ', loc=' + window.location.href + ')...');
+                        }
                         setTimeout(tryIngest, 250);
                     } else {
+                        const matchingKeys = Object.keys(window).filter(k => k.toLowerCase().includes('conduit') || k.toLowerCase().includes('cxp') || k.toLowerCase().includes('patch'));
+                        const iframesCount = document.querySelectorAll('iframe').length;
+                        const diagDetails = 'loc=' + window.location.href + ' | fnType=' + fnType + ' | matchingKeys=[' + matchingKeys.join(', ') + '] | iframes=' + iframesCount;
+                        if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                            window.OmniIdeBridge.log('AUTOPILOT_PROBE_ERR', '❌ Failed after 20 attempts (5s). Diag: ' + diagDetails);
+                        }
                         if (window.OmniIdeBridge && window.OmniIdeBridge.reportPatchResult) {
-                            window.OmniIdeBridge.reportPatchResult('FAILED', 'Conduit IDE not ready after 5s');
+                            window.OmniIdeBridge.reportPatchResult('FAILED', 'Conduit IDE not ready after 5s (' + diagDetails + ')');
                         }
                     }
                 }
@@ -902,23 +943,30 @@ class BrowserStateHolder(
 
         val ideWv = poolManager.pool[targetTabId]
         if (ideWv != null) {
+            bridge.log("AUTOPILOT_DEBUG", "📱 [POOL MATCH] Target WebView found in pool for '$targetTabId'. wv.url='${ideWv.url}', wv.originalUrl='${ideWv.originalUrl}', wv.progress=${ideWv.progress}")
             ideWv.onResume()
             containerLayout?.let { container ->
                 if (ideWv.parent !== container) {
+                    bridge.log("AUTOPILOT_DEBUG", "📦 [HIERARCHY] Attaching target WebView to container layout at index 0.")
                     (ideWv.parent as? android.view.ViewGroup)?.removeView(ideWv)
                     container.addView(ideWv, 0)
                 }
             }
 
-            bridge.log("AUTOPILOT_PIPELINE", "💉 [STAGE 2: INJECT] Dispatched probe into IDE tab [$targetTabId].")
-            ideWv.evaluateJavascript(probeScript, null)
+            bridge.log("AUTOPILOT_DEBUG", "💉 [EVAL DISPATCH] Calling evaluateJavascript on tab '$targetTabId'...")
+            ideWv.evaluateJavascript(probeScript) { evalResult ->
+                bridge.log("AUTOPILOT_DEBUG", "📝 evaluateJavascript callback returned: $evalResult")
+            }
         } else {
-            bridge.log("AUTOPILOT_PIPELINE", "⏳ [STAGE 2: INJECT QUEUE] IDE tab [$targetTabId] warming up. Polling injection...")
+            bridge.log("AUTOPILOT_DEBUG", "⏳ [POOL MISS] Target tab '$targetTabId' is NOT in poolManager.pool. Keys in pool: ${poolManager.pool.keys}. Waiting 600ms...")
             coroutineScope.launch {
                 delay(600)
                 val wv = poolManager.pool[targetTabId]
+                bridge.log("AUTOPILOT_DEBUG", "⏳ [POST DELAY] Re-checked pool for '$targetTabId': wv is ${if (wv != null) "FOUND (url='${wv.url}')" else "STILL NULL"}")
                 wv?.onResume()
-                wv?.evaluateJavascript(probeScript, null)
+                wv?.evaluateJavascript(probeScript) { evalResult ->
+                    bridge.log("AUTOPILOT_DEBUG", "📝 Post-delay evaluateJavascript callback returned: $evalResult")
+                }
             }
         }
     }
