@@ -13,17 +13,17 @@ import org.json.JSONObject
  */
 object LiveAutoPilotEngine {
 
-    fun arm(webView: WebView?, bridge: HostBridge) {
+    fun arm(webView: WebView?, bridge: HostBridge, showToast: Boolean = true) {
         if (webView == null) return
-        bridge.showToast("⚡ Live AI Auto-Pilot Armed!")
+        if (showToast) bridge.showToast("⚡ Live AI Auto-Pilot Armed!")
         bridge.log("AUTOPILOT_PIPELINE", "🟢 [ARMED] Live Auto-Pilot is now ACTIVE and watching AI Studio.")
         webView.evaluateJavascript(buildSentinelScript(), null)
         webView.evaluateJavascript("window.__omniLiveAutoPilotActive = true;", null)
     }
 
-    fun disarm(webView: WebView?, bridge: HostBridge) {
+    fun disarm(webView: WebView?, bridge: HostBridge, showToast: Boolean = true) {
         if (webView == null) return
-        bridge.showToast("Live Auto-Pilot Disarmed")
+        if (showToast) bridge.showToast("Live Auto-Pilot Disarmed")
         bridge.log("AUTOPILOT_PIPELINE", "🔴 [DISARMED] Live Auto-Pilot deactivated. All scrapers silenced.")
         webView.evaluateJavascript("window.__omniLiveAutoPilotActive = false;", null)
     }
