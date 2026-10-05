@@ -137,97 +137,6 @@ class BrowserStateHolder(
     var showAutoPilotConfirmDialog by mutableStateOf(false)
     var liveAutoPilotStatus by mutableStateOf("Watching")
     var automationStatus by mutableStateOf("Idle")
-=== REPLACE
-<<< FIND
-    fun toggleLiveAutoPilot() {
-        isLiveAutoPilotEnabled = !isLiveAutoPilotEnabled
-        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot: enabled=$isLiveAutoPilotEnabled")
-        if (isLiveAutoPilotEnabled) {
-            com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge)
-        } else {
-            showCxpPill = false
-            cxpPillStatus = null
-            cxpPillDismissJob?.cancel()
-            showAutoPilotConfirmDialog = false
-            pendingAutoPilotCxp = null
-            com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
-        }
-    }
-
-    fun toggleAutoPilotConfirm() {
-        isAutoPilotConfirmEnabled = !isAutoPilotConfirmEnabled
-        try {
-            val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
-            prefs.edit().putBoolean("autopilot_confirm_enabled", isAutoPilotConfirmEnabled).apply()
-        } catch (_: Exception) {}
-        bridge.showToast(if (isAutoPilotConfirmEnabled) "🛡️ Auto-Pilot: Confirmation Modal ON" else "⚡ Auto-Pilot: Auto-Commit ON")
-    }
-
-    fun approveAutoPilotCxp() {
-        val xml = pendingAutoPilotCxp ?: return
-        showAutoPilotConfirmDialog = false
-        pendingAutoPilotCxp = null
-        commitCxpToIde(xml)
-    }
-
-    fun rejectAutoPilotCxp() {
-        showAutoPilotConfirmDialog = false
-        pendingAutoPilotCxp = null
-        bridge.showToast("🛑 Patch discarded by user")
-        bridge.log("AUTOPILOT_PIPELINE", "🛑 [DISCARDED] User rejected patch in confirmation dialog.")
-    }
-=== REPLACE
-    fun toggleLiveAutoPilot() {
-        if (!isLiveAutoPilotEnabled && !currentUrl.contains("aistudio.google.com")) {
-            bridge.showToast("⚡ Auto-Pilot is only supported on Google AI Studio")
-            return
-        }
-        isLiveAutoPilotEnabled = !isLiveAutoPilotEnabled
-        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot: enabled=$isLiveAutoPilotEnabled")
-        if (isLiveAutoPilotEnabled) {
-            com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge)
-        } else {
-            showCxpPill = false
-            cxpPillStatus = null
-            cxpPillDismissJob?.cancel()
-            showAutoPilotConfirmDialog = false
-            pendingAutoPilotPayload = null
-            pendingAutoPilotActionType = null
-            com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
-        }
-    }
-
-    fun toggleAutoPilotConfirm() {
-        isAutoPilotConfirmEnabled = !isAutoPilotConfirmEnabled
-        try {
-            val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
-            prefs.edit().putBoolean("autopilot_confirm_enabled", isAutoPilotConfirmEnabled).apply()
-        } catch (_: Exception) {}
-        bridge.showToast(if (isAutoPilotConfirmEnabled) "🛡️ Auto-Pilot: Universal Confirmation ON" else "⚡ Auto-Pilot: Autonomous Mode ON")
-    }
-
-    fun approveAutoPilotAction() {
-        val payload = pendingAutoPilotPayload ?: return
-        val type = pendingAutoPilotActionType ?: "CXP"
-        showAutoPilotConfirmDialog = false
-        pendingAutoPilotPayload = null
-        pendingAutoPilotActionType = null
-
-        when (type) {
-            "CXP" -> commitCxpToIde(payload)
-            "PYTHON" -> executeLivePythonDirectly(payload)
-            "PULL" -> executeFilePullDirectly(payload)
-        }
-    }
-
-    fun rejectAutoPilotAction() {
-        val type = pendingAutoPilotActionType ?: "Action"
-        showAutoPilotConfirmDialog = false
-        pendingAutoPilotPayload = null
-        pendingAutoPilotActionType = null
-        bridge.showToast("🛑 $type discarded by user")
-        bridge.log("AUTOPILOT_PIPELINE", "🛑 [DISCARDED] User rejected $type in confirmation dialog.")
-    }
 
     // CXP Auto-Commit Banner State
     var cxpPillStatus by mutableStateOf<String?>(null)
@@ -860,6 +769,10 @@ class BrowserStateHolder(
     }
 
     fun toggleLiveAutoPilot() {
+        if (!isLiveAutoPilotEnabled && !currentUrl.contains("aistudio.google.com")) {
+            bridge.showToast("⚡ Auto-Pilot is only supported on Google AI Studio")
+            return
+        }
         isLiveAutoPilotEnabled = !isLiveAutoPilotEnabled
         bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot: enabled=$isLiveAutoPilotEnabled")
         if (isLiveAutoPilotEnabled) {
@@ -869,7 +782,8 @@ class BrowserStateHolder(
             cxpPillStatus = null
             cxpPillDismissJob?.cancel()
             showAutoPilotConfirmDialog = false
-            pendingAutoPilotCxp = null
+            pendingAutoPilotPayload = null
+            pendingAutoPilotActionType = null
             com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
         }
     }
@@ -880,21 +794,30 @@ class BrowserStateHolder(
             val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("autopilot_confirm_enabled", isAutoPilotConfirmEnabled).apply()
         } catch (_: Exception) {}
-        bridge.showToast(if (isAutoPilotConfirmEnabled) "🛡️ Auto-Pilot: Confirmation Modal ON" else "⚡ Auto-Pilot: Auto-Commit ON")
+        bridge.showToast(if (isAutoPilotConfirmEnabled) "🛡️ Auto-Pilot: Universal Confirmation ON" else "⚡ Auto-Pilot: Autonomous Mode ON")
     }
 
-    fun approveAutoPilotCxp() {
-        val xml = pendingAutoPilotCxp ?: return
+    fun approveAutoPilotAction() {
+        val payload = pendingAutoPilotPayload ?: return
+        val type = pendingAutoPilotActionType ?: "CXP"
         showAutoPilotConfirmDialog = false
-        pendingAutoPilotCxp = null
-        commitCxpToIde(xml)
+        pendingAutoPilotPayload = null
+        pendingAutoPilotActionType = null
+
+        when (type) {
+            "CXP" -> commitCxpToIde(payload)
+            "PYTHON" -> executeLivePythonDirectly(payload)
+            "PULL" -> executeFilePullDirectly(payload)
+        }
     }
 
-    fun rejectAutoPilotCxp() {
+    fun rejectAutoPilotAction() {
+        val type = pendingAutoPilotActionType ?: "Action"
         showAutoPilotConfirmDialog = false
-        pendingAutoPilotCxp = null
-        bridge.showToast("🛑 Patch discarded by user")
-        bridge.log("AUTOPILOT_PIPELINE", "🛑 [DISCARDED] User rejected patch in confirmation dialog.")
+        pendingAutoPilotPayload = null
+        pendingAutoPilotActionType = null
+        bridge.showToast("🛑 $type discarded by user")
+        bridge.log("AUTOPILOT_PIPELINE", "🛑 [DISCARDED] User rejected $type in confirmation dialog.")
     }
 
     override fun onLivePythonRequested(code: String) {
