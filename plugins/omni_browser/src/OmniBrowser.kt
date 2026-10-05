@@ -1031,10 +1031,7 @@ class OmniBrowser : PluginEntry() {
                 }
             }
 
-
-
             DownloadCompletedPillBanner(
-                visible = state.showDownloadBanner,
                 file = state.latestDownloadedFile,
                 onOpen = { file ->
                     openDownloadedFile(context, file, bridge)
