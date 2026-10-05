@@ -40,6 +40,7 @@ interface WebViewEventListener {
     fun onPatchReported(status: String, details: String)
     fun onFilePullRequested(xml: String)
     fun onFilesPulled(dumpText: String, fileCount: Int)
+    fun onSyncFavoriteIde(content: String): Boolean
 }
 
 class WebViewPoolManager(
@@ -306,6 +307,9 @@ class WebViewPoolManager(
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         listener.onFilesPulled(dumpText, fileCount)
                     }
+                },
+                onSyncFavoriteIde = { content ->
+                    listener.onSyncFavoriteIde(content)
                 },
                 onLog = { tag, msg -> bridge.log(tag, msg) }
             )
