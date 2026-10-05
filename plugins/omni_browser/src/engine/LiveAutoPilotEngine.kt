@@ -189,7 +189,7 @@ object LiveAutoPilotEngine {
                     }
 
                     // Strategy 3: Direct structural CXP boundary match (first tag to last closing tag)
-                    const tagNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
+                    const tagNames = ['cxp', 'omni_cxp', 'patch', 'comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
                     const pattern = '(<(?:' + tagNames + ')[\\s\\S]*<\\/(?:' + tagNames + ')>)';
                     const rawTagMatch = text.match(new RegExp(pattern, 'i'));
                     if (rawTagMatch && hasValidCxpTag(rawTagMatch[1])) {
@@ -203,6 +203,10 @@ object LiveAutoPilotEngine {
                     if (!rawPayload) return false;
                     const tag = (name) => new RegExp('<' + name, 'gi');
                     const endTag = (name) => new RegExp('<\\/' + name + '>', 'gi');
+
+                    const openCxp = (rawPayload.match(/<(?:cxp|omni_cxp|patch)\b/gi) || []).length;
+                    const closeCxp = (rawPayload.match(/<\/(?:cxp|omni_cxp|patch)>/gi) || []).length;
+                    if (openCxp !== closeCxp) return false;
 
                     const openReplace = (rawPayload.match(tag('replace' + '_block')) || []).length;
                     const closeReplace = (rawPayload.match(endTag('replace' + '_block')) || []).length;
