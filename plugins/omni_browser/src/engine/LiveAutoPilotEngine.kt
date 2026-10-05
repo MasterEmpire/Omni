@@ -57,7 +57,7 @@ object LiveAutoPilotEngine {
                 bridge.log("LIVE_PYTHON_STREAM", chunk)
             },
             onComplete = { success, output ->
-                coroutineScope.launch(Dispatchers.Main) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
                     onStatusChanged("Watching")
                     val effectiveOutput = if (output.isNotBlank()) output.trim() else streamBuffer.toString().trim()
                     bridge.log("LIVE_AUTO", "Python finished (success=$success, outputLen=${effectiveOutput.length})")
@@ -109,10 +109,22 @@ object LiveAutoPilotEngine {
         val escapedMime = if (attachedMime != null) JSONObject.quote(attachedMime) else "null"
 
         bridge.log("LIVE_AUTO", "Delivering result to AI Studio (${cleanOutput.length} chars, file=$attachedFileName)")
-        webView.evaluateJavascript(
-            "if (window.__omniDeliverPythonResult) { window.__omniDeliverPythonResult($escapedText, $escapedName, $escapedB64, $escapedMime); }",
-            null
-        )
+        val deliveryScript = """
+            (function() {
+                if (typeof window.__omniDeliverPythonResult === 'function') {
+                    window.__omniDeliverPythonResult($escapedText, $escapedName, $escapedB64, $escapedMime);
+                    return 'DELIVERED';
+                } else {
+                    if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                        window.OmniPythonBridge.log('LIVE_AUTO_ERR', 'window.__omniDeliverPythonResult is missing on page (loc=' + window.location.href + ')');
+                    }
+                    return 'MISSING_DELIVERY_FN';
+                }
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(deliveryScript) { evalResult ->
+            bridge.log("LIVE_AUTO", "Delivery evaluateJavascript callback returned: $evalResult")
+        }
     }
 
     fun buildSentinelScript(): String {
@@ -418,6 +430,9 @@ object LiveAutoPilotEngine {
                 }
 
                             window.__omniDeliverPythonResult = async function(textResult, fileName, fileBase64, mimeType) {
+                if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                    window.OmniPythonBridge.log('LIVE_AUTO_JS', 'Delivering python output to AI Studio (' + (textResult ? textResult.length : 0) + ' chars, file=' + fileName + ')...');
+                }
                 // 1. If a generated file was produced by Python, attach it via DataTransfer
                 if (fileName && fileBase64) {
                     try {
@@ -436,23 +451,37 @@ object LiveAutoPilotEngine {
                             fileInput.dispatchEvent(new Event('change', { bubbles: true }));
                             await delay(1600);
                         }
-                    } catch(e) {}
+                    } catch(e) {
+                        if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                            window.OmniPythonBridge.log('LIVE_AUTO_JS_ERR', 'Failed attaching file: ' + e.message);
+                        }
+                    }
                 }
 
                 // 2. Inject text into textarea
                 const promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
                 if (promptArea) {
                     safeInjectText(promptArea, textResult);
+                    if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                        window.OmniPythonBridge.log('LIVE_AUTO_JS', 'Injected text into prompt textarea. Polling Run button...');
+                    }
                     await delay(800);
                     let readyWait = 0;
                     while (readyWait < 25) {
                         const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
                         if (submitBtn && isRunButtonReady(submitBtn)) {
                             submitBtn.click();
+                            if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                                window.OmniPythonBridge.log('LIVE_AUTO_JS', 'Successfully clicked Run button!');
+                            }
                             break;
                         }
                         await delay(300);
                         readyWait++;
+                    }
+                } else {
+                    if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                        window.OmniPythonBridge.log('LIVE_AUTO_JS_ERR', 'Prompt textarea not found in DOM.');
                     }
                 }
             };
