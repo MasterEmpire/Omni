@@ -661,12 +661,81 @@ class OmniBrowser : PluginEntry() {
                 )
             }
 
-            // --- Modals & Dialogs ---
-            val hostActivity = context as? android.app.Activity
-            val isHostAlive = hostActivity == null || (!hostActivity.isFinishing && !hostActivity.isDestroyed)
+                    // --- Modals & Dialogs ---
+        val hostActivity = context as? android.app.Activity
+        val isHostAlive = hostActivity == null || (!hostActivity.isFinishing && !hostActivity.isDestroyed)
 
-            if (isHostAlive) {
-                if (state.showSmartNotesDialog) {
+        if (isHostAlive) {
+            if (state.showAutoPilotConfirmDialog && state.pendingAutoPilotCxp != null) {
+                val rawPayload = state.pendingAutoPilotCxp!!
+                val replaces = Regex("<replace_block\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
+                val creates = Regex("<create_file\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
+                val deletes = Regex("<delete_file\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
+                val projMatch = Regex("(?:project|repo)=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(rawPayload)?.groupValues?.get(1) ?: "Default Workspace"
+
+                AlertDialog(
+                    onDismissRequest = { state.rejectAutoPilotCxp() },
+                    containerColor = Color(0xFF1E2228),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🛡️", fontSize = 20.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Auto-Pilot Confirmation", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF16181D),
+                                border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text("Target Project: $projMatch", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text("Replaces: $replaces | Creates: $creates | Deletes: $deletes", color = Color(0xFF9AA0A6), fontSize = 11.sp)
+                                }
+                            }
+                            Text("Captured Patch Preview:", color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF121418))
+                                    .padding(8.dp)
+                            ) {
+                                androidx.compose.foundation.lazy.LazyColumn {
+                                    item {
+                                        Text(
+                                            text = rawPayload,
+                                            color = Color(0xFFD4D4D4),
+                                            fontSize = 10.sp,
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { state.approveAutoPilotCxp() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF))
+                        ) {
+                            Text("Commit to IDE", color = Color(0xFF121418), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { state.rejectAutoPilotCxp() }) {
+                            Text("Discard", color = Color(0xFFF28B82), fontSize = 12.sp)
+                        }
+                    }
+                )
+            }
+
+            if (state.showSmartNotesDialog) {
                     SmartNotesDialog(
                         bridge = bridge,
                         notes = state.smartNotes,
