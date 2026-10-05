@@ -219,6 +219,140 @@ object LiveAutoPilotEngine {
                     return null;
                 }
 
+                function extractPythonBlock(text) {
+                    if (!text) return null;
+
+                    const pairs = [
+                        {
+                            open: /<execute_python\b[^>]*>/gi,
+                            close: /<\/execute_python>/gi,
+                            innerTagCheck: /<\/?(?:execute_python|omni_action)\b/i
+                        },
+                        {
+                            open: /<omni_action\s+name=["']execute_python["'][^>]*>/gi,
+                            close: /<\/omni_action>/gi,
+                            innerTagCheck: /<\/?omni_action\b/i
+                        }
+                    ];
+
+                    let foundScript = null;
+
+                    for (const pair of pairs) {
+                        let searchIndex = 0;
+                        while (searchIndex < text.length) {
+                            pair.close.lastIndex = searchIndex;
+                            const closeMatch = pair.close.exec(text);
+                            if (!closeMatch) break;
+
+                            const closeStart = closeMatch.index;
+                            const closeEnd = closeStart + closeMatch[0].length;
+
+                            pair.open.lastIndex = searchIndex;
+                            let lastOpenMatch = null;
+                            let oMatch;
+                            while ((oMatch = pair.open.exec(text)) !== null) {
+                                if (oMatch.index >= closeStart) break;
+                                lastOpenMatch = oMatch;
+                            }
+
+                            if (lastOpenMatch) {
+                                const openEnd = lastOpenMatch.index + lastOpenMatch[0].length;
+                                const innerCode = text.substring(openEnd, closeStart).trim();
+
+                                if (innerCode.length > 0 && !pair.innerTagCheck.test(innerCode)) {
+                                    let cleanCode = innerCode
+                                        .replace(/^```(?:python|py)?[\r\n]+/i, '')
+                                        .trim();
+                                    if (cleanCode.endsWith('```')) {
+                                        cleanCode = cleanCode.slice(0, -3).trim();
+                                    }
+
+                                    if (cleanCode.length > 0) {
+                                        foundScript = cleanCode;
+                                        searchIndex = closeEnd;
+                                        continue;
+                                    }
+                                }
+                            }
+                            searchIndex = closeEnd;
+                        }
+                        if (foundScript) break;
+                    }
+
+                    return foundScript;
+                }
+
+                function extractPullFilesBlock(text) {
+                    if (!text) return null;
+
+                    const selfClosingRegex = /<(?:pull_files|omni_action\s+name=["']pull_files["'])\b[^>]*?\/>/gi;
+                    let scMatch;
+                    let lastSelfClosing = null;
+                    while ((scMatch = selfClosingRegex.exec(text)) !== null) {
+                        const raw = scMatch[0].trim();
+                        if (/files?\s*=/i.test(raw)) {
+                            lastSelfClosing = raw;
+                        }
+                    }
+                    if (lastSelfClosing) return lastSelfClosing;
+
+                    const pairs = [
+                        {
+                            open: /<pull_files\b[^>]*>/gi,
+                            close: /<\/pull_files>/gi,
+                            innerTagCheck: /<\/?pull_files\b/i
+                        },
+                        {
+                            open: /<omni_action\s+name=["']pull_files["'][^>]*>/gi,
+                            close: /<\/omni_action>/gi,
+                            innerTagCheck: /<\/?omni_action\b/i
+                        }
+                    ];
+
+                    let foundPull = null;
+
+                    for (const pair of pairs) {
+                        let searchIndex = 0;
+                        while (searchIndex < text.length) {
+                            pair.close.lastIndex = searchIndex;
+                            const closeMatch = pair.close.exec(text);
+                            if (!closeMatch) break;
+
+                            const closeStart = closeMatch.index;
+                            const closeEnd = closeStart + closeMatch[0].length;
+
+                            pair.open.lastIndex = searchIndex;
+                            let lastOpenMatch = null;
+                            let oMatch;
+                            while ((oMatch = pair.open.exec(text)) !== null) {
+                                if (oMatch.index >= closeStart) break;
+                                lastOpenMatch = oMatch;
+                            }
+
+                            if (lastOpenMatch) {
+                                const openEnd = lastOpenMatch.index + lastOpenMatch[0].length;
+                                const inner = text.substring(openEnd, closeStart).trim();
+                                const fullBurger = text.substring(lastOpenMatch.index, closeEnd).trim();
+
+                                const hasAction = /<file\b/i.test(inner) || /files?\s*=/i.test(lastOpenMatch[0]);
+                                const fileOpenCount = (inner.match(/<file\b/gi) || []).length;
+                                const fileCloseCount = (inner.match(/<\/file>/gi) || []).length;
+                                const isBalanced = fileOpenCount === fileCloseCount;
+
+                                if (hasAction && isBalanced && !pair.innerTagCheck.test(inner)) {
+                                    foundPull = fullBurger;
+                                    searchIndex = closeEnd;
+                                    continue;
+                                }
+                            }
+                            searchIndex = closeEnd;
+                        }
+                        if (foundPull) break;
+                    }
+
+                    return foundPull;
+                }
+
                 function getScreenText(turnEl) {
                     if (!turnEl) return '';
                     try {
@@ -395,14 +529,12 @@ object LiveAutoPilotEngine {
 
                     // 2. Detect & Auto-Bridge Python Tool Execution to Nexus
                     if (latestTurn.getAttribute('data-omni-executed') !== 'true') {
-                        const match = screenText.match(/<(?:omni_action\s+name=["']execute_python["']|execute_python)>([\s\S]*?)<\/(?:omni_action|execute_python)>/i);
+                        const pythonScript = extractPythonBlock(screenText);
 
-                        if (match && match[1]) {
+                        if (pythonScript) {
                             latestTurn.setAttribute('data-omni-executed', 'true');
-                            const pythonScript = match[1].trim();
-
                             if (window.OmniPythonBridge && window.OmniPythonBridge.executeFromLivePage) {
-                                window.OmniPythonBridge.log('LIVE_AUTO', 'Captured Python block from chat turn. Executing on Nexus...');
+                                window.OmniPythonBridge.log('LIVE_AUTO', 'Captured Python block from chat turn (' + pythonScript.length + ' chars). Executing on Nexus...');
                                 window.OmniPythonBridge.executeFromLivePage(pythonScript);
                             }
                         }
@@ -410,13 +542,12 @@ object LiveAutoPilotEngine {
 
                     // 3. Detect & Auto-Bridge Project File Pulling to Conduit IDE
                     if (latestTurn.getAttribute('data-omni-pull-executed') !== 'true') {
-                        const pullMatch = screenText.match(/<(?:omni_action\s+name=["']pull_files["']|pull_files)(?:\s+[^>]*?)?>[\s\S]*?<\/(?:omni_action|pull_files)>/i);
-                        if (pullMatch) {
+                        const pullPayload = extractPullFilesBlock(screenText);
+                        if (pullPayload) {
                             latestTurn.setAttribute('data-omni-pull-executed', 'true');
-                            const pullPayload = pullMatch[0].trim();
                             if (window.OmniIdeBridge && window.OmniIdeBridge.requestFilePull) {
                                 if (window.OmniIdeBridge.log) {
-                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📂 [STAGE 1: SCRAPED PULL] Captured pull_files request. Beaming to Conduit IDE...');
+                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📂 [STAGE 1: SCRAPED PULL] Captured pull_files request (' + pullPayload.length + ' chars). Beaming to Conduit IDE...');
                                 }
                                 window.OmniIdeBridge.requestFilePull(pullPayload);
                             }
