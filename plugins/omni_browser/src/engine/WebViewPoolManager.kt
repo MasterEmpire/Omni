@@ -38,6 +38,8 @@ interface WebViewEventListener {
     fun onLivePythonRequested(code: String)
     fun onCxpDispatched(xml: String)
     fun onPatchReported(status: String, details: String)
+    fun onFilePullRequested(xml: String)
+    fun onFilesPulled(dumpText: String, fileCount: Int)
 }
 
 class WebViewPoolManager(
@@ -293,6 +295,16 @@ class WebViewPoolManager(
                 onPatchReported = { status, details ->
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         listener.onPatchReported(status, details)
+                    }
+                },
+                onFilePullRequested = { xml ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onFilePullRequested(xml)
+                    }
+                },
+                onFilesPulled = { dumpText, fileCount ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onFilesPulled(dumpText, fileCount)
                     }
                 },
                 onLog = { tag, msg -> bridge.log(tag, msg) }
