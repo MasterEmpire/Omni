@@ -904,16 +904,19 @@ class BrowserStateHolder(
                     window.OmniIdeBridge.log('AUTOPILOT_PROBE', '💉 ProbeScript entered window. loc: ' + loc + ' | readyState: ' + ready + ' | title: ' + title);
                 }
                 function tryIngest() {
-                    const fnType = typeof window.__conduitAutoIngestAndCommit;
-                    if (window.__conduitAutoIngestAndCommit) {
+                    const ingestFn = window.__conduitAutoIngestCXP || window.__conduitAutoIngestAndCommit;
+                    const fnName = window.__conduitAutoIngestCXP ? '__conduitAutoIngestCXP' : '__conduitAutoIngestAndCommit';
+                    const fnType = typeof ingestFn;
+
+                    if (typeof ingestFn === 'function') {
                         if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                            window.OmniIdeBridge.log('AUTOPILOT_PROBE', '✅ Found window.__conduitAutoIngestAndCommit at attempt ' + attempts + '! Invoking with ' + payload.length + ' chars...');
+                            window.OmniIdeBridge.log('AUTOPILOT_PROBE', '✅ Found window.' + fnName + ' at attempt ' + attempts + '! Invoking with ' + payload.length + ' chars...');
                         }
                         try {
-                            window.__conduitAutoIngestAndCommit(payload);
+                            ingestFn(payload);
                         } catch (err) {
                             if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                                window.OmniIdeBridge.log('AUTOPILOT_PROBE_ERR', '💥 Exception calling window.__conduitAutoIngestAndCommit: ' + err.message);
+                                window.OmniIdeBridge.log('AUTOPILOT_PROBE_ERR', '💥 Exception calling window.' + fnName + ': ' + err.message);
                             }
                             if (window.OmniIdeBridge && window.OmniIdeBridge.reportPatchResult) {
                                 window.OmniIdeBridge.reportPatchResult('FAILED', 'Error executing ingest: ' + err.message);
@@ -922,7 +925,7 @@ class BrowserStateHolder(
                     } else if (attempts < 20) {
                         attempts++;
                         if (attempts % 4 === 0 && window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                            window.OmniIdeBridge.log('AUTOPILOT_PROBE', '⏳ Waiting for window.__conduitAutoIngestAndCommit (attempt ' + attempts + '/20, typeof=' + fnType + ', loc=' + window.location.href + ')...');
+                            window.OmniIdeBridge.log('AUTOPILOT_PROBE', '⏳ Waiting for window.' + fnName + ' (attempt ' + attempts + '/20, typeof=' + fnType + ', loc=' + window.location.href + ')...');
                         }
                         setTimeout(tryIngest, 250);
                     } else {
