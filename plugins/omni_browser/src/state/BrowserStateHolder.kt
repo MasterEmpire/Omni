@@ -1495,6 +1495,7 @@ class BrowserStateHolder(
 
     fun handleBackPressed(): Boolean {
         return when {
+            showAutoPilotConfirmDialog -> { rejectAutoPilotCxp(); true }
             showDownloadBanner -> { showDownloadBanner = false; true }
             showMenu -> { showMenu = false; true }
             showSmartNotesDialog -> { showSmartNotesDialog = false; true }
