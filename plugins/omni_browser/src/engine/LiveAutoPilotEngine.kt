@@ -150,73 +150,73 @@ object LiveAutoPilotEngine {
                 function extractCxpBlock(text) {
                     if (!text) return null;
 
-                    const hasValidCxpTag = (str) => {
-                        if (!str || str.length < 15) return false;
-                        const tNames = ['comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
-                        return new RegExp('<(?:' + tNames + ')\\b', 'i').test(str);
-                    };
+                    // Evaluates the "Meat" between the buns
+                    function isBurgerValidAndBalanced(burgerStr) {
+                        if (!burgerStr || burgerStr.length < 20) return false;
 
-                    // Strategy 1: Explicit unique wrapper tag <cxp>...</cxp> or <patch>...</patch>
-                    // Retains the full tag wrapper (wMatch[0]) so downstream IDE can parse attributes like project="..."
-                    const wrapperRegex = /<(?:cxp|omni_cxp|patch)[^>]*>[\s\S]*?<\/(?:cxp|omni_cxp|patch)>/gi;
-                    const wrapperCandidates = [];
-                    let wMatch;
-                    while ((wMatch = wrapperRegex.exec(text)) !== null) {
-                        const candidate = wMatch[0].trim();
-                        if (hasValidCxpTag(candidate)) {
-                            wrapperCandidates.push(candidate);
+                        // 1. Must contain at least one real operational tag
+                        const hasAction = /<(?:comment|replace_block|create_file|delete_file|rename_file|export_files)\b/i.test(burgerStr);
+                        if (!hasAction) return false;
+
+                        // 2. Exactly one open wrapper and one close wrapper in this candidate slice
+                        const openWrapper = (burgerStr.match(/<(?:cxp|omni_cxp|patch)\b/gi) || []).length;
+                        const closeWrapper = (burgerStr.match(/<\/(?:cxp|omni_cxp|patch)>/gi) || []).length;
+                        if (openWrapper !== 1 || closeWrapper !== 1) return false;
+
+                        // 3. Paired Container Tags Balance Sentry
+                        const tagCount = (name) => (burgerStr.match(new RegExp('<' + name + '\\b', 'gi')) || []).length;
+                        const endTagCount = (name) => (burgerStr.match(new RegExp('<\\/' + name + '>', 'gi')) || []).length;
+
+                        if (tagCount('replace_block') !== endTagCount('replace_block')) return false;
+                        if (tagCount('create_file') !== endTagCount('create_file')) return false;
+                        if (tagCount('comment') !== endTagCount('comment')) return false;
+                        if (tagCount('find') !== endTagCount('find')) return false;
+                        if (tagCount('replace_with') !== endTagCount('replace_with')) return false;
+                        if (tagCount('content') !== endTagCount('content')) return false;
+
+                        return true;
+                    }
+
+                    // Top-Down Sequential Hamburger Scanner with "Tightest Bun Rule"
+                    const openRegex = /<(?:cxp|omni_cxp|patch)\b[^>]*>/gi;
+                    const closeRegex = /<\/(?:cxp|omni_cxp|patch)>/gi;
+                    const validBurgers = [];
+                    let searchIndex = 0;
+
+                    while (searchIndex < text.length) {
+                        closeRegex.lastIndex = searchIndex;
+                        const closeMatch = closeRegex.exec(text);
+                        if (!closeMatch) break;
+
+                        const closeStart = closeMatch.index;
+                        const closeEnd = closeStart + closeMatch[0].length;
+
+                        // Find the tightest (latest) opening tag before this closing tag
+                        openRegex.lastIndex = searchIndex;
+                        let lastOpenMatch = null;
+                        let oMatch;
+                        while ((oMatch = openRegex.exec(text)) !== null) {
+                            if (oMatch.index >= closeStart) break;
+                            lastOpenMatch = oMatch;
                         }
-                    }
-                    if (wrapperCandidates.length > 0) {
-                        // Join all valid blocks to support sequential multi-project patching!
-                        return wrapperCandidates.join('\n\n');
-                    }
 
-                    // Strategy 2: Markdown code fence match (if in raw mode)
-                    const fenceRegex = /```(?:xml|cxp)?\s*([\s\S]*?)```/gi;
-                    const fenceCandidates = [];
-                    let fMatch;
-                    while ((fMatch = fenceRegex.exec(text)) !== null) {
-                        let candidate = fMatch[1].trim();
-                        const innerMatch = candidate.match(/<(?:cxp|omni_cxp|patch)>([\s\S]*?)<\/(?:cxp|omni_cxp|patch)>/i);
-                        if (innerMatch) candidate = innerMatch[1].trim();
-                        if (hasValidCxpTag(candidate)) {
-                            fenceCandidates.push(candidate);
+                        if (lastOpenMatch) {
+                            const candidate = text.substring(lastOpenMatch.index, closeEnd).trim();
+                            if (isBurgerValidAndBalanced(candidate)) {
+                                validBurgers.push(candidate);
+                                searchIndex = closeEnd;
+                                continue;
+                            }
                         }
-                    }
-                    if (fenceCandidates.length > 0) {
-                        return fenceCandidates[fenceCandidates.length - 1];
+
+                        searchIndex = closeEnd;
                     }
 
-                    // Strategy 3: Direct structural CXP boundary match (first tag to last closing tag)
-                    const tagNames = ['cxp', 'omni_cxp', 'patch', 'comment', 'replace' + '_block', 'create' + '_file', 'delete' + '_file', 'rename' + '_file', 'export' + '_files'].join('|');
-                    const pattern = '(<(?:' + tagNames + ')[\\s\\S]*<\\/(?:' + tagNames + ')>)';
-                    const rawTagMatch = text.match(new RegExp(pattern, 'i'));
-                    if (rawTagMatch && hasValidCxpTag(rawTagMatch[1])) {
-                        return rawTagMatch[1].trim();
+                    if (validBurgers.length > 0) {
+                        return validBurgers.join('\n\n');
                     }
 
                     return null;
-                }
-
-                function isCxpBalanced(rawPayload) {
-                    if (!rawPayload) return false;
-                    const tag = (name) => new RegExp('<' + name, 'gi');
-                    const endTag = (name) => new RegExp('<\\/' + name + '>', 'gi');
-
-                    const openCxp = (rawPayload.match(/<(?:cxp|omni_cxp|patch)\b/gi) || []).length;
-                    const closeCxp = (rawPayload.match(/<\/(?:cxp|omni_cxp|patch)>/gi) || []).length;
-                    if (openCxp !== closeCxp) return false;
-
-                    const openReplace = (rawPayload.match(tag('replace' + '_block')) || []).length;
-                    const closeReplace = (rawPayload.match(endTag('replace' + '_block')) || []).length;
-                    const openCreate = (rawPayload.match(tag('create' + '_file')) || []).length;
-                    const closeCreate = (rawPayload.match(endTag('create' + '_file')) || []).length;
-                    const openComment = (rawPayload.match(tag('comment')) || []).length;
-                    const closeComment = (rawPayload.match(endTag('comment')) || []).length;
-
-                    if (openReplace === 0 && openCreate === 0 && openComment === 0 && !rawPayload.includes('<export_files') && !rawPayload.includes('<delete_file') && !rawPayload.includes('<rename_file')) return false;
-                    return openReplace === closeReplace && openCreate === closeCreate && openComment === closeComment;
                 }
 
                 function getScreenText(turnEl) {
@@ -383,20 +383,12 @@ object LiveAutoPilotEngine {
                     if (latestTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
                         const cxpPayload = extractCxpBlock(screenText);
                         if (cxpPayload) {
-                            const balanced = isCxpBalanced(cxpPayload);
-                            if (balanced) {
-                                latestTurn.setAttribute('data-omni-cxp-executed', 'true');
-                                if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [STAGE 1: SCRAPED] Balanced CXP extracted (' + cxpPayload.length + ' chars). Beaming to Conduit IDE...');
-                                }
-                                if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
-                                    window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
-                                }
-                            } else {
-                                window.__cxpTicks = (window.__cxpTicks || 0) + 1;
-                                if (window.__cxpTicks % 5 === 0 && window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '⏳ [STAGE 1: WAITING CLOSURES] Detected CXP but tags still streaming. Length: ' + cxpPayload.length);
-                                }
+                            latestTurn.setAttribute('data-omni-cxp-executed', 'true');
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                                window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [STAGE 1: SCRAPED] Valid CXP burger extracted (' + cxpPayload.length + ' chars). Beaming to Conduit IDE...');
+                            }
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
+                                window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
                             }
                         }
                     }
