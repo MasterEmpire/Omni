@@ -119,8 +119,14 @@ class OmniIdeBridge(
     private val onPatchReported: (status: String, details: String) -> Unit,
     private val onFilePullRequested: (xml: String) -> Unit = {},
     private val onFilesPulled: (dumpText: String, fileCount: Int) -> Unit = { _, _ -> },
+    private val onSyncFavoriteIde: (content: String) -> Boolean = { false },
     private val onLog: (tag: String, message: String) -> Unit
 ) {
+    @JavascriptInterface
+    fun syncFavoriteIde(htmlContent: String): Boolean {
+        return onSyncFavoriteIde(htmlContent)
+    }
+
     @JavascriptInterface
     fun dispatchCxpToIde(xml: String) {
         onCxpDispatched(xml)
