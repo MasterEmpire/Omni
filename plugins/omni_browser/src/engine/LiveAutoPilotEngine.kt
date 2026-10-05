@@ -415,6 +415,21 @@ object LiveAutoPilotEngine {
                             }
                         }
                     }
+
+                    // 3. Detect & Auto-Bridge Project File Pulling to Conduit IDE
+                    if (latestTurn.getAttribute('data-omni-pull-executed') !== 'true') {
+                        const pullMatch = screenText.match(/<(?:omni_action\s+name=["']pull_files["']|pull_files)(?:\s+[^>]*?)?>[\s\S]*?<\/(?:omni_action|pull_files)>/i);
+                        if (pullMatch) {
+                            latestTurn.setAttribute('data-omni-pull-executed', 'true');
+                            const pullPayload = pullMatch[0].trim();
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.requestFilePull) {
+                                if (window.OmniIdeBridge.log) {
+                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📂 [STAGE 1: SCRAPED PULL] Captured pull_files request. Beaming to Conduit IDE...');
+                                }
+                                window.OmniIdeBridge.requestFilePull(pullPayload);
+                            }
+                        }
+                    }
                 }, 600);
             })();
         """.trimIndent()
