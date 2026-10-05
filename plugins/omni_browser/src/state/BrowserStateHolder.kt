@@ -857,7 +857,7 @@ class BrowserStateHolder(
                 code = code,
                 webView = currentWebView,
                 bridge = bridge,
-                coroutineScope = this,
+                coroutineScope = this@BrowserStateHolder.coroutineScope,
                 onStatusChanged = { liveAutoPilotStatus = it }
             )
         }
