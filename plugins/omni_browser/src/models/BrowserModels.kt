@@ -117,6 +117,8 @@ class OmniPythonBridge(
 class OmniIdeBridge(
     private val onCxpDispatched: (xml: String) -> Unit,
     private val onPatchReported: (status: String, details: String) -> Unit,
+    private val onFilePullRequested: (xml: String) -> Unit = {},
+    private val onFilesPulled: (dumpText: String, fileCount: Int) -> Unit = { _, _ -> },
     private val onLog: (tag: String, message: String) -> Unit
 ) {
     @JavascriptInterface
@@ -127,6 +129,16 @@ class OmniIdeBridge(
     @JavascriptInterface
     fun reportPatchResult(status: String, details: String) {
         onPatchReported(status, details)
+    }
+
+    @JavascriptInterface
+    fun requestFilePull(xml: String) {
+        onFilePullRequested(xml)
+    }
+
+    @JavascriptInterface
+    fun deliverPulledFiles(dumpText: String, fileCount: Int) {
+        onFilesPulled(dumpText, fileCount)
     }
 
     @JavascriptInterface
