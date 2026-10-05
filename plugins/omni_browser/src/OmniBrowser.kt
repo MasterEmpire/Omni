@@ -602,6 +602,8 @@ class OmniBrowser : PluginEntry() {
                 },
                 isLiveAutoPilotEnabled = state.isLiveAutoPilotEnabled,
                 onToggleLiveAutoPilot = { state.toggleLiveAutoPilot() },
+                isAutoPilotConfirmEnabled = state.isAutoPilotConfirmEnabled,
+                onToggleAutoPilotConfirm = { state.toggleAutoPilotConfirm() },
                 onOpenLocalIde = {
                     state.openLocalIdeAsNeighbor()
                 },
