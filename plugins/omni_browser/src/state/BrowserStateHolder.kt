@@ -132,10 +132,102 @@ class BrowserStateHolder(
     // Live On-Screen Auto-Pilot State
     var isLiveAutoPilotEnabled by mutableStateOf(false)
     var isAutoPilotConfirmEnabled by mutableStateOf(false)
-    var pendingAutoPilotCxp by mutableStateOf<String?>(null)
+    var pendingAutoPilotPayload by mutableStateOf<String?>(null)
+    var pendingAutoPilotActionType by mutableStateOf<String?>(null) // "CXP", "PYTHON", "PULL"
     var showAutoPilotConfirmDialog by mutableStateOf(false)
     var liveAutoPilotStatus by mutableStateOf("Watching")
     var automationStatus by mutableStateOf("Idle")
+=== REPLACE
+<<< FIND
+    fun toggleLiveAutoPilot() {
+        isLiveAutoPilotEnabled = !isLiveAutoPilotEnabled
+        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot: enabled=$isLiveAutoPilotEnabled")
+        if (isLiveAutoPilotEnabled) {
+            com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge)
+        } else {
+            showCxpPill = false
+            cxpPillStatus = null
+            cxpPillDismissJob?.cancel()
+            showAutoPilotConfirmDialog = false
+            pendingAutoPilotCxp = null
+            com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
+        }
+    }
+
+    fun toggleAutoPilotConfirm() {
+        isAutoPilotConfirmEnabled = !isAutoPilotConfirmEnabled
+        try {
+            val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("autopilot_confirm_enabled", isAutoPilotConfirmEnabled).apply()
+        } catch (_: Exception) {}
+        bridge.showToast(if (isAutoPilotConfirmEnabled) "🛡️ Auto-Pilot: Confirmation Modal ON" else "⚡ Auto-Pilot: Auto-Commit ON")
+    }
+
+    fun approveAutoPilotCxp() {
+        val xml = pendingAutoPilotCxp ?: return
+        showAutoPilotConfirmDialog = false
+        pendingAutoPilotCxp = null
+        commitCxpToIde(xml)
+    }
+
+    fun rejectAutoPilotCxp() {
+        showAutoPilotConfirmDialog = false
+        pendingAutoPilotCxp = null
+        bridge.showToast("🛑 Patch discarded by user")
+        bridge.log("AUTOPILOT_PIPELINE", "🛑 [DISCARDED] User rejected patch in confirmation dialog.")
+    }
+=== REPLACE
+    fun toggleLiveAutoPilot() {
+        if (!isLiveAutoPilotEnabled && !currentUrl.contains("aistudio.google.com")) {
+            bridge.showToast("⚡ Auto-Pilot is only supported on Google AI Studio")
+            return
+        }
+        isLiveAutoPilotEnabled = !isLiveAutoPilotEnabled
+        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot: enabled=$isLiveAutoPilotEnabled")
+        if (isLiveAutoPilotEnabled) {
+            com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge)
+        } else {
+            showCxpPill = false
+            cxpPillStatus = null
+            cxpPillDismissJob?.cancel()
+            showAutoPilotConfirmDialog = false
+            pendingAutoPilotPayload = null
+            pendingAutoPilotActionType = null
+            com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
+        }
+    }
+
+    fun toggleAutoPilotConfirm() {
+        isAutoPilotConfirmEnabled = !isAutoPilotConfirmEnabled
+        try {
+            val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("autopilot_confirm_enabled", isAutoPilotConfirmEnabled).apply()
+        } catch (_: Exception) {}
+        bridge.showToast(if (isAutoPilotConfirmEnabled) "🛡️ Auto-Pilot: Universal Confirmation ON" else "⚡ Auto-Pilot: Autonomous Mode ON")
+    }
+
+    fun approveAutoPilotAction() {
+        val payload = pendingAutoPilotPayload ?: return
+        val type = pendingAutoPilotActionType ?: "CXP"
+        showAutoPilotConfirmDialog = false
+        pendingAutoPilotPayload = null
+        pendingAutoPilotActionType = null
+
+        when (type) {
+            "CXP" -> commitCxpToIde(payload)
+            "PYTHON" -> executeLivePythonDirectly(payload)
+            "PULL" -> executeFilePullDirectly(payload)
+        }
+    }
+
+    fun rejectAutoPilotAction() {
+        val type = pendingAutoPilotActionType ?: "Action"
+        showAutoPilotConfirmDialog = false
+        pendingAutoPilotPayload = null
+        pendingAutoPilotActionType = null
+        bridge.showToast("🛑 $type discarded by user")
+        bridge.log("AUTOPILOT_PIPELINE", "🛑 [DISCARDED] User rejected $type in confirmation dialog.")
+    }
 
     // CXP Auto-Commit Banner State
     var cxpPillStatus by mutableStateOf<String?>(null)
@@ -807,6 +899,18 @@ class BrowserStateHolder(
 
     override fun onLivePythonRequested(code: String) {
         if (!isLiveAutoPilotEnabled) return
+        if (isAutoPilotConfirmEnabled) {
+            bridge.log("AUTOPILOT_PIPELINE", "🛡️ [CONFIRM GUARD] Python execution requires confirmation.")
+            pendingAutoPilotPayload = code
+            pendingAutoPilotActionType = "PYTHON"
+            showAutoPilotConfirmDialog = true
+            bridge.vibrate(40L)
+            return
+        }
+        executeLivePythonDirectly(code)
+    }
+
+    fun executeLivePythonDirectly(code: String) {
         com.omni.plugin.browser.engine.LiveAutoPilotEngine.executeLivePython(
             code = code,
             webView = currentWebView,
@@ -822,8 +926,9 @@ class BrowserStateHolder(
             return
         }
         if (isAutoPilotConfirmEnabled) {
-            bridge.log("AUTOPILOT_PIPELINE", "🛡️ [CONFIRM GUARD] Auto-Pilot confirmation required. Displaying modal.")
-            pendingAutoPilotCxp = xml
+            bridge.log("AUTOPILOT_PIPELINE", "🛡️ [CONFIRM GUARD] CXP Patch requires confirmation.")
+            pendingAutoPilotPayload = xml
+            pendingAutoPilotActionType = "CXP"
             showAutoPilotConfirmDialog = true
             bridge.vibrate(40L)
             return
@@ -873,11 +978,6 @@ class BrowserStateHolder(
         val ideWv = poolManager.pool[targetTabId]
         if (ideWv != null) {
             ideWv.onResume()
-            
-            // 🛡️ ANTI-THROTTLE GUARD: Unfreeze background fetch() promises
-            // Chromium severely throttles or pauses network requests in detached WebViews.
-            // By silently attaching the IDE tab at the very bottom of the Z-stack (Index 0),
-            // we force Chromium to treat it as alive, executing the patch instantly in the background.
             containerLayout?.let { container ->
                 if (ideWv.parent !== container) {
                     (ideWv.parent as? android.view.ViewGroup)?.removeView(ideWv)
@@ -926,7 +1026,19 @@ class BrowserStateHolder(
     override fun onFilePullRequested(xml: String) {
         if (!isLiveAutoPilotEnabled) return
         activeAiStudioTabId = activeTabId
-        bridge.log("AUTOPILOT_PULL", "🔍 [STAGE 1: REQUEST] AI Studio requested project files. Routing to Conduit IDE...")
+        if (isAutoPilotConfirmEnabled) {
+            bridge.log("AUTOPILOT_PULL", "🛡️ [CONFIRM GUARD] File pull requires confirmation.")
+            pendingAutoPilotPayload = xml
+            pendingAutoPilotActionType = "PULL"
+            showAutoPilotConfirmDialog = true
+            bridge.vibrate(40L)
+            return
+        }
+        executeFilePullDirectly(xml)
+    }
+
+    fun executeFilePullDirectly(xml: String) {
+        bridge.log("AUTOPILOT_PULL", "🔍 [STAGE 1: REQUEST] Routing file pull request to Conduit IDE...")
         bridge.showToast("📂 AI requesting project files from Conduit...")
 
         var ideTab = getMostRecentIdeTab()
@@ -1105,20 +1217,31 @@ class BrowserStateHolder(
         }
     }
 
-    fun isIdeTab(tab: BrowserTab): Boolean {
+    fun getFavoriteIdeShortcut(): ShortcutItem? {
+        return shortcuts.firstOrNull { it.isDefault }
+            ?: shortcuts.firstOrNull { it.localSourcePath != null }
+            ?: shortcuts.firstOrNull { it.url.contains("vault_") }
+            ?: shortcuts.firstOrNull { isLocalFilePath(it.url) }
+    }
+
+    fun isMatchingIdeTab(tab: BrowserTab, targetShortcut: ShortcutItem?): Boolean {
         val u = tab.url.lowercase(java.util.Locale.US)
-        val t = tab.title.lowercase(java.util.Locale.US)
-        return u.contains("localhost:$localServerPort") ||
-               u.contains("127.0.0.1:$localServerPort") ||
-               u.contains("/ide") ||
-               u.contains("vault_") ||
-               (u.endsWith(".html") && (t.contains("conduit") || t.contains("ide"))) ||
-               t.contains("ide") ||
-               t.contains("conduit")
+        if (targetShortcut == null) {
+            return u.contains("localhost:$localServerPort") || u.contains("127.0.0.1:$localServerPort")
+        }
+        val targetUrl = targetShortcut.url.lowercase(java.util.Locale.US)
+        val vaultToken = "vault_${targetShortcut.id}".lowercase(java.util.Locale.US)
+        return u.contains(vaultToken) || u == targetUrl || (targetUrl.contains("localhost") && u.contains("localhost:$localServerPort"))
+    }
+
+    fun isIdeTab(tab: BrowserTab): Boolean {
+        return isMatchingIdeTab(tab, getFavoriteIdeShortcut())
     }
 
     fun getMostRecentIdeTab(): BrowserTab? {
-        return tabs.filter { isIdeTab(it) }.maxByOrNull { it.lastAccessedTime }
+        val fav = getFavoriteIdeShortcut()
+        // Trace back across all tabs in history to find the most recently accessed matching favorite IDE
+        return tabs.filter { isMatchingIdeTab(it, fav) }.maxByOrNull { it.lastAccessedTime }
     }
 
     fun getLocalShortcuts(): List<ShortcutItem> {
@@ -1495,9 +1618,8 @@ class BrowserStateHolder(
 
     fun handleBackPressed(): Boolean {
         return when {
-            showAutoPilotConfirmDialog -> { rejectAutoPilotCxp(); true }
+            showAutoPilotConfirmDialog -> { rejectAutoPilotAction(); true }
             showDownloadBanner -> { showDownloadBanner = false; true }
-            showMenu -> { showMenu = false; true }
             showSmartNotesDialog -> { showSmartNotesDialog = false; true }
             showAutomationResultDialog -> { showAutomationResultDialog = false; true }
             showAutomationDialog -> { showAutomationDialog = false; true }
@@ -1541,6 +1663,12 @@ class BrowserStateHolder(
             this.canGoForward = canGoForward
             currentUrl = url
             urlInputText = url
+            if (isLiveAutoPilotEnabled && (url == "about:blank" || !url.contains("aistudio.google.com"))) {
+                isLiveAutoPilotEnabled = false
+                showCxpPill = false
+                com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
+                bridge.log("AUTOPILOT_PIPELINE", "🔴 [AUTO-DISARM] Left AI Studio ($url). Live Auto-Pilot disarmed.")
+            }
         }
         tabs = tabs.map { if (it.id == tabId) it.copy(url = url) else it }
         vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
