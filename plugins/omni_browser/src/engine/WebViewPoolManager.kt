@@ -360,12 +360,16 @@ class WebViewPoolManager(
                         return true
                     }
 
+                    // Silence site warning vomit
+                    if (consoleMessage?.messageLevel() == ConsoleMessage.MessageLevel.WARNING) {
+                        return true
+                    }
+
                     val lvl = consoleMessage?.messageLevel()?.name ?: "LOG"
                     val line = consoleMessage?.lineNumber() ?: 0
                     val src = consoleMessage?.sourceId() ?: ""
                     val tag = when (consoleMessage?.messageLevel()) {
                         ConsoleMessage.MessageLevel.ERROR -> "WEBVIEW_ERR"
-                        ConsoleMessage.MessageLevel.WARNING -> "WEBVIEW_WARN"
                         else -> "WEBVIEW_CONSOLE"
                     }
                     bridge.log(tag, "[$lvl] $msg (line $line in $src)")
