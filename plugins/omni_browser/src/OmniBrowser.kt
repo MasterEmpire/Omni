@@ -661,16 +661,104 @@ class OmniBrowser : PluginEntry() {
                 )
             }
 
-                    // --- Modals & Dialogs ---
+        // --- Modals & Dialogs ---
         val hostActivity = context as? android.app.Activity
         val isHostAlive = hostActivity == null || (!hostActivity.isFinishing && !hostActivity.isDestroyed)
 
         if (isHostAlive) {
-            if (state.showAutoPilotConfirmDialog && state.pendingAutoPilotCxp != null) {
-                val rawPayload = state.pendingAutoPilotCxp!!
-                val replaces = Regex("<replace_block\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
-                val creates = Regex("<create_file\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
-                val deletes = Regex("<delete_file\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
+            if (state.showAutoPilotConfirmDialog && state.pendingAutoPilotPayload != null) {
+                val rawPayload = state.pendingAutoPilotPayload!!
+                val actionType = state.pendingAutoPilotActionType ?: "CXP"
+
+                val (dialogIcon, dialogTitle, confirmLabel) = when (actionType) {
+                    "PYTHON" -> Triple("🐍", "Auto-Pilot: Run Python", "Execute on Nexus")
+                    "PULL" -> Triple("📂", "Auto-Pilot: Pull Files", "Deliver Files")
+                    else -> Triple("🛡️", "Auto-Pilot: Commit Patch", "Commit to IDE")
+                }
+
+                val previewSummary = remember(rawPayload, actionType) {
+                    when (actionType) {
+                        "PYTHON" -> "Python Script (${rawPayload.lines().size} lines)"
+                        "PULL" -> {
+                            val count = Regex("<file\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
+                            "Pull request for $count file(s)"
+                        }
+                        else -> {
+                            val replaces = Regex("<replace_block\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
+                            val creates = Regex("<create_file\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
+                            val deletes = Regex("<delete_file\\b", RegexOption.IGNORE_CASE).findAll(rawPayload).count()
+                            "Replaces: $replaces | Creates: $creates | Deletes: $deletes"
+                        }
+                    }
+                }
+
+                val projMatch = remember(rawPayload) {
+                    Regex("(?:project|repo)=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(rawPayload)?.groupValues?.get(1) ?: "Default Workspace"
+                }
+
+                AlertDialog(
+                    onDismissRequest = { state.rejectAutoPilotAction() },
+                    containerColor = Color(0xFF1E2228),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(dialogIcon, fontSize = 20.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(dialogTitle, color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF16181D),
+                                border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text("Scope: $projMatch", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(previewSummary, color = Color(0xFF9AA0A6), fontSize = 11.sp)
+                                }
+                            }
+                            Text("Payload Preview:", color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF121418))
+                                    .padding(8.dp)
+                            ) {
+                                androidx.compose.foundation.lazy.LazyColumn {
+                                    item {
+                                        Text(
+                                            text = rawPayload,
+                                            color = Color(0xFFD4D4D4),
+                                            fontSize = 10.sp,
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { state.approveAutoPilotAction() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF))
+                        ) {
+                            Text(confirmLabel, color = Color(0xFF121418), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { state.rejectAutoPilotAction() }) {
+                            Text("Discard", color = Color(0xFFF28B82), fontSize = 12.sp)
+                        }
+                    }
+                )
+            }
+
+            if (state.showSmartNotesDialog) {
                 val projMatch = Regex("(?:project|repo)=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(rawPayload)?.groupValues?.get(1) ?: "Default Workspace"
 
                 AlertDialog(
