@@ -291,8 +291,19 @@ class SpotifyRecorderPlugin : PluginEntry() {
             return
         }
 
-        // 4. Duplicate Vault Check (.m4a and .wav)
+        // 4. Duplicate Vault Check & In-Flight / Recent Completion Guard
         val ctx = activeContext ?: return
+        if (currentTrackId.isNotEmpty() && currentTrackId == lastCompletedTrackId && SystemClock.elapsedRealtime() - lastCompletedTimeMs < 15_000L) {
+            if (!isRecording) stateUpdater?.invoke(EngineState.ALREADY_EXISTS)
+            activeBridge?.log("SPOTIFY_RADAR", "[$triggerSource] Track '$currentTrackTitle' just completed & committed (${(SystemClock.elapsedRealtime() - lastCompletedTimeMs) / 1000}s ago). Ignoring duplicate trigger.")
+            return
+        }
+        if (activeSavingInfo?.title.equals(currentTrackTitle, ignoreCase = true)) {
+            if (!isRecording) stateUpdater?.invoke(EngineState.ALREADY_EXISTS)
+            activeBridge?.log("SPOTIFY_RADAR", "[$triggerSource] Track '$currentTrackTitle' is actively encoding in background. Ignoring duplicate trigger.")
+            return
+        }
+
         val vaultDir = getVaultDirectory(ctx)
         val baseName = "${sanitizeFilename(currentArtist)} - ${sanitizeFilename(currentTrackTitle)}"
         val m4aFile = File(vaultDir, "$baseName.m4a")
@@ -649,6 +660,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
     private fun finalizeCurrentRecording(reason: String = "Normal completion") {
         var jobToTranscode: TranscodeJob? = null
 
+        adWatchdogJob?.cancel()
+        adWatchdogJob = null
+        pauseDebounceJob?.cancel()
+        pauseDebounceJob = null
+
         synchronized(recordLock) {
             if (!isRecording) return
             isRecording = false
@@ -699,6 +715,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
             }
 
             if (!wasInterrupted && isDurationComplete) {
+                lastCompletedTrackId = take.trackId
+                lastCompletedTimeMs = SystemClock.elapsedRealtime()
                 val ctx = activeContext
                 val vaultDir = if (ctx != null) getVaultDirectory(ctx) else null
 
@@ -717,20 +735,28 @@ class SpotifyRecorderPlugin : PluginEntry() {
                 }
             } else {
                 temp.delete()
-                countDiscarded++
-                val failReason = if (wasInterrupted) "Recording interrupted" else "Duration incomplete (${recordedDurationMs / 1000}s vs ${targetLength / 1000}s expected)"
-                val info = DiscardInfo(take.trackTitle, failReason)
-                lastDiscardInfo = info
-                synchronized(discardedHistory) {
-                    discardedHistory.add(0, info)
-                    if (discardedHistory.size > 100) discardedHistory.removeAt(discardedHistory.lastIndex)
+                val isPhantomMicroTake = recordedDurationMs < 3000L
+                if (!isPhantomMicroTake) {
+                    countDiscarded++
+                    val failReason = if (wasInterrupted) "Recording interrupted" else "Duration incomplete (${recordedDurationMs / 1000}s vs ${targetLength / 1000}s expected)"
+                    val info = DiscardInfo(take.trackTitle, failReason)
+                    lastDiscardInfo = info
+                    synchronized(discardedHistory) {
+                        discardedHistory.add(0, info)
+                        if (discardedHistory.size > 100) discardedHistory.removeAt(discardedHistory.lastIndex)
+                    }
+                    discardUpdater?.invoke(info)
+                    statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+                    activeBridge?.log(
+                        "SPOTIFY_RECORDER",
+                        "❌ Discarded take for '${take.trackTitle}' ($failReason)"
+                    )
+                } else {
+                    activeBridge?.log(
+                        "SPOTIFY_RECORDER",
+                        "🧹 Cleaned up phantom micro-take for '${take.trackTitle}' (${recordedDurationMs}ms recorded). Discard counter suppressed."
+                    )
                 }
-                discardUpdater?.invoke(info)
-                statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-                activeBridge?.log(
-                    "SPOTIFY_RECORDER",
-                    "❌ Discarded take for '${take.trackTitle}' ($failReason)"
-                )
             }
         }
 
@@ -1046,6 +1072,11 @@ class SpotifyRecorderPlugin : PluginEntry() {
     }
 
     private fun abortAndDiscard(reason: String) {
+        adWatchdogJob?.cancel()
+        adWatchdogJob = null
+        pauseDebounceJob?.cancel()
+        pauseDebounceJob = null
+
         wasInterrupted = true
         isRecording = false
 
@@ -1065,22 +1096,29 @@ class SpotifyRecorderPlugin : PluginEntry() {
             audioRecord = null
         } catch (_: Exception) {}
 
+        val recordedMs = (recordedBytesCount * 1000L) / (44100 * 2 * 2)
         take?.tempFile?.delete()
         recordedBytesCount = 0L
 
-        countDiscarded++
+        val isMicroTake = recordedMs < 3000L
         val discardedTitle = take?.trackTitle ?: currentTrackTitle.ifEmpty { "Audio Stream" }
-        val info = DiscardInfo(discardedTitle, reason)
-        lastDiscardInfo = info
-        synchronized(discardedHistory) {
-            discardedHistory.add(0, info)
-            if (discardedHistory.size > 100) discardedHistory.removeAt(discardedHistory.lastIndex)
-        }
-        discardUpdater?.invoke(info)
 
-        statsUpdater?.invoke(countSaved, countDiscarded, countAds)
-        stateUpdater?.invoke(EngineState.INTERRUPTED_DISCARDED)
-        activeBridge?.log("SPOTIFY_RECORDER", "⚠️ Discard triggered for '$discardedTitle': $reason")
+        if (!isMicroTake) {
+            countDiscarded++
+            val info = DiscardInfo(discardedTitle, reason)
+            lastDiscardInfo = info
+            synchronized(discardedHistory) {
+                discardedHistory.add(0, info)
+                if (discardedHistory.size > 100) discardedHistory.removeAt(discardedHistory.lastIndex)
+            }
+            discardUpdater?.invoke(info)
+            statsUpdater?.invoke(countSaved, countDiscarded, countAds)
+            stateUpdater?.invoke(EngineState.INTERRUPTED_DISCARDED)
+            activeBridge?.log("SPOTIFY_RECORDER", "⚠️ Discard triggered for '$discardedTitle': $reason")
+        } else {
+            activeBridge?.log("SPOTIFY_RECORDER", "🧹 Cleaned up micro-take abort for '$discardedTitle' (${recordedMs}ms): $reason")
+            stateUpdater?.invoke(if (isArmed) EngineState.ARMED_LISTENING else EngineState.DISARMED)
+        }
     }
 
     private fun writeWavHeader(file: File, sampleRate: Int = 44100, channels: Short = 2, bitsPerSample: Short = 16) {
@@ -2066,6 +2104,8 @@ class SpotifyRecorderPlugin : PluginEntry() {
         @Volatile var isAdActive = false
         @Volatile var adTitle = ""
         @Volatile var adArtist = ""
+        @Volatile var lastCompletedTrackId = ""
+        @Volatile var lastCompletedTimeMs = 0L
 
         @Volatile var isManualRecording = false
         @Volatile var manualRecordingLimitMs = 0L
