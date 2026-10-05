@@ -130,6 +130,7 @@ class BrowserStateHolder(
     var isAutomating by mutableStateOf(false)
 
     // Live On-Screen Auto-Pilot State
+    var isAutoPilotUserArmed by mutableStateOf(false)
     var isLiveAutoPilotEnabled by mutableStateOf(false)
     var isAutoPilotConfirmEnabled by mutableStateOf(false)
     var pendingAutoPilotPayload by mutableStateOf<String?>(null)
@@ -378,6 +379,7 @@ class BrowserStateHolder(
             loadProgress = recordedProg / 100f
             isLoading = true
         }
+        syncAutoPilotStateForCurrentTab(isExplicitUserToggle = false)
     }
 
     fun createNewTab(
@@ -768,24 +770,39 @@ class BrowserStateHolder(
         }
     }
 
+    fun syncAutoPilotStateForCurrentTab(isExplicitUserToggle: Boolean = false) {
+        val isAiStudio = currentUrl.contains("aistudio.google.com")
+        val shouldBeArmed = isAutoPilotUserArmed && isAiStudio
+
+        if (shouldBeArmed) {
+            if (!isLiveAutoPilotEnabled || isExplicitUserToggle) {
+                isLiveAutoPilotEnabled = true
+                com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge, showToast = isExplicitUserToggle)
+                bridge.log("AUTOPILOT_PIPELINE", "🟢 [AUTO-SYNC] Armed Auto-Pilot on AI Studio ($currentUrl). Explicit=$isExplicitUserToggle")
+            }
+        } else {
+            if (isLiveAutoPilotEnabled || isExplicitUserToggle) {
+                isLiveAutoPilotEnabled = false
+                showCxpPill = false
+                cxpPillStatus = null
+                cxpPillDismissJob?.cancel()
+                showAutoPilotConfirmDialog = false
+                pendingAutoPilotPayload = null
+                pendingAutoPilotActionType = null
+                com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge, showToast = isExplicitUserToggle)
+                bridge.log("AUTOPILOT_PIPELINE", "🔴 [AUTO-SYNC] Disarmed Auto-Pilot (URL: $currentUrl, UserArmed: $isAutoPilotUserArmed). Explicit=$isExplicitUserToggle")
+            }
+        }
+    }
+
     fun toggleLiveAutoPilot() {
-        if (!isLiveAutoPilotEnabled && !currentUrl.contains("aistudio.google.com")) {
+        if (!isAutoPilotUserArmed && !currentUrl.contains("aistudio.google.com")) {
             bridge.showToast("⚡ Auto-Pilot is only supported on Google AI Studio")
             return
         }
-        isLiveAutoPilotEnabled = !isLiveAutoPilotEnabled
-        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot: enabled=$isLiveAutoPilotEnabled")
-        if (isLiveAutoPilotEnabled) {
-            com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge)
-        } else {
-            showCxpPill = false
-            cxpPillStatus = null
-            cxpPillDismissJob?.cancel()
-            showAutoPilotConfirmDialog = false
-            pendingAutoPilotPayload = null
-            pendingAutoPilotActionType = null
-            com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
-        }
+        isAutoPilotUserArmed = !isAutoPilotUserArmed
+        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot intent: userArmed=$isAutoPilotUserArmed")
+        syncAutoPilotStateForCurrentTab(isExplicitUserToggle = true)
     }
 
     fun toggleAutoPilotConfirm() {
@@ -1639,12 +1656,7 @@ class BrowserStateHolder(
             this.canGoForward = canGoForward
             currentUrl = url
             urlInputText = url
-            if (isLiveAutoPilotEnabled && (url == "about:blank" || !url.contains("aistudio.google.com"))) {
-                isLiveAutoPilotEnabled = false
-                showCxpPill = false
-                com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
-                bridge.log("AUTOPILOT_PIPELINE", "🔴 [AUTO-DISARM] Left AI Studio ($url). Live Auto-Pilot disarmed.")
-            }
+            syncAutoPilotStateForCurrentTab(isExplicitUserToggle = false)
         }
         tabs = tabs.map { if (it.id == tabId) it.copy(url = url) else it }
         vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
