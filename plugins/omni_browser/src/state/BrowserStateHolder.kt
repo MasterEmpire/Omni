@@ -911,13 +911,15 @@ class BrowserStateHolder(
     }
 
     fun executeLivePythonDirectly(code: String) {
-        com.omni.plugin.browser.engine.LiveAutoPilotEngine.executeLivePython(
-            code = code,
-            webView = currentWebView,
-            bridge = bridge,
-            coroutineScope = coroutineScope,
-            onStatusChanged = { liveAutoPilotStatus = it }
-        )
+        coroutineScope.launch {
+            com.omni.plugin.browser.engine.LiveAutoPilotEngine.executeLivePython(
+                code = code,
+                webView = currentWebView,
+                bridge = bridge,
+                coroutineScope = this,
+                onStatusChanged = { liveAutoPilotStatus = it }
+            )
+        }
     }
 
     override fun onCxpDispatched(xml: String) {
