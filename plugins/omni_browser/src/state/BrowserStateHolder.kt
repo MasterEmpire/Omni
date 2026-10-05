@@ -131,6 +131,9 @@ class BrowserStateHolder(
 
     // Live On-Screen Auto-Pilot State
     var isLiveAutoPilotEnabled by mutableStateOf(false)
+    var isAutoPilotConfirmEnabled by mutableStateOf(false)
+    var pendingAutoPilotCxp by mutableStateOf<String?>(null)
+    var showAutoPilotConfirmDialog by mutableStateOf(false)
     var liveAutoPilotStatus by mutableStateOf("Watching")
     var automationStatus by mutableStateOf("Idle")
 
@@ -177,6 +180,11 @@ class BrowserStateHolder(
 
     fun init() {
         vaultManager.resurrectFromVault()
+
+        try {
+            val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
+            isAutoPilotConfirmEnabled = prefs.getBoolean("autopilot_confirm_enabled", false)
+        } catch (_: Exception) {}
 
         vaultManager.loadSolverConfig()?.let { config ->
             solverApiKey = config.apiKey
@@ -768,8 +776,33 @@ class BrowserStateHolder(
             showCxpPill = false
             cxpPillStatus = null
             cxpPillDismissJob?.cancel()
+            showAutoPilotConfirmDialog = false
+            pendingAutoPilotCxp = null
             com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge)
         }
+    }
+
+    fun toggleAutoPilotConfirm() {
+        isAutoPilotConfirmEnabled = !isAutoPilotConfirmEnabled
+        try {
+            val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("autopilot_confirm_enabled", isAutoPilotConfirmEnabled).apply()
+        } catch (_: Exception) {}
+        bridge.showToast(if (isAutoPilotConfirmEnabled) "🛡️ Auto-Pilot: Confirmation Modal ON" else "⚡ Auto-Pilot: Auto-Commit ON")
+    }
+
+    fun approveAutoPilotCxp() {
+        val xml = pendingAutoPilotCxp ?: return
+        showAutoPilotConfirmDialog = false
+        pendingAutoPilotCxp = null
+        commitCxpToIde(xml)
+    }
+
+    fun rejectAutoPilotCxp() {
+        showAutoPilotConfirmDialog = false
+        pendingAutoPilotCxp = null
+        bridge.showToast("🛑 Patch discarded by user")
+        bridge.log("AUTOPILOT_PIPELINE", "🛑 [DISCARDED] User rejected patch in confirmation dialog.")
     }
 
     override fun onLivePythonRequested(code: String) {
@@ -788,6 +821,17 @@ class BrowserStateHolder(
             bridge.log("AUTOPILOT_PIPELINE", "🛑 [BLOCKED] onCxpDispatched ignored because Live Auto-Pilot is OFF.")
             return
         }
+        if (isAutoPilotConfirmEnabled) {
+            bridge.log("AUTOPILOT_PIPELINE", "🛡️ [CONFIRM GUARD] Auto-Pilot confirmation required. Displaying modal.")
+            pendingAutoPilotCxp = xml
+            showAutoPilotConfirmDialog = true
+            bridge.vibrate(40L)
+            return
+        }
+        commitCxpToIde(xml)
+    }
+
+    fun commitCxpToIde(xml: String) {
         bridge.log("AUTOPILOT_PIPELINE", "🚀 [STAGE 2: HOST ROUTE] CXP XML received (${xml.length} chars). Identifying Conduit IDE tab...")
         bridge.showToast("⚡ Beaming CXP patch to Conduit IDE...")
 
@@ -864,6 +908,7 @@ class BrowserStateHolder(
         cxpPillMessage = when (cxpPillStatus) {
             "SUCCESS" -> "Patch Committed to Git!"
             "PARTIAL" -> "Committed with AI Healing"
+            "PARTIAL_PARSE_BLOCKED" -> "Blocked: Incomplete XML (Review in IDE)"
             "FAILED" -> details.ifEmpty { "Patch Failed" }
             else -> details
         }
