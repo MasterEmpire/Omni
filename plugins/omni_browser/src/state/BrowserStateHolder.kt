@@ -702,7 +702,7 @@ class BrowserStateHolder(
         val input = rawInput.trim()
         if (input.isEmpty()) return
 
-        val target = when {
+        val rawTarget = when {
             input == "about:blank" -> "about:blank"
             input.startsWith("file://") && input.contains("/ide/") -> convertLocalFileToLocalhost(input, localServerPort)
             input.startsWith("http://") || input.startsWith("https://") -> input
@@ -712,6 +712,7 @@ class BrowserStateHolder(
             input.contains(".") && !input.contains(" ") -> "https://$input"
             else -> "https://www.google.com/search?q=${URLEncoder.encode(input, "UTF-8")}"
         }
+        val target = sanitizeSafeUrl(rawTarget)
 
         if (isHomeOverlayOpen && currentUrl != "about:blank") {
             isHomeOverlayOpen = false
@@ -1668,14 +1669,15 @@ class BrowserStateHolder(
     }
 
     override fun onUrlChanged(tabId: String, url: String, canGoBack: Boolean, canGoForward: Boolean) {
+        val safeUrl = sanitizeSafeUrl(url)
         if (activeTabId == tabId) {
             this.canGoBack = canGoBack
             this.canGoForward = canGoForward
-            currentUrl = url
-            urlInputText = url
+            currentUrl = safeUrl
+            urlInputText = safeUrl
             syncAutoPilotStateForCurrentTab(isExplicitUserToggle = false)
         }
-        tabs = tabs.map { if (it.id == tabId) it.copy(url = url) else it }
+        tabs = tabs.map { if (it.id == tabId) it.copy(url = safeUrl) else it }
         vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
     }
 
@@ -1822,15 +1824,20 @@ class BrowserStateHolder(
     }
 
     override fun onRenderProcessKilled(tabId: String) {
-        bridge.log("RENDER_WATCHDOG", "Resurrecting killed render process for tab [$tabId]")
-        tabProgressMap[tabId] = 0
+        bridge.log("RENDER_WATCHDOG", "🛡️ Tab [$tabId] died alone in its sandbox. Poison URL suppressed.")
+        tabProgressMap.remove(tabId)
+        poolManager.pool.remove(tabId)
+        tabs = tabs.map { if (it.id == tabId) it.copy(url = "about:blank", title = "Tab Recovered") else it }
+        vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
         if (activeTabId == tabId) {
             isLoading = false
             loadProgress = 0f
-        }
-        poolManager.pool.remove(tabId)
-        if (activeTabId == tabId) {
-            attachTabWebView(tabId)
+            currentUrl = "about:blank"
+            urlInputText = ""
+            pageTitle = "New Tab"
+            isHomeOverlayOpen = true
+            containerLayout?.removeAllViews()
+            bridge.showToast("🛡️ Tab memory exceeded limit. Contained safely.")
         }
     }
 
