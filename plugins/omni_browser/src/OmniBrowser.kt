@@ -1050,7 +1050,9 @@ class OmniBrowser : PluginEntry() {
                 status = state.cxpPillStatus,
                 message = state.cxpPillMessage,
                 onOpenIde = {
-                    state.showCxpPill = false
+                    if (state.cxpPillStatus != "PATCHING") {
+                        state.showCxpPill = false
+                    }
                     val ideId = state.cxpPillIdeTabId ?: state.getMostRecentIdeTab()?.id
                     if (ideId != null && state.tabs.any { it.id == ideId }) {
                         state.switchToTab(ideId)
