@@ -323,7 +323,7 @@ class VaultManager(
                 val tObj = JSONObject().apply {
                     put("id", tab.id)
                     put("title", tab.title)
-                    put("url", tab.url)
+                    put("url", com.omni.plugin.browser.utils.sanitizeSafeUrl(tab.url))
                     put("profileId", tab.profileId)
                     put("lastAccessedTime", tab.lastAccessedTime)
                     put("isDesktop", tab.isDesktop)
@@ -353,11 +353,12 @@ class VaultManager(
             val loadedTabs = mutableListOf<BrowserTab>()
             for (i in 0 until arr.length()) {
                 val tObj = arr.getJSONObject(i)
-                loadedTabs.add(
-                    BrowserTab(
-                        id = tObj.getString("id"),
-                        title = tObj.optString("title", "New Tab"),
-                        url = tObj.optString("url", "about:blank"),
+                                    val safeUrl = com.omni.plugin.browser.utils.sanitizeSafeUrl(tObj.optString("url", "about:blank"))
+                    loadedTabs.add(
+                        BrowserTab(
+                            id = tObj.getString("id"),
+                            title = tObj.optString("title", "New Tab"),
+                            url = safeUrl,
                         lastAccessedTime = tObj.optLong("lastAccessedTime", System.currentTimeMillis()),
                         profileId = tObj.optString("profileId", "default"),
                         isDesktop = tObj.optBoolean("isDesktop", false)
