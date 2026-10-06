@@ -22,31 +22,38 @@ object OmniLogger {
             logFile = File(context.filesDir, "omni_system_trace.txt")
             blackBoxFile = File(context.filesDir, "omni_blackbox.log")
 
-            // 1. Recover Black Box historical trace from previous session (post-crash resurrection)
-            if (blackBoxFile?.exists() == true && blackBoxFile!!.length() > 0) {
-                val previousTrace = blackBoxFile!!.readLines().takeLast(300)
-                synchronized(logBuffer) {
-                    logBuffer.clear()
-                    logBuffer.add(0, "=== [BLACK BOX RECOVERY: PREVIOUS SESSION AUDIT TRAIL] ===")
-                    logBuffer.addAll(previousTrace.reversed())
-                    logBuffer.add(0, "=== [CURRENT SESSION BOOT RECORD] ===")
-                }
-            } else if (logFile?.exists() == true) {
-                val lines = logFile!!.readLines().takeLast(200)
-                synchronized(logBuffer) {
-                    logBuffer.clear()
-                    logBuffer.addAll(lines.reversed())
-                }
+                    // 1. Recover Black Box historical trace from previous session (post-crash resurrection)
+        if (blackBoxFile?.exists() == true && blackBoxFile!!.length() > 0) {
+            val previousTrace = blackBoxFile!!.readLines().takeLast(200).map {
+                if (it.length > 800) it.take(800) + "... [TRUNCATED]" else it
             }
+            synchronized(logBuffer) {
+                logBuffer.clear()
+                logBuffer.add(0, "=== [BLACK BOX RECOVERY: PREVIOUS SESSION AUDIT TRAIL] ===")
+                logBuffer.addAll(previousTrace.reversed())
+                logBuffer.add(0, "=== [CURRENT SESSION BOOT RECORD] ===")
+            }
+        } else if (logFile?.exists() == true) {
+            val lines = logFile!!.readLines().takeLast(150).map {
+                if (it.length > 800) it.take(800) + "... [TRUNCATED]" else it
+            }
+            synchronized(logBuffer) {
+                logBuffer.clear()
+                logBuffer.addAll(lines.reversed())
+            }
+        }
         } catch (_: Exception) {}
     }
 
     fun log(tag: String, message: String, forceSync: Boolean = false) {
         val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
-        val entry = "[$timestamp] [$tag] $message"
+        val safeMessage = if (message.length > 800) {
+            message.take(800) + "... [TRUNCATED ${message.length - 800} chars]"
+        } else message
+        val entry = "[$timestamp] [$tag] $safeMessage"
         android.util.Log.d("OmniHub", entry)
 
-        val isCritical = forceSync || tag.contains("ERR") || tag.contains("FATAL") || tag.contains("CRASH") || tag.contains("BOOT_TRACE") || tag.contains("TRACE")
+        val isCritical = forceSync || tag.contains("ERR") || tag.contains("FATAL") || tag.contains("CRASH")
 
         try {
             if (isCritical) {
