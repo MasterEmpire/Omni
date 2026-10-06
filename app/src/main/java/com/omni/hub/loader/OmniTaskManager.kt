@@ -72,9 +72,7 @@ object OmniTaskManager {
             suspendCurrent()
         }
 
-        OmniLogger.log("BOOT_TRACE", "OmniTaskManager: invoking onCreateView for [$pluginName]...", forceSync = true)
         val pluginView = loaded.instance.onCreateView(context, bridge, loaded.baseDir.absolutePath)
-        OmniLogger.log("BOOT_TRACE", "OmniTaskManager: onCreateView finished for [$pluginName]", forceSync = true)
         (pluginView as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
             setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
         }
