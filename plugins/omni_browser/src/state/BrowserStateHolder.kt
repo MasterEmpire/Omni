@@ -780,13 +780,15 @@ class BrowserStateHolder(
                 com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge, showToast = isExplicitUserToggle)
                 bridge.log("AUTOPILOT_PIPELINE", "🟢 [AUTO-SYNC] Armed Auto-Pilot on AI Studio ($currentUrl). Explicit=$isExplicitUserToggle")
             }
-        } else {
-            if (isLiveAutoPilotEnabled || isExplicitUserToggle) {
-                isLiveAutoPilotEnabled = false
-                showCxpPill = false
-                cxpPillStatus = null
-                cxpPillDismissJob?.cancel()
-                showAutoPilotConfirmDialog = false
+                    } else {
+                if (isLiveAutoPilotEnabled || isExplicitUserToggle) {
+                    isLiveAutoPilotEnabled = false
+                    if (cxpPillStatus != "PATCHING") {
+                        showCxpPill = false
+                        cxpPillStatus = null
+                        cxpPillDismissJob?.cancel()
+                    }
+                    showAutoPilotConfirmDialog = false
                 pendingAutoPilotPayload = null
                 pendingAutoPilotActionType = null
                 com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge, showToast = isExplicitUserToggle)
@@ -992,7 +994,7 @@ class BrowserStateHolder(
     }
 
     override fun onPatchReported(status: String, details: String) {
-        if (!isLiveAutoPilotEnabled) {
+        if (!isLiveAutoPilotEnabled && cxpPillStatus != "PATCHING") {
             bridge.log("AUTOPILOT_PIPELINE", "🛑 [BLOCKED] onPatchReported ignored because Live Auto-Pilot is OFF (Status: $status, Details: '$details').")
             return
         }
