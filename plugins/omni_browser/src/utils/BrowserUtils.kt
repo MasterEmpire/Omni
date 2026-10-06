@@ -2105,6 +2105,16 @@ fun normalizeLocalFilePath(rawPath: String): String {
     return path.trim()
 }
 
+fun sanitizeSafeUrl(rawUrl: String?): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (trimmed.length > 1200) {
+        val cleanBase = trimmed.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return trimmed
+}
+
 fun isLocalFilePath(input: String): Boolean {
     val clean = input.trim().lowercase()
     return clean.startsWith("/") ||
