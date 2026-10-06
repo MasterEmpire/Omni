@@ -329,7 +329,9 @@ class OmniBrowser : PluginEntry() {
 
         // --- Lifecycle and Background Loops ---
         LaunchedEffect(Unit) {
+            bridge.log("BOOT_TRACE", "ChromeBrowserScreen: LaunchedEffect(Unit) -> state.init() START")
             state.init()
+            bridge.log("BOOT_TRACE", "ChromeBrowserScreen: LaunchedEffect(Unit) -> state.init() END")
         }
 
         LaunchedEffect(state.trackedDownloadIds.size, state.showDownloadsDialog) {
@@ -433,6 +435,7 @@ class OmniBrowser : PluginEntry() {
                     ) {
                         AndroidView(
                             factory = { ctx ->
+                                bridge.log("BOOT_TRACE", "AndroidView factory creating container and attaching initial tab: ${state.activeTabId}")
                                 FrameLayout(ctx).apply {
                                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                                     state.containerLayout = this
@@ -441,6 +444,7 @@ class OmniBrowser : PluginEntry() {
                             },
                             update = { _ ->
                                 if (state.containerLayout != null && state.currentWebView == null) {
+                                    bridge.log("BOOT_TRACE", "AndroidView update re-attaching tab: ${state.activeTabId}")
                                     state.attachTabWebView(state.activeTabId)
                                 }
                             },
