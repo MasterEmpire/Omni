@@ -35,7 +35,7 @@ class OmniApp : Application() {
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         try {
                             com.omni.hub.loader.OmniTaskManager.suspendCurrent(returnToDashboard = true)
-                            android.widget.Toast.makeText(this@OmniApp, "🛡️ Contained plugin crash. Returning to dashboard.", android.widget.Toast.SHORT).show()
+                            android.widget.Toast.makeText(this@OmniApp, "🛡️ Contained plugin crash. Returning to dashboard.", android.widget.Toast.LENGTH_SHORT).show()
                         } catch (_: Exception) {}
                     }
                     while (true) {
