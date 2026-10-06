@@ -46,7 +46,7 @@ object OmniLogger {
         val entry = "[$timestamp] [$tag] $message"
         android.util.Log.d("OmniHub", entry)
 
-        val isCritical = forceSync || tag.contains("ERR") || tag.contains("FATAL") || tag.contains("CRASH")
+        val isCritical = forceSync || tag.contains("ERR") || tag.contains("FATAL") || tag.contains("CRASH") || tag.contains("BOOT_TRACE") || tag.contains("TRACE")
 
         try {
             if (isCritical) {
