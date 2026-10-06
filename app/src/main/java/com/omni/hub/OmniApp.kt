@@ -23,15 +23,30 @@ class OmniApp : Application() {
             OmniLogger.log("CRASH_FATAL", "💥 UNCAUGHT EXCEPTION on [${thread.name}]: ${throwable.message}\n$stackTrace", forceSync = true)
             OmniLogger.flushSync()
 
-            // Isolate non-UI background worker crashes originating from dynamic code
             val isMainThread = android.os.Looper.getMainLooper().thread == thread
             val isDynamicCode = stackTrace.contains("com.omni.plugin") ||
                 stackTrace.contains("dalvik.system.DexClassLoader") ||
                 thread.name.startsWith("omni-") ||
                 thread.name.contains("coroutine", ignoreCase = true)
 
-            if (!isMainThread && isDynamicCode) {
-                OmniLogger.log("CRASH_CONTAINED", "🛡️ Contained fatal crash on dynamic worker thread [${thread.name}]. Host process preserved.")
+            if (isDynamicCode) {
+                OmniLogger.log("CRASH_CONTAINED", "🛡️ Contained fatal crash on [${thread.name}] from dynamic code. Preserving host process.", forceSync = true)
+                if (isMainThread) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        try {
+                            com.omni.hub.loader.OmniTaskManager.suspendCurrent(returnToDashboard = true)
+                            android.widget.Toast.makeText(this@OmniApp, "🛡️ Contained plugin crash. Returning to dashboard.", android.widget.Toast.SHORT).show()
+                        } catch (_: Exception) {}
+                    }
+                    while (true) {
+                        try {
+                            android.os.Looper.loop()
+                            break
+                        } catch (looperThrowable: Throwable) {
+                            OmniLogger.log("LOOPER_CONTAINED", "🛡️ Suppressed secondary main looper exception: ${looperThrowable.message}", forceSync = true)
+                        }
+                    }
+                }
                 return@setDefaultUncaughtExceptionHandler
             }
 
