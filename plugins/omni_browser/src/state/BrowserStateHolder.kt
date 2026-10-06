@@ -181,16 +181,13 @@ class BrowserStateHolder(
     }
 
     fun init() {
-        bridge.log("BOOT_TRACE", "BrowserStateHolder.init() -> [1/7] resurrectFromVault START")
         vaultManager.resurrectFromVault()
-        bridge.log("BOOT_TRACE", "BrowserStateHolder.init() -> [1/7] resurrectFromVault COMPLETED")
 
         try {
             val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
             isAutoPilotConfirmEnabled = prefs.getBoolean("autopilot_confirm_enabled", false)
         } catch (_: Exception) {}
 
-        bridge.log("BOOT_TRACE", "BrowserStateHolder.init() -> [2/7] loadSolverConfig")
         vaultManager.loadSolverConfig()?.let { config ->
             solverApiKey = config.apiKey
             autoSolveEnabled = config.autoSolve
@@ -235,9 +232,7 @@ class BrowserStateHolder(
             if (loaded.isNotEmpty()) smartNotes = loaded
         }
 
-        bridge.log("BOOT_TRACE", "BrowserStateHolder.init() -> [7/7] loadSession START")
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId, savedProfileId) ->
-            bridge.log("BOOT_TRACE", "BrowserStateHolder.init() -> [7/7] session loaded (${loadedTabs.size} tabs, activeId=$savedActiveId)")
             val cleanedTabs = loadedTabs.filter { !it.id.startsWith("tab_landing_") }
             if (cleanedTabs.isNotEmpty()) {
                 val migratedTabs = cleanedTabs.map {
@@ -258,12 +253,10 @@ class BrowserStateHolder(
                 pageTitle = targetTab.title
                 isHomeOverlayOpen = true
                 if (containerLayout != null) {
-                    bridge.log("BOOT_TRACE", "BrowserStateHolder.init() -> calling attachTabWebView for target tab: ${targetTab.id} (${targetTab.url.take(80)})")
                     attachTabWebView(targetTab.id)
                 }
             }
         }
-        bridge.log("BOOT_TRACE", "BrowserStateHolder.init() COMPLETED ALL STEPS")
     }
 
     fun changeSelectedProfile(newProfileId: String) {
@@ -319,16 +312,11 @@ class BrowserStateHolder(
         }
         CookieManager.getInstance().flush()
 
-        val targetTab = tabs.find { it.id == targetTabId } ?: run {
-            bridge.log("BOOT_TRACE", "attachTabWebView ABORT: targetTabId $targetTabId not in tabs list")
-            return
-        }
-        bridge.log("BOOT_TRACE", "attachTabWebView targetTab found: id=${targetTab.id}, profile=${targetTab.profileId}, url=${targetTab.url.take(80)}")
+        val targetTab = tabs.find { it.id == targetTabId } ?: return
         selectedProfileId = targetTab.profileId
         isDesktopMode = targetTab.isDesktop
         val isNewInstance = !poolManager.pool.containsKey(targetTabId)
 
-        bridge.log("BOOT_TRACE", "attachTabWebView resolving webView in pool (isNewInstance=$isNewInstance)")
         val targetWv = poolManager.pool.getOrPut(targetTabId) {
             poolManager.createConfiguredWebView(
                 tabId = targetTabId,
@@ -350,10 +338,8 @@ class BrowserStateHolder(
             (targetWv.url == null || targetWv.url == "about:blank" || (isNewInstance && targetWv.copyBackForwardList().size == 0))
 
         if (needsUrlLoad) {
-            bridge.log("BOOT_TRACE", "attachTabWebView: invoking loadUrl on targetWv: ${targetTab.url.take(80)}")
             targetWv.loadUrl(targetTab.url)
         }
-        bridge.log("BOOT_TRACE", "attachTabWebView: attaching view to FrameLayout hierarchy")
 
         // Attach new target view BEFORE removing old view to eliminate blank-screen flashing
         if (targetWv.parent !== container) {
