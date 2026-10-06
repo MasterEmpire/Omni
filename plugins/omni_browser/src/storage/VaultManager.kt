@@ -210,17 +210,12 @@ class VaultManager(
 
                                     val vaultIdeDir = File(vaultDir, "ide")
                     if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
-                        bridge.log("BOOT_TRACE", "resurrectFromVault -> scanning vaultIdeDir: ${vaultIdeDir.absolutePath}")
-                        var fileCount = 0
                         vaultIdeDir.walkTopDown().filter { it.isFile }.forEach { f ->
-                            fileCount++
                             val relPath = "ide/" + f.relativeTo(vaultIdeDir).path.replace("\\", "/")
                             if (bridge.readFile(relPath) == null) {
-                                bridge.log("BOOT_TRACE", "resurrectFromVault -> copying file #$fileCount: $relPath (${f.length()} bytes)")
                                 bridge.saveFile(relPath, f.readBytes())
                             }
                         }
-                        bridge.log("BOOT_TRACE", "resurrectFromVault -> completed scanning vaultIdeDir ($fileCount files scanned)")
                     }
             }
         } catch (_: Exception) {}
@@ -338,18 +333,11 @@ class VaultManager(
 
     fun loadSession(): Triple<List<BrowserTab>, String?, String?>? {
         return try {
-            bridge.log("BOOT_TRACE", "loadSession -> reading config/session.json")
-            val bytes = bridge.readFile("config/session.json")
-            if (bytes == null) {
-                bridge.log("BOOT_TRACE", "loadSession -> config/session.json is null")
-                return null
-            }
-            bridge.log("BOOT_TRACE", "loadSession -> read ${bytes.size} bytes from config/session.json")
+            val bytes = bridge.readFile("config/session.json") ?: return null
             val sObj = JSONObject(String(bytes, Charsets.UTF_8))
             val savedActiveId = sObj.optString("activeTabId", "").takeIf { it.isNotEmpty() }
             val savedProfileId = sObj.optString("selectedProfileId", "").takeIf { it.isNotEmpty() }
             val arr = sObj.optJSONArray("tabs") ?: return null
-            bridge.log("BOOT_TRACE", "loadSession -> parsed JSON: activeTabId=$savedActiveId, tabsCount=${arr.length()}")
             val loadedTabs = mutableListOf<BrowserTab>()
             for (i in 0 until arr.length()) {
                 val tObj = arr.getJSONObject(i)
