@@ -212,6 +212,7 @@ class WebViewPoolManager(
         isDesktop: Boolean,
         listener: WebViewEventListener
     ): WebView {
+        bridge.log("BOOT_TRACE", "createConfiguredWebView -> START: tab=$tabId, profile=$profileId, url=${initialUrl.take(80)}")
         val webView = WebView(context).apply {
             setBackgroundColor(android.graphics.Color.parseColor("#1F2227"))
             layoutParams = ViewGroup.LayoutParams(
@@ -515,10 +516,13 @@ class WebViewPoolManager(
         }
 
         if (savedState != null) {
+            bridge.log("BOOT_TRACE", "createConfiguredWebView: restoring savedState bundle for tab $tabId")
             webView.restoreState(savedState)
         } else if (initialUrl.isNotEmpty() && initialUrl != "about:blank") {
+            bridge.log("BOOT_TRACE", "createConfiguredWebView: initial loadUrl(${initialUrl.take(80)}) for tab $tabId")
             webView.loadUrl(initialUrl)
         }
+        bridge.log("BOOT_TRACE", "createConfiguredWebView -> COMPLETED for tab $tabId")
         return webView
     }
 }
