@@ -1351,7 +1351,11 @@ fun LogConsoleDialog(
     onCopy: () -> Unit,
     onClear: () -> Unit
 ) {
-    var logsText by remember { mutableStateOf(OmniLogger.getLogs()) }
+    var rawLogs by remember { mutableStateOf(OmniLogger.getLogs()) }
+    val logLines = remember(rawLogs) {
+        if (rawLogs.isBlank()) listOf("No diagnostic logs recorded.")
+        else rawLogs.lines().take(250)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1366,7 +1370,7 @@ fun LogConsoleDialog(
                 Row {
                     TextButton(onClick = {
                         onClear()
-                        logsText = ""
+                        rawLogs = ""
                     }) {
                         Text("Clear", color = Color(0xFFDA3633), fontSize = 12.sp)
                     }
@@ -1382,19 +1386,20 @@ fun LogConsoleDialog(
                     .fillMaxWidth()
                     .height(350.dp)
                     .background(Color(0xFF0D1117), RoundedCornerShape(8.dp))
-                    .padding(12.dp)
+                    .padding(8.dp)
             ) {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    item {
-                        androidx.compose.foundation.text.selection.SelectionContainer {
-                            Text(
-                                text = logsText.ifEmpty { "No diagnostic logs recorded." },
-                                color = Color(0xFFC9D1D9),
-                                fontSize = 11.sp,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                lineHeight = 16.sp
-                            )
-                        }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    items(logLines) { line ->
+                        Text(
+                            text = if (line.length > 600) line.take(600) + "..." else line,
+                            color = Color(0xFFC9D1D9),
+                            fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            lineHeight = 15.sp
+                        )
                     }
                 }
             }
