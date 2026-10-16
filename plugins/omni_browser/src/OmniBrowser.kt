@@ -393,6 +393,7 @@ class OmniBrowser : PluginEntry() {
                         state.currentWebView?.saveState(bundle)
                         state.tabs = state.tabs.map { if (it.id == state.activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
                         CookieManager.getInstance().flush()
+                        state.containerLayout?.visibility = android.view.View.INVISIBLE
                         state.isTabSwitcherOpen = true
                     },
                     showMenu = state.showMenu,
@@ -439,7 +440,12 @@ class OmniBrowser : PluginEntry() {
                                     state.attachTabWebView(state.activeTabId)
                                 }
                             },
-                            update = { _ ->
+                            update = { frame ->
+                                val targetVisibility = if (state.isTabSwitcherOpen) android.view.View.INVISIBLE else android.view.View.VISIBLE
+                                if (frame.visibility != targetVisibility) {
+                                    frame.visibility = targetVisibility
+                                    state.bridge.log("TOUCH_SHIELD", "WebView container visibility -> ${if (state.isTabSwitcherOpen) "INVISIBLE (Shielded from touch)" else "VISIBLE"}")
+                                }
                                 if (state.containerLayout != null && state.currentWebView == null) {
                                     state.attachTabWebView(state.activeTabId)
                                 }
