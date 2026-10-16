@@ -373,14 +373,27 @@ class OmniBrowser : PluginEntry() {
                 OmniBrowserTopBar(
                     currentUrl = state.currentUrl,
                     urlInputText = state.urlInputText,
-                    onUrlTextChange = { state.urlInputText = it },
+                    onUrlTextChange = {
+                        state.onSearchInputChanged(it)
+                    },
                     onNavigate = {
                         state.navigateTo(it)
+                        state.isSearchFocused = false
+                        state.suggestions = emptyList()
                         focusManager.clearFocus()
                     },
                     profColor = profColor,
                     tabCount = state.tabs.size,
                     isHomeOverlayOpen = state.isHomeOverlayOpen,
+                    isSearchFocused = state.isSearchFocused,
+                    onSearchFocusChange = { focused ->
+                        state.isSearchFocused = focused
+                        if (focused) {
+                            state.onSearchInputChanged(state.urlInputText)
+                        } else {
+                            state.suggestions = emptyList()
+                        }
+                    },
                     onHomeClick = {
                         if (state.currentUrl != "about:blank") {
                             state.isHomeOverlayOpen = !state.isHomeOverlayOpen
@@ -405,6 +418,23 @@ class OmniBrowser : PluginEntry() {
                     onTopBarDragEnd = { state.onTopBarDragEnd() },
                     onTopBarDragCancel = { state.onTopBarDragCancel() }
                 )
+
+                if (state.isSearchFocused && state.suggestions.isNotEmpty()) {
+                    OmniboxSuggestionOverlay(
+                        suggestions = state.suggestions,
+                        onSelectSuggestion = { sug ->
+                            focusManager.clearFocus()
+                            state.selectSuggestion(sug)
+                        },
+                        onFillSuggestion = { sug ->
+                            state.fillSuggestion(sug)
+                        },
+                        onDismiss = {
+                            state.suggestions = emptyList()
+                        },
+                        modifier = Modifier.zIndex(50f)
+                    )
+                }
 
                 AnimatedVisibility(
                     visible = state.isLoading,
