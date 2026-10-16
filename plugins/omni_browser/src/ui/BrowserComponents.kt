@@ -917,6 +917,11 @@ fun DownloadCompletedPillBanner(
     ) {
         if (file == null) return@AnimatedVisibility
         val emoji = remember(file.name) { com.omni.plugin.browser.utils.getFileEmoji(file.name) }
+        val sizeText = remember(file, file.length()) {
+            if (file.exists() && file.length() > 0) {
+                com.omni.plugin.browser.utils.formatFileSize(file.length())
+            } else ""
+        }
 
         Surface(
             shape = RoundedCornerShape(24.dp),
@@ -944,7 +949,7 @@ fun DownloadCompletedPillBanner(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "Downloaded",
+                        text = if (sizeText.isNotEmpty()) "Downloaded • $sizeText" else "Downloaded",
                         color = Color(0xFF3FB950),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold
