@@ -48,6 +48,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Velocity
+import com.omni.hub.api.HostBridge
 import com.omni.hub.api.OmniLogger
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -56,6 +57,7 @@ import java.util.Locale
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TabSwitcherScreen(
+    bridge: HostBridge? = null,
     tabs: List<BrowserTab>,
     activeTabId: String,
     profiles: List<BrowserProfile>,
@@ -97,6 +99,10 @@ fun TabSwitcherScreen(
     }
     val closingTabIds = remember { mutableStateListOf<String>() }
 
+    fun logTrace(tag: String, msg: String) {
+        bridge?.log(tag, msg) ?: OmniLogger.log(tag, msg)
+    }
+
     val tabsGridScrollConnection = remember(gridState) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -109,7 +115,7 @@ fun TabSwitcherScreen(
                     val firstIdx = gridState.firstVisibleItemIndex
                     val firstOffset = gridState.firstVisibleItemScrollOffset
 
-                    OmniLogger.log(
+                    logTrace(
                         "TABS_SCROLL",
                         "📥 [PRE_SCROLL] dy=${"%.1f".format(Locale.US, dy)}px | $direction | Source=$src | Pos: Item #$firstIdx (offset ${firstOffset}px) | Bounds: [canScrollUp=$canBack, canScrollDown=$canFwd]"
                     )
@@ -127,7 +133,7 @@ fun TabSwitcherScreen(
                 val canFwd = gridState.canScrollForward
 
                 if (Math.abs(consumedY) > 0.5f) {
-                    OmniLogger.log(
+                    logTrace(
                         "TABS_SCROLL",
                         "✅ [ACTED / PHYSICALLY SCROLLED] Moved ${"%.1f".format(Locale.US, consumedY)}px | Now at: Item #$firstIdx (offset ${firstOffset}px) | Source=$src"
                     )
@@ -148,7 +154,7 @@ fun TabSwitcherScreen(
                             "PARTIAL_SCROLL: Scrolled ${"%.1f".format(Locale.US, consumedY)}px, hit boundary with ${"%.1f".format(Locale.US, unconsumedY)}px excess."
                     }
 
-                    OmniLogger.log(
+                    logTrace(
                         "TABS_SCROLL",
                         "🛑 [UNCONSUMED / NOT SCROLLED] unconsumedDy=${"%.1f".format(Locale.US, unconsumedY)}px (Attempted: $attemptedDir) | CAUSE: $cause | Pos: Item #$firstIdx (${firstOffset}px)"
                     )
@@ -159,7 +165,7 @@ fun TabSwitcherScreen(
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (Math.abs(available.y) > 50f) {
                     val dir = if (available.y > 0f) "TOWARDS_TOP ⬆️" else "TOWARDS_BOTTOM ⬇️"
-                    OmniLogger.log(
+                    logTrace(
                         "TABS_SCROLL",
                         "💨 [PRE_FLING] VelocityY=${"%.1f".format(Locale.US, available.y)} px/s $dir | Pos: Item #${gridState.firstVisibleItemIndex} (${gridState.firstVisibleItemScrollOffset}px)"
                     )
@@ -169,7 +175,7 @@ fun TabSwitcherScreen(
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
                 if (Math.abs(consumed.y) > 50f || Math.abs(available.y) > 50f) {
-                    OmniLogger.log(
+                    logTrace(
                         "TABS_SCROLL",
                         "🏁 [POST_FLING] Consumed=${"%.1f".format(Locale.US, consumed.y)} px/s, Unconsumed=${"%.1f".format(Locale.US, available.y)} px/s | Final Pos: Item #${gridState.firstVisibleItemIndex} (${gridState.firstVisibleItemScrollOffset}px)"
                     )
@@ -182,7 +188,7 @@ fun TabSwitcherScreen(
     LaunchedEffect(Unit) {
         val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
         val targetIndex = if (activeIndex >= 0) activeIndex else (tabs.size - 1).coerceAtLeast(0)
-        OmniLogger.log(
+        logTrace(
             "TABS_SCROLL",
             "🚀 [GRID_INIT] Tabs count=${tabs.size}, activeTabId='$activeTabId', activeIndex=$activeIndex -> Scrolling to targetIndex=$targetIndex"
         )
@@ -194,7 +200,7 @@ fun TabSwitcherScreen(
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
             .collect { (idx, offset) ->
-                OmniLogger.log(
+                logTrace(
                     "TABS_SCROLL_TRACK",
                     "📍 [GRID_INDEX_PULSE] Item #$idx (offset ${offset}px) | canScrollUp=${gridState.canScrollBackward}, canScrollDown=${gridState.canScrollForward}"
                 )
@@ -204,7 +210,7 @@ fun TabSwitcherScreen(
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.isScrollInProgress }
             .collect { inProgress ->
-                OmniLogger.log(
+                logTrace(
                     "TABS_SCROLL_TRACK",
                     if (inProgress) "⚡ [GRID_MOTION_STARTED] isScrollInProgress=true" else "🛑 [GRID_MOTION_STOPPED] isScrollInProgress=false (Settled at Item #${gridState.firstVisibleItemIndex}, offset ${gridState.firstVisibleItemScrollOffset}px)"
                 )
@@ -558,19 +564,12 @@ fun TabSwitcherScreen(
                                     shape = RoundedCornerShape(12.dp)
                                     clip = true
                                 }
-                                .combinedClickable(
+                                .clickable(
+                                    enabled = !isClosing,
                                     onClick = {
-                                        OmniLogger.log("TABS_UI", "Card onClick for tab [${tab.id}] ('${tab.title}')")
-                                        if (!isClosing) {
-                                            if (isSelectionMode) onToggleTabSelection(tab.id)
-                                            else onSelectTab(tab.id)
-                                        }
-                                    },
-                                    onLongClick = {
-                                        OmniLogger.log("TABS_UI", "Card onLongClick for tab [${tab.id}] ('${tab.title}')")
-                                        if (!isClosing && !isSelectionMode) {
-                                            onEnterSelectionMode(tab.id)
-                                        }
+                                        logTrace("TABS_UI", "Card onClick for tab [${tab.id}] ('${tab.title}')")
+                                        if (isSelectionMode) onToggleTabSelection(tab.id)
+                                        else onSelectTab(tab.id)
                                     }
                                 )
                         ) {
