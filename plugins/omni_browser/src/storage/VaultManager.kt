@@ -180,6 +180,7 @@ class VaultManager(
                 mirrorFile("config/system_presets.json", "system_presets.json")
                 mirrorFile("config/smart_notes.json", "smart_notes.json")
                 mirrorFile("config/tab_groups.json", "tab_groups.json")
+                mirrorFile("config/history.json", "history.json")
 
                 val ideDir = File(bridge.getPluginDir(), "ide")
                 if (ideDir.exists() && ideDir.isDirectory) {
@@ -210,6 +211,7 @@ class VaultManager(
                 restoreIfMissing("config/system_presets.json", "system_presets.json")
                 restoreIfMissing("config/smart_notes.json", "smart_notes.json")
                 restoreIfMissing("config/tab_groups.json", "tab_groups.json")
+                restoreIfMissing("config/history.json", "history.json")
 
                                     val vaultIdeDir = File(vaultDir, "ide")
                     if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
@@ -407,6 +409,47 @@ class VaultManager(
         }
     }
 
+    fun saveHistory(list: List<com.omni.plugin.browser.models.HistoryItem>) {
+        try {
+            val arr = JSONArray()
+            list.take(800).forEach { h ->
+                val obj = JSONObject().apply {
+                    put("id", h.id)
+                    put("title", h.title)
+                    put("url", h.url)
+                    put("timestamp", h.timestamp)
+                    put("visitCount", h.visitCount)
+                }
+                arr.put(obj)
+            }
+            bridge.saveFile("config/history.json", arr.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadHistory(): List<com.omni.plugin.browser.models.HistoryItem>? {
+        return try {
+            val bytes = bridge.readFile("config/history.json") ?: return null
+            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+            val list = mutableListOf<com.omni.plugin.browser.models.HistoryItem>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    com.omni.plugin.browser.models.HistoryItem(
+                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                        title = obj.optString("title", "Web Page"),
+                        url = obj.getString("url"),
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                        visitCount = obj.optInt("visitCount", 1)
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun saveTabGroups(list: List<com.omni.plugin.browser.models.TabGroup>) {
         try {
             val arr = JSONArray()
@@ -575,6 +618,7 @@ class VaultManager(
             addFileToZip("config/system_presets.json", "system_presets.json")
             addFileToZip("config/smart_notes.json", "smart_notes.json")
             addFileToZip("config/tab_groups.json", "tab_groups.json")
+            addFileToZip("config/history.json", "history.json")
 
             val ideDir = File(bridge.getPluginDir(), "ide")
             if (ideDir.exists() && ideDir.isDirectory) {
