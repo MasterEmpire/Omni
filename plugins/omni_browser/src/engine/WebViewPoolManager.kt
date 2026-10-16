@@ -54,6 +54,19 @@ class WebViewPoolManager(
 
     var mobileUA: String = ""
         private set
+    var isDataSaverActive: Boolean = false
+
+    fun applyDataSaver(settings: WebSettings, enabled: Boolean) {
+        settings.blockNetworkImage = enabled
+        settings.cacheMode = if (enabled) WebSettings.LOAD_CACHE_ELSE_NETWORK else WebSettings.LOAD_DEFAULT
+    }
+
+    fun updateDataSaver(enabled: Boolean) {
+        isDataSaverActive = enabled
+        pool.values.forEach { wv ->
+            applyDataSaver(wv.settings, enabled)
+        }
+    }
 
     private fun interceptLocalhostRequest(uri: Uri, request: WebResourceRequest?): WebResourceResponse? {
         return try {
@@ -321,6 +334,7 @@ class WebViewPoolManager(
             tabDesktopModes[tabId] = isDesktop
             settings.userAgentString = if (isDesktop) DESKTOP_USER_AGENT else cleanMobileUA
             applyForceDark(settings, isForceDarkWebPages)
+            applyDataSaver(settings, isDataSaverActive)
 
             webChromeClient = object : WebChromeClient() {
                 override fun onCreateWindow(
@@ -442,6 +456,42 @@ class WebViewPoolManager(
                     if ((host == "localhost" || host == "127.0.0.1") && port == localPort) {
                         return interceptLocalhostRequest(reqUri, request)
                     }
+
+                    if (isDataSaverActive) {
+                        val path = reqUri.path?.lowercase(Locale.US) ?: ""
+                        val urlStr = reqUri.toString().lowercase(Locale.US)
+
+                        // 1. Block heavy web fonts (.woff2, .woff, .ttf, .otf)
+                        if (path.endsWith(".woff2") || path.endsWith(".woff") || path.endsWith(".ttf") || path.endsWith(".otf")) {
+                            return WebResourceResponse("text/plain", "UTF-8", 200, "OK", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                        }
+
+                        // 2. Block heavy media video/audio chunks
+                        if (path.endsWith(".mp4") || path.endsWith(".webm") || path.endsWith(".m4v") || path.endsWith(".mp3") || path.endsWith(".ogg")) {
+                            return WebResourceResponse("text/plain", "UTF-8", 200, "OK", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                        }
+
+                        // 3. Block ad trackers, analytics & telemetry scripts
+                        if (host.contains("google-analytics.com") ||
+                            host.contains("googletagmanager.com") ||
+                            host.contains("doubleclick.net") ||
+                            host.contains("adservice.google.") ||
+                            host.contains("pagead2.googlesyndication.com") ||
+                            host.contains("facebook.net") ||
+                            host.contains("clarity.ms") ||
+                            host.contains("scorecardresearch.com") ||
+                            host.contains("hotjar.com") ||
+                            host.contains("criteo.com") ||
+                            host.contains("taboola.com") ||
+                            host.contains("outbrain.com") ||
+                            urlStr.contains("/adsystem/") ||
+                            urlStr.contains("/adserver/") ||
+                            urlStr.contains("ads.min.js")
+                        ) {
+                            return WebResourceResponse("text/plain", "UTF-8", 200, "OK", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                        }
+                    }
+
                     return super.shouldInterceptRequest(view, request)
                 }
 
@@ -486,6 +536,9 @@ class WebViewPoolManager(
                     view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
+                    }
+                    if (isDataSaverActive) {
+                        view?.evaluateJavascript(DATA_SAVER_POLYFILL, null)
                     }
                     CookieManager.getInstance().flush()
                 }
