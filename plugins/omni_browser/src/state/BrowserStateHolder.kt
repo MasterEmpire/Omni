@@ -348,6 +348,7 @@ class BrowserStateHolder(
         }
         targetWv.onResume()
         targetWv.visibility = android.view.View.VISIBLE
+        container.visibility = android.view.View.VISIBLE
 
         // Safely remove sibling views now that targetWv is active on screen
         for (i in container.childCount - 1 downTo 0) {
@@ -458,15 +459,11 @@ class BrowserStateHolder(
         if (currentIdx == -1) return
 
         dragJob?.cancel()
-        try {
-            currentWebView?.captureThumbnail()?.let { freshThumb ->
-                tabs = tabs.map { if (it.id == activeTabId) it.copy(thumbnail = freshThumb) else it }
-            }
-        } catch (_: Exception) {}
+        bridge.log("SWIPE_DEBUG", "onTopBarDragStart -> tabCount=${tabs.size}, activeTabId=$activeTabId")
 
         isTabSwiping = true
         swipeTargetTab = null
-        dragJob = coroutineScope.launch {
+        dragJob = coroutineScope.launch(Dispatchers.Main.immediate) {
             tabSwipeOffset.snapTo(0f)
         }
     }
@@ -507,7 +504,7 @@ class BrowserStateHolder(
 
         swipeTargetTab = targetTab
         dragJob?.cancel()
-        dragJob = coroutineScope.launch {
+        dragJob = coroutineScope.launch(Dispatchers.Main.immediate) {
             tabSwipeOffset.snapTo(appliedOffset)
         }
     }
@@ -521,36 +518,44 @@ class BrowserStateHolder(
         val density = context.resources.displayMetrics.density
         // Flick-responsive threshold: 55dp or 8% screen width so natural thumb flicks always register
         val threshold = minOf(55f * density, screenW * 0.08f)
+        bridge.log("SWIPE_DEBUG", "onTopBarDragEnd -> offset=$currentOffset, threshold=$threshold, target=${target?.title ?: "none"}")
 
-        coroutineScope.launch {
-            if (target != null && Math.abs(currentOffset) >= threshold) {
-                val settleTarget = if (currentOffset < 0) -screenW else screenW
-                tabSwipeOffset.animateTo(
-                    targetValue = settleTarget,
-                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 140, easing = androidx.compose.animation.core.FastOutSlowInEasing)
-                )
-                switchToTab(target.id)
-                bridge.vibrate(25L)
-            } else {
-                tabSwipeOffset.animateTo(
-                    targetValue = 0f,
-                    animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 450f)
-                )
+        dragJob = coroutineScope.launch(Dispatchers.Main.immediate) {
+            try {
+                if (target != null && Math.abs(currentOffset) >= threshold) {
+                    val settleTarget = if (currentOffset < 0) -screenW else screenW
+                    tabSwipeOffset.animateTo(
+                        targetValue = settleTarget,
+                        animationSpec = androidx.compose.animation.core.tween(durationMillis = 140, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+                    )
+                    switchToTab(target.id)
+                    bridge.vibrate(25L)
+                } else {
+                    tabSwipeOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 450f)
+                    )
+                }
+            } finally {
+                tabSwipeOffset.snapTo(0f)
+                swipeTargetTab = null
+                isTabSwiping = false
             }
-            tabSwipeOffset.snapTo(0f)
-            swipeTargetTab = null
-            isTabSwiping = false
         }
     }
 
     fun onTopBarDragCancel() {
         if (!isTabSwiping) return
         dragJob?.cancel()
-        coroutineScope.launch {
-            tabSwipeOffset.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 450f))
-            tabSwipeOffset.snapTo(0f)
-            swipeTargetTab = null
-            isTabSwiping = false
+        bridge.log("SWIPE_DEBUG", "onTopBarDragCancel -> cancelled by gesture engine")
+        dragJob = coroutineScope.launch(Dispatchers.Main.immediate) {
+            try {
+                tabSwipeOffset.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 450f))
+            } finally {
+                tabSwipeOffset.snapTo(0f)
+                swipeTargetTab = null
+                isTabSwiping = false
+            }
         }
     }
 
