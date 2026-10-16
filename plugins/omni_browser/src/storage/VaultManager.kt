@@ -29,7 +29,8 @@ data class BrowserConfig(
     val localPort: Int = 8080,
     val erudaEnabled: Boolean = false,
     val desktopMode: Boolean = false,
-    val backgroundAudio: Boolean = true
+    val backgroundAudio: Boolean = true,
+    val dataSaver: Boolean = false
 )
 
 data class VaultRestoreData(
@@ -368,7 +369,8 @@ class VaultManager(
         localPort: Int = 8080,
         erudaEnabled: Boolean = false,
         desktopMode: Boolean = false,
-        backgroundAudio: Boolean = true
+        backgroundAudio: Boolean = true,
+        dataSaver: Boolean = false
     ) {
         try {
             val cfg = JSONObject().apply {
@@ -379,6 +381,7 @@ class VaultManager(
                 put("erudaEnabled", erudaEnabled)
                 put("desktopMode", desktopMode)
                 put("backgroundAudio", backgroundAudio)
+                put("dataSaver", dataSaver)
             }
             bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
@@ -396,7 +399,8 @@ class VaultManager(
                 localPort = json.optInt("localPort", 8080),
                 erudaEnabled = json.optBoolean("erudaEnabled", false),
                 desktopMode = json.optBoolean("desktopMode", false),
-                backgroundAudio = json.optBoolean("backgroundAudio", true)
+                backgroundAudio = json.optBoolean("backgroundAudio", true),
+                dataSaver = json.optBoolean("dataSaver", false)
             )
         } catch (_: Exception) {
             null
