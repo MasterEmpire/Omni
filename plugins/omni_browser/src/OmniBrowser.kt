@@ -673,6 +673,7 @@ class OmniBrowser : PluginEntry() {
 
             if (state.isTabSwitcherOpen) {
                 TabSwitcherScreen(
+                    bridge = bridge,
                     tabs = state.tabs,
                     activeTabId = state.activeTabId,
                     profiles = state.profiles,
