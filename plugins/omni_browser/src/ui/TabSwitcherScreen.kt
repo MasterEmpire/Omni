@@ -62,7 +62,7 @@ fun TabSwitcherScreen(
     }
     val closingTabIds = remember { mutableStateListOf<String>() }
 
-    LaunchedEffect(tabs.size, activeTabId) {
+    LaunchedEffect(Unit) {
         val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
         val targetIndex = if (activeIndex >= 0) activeIndex else (tabs.size - 1).coerceAtLeast(0)
         if (targetIndex >= 0 && tabs.isNotEmpty()) {
@@ -312,7 +312,6 @@ fun TabSwitcherScreen(
                                 shape = RoundedCornerShape(12.dp)
                                 clip = true
                             }
-                            .longPressDraggableHandle()
                             .clickable { if (!isClosing) onSelectTab(tab.id) }
                     ) {
                     Column(modifier = Modifier.fillMaxSize()) {
@@ -320,6 +319,7 @@ fun TabSwitcherScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(if (isActive) Color(0xFF333842) else Color(0xFF21252B))
+                                .longPressDraggableHandle()
                                 .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
