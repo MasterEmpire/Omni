@@ -1810,6 +1810,19 @@ fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
     return Uri.fromFile(file)
 }
 
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
 fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
     try {
         if (!file.exists()) {
@@ -1818,12 +1831,14 @@ fun openDownloadedFile(context: android.content.Context, file: java.io.File, bri
         }
         val mime = resolveMimeType(file)
         val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
             setDataAndType(contentUri, mime)
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(chooser)
