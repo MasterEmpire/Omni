@@ -16,7 +16,8 @@ data class LoadedPlugin(
     val baseDir: File,
     val dataDir: File,
     val classLoader: ClassLoader,
-    val icon: String? = null
+    val icon: String? = null,
+    val loadedAt: Long = System.currentTimeMillis()
 )
 
 object PluginLoader {
@@ -154,9 +155,15 @@ object PluginLoader {
         pluginId: String,
         fallbackEntryClass: String? = null
     ): LoadedPlugin {
-        // Fast-path: Return cached singleton instance if already loaded
+        // Fast-path: Return cached singleton instance only if disk bytecode has not been updated
         pluginCache[pluginId]?.let { cached ->
-            return cached
+            val dexFile = File(cached.baseDir, "classes.dex")
+            if (dexFile.exists() && dexFile.lastModified() > cached.loadedAt) {
+                OmniLogger.log("LOADER", "🔄 [STALENESS_SENTRY] Newer classes.dex on disk for [$pluginId]. Evicting cached classloader!")
+                invalidate(pluginId)
+            } else {
+                return cached
+            }
         }
 
         val targetBaseDir = context.getDir("plugins", Context.MODE_PRIVATE)
