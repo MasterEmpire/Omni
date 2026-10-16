@@ -93,132 +93,54 @@ fun TabSwitcherScreen(
     var profileMenuExpanded by remember { mutableStateOf(false) }
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
 
-    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val initialIndex = remember {
+        val idx = tabs.indexOfFirst { it.id == activeTabId }
+        if (idx >= 0) idx else (tabs.size - 1).coerceAtLeast(0)
+    }
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialIndex
+    )
     val reorderableLazyGridState = rememberReorderableLazyGridState(gridState) { from, to ->
         onReorderTabs(from.index, to.index)
     }
     val closingTabIds = remember { mutableStateListOf<String>() }
 
-    fun logTrace(tag: String, msg: String) {
-        bridge?.log(tag, msg) ?: OmniLogger.log(tag, msg)
-    }
-
-    SideEffect {
-        logTrace("OMNI_TRACE", "⚡ [GRID_COMPOSED] TabSwitcherScreen active! (activeTabId='$activeTabId', tabs=${tabs.size}, segment='$activeSegment')")
-    }
-
+    // Focused Anomaly Sentry: Silent during normal scrolling; only logs if a swipe is truly swallowed!
     val tabsGridScrollConnection = remember(gridState) {
         object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                val dy = available.y
-                if (Math.abs(dy) > 0.5f) {
-                    val direction = if (dy > 0f) "SWIPE_DOWN (Scroll to TOP ⬆️)" else "SWIPE_UP (Scroll to BOTTOM ⬇️)"
-                    val src = if (source == NestedScrollSource.Drag) "USER_DRAG" else "FLING_INERTIA"
-                    val canBack = gridState.canScrollBackward
-                    val canFwd = gridState.canScrollForward
-                    val firstIdx = gridState.firstVisibleItemIndex
-                    val firstOffset = gridState.firstVisibleItemScrollOffset
+            var dragDeltaAccumulator = 0f
+            var consumedDeltaAccumulator = 0f
 
-                    logTrace(
-                        "TABS_SCROLL",
-                        "📥 [PRE_SCROLL] dy=${"%.1f".format(Locale.US, dy)}px | $direction | Source=$src | Pos: Item #$firstIdx (offset ${firstOffset}px) | Bounds: [canScrollUp=$canBack, canScrollDown=$canFwd]"
-                    )
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag) {
+                    dragDeltaAccumulator += available.y
                 }
                 return Offset.Zero
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                val consumedY = consumed.y
-                val unconsumedY = available.y
-                val src = if (source == NestedScrollSource.Drag) "USER_DRAG" else "FLING_INERTIA"
-                val firstIdx = gridState.firstVisibleItemIndex
-                val firstOffset = gridState.firstVisibleItemScrollOffset
-                val canBack = gridState.canScrollBackward
-                val canFwd = gridState.canScrollForward
-
-                if (Math.abs(consumedY) > 0.5f) {
-                    logTrace(
-                        "TABS_SCROLL",
-                        "✅ [ACTED / PHYSICALLY SCROLLED] Moved ${"%.1f".format(Locale.US, consumedY)}px | Now at: Item #$firstIdx (offset ${firstOffset}px) | Source=$src"
-                    )
-                }
-
-                if (Math.abs(unconsumedY) > 0.5f) {
-                    val attemptedDir = if (unconsumedY > 0f) "TOP" else "BOTTOM"
-                    val cause = when {
-                        unconsumedY > 0f && !canBack ->
-                            "BLOCKED_BY_BOUND: Grid is already at the absolute TOP (item #0, offset 0px). canScrollBackward=false."
-                        unconsumedY < 0f && !canFwd ->
-                            "BLOCKED_BY_BOUND: Grid is already at the absolute BOTTOM. canScrollForward=false."
-                        unconsumedY > 0f && canBack && Math.abs(consumedY) < 0.5f ->
-                            "⚠️ SWALLOWED_ANOMALY: Grid has room to scroll up (item #$firstIdx, offset=${firstOffset}px, canScrollBackward=true), but consumed 0px! Gesture was swallowed or locked!"
-                        unconsumedY < 0f && canFwd && Math.abs(consumedY) < 0.5f ->
-                            "⚠️ SWALLOWED_ANOMALY: Grid has room to scroll down (item #$firstIdx, canScrollForward=true), but consumed 0px! Gesture was swallowed or locked!"
-                        else ->
-                            "PARTIAL_SCROLL: Scrolled ${"%.1f".format(Locale.US, consumedY)}px, hit boundary with ${"%.1f".format(Locale.US, unconsumedY)}px excess."
-                    }
-
-                    logTrace(
-                        "TABS_SCROLL",
-                        "🛑 [UNCONSUMED / NOT SCROLLED] unconsumedDy=${"%.1f".format(Locale.US, unconsumedY)}px (Attempted: $attemptedDir) | CAUSE: $cause | Pos: Item #$firstIdx (${firstOffset}px)"
-                    )
+                if (source == NestedScrollSource.Drag) {
+                    consumedDeltaAccumulator += consumed.y
                 }
                 return Offset.Zero
             }
 
             override suspend fun onPreFling(available: Velocity): Velocity {
-                if (Math.abs(available.y) > 50f) {
-                    val dir = if (available.y > 0f) "TOWARDS_TOP ⬆️" else "TOWARDS_BOTTOM ⬇️"
-                    logTrace(
-                        "TABS_SCROLL",
-                        "💨 [PRE_FLING] VelocityY=${"%.1f".format(Locale.US, available.y)} px/s $dir | Pos: Item #${gridState.firstVisibleItemIndex} (${gridState.firstVisibleItemScrollOffset}px)"
-                    )
+                // End of touch drag gesture: audit if user swiped significantly but grid refused to scroll
+                if (Math.abs(dragDeltaAccumulator) > 40f && Math.abs(consumedDeltaAccumulator) < 2f) {
+                    val canUp = gridState.canScrollBackward
+                    val canDown = gridState.canScrollForward
+                    val firstIdx = gridState.firstVisibleItemIndex
+                    val firstOffset = gridState.firstVisibleItemScrollOffset
+                    val tag = "TABS_SWALLOWED_DEBUG"
+                    val msg = "🚨 [SWALLOWED_SWIPE] Dragged ${dragDeltaAccumulator.toInt()}px, consumed 0px! Pos: Item #$firstIdx (${firstOffset}px). Bounds: [canUp=$canUp, canDown=$canDown]"
+                    bridge?.log(tag, msg) ?: OmniLogger.log(tag, msg)
                 }
-                return Velocity.Zero
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                if (Math.abs(consumed.y) > 50f || Math.abs(available.y) > 50f) {
-                    logTrace(
-                        "TABS_SCROLL",
-                        "🏁 [POST_FLING] Consumed=${"%.1f".format(Locale.US, consumed.y)} px/s, Unconsumed=${"%.1f".format(Locale.US, available.y)} px/s | Final Pos: Item #${gridState.firstVisibleItemIndex} (${gridState.firstVisibleItemScrollOffset}px)"
-                    )
-                }
+                dragDeltaAccumulator = 0f
+                consumedDeltaAccumulator = 0f
                 return Velocity.Zero
             }
         }
-    }
-
-    LaunchedEffect(Unit) {
-        val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
-        val targetIndex = if (activeIndex >= 0) activeIndex else (tabs.size - 1).coerceAtLeast(0)
-        logTrace(
-            "TABS_SCROLL",
-            "🚀 [GRID_INIT] Tabs count=${tabs.size}, activeTabId='$activeTabId', activeIndex=$activeIndex -> Scrolling to targetIndex=$targetIndex"
-        )
-        if (targetIndex >= 0 && tabs.isNotEmpty()) {
-            gridState.scrollToItem(targetIndex)
-        }
-    }
-
-    LaunchedEffect(gridState) {
-        snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
-            .collect { (idx, offset) ->
-                logTrace(
-                    "TABS_SCROLL_TRACK",
-                    "📍 [GRID_INDEX_PULSE] Item #$idx (offset ${offset}px) | canScrollUp=${gridState.canScrollBackward}, canScrollDown=${gridState.canScrollForward}"
-                )
-            }
-    }
-
-    LaunchedEffect(gridState) {
-        snapshotFlow { gridState.isScrollInProgress }
-            .collect { inProgress ->
-                logTrace(
-                    "TABS_SCROLL_TRACK",
-                    if (inProgress) "⚡ [GRID_MOTION_STARTED] isScrollInProgress=true" else "🛑 [GRID_MOTION_STOPPED] isScrollInProgress=false (Settled at Item #${gridState.firstVisibleItemIndex}, offset ${gridState.firstVisibleItemScrollOffset}px)"
-                )
-            }
     }
 
     Column(
@@ -504,40 +426,6 @@ fun TabSwitcherScreen(
                     .weight(1f)
                     .fillMaxWidth()
                     .nestedScroll(tabsGridScrollConnection)
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent(PointerEventPass.Final)
-                                val type = event.type
-                                val change = event.changes.firstOrNull()
-                                if (change != null) {
-                                    when (type) {
-                                        androidx.compose.ui.input.pointer.PointerEventType.Press -> {
-                                            logTrace(
-                                                "OMNI_TRACE",
-                                                "👉 [GRID_TOUCH_PRESS] Finger hit grid at (${change.position.x.toInt()}, ${change.position.y.toInt()}) | Pos: Item #${gridState.firstVisibleItemIndex} (${gridState.firstVisibleItemScrollOffset}px)"
-                                            )
-                                        }
-                                        androidx.compose.ui.input.pointer.PointerEventType.Move -> {
-                                            val dy = change.position.y - change.previousPosition.y
-                                            if (Math.abs(dy) > 3f && change.isConsumed && !gridState.isScrollInProgress) {
-                                                OmniLogger.log(
-                                                    "TABS_TOUCH",
-                                                    "🔒 [TOUCH_SWALLOWED_BY_CHILD] dy=${"%.1f".format(Locale.US, dy)}px consumed by child element, but grid did NOT scroll!"
-                                                )
-                                            }
-                                        }
-                                        androidx.compose.ui.input.pointer.PointerEventType.Release -> {
-                                            OmniLogger.log(
-                                                "TABS_TOUCH",
-                                                "👆 [TOUCH_UP] Pointer released at (${change.position.x.toInt()}, ${change.position.y.toInt()}) | Grid pos: #${gridState.firstVisibleItemIndex} (${gridState.firstVisibleItemScrollOffset}px)"
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
             ) {
                 items(tabs, key = { it.id }) { tab ->
                     val isActive = tab.id == activeTabId
