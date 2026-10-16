@@ -126,9 +126,10 @@ class DownloadController(
                                     resolved = candidates.maxByOrNull { it.lastModified() }
                                 }
 
-                                if (resolved != null && !finishedFiles.contains(resolved)) {
-                                    bridge.log("DOWNLOAD_FINISH", "Resolved download [$dId] -> ${resolved.absolutePath} (${resolved.length()} bytes)")
-                                    finishedFiles.add(resolved)
+                                val targetFile = resolved
+                                if (targetFile != null && !finishedFiles.contains(targetFile)) {
+                                    bridge.log("DOWNLOAD_FINISH", "Resolved download [$dId] -> ${targetFile.absolutePath} (${targetFile.length()} bytes)")
+                                    finishedFiles.add(targetFile)
                                 }
                             }
                         } else {
