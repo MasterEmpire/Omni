@@ -4,6 +4,22 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.webkit.JavascriptInterface
 
+data class GroupedTabItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val url: String,
+    val profileId: String = "default",
+    val isDesktop: Boolean = false
+)
+
+data class TabGroup(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val colorValue: Long = 0xFF2979FF,
+    val createdAt: Long = System.currentTimeMillis(),
+    val tabs: List<GroupedTabItem> = emptyList()
+)
+
 data class ShortcutItem(
     val id: String = java.util.UUID.randomUUID().toString(),
     val title: String,
