@@ -278,6 +278,7 @@ class OmniBrowser : PluginEntry() {
     }
 
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
+        bridge.log("OMNI_TRACE", "🌐 [BROWSER_INIT] OmniBrowser.onCreateView invoked!")
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
@@ -329,6 +330,7 @@ class OmniBrowser : PluginEntry() {
 
         // --- Lifecycle and Background Loops ---
         LaunchedEffect(Unit) {
+            bridge.log("OMNI_TRACE", "🌐 [BROWSER_MOUNT] ChromeBrowserScreen mounted & state.init() running!")
             state.init()
         }
 
@@ -401,6 +403,7 @@ class OmniBrowser : PluginEntry() {
                     },
                     onQuickToggleTab = { state.togglePreviousTab() },
                     onTabSwitcherClick = {
+                        state.bridge.log("OMNI_TRACE", "🔘 [TAB_BTN_CLICK] User tapped tab count button (${state.tabs.size} tabs open)!")
                         val thumb = state.currentWebView?.captureThumbnail()
                         val bundle = android.os.Bundle()
                         state.currentWebView?.saveState(bundle)
@@ -408,6 +411,7 @@ class OmniBrowser : PluginEntry() {
                         CookieManager.getInstance().flush()
                         state.containerLayout?.visibility = android.view.View.INVISIBLE
                         state.isTabSwitcherOpen = true
+                        state.bridge.log("OMNI_TRACE", "📂 [TAB_BTN_CLICK] state.isTabSwitcherOpen flipped to TRUE!")
                     },
                     showMenu = state.showMenu,
                     onMenuToggle = { state.showMenu = !state.showMenu },
@@ -672,6 +676,9 @@ class OmniBrowser : PluginEntry() {
             )
 
             if (state.isTabSwitcherOpen) {
+                SideEffect {
+                    bridge.log("OMNI_TRACE", "🎭 [SWITCHER_TREE] TabSwitcherScreen rendered in Compose tree! activeTabId='${state.activeTabId}'")
+                }
                 TabSwitcherScreen(
                     bridge = bridge,
                     tabs = state.tabs,
