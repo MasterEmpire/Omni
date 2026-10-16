@@ -644,6 +644,20 @@ class OmniBrowser : PluginEntry() {
                     activeTabId = state.activeTabId,
                     profiles = state.profiles,
                     selectedProfileId = state.selectedProfileId,
+                    tabGroups = state.tabGroups,
+                    isSelectionMode = state.isSelectionMode,
+                    selectedTabIds = state.selectedTabIds,
+                    showGroupNamingDialog = state.showGroupNamingDialog,
+                    onEnterSelectionMode = { state.enterSelectionMode(it) },
+                    onToggleTabSelection = { state.toggleTabSelection(it) },
+                    onSelectAllTabs = { state.selectAllTabs() },
+                    onClearSelectionMode = { state.clearSelectionMode() },
+                    onPromptGroupSelection = { state.promptGroupSelection() },
+                    onConfirmCreateGroup = { title, color -> state.confirmCreateGroup(title, color) },
+                    onDismissGroupNamingDialog = { state.showGroupNamingDialog = false },
+                    onRestoreTabGroup = { state.restoreTabGroup(it) },
+                    onRestoreSingleGroupedTab = { gId, item -> state.restoreSingleGroupedTab(gId, item) },
+                    onDeleteTabGroup = { state.deleteTabGroup(it) },
                     onSelectProfile = {
                         state.changeSelectedProfile(it)
                     },
@@ -660,7 +674,10 @@ class OmniBrowser : PluginEntry() {
                     onCloseTab = { state.closeTab(it) },
                     onNewTab = { profId -> state.createNewTab(targetProfileId = profId) },
                     onCloseAll = { state.closeAllTabs() },
-                    onCloseSwitcher = { state.isTabSwitcherOpen = false },
+                    onCloseSwitcher = {
+                        state.clearSelectionMode()
+                        state.isTabSwitcherOpen = false
+                    },
                     onReorderTabs = { from, to -> state.reorderTabs(from, to) },
                     onSaveTabOrder = { state.saveCurrentTabOrder() },
                     modifier = Modifier.fillMaxSize().zIndex(10f)
