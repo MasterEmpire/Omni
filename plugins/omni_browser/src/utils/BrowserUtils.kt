@@ -389,6 +389,44 @@ val BLOB_INTERCEPTOR_SCRIPT = """
 })();
 """.trimIndent()
 
+val DATA_SAVER_POLYFILL = """
+(function() {
+    try {
+        if (navigator.connection) {
+            Object.defineProperty(navigator.connection, 'saveData', { get: () => true, configurable: true });
+        }
+    } catch(_) {}
+    function killMediaPreload() {
+        document.querySelectorAll('video, audio').forEach(function(el) {
+            try {
+                el.preload = 'none';
+                el.autoplay = false;
+                el.removeAttribute('autoplay');
+                el.pause();
+            } catch(_) {}
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', killMediaPreload);
+    } else {
+        killMediaPreload();
+    }
+})();
+""".trimIndent()
+
+fun isMeteredOrMobileConnection(context: android.content.Context): Boolean {
+    return try {
+        val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return true
+        val activeNetwork = cm.activeNetwork ?: return true
+        val caps = cm.getNetworkCapabilities(activeNetwork) ?: return true
+        val isWifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+        val isMetered = cm.isActiveNetworkMetered
+        !(isWifi && !isMetered)
+    } catch (_: Exception) {
+        true
+    }
+}
+
 val DOM_SNAPSHOT_SCRIPT = """
 (function() {
     try {
