@@ -23,12 +23,16 @@ class DownloadController(
 ) {
     fun fetchCompletedDownloads(): List<File> {
         return try {
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "OmniDownloads")
-            if (dir.exists() && dir.isDirectory) {
-                dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() } ?: emptyList()
-            } else {
-                emptyList()
-            }
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val omniDir = File(downloadsDir, "OmniDownloads")
+            val omniFiles = if (omniDir.exists() && omniDir.isDirectory) {
+                omniDir.listFiles()?.filter { it.isFile } ?: emptyList()
+            } else emptyList()
+            val rootFiles = if (downloadsDir.exists() && downloadsDir.isDirectory) {
+                downloadsDir.listFiles()?.filter { it.isFile } ?: emptyList()
+            } else emptyList()
+
+            (omniFiles + rootFiles).distinctBy { it.absolutePath }.sortedByDescending { it.lastModified() }
         } catch (_: Exception) {
             emptyList()
         }
@@ -62,29 +66,72 @@ class DownloadController(
                     val status = if (statusCol >= 0) cursor.getInt(statusCol) else DownloadManager.STATUS_RUNNING
                     val prog = if (total > 0) (bytes.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
 
-                    if (status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED) {
-                        finishedIds.add(dId)
-                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                            var resolved: File? = null
-                            if (localUriCol >= 0) {
-                                val uriStr = cursor.getString(localUriCol)
-                                if (!uriStr.isNullOrEmpty()) {
-                                    val u = Uri.parse(uriStr)
-                                    if (u.scheme == "file") {
-                                        val f = File(u.path ?: "")
-                                        if (f.exists()) resolved = f
+                                            if (status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED) {
+                            finishedIds.add(dId)
+                            if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                                var resolved: File? = null
+
+                                // 1. Query DownloadManager content URI via ContentResolver for exact DATA path
+                                try {
+                                    val downloadUri = dm.getUriForDownloadedFile(dId)
+                                    if (downloadUri != null) {
+                                        context.contentResolver.query(downloadUri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                                            if (c.moveToFirst()) {
+                                                val path = c.getString(0)
+                                                if (!path.isNullOrEmpty()) {
+                                                    val f = File(path)
+                                                    if (f.exists() && f.length() > 0) resolved = f
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+
+                                // 2. Query underlying cursor columns (_data, local_filename)
+                                if (resolved == null) {
+                                    for (colName in listOf("local_filename", "_data")) {
+                                        val idx = cursor.getColumnIndex(colName)
+                                        if (idx >= 0) {
+                                            val path = cursor.getString(idx)
+                                            if (!path.isNullOrEmpty()) {
+                                                val f = File(path)
+                                                if (f.exists() && f.length() > 0) {
+                                                    resolved = f
+                                                    break
+                                                }
+                                            }
+                                        }
                                     }
                                 }
+
+                                // 3. Decode COLUMN_LOCAL_URI (file://)
+                                if (resolved == null && localUriCol >= 0) {
+                                    val uriStr = cursor.getString(localUriCol)
+                                    if (!uriStr.isNullOrEmpty()) {
+                                        val u = Uri.parse(uriStr)
+                                        if (u.scheme == "file") {
+                                            val f = File(u.path ?: "")
+                                            if (f.exists() && f.length() > 0) resolved = f
+                                        }
+                                    }
+                                }
+
+                                // 4. Search OmniDownloads and root Downloads, picking newest matching file
+                                if (resolved == null) {
+                                    val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                                    val candidates = listOf(
+                                        File(File(downloadsDir, "OmniDownloads"), title),
+                                        File(downloadsDir, title)
+                                    ).filter { it.exists() && it.length() > 0 }
+                                    resolved = candidates.maxByOrNull { it.lastModified() }
+                                }
+
+                                if (resolved != null && !finishedFiles.contains(resolved)) {
+                                    bridge.log("DOWNLOAD_FINISH", "Resolved download [$dId] -> ${resolved.absolutePath} (${resolved.length()} bytes)")
+                                    finishedFiles.add(resolved)
+                                }
                             }
-                            if (resolved == null) {
-                                val candidate = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), title)
-                                if (candidate.exists()) resolved = candidate
-                            }
-                            if (resolved != null && !finishedFiles.contains(resolved)) {
-                                finishedFiles.add(resolved)
-                            }
-                        }
-                    } else {
+                        } else {
                         updated.add(ActiveDownloadItem(dId, title, bytes, total, prog, status))
                     }
                 } while (cursor.moveToNext())
@@ -125,6 +172,8 @@ class DownloadController(
             var saved = false
             var savedLocation = ""
 
+            var resolvedFile: File? = null
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 try {
                     val contentValues = ContentValues().apply {
@@ -140,6 +189,19 @@ class DownloadController(
                         saved = true
                         savedLocation = "Downloads/OmniDownloads/$filename (MediaStore)"
                         bridge.log("DOWNLOAD", "Saved via MediaStore -> $uri ($savedLocation)")
+
+                        // Query MediaStore for the exact filesystem path created
+                        try {
+                            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                                if (c.moveToFirst()) {
+                                    val path = c.getString(0)
+                                    if (!path.isNullOrEmpty()) {
+                                        val f = File(path)
+                                        if (f.exists()) resolvedFile = f
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
                     } else {
                         bridge.log("DOWNLOAD_WARN", "MediaStore returned null URI. Falling back to direct filesystem write.")
                     }
@@ -154,14 +216,19 @@ class DownloadController(
                 val targetFile = File(targetDir, filename)
                 FileOutputStream(targetFile).use { it.write(bytes) }
                 saved = true
+                resolvedFile = targetFile
                 savedLocation = targetFile.absolutePath
                 bridge.log("DOWNLOAD", "Saved directly to File -> $savedLocation (${targetFile.length()} bytes)")
             }
 
-            bridge.showToast("Saved $filename to Downloads/OmniDownloads")
-            bridge.log("DOWNLOAD_SUCCESS", "✅ Download complete: $filename (${bytes.size} bytes)")
-            val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            return File(File(publicDocs, "OmniDownloads"), filename)
+            if (resolvedFile == null || !resolvedFile!!.exists()) {
+                val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                resolvedFile = File(File(publicDocs, "OmniDownloads"), filename)
+            }
+
+            bridge.showToast("Saved ${resolvedFile?.name ?: filename} to Downloads/OmniDownloads")
+            bridge.log("DOWNLOAD_SUCCESS", "✅ Download complete: ${resolvedFile?.name ?: filename} (${bytes.size} bytes)")
+            return resolvedFile
         } catch (e: Exception) {
             bridge.showToast("Blob save failed: ${e.message}")
             bridge.log("DOWNLOAD_ERR", "Failed saving base64 file: ${e.message}\n${e.stackTraceToString()}")
@@ -207,7 +274,7 @@ class DownloadController(
                 setDescription("Downloading file...")
                 setTitle(filename)
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "OmniDownloads/$filename")
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(true)
             }
