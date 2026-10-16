@@ -1,191 +1,196 @@
 -- AUTO-GENERATED SCHEMA DUMP
--- Date: 2026-10-04T06:36:15.404Z
+-- Date: 2026-10-16T15:42:56.527Z
 
 -- ========================
 -- TABLES & COLUMNS
 -- ========================
 Table: api_keys
-is_active (boolean), last_used_at (timestamp with time zone), name (text), id (bigint), service (text), api_key (text), created_at (timestamp with time zone), cooldown_until (timestamp with time zone)
+service (text), id (bigint), api_key (text), is_active (boolean), created_at (timestamp with time zone), name (text), cooldown_until (timestamp with time zone), last_used_at (timestamp with time zone)
 
 Table: asset_upload_queue
-file_path (text), zip_name (text), book_name (text), id (bigint), updated_at (timestamp with time zone), created_at (timestamp with time zone), image_name (text), status (text), error_message (text)
+file_path (text), book_name (text), zip_name (text), status (text), error_message (text), id (bigint), image_name (text), created_at (timestamp with time zone), updated_at (timestamp with time zone)
 
 Table: book_flashcard_progress
-status (text), course_code (text), id (uuid), book_id (uuid), error_message (text), book_title (text), chapter_title (text), section_title (text), created_at (timestamp with time zone), updated_at (timestamp with time zone), locked_until (timestamp with time zone), cards_generated (integer), end_page (integer), start_page (integer)
+id (uuid), chapter_title (text), section_title (text), created_at (timestamp with time zone), updated_at (timestamp with time zone), locked_until (timestamp with time zone), course_code (text), cards_generated (integer), end_page (integer), error_message (text), start_page (integer), status (text), book_id (uuid), book_title (text)
 
 Table: book_pages
-id (uuid), manual_flag (text), page_key (text), book_id (uuid), page_number (integer), content_json (jsonb), created_at (timestamp with time zone)
+page_number (integer), content_json (jsonb), created_at (timestamp with time zone), id (uuid), manual_flag (text), book_id (uuid), page_key (text)
 
 Table: book_progress
-status (text), error_message (text), pdf_name (text), id (uuid), page_number (integer), updated_at (timestamp with time zone), created_at (timestamp with time zone)
+created_at (timestamp with time zone), error_message (text), updated_at (timestamp with time zone), page_number (integer), id (uuid), status (text), pdf_name (text)
 
 Table: book_question_links
-similarity_score (double precision), id (uuid), question_id (uuid), chunk_id (uuid), created_at (timestamp with time zone)
+similarity_score (double precision), created_at (timestamp with time zone), id (uuid), chunk_id (uuid), question_id (uuid)
 
 Table: book_results
-created_at (timestamp with time zone), id (uuid), result_json (jsonb), pdf_name (text), page_number (integer)
+result_json (jsonb), pdf_name (text), id (uuid), created_at (timestamp with time zone), page_number (integer)
 
 Table: books
-custom_css (text), author (text), cover_url (text), category (text), title (text), page_offset (integer), toc (jsonb), created_at (timestamp with time zone), id (uuid), course_code (text)
+page_offset (integer), custom_css (text), course_code (text), author (text), cover_url (text), category (text), title (text), id (uuid), created_at (timestamp with time zone), toc (jsonb), ai_explore_enabled (boolean), is_published (boolean)
 
 Table: campus_channels
-last_extracted_at (timestamp with time zone), channel_handle (text), telegram_peer_id (bigint), is_private (boolean), id (uuid), last_scraped_id (bigint), is_active (boolean), created_at (timestamp with time zone), members_data (jsonb)
+created_at (timestamp with time zone), members_data (jsonb), id (uuid), channel_handle (text), last_scraped_id (bigint), telegram_peer_id (bigint), is_private (boolean), channel_title (text), last_extracted_at (timestamp with time zone), is_active (boolean)
 
 Table: campus_feed
-sender_id (bigint), sender_username (text), sender_name (text), image_url (text), full_text (text), channel_handle (text), telegram_id (bigint), telegram_timestamp (timestamp with time zone), created_at (timestamp with time zone), metadata (jsonb), id (uuid)
+sender_id (bigint), metadata (jsonb), image_url (text), created_at (timestamp with time zone), telegram_timestamp (timestamp with time zone), sender_username (text), sender_name (text), telegram_id (bigint), id (uuid), channel_handle (text), full_text (text)
 
 Table: chunks
-page_number (integer), prev_chunk_id (uuid), next_chunk_id (uuid), chunk_index (integer), document_id (uuid), created_at (timestamp with time zone), id (uuid), chunk_text (text), embedding (USER-DEFINED), toc_node_id (uuid)
+prev_chunk_id (uuid), next_chunk_id (uuid), chunk_index (integer), created_at (timestamp with time zone), page_number (integer), document_id (uuid), id (uuid), toc_node_id (uuid), embedding (USER-DEFINED), chunk_text (text)
 
 Table: conduit_favorites
-created_at (timestamp with time zone), repo_name (text), target_id (text), category (text), id (uuid), metadata (jsonb)
+category (text), target_id (text), id (uuid), created_at (timestamp with time zone), repo_name (text), metadata (jsonb)
 
 Table: conduit_history
-title (text), id (uuid), repo_name (text), note (text), meta (text), type (text), created_at (timestamp with time zone), ops (jsonb), conduit_id (integer), sha (text)
+note (text), meta (text), type (text), title (text), sha (text), repo_name (text), created_at (timestamp with time zone), ops (jsonb), conduit_id (integer), id (uuid)
 
 Table: conduit_logs
-data (jsonb), id (uuid), repo_name (text), type (text), created_at (timestamp with time zone)
+repo_name (text), id (uuid), type (text), data (jsonb), created_at (timestamp with time zone)
 
 Table: conversation_members
-muted_until (timestamp with time zone), created_at (timestamp with time zone), last_read_at (timestamp with time zone), role (USER-DEFINED), user_id (uuid), conversation_id (uuid), id (uuid)
+conversation_id (uuid), id (uuid), user_id (uuid), created_at (timestamp with time zone), last_read_at (timestamp with time zone), role (USER-DEFINED), muted_until (timestamp with time zone)
 
 Table: conversations
-id (uuid), owner_id (uuid), last_message_at (timestamp with time zone), created_at (timestamp with time zone), type (USER-DEFINED), avatar_url (text), title (character varying), metadata (jsonb)
+type (USER-DEFINED), avatar_url (text), metadata (jsonb), owner_id (uuid), last_message_at (timestamp with time zone), created_at (timestamp with time zone), title (character varying), id (uuid)
 
 Table: course_flashcards
-front (text), back (text), section_title (text), chapter_title (text), course_code (text), id (uuid), book_id (uuid), ref_page (integer), created_at (timestamp with time zone)
+front (text), id (uuid), book_id (uuid), ref_page (integer), created_at (timestamp with time zone), course_code (text), chapter_title (text), section_title (text), back (text)
 
 Table: course_visual_notebooks
-language (text), id (uuid), page_number (integer), metadata (jsonb), created_at (timestamp with time zone), scoped_css (text), html_body (text), topic_title (text), course_code (text)
+metadata (jsonb), created_at (timestamp with time zone), page_number (integer), course_code (text), language (text), topic_title (text), html_body (text), scoped_css (text), id (uuid)
 
 Table: courses
-id (uuid), department_id (uuid), created_at (timestamp with time zone), code (text), name (text)
+name (text), code (text), created_at (timestamp with time zone), id (uuid), department_id (uuid)
 
 Table: departments
-created_at (timestamp with time zone), id (uuid), name (text)
+created_at (timestamp with time zone), name (text), id (uuid)
 
 Table: documents
-status (text), chunk_count (integer), storage_path (text), user_id (uuid), id (uuid), created_at (timestamp with time zone), file_name (text), last_processed_at (timestamp with time zone), page_count (integer)
+storage_path (text), file_name (text), status (text), user_id (uuid), id (uuid), created_at (timestamp with time zone), last_processed_at (timestamp with time zone), page_count (integer), chunk_count (integer)
 
 Table: embedding_progress
-book_id (uuid), error_message (text), status (text), locked_until (timestamp with time zone), block_index (integer), page_number (integer), id (uuid), updated_at (timestamp with time zone)
+book_id (uuid), id (uuid), status (text), updated_at (timestamp with time zone), block_index (integer), error_message (text), locked_until (timestamp with time zone), page_number (integer)
 
 Table: exams
-university_id (uuid), id (uuid), constants_provided (jsonb), program (text), exam_type (text), exam_quality_notes (jsonb), media_summary (jsonb), created_at (timestamp with time zone), date (text), general_instructions (text), course_id (uuid), total_marks (numeric), time_allowed_minutes (integer)
+general_instructions (text), program (text), media_summary (jsonb), exam_quality_notes (jsonb), university_id (uuid), time_allowed_minutes (integer), id (uuid), constants_provided (jsonb), total_marks (numeric), created_at (timestamp with time zone), date (text), course_id (uuid), exam_type (text)
 
 Table: extracted_events
-event_date (timestamp with time zone), id (uuid), channel_id (uuid), source_ids (ARRAY), is_active (boolean), created_at (timestamp with time zone), title (text), description (text), event_type (text)
+source_ids (ARRAY), id (uuid), channel_id (uuid), event_date (timestamp with time zone), is_active (boolean), created_at (timestamp with time zone), title (text), description (text), event_type (text)
 
 Table: featured_events
-body (text), image_url (text), tag_text (text), weight (integer), metadata (jsonb), created_at (timestamp with time zone), is_active (boolean), app_route (jsonb), id (uuid), external_url (text), html_content (text), action_type (text), button_color (text), button_text (text), tag_color (text), title (text)
+id (uuid), weight (integer), html_content (text), button_text (text), external_url (text), image_url (text), body (text), title (text), button_color (text), metadata (jsonb), tag_text (text), created_at (timestamp with time zone), is_active (boolean), app_route (jsonb), action_type (text), tag_color (text)
 
 Table: linkoin_transactions
-description (text), id (uuid), created_at (timestamp with time zone), amount (integer), user_id (uuid), idempotency_key (text), transaction_type (text)
+user_id (uuid), transaction_type (text), id (uuid), idempotency_key (text), description (text), created_at (timestamp with time zone), amount (integer)
 
 Table: live_stage_questions
-id (uuid), is_pinned (boolean), text (text), status (text), sender_id (uuid), conversation_id (uuid), created_at (timestamp with time zone)
+created_at (timestamp with time zone), sender_id (uuid), text (text), conversation_id (uuid), status (text), id (uuid), is_pinned (boolean)
 
 Table: live_study_sessions
-active_user_ids (ARRAY), conversation_id (uuid), id (uuid), generation_state (text), raw_source_text (text), lesson_topic (text), course_name (text), layout_blueprint (jsonb), compiled_answers (jsonb), lecture_chunks (jsonb), last_updated_at (timestamp with time zone)
+lesson_topic (text), id (uuid), conversation_id (uuid), active_user_ids (ARRAY), last_updated_at (timestamp with time zone), lecture_chunks (jsonb), compiled_answers (jsonb), layout_blueprint (jsonb), generation_state (text), raw_source_text (text), course_name (text)
 
 Table: messages
-is_edited (boolean), reply_to_id (uuid), forward_meta (jsonb), text (text), id (uuid), conversation_id (uuid), sender_id (uuid), attachments (jsonb), created_at (timestamp with time zone)
+is_edited (boolean), reply_to_id (uuid), sender_id (uuid), forward_meta (jsonb), text (text), conversation_id (uuid), attachments (jsonb), id (uuid), created_at (timestamp with time zone)
 
 Table: migration_progress
-pdf_name (text), id (uuid), processed_at (timestamp with time zone), remote_id (text), error_message (text), status (text), page_index (text)
+processed_at (timestamp with time zone), pdf_name (text), remote_id (text), status (text), id (uuid), error_message (text), page_index (text)
 
 Table: migration_sync_state
-current_offset (integer), last_run_at (timestamp with time zone), id (integer)
+id (integer), current_offset (integer), last_run_at (timestamp with time zone)
 
 Table: miron_messages
-thread_id (uuid), id (uuid), user_id (uuid), snapshots (jsonb), quizzes (jsonb), ui_command (jsonb), created_at (timestamp with time zone), flashcards (jsonb), text (text), thought_process (text), role (text)
+quizzes (jsonb), id (uuid), thread_id (uuid), user_id (uuid), snapshots (jsonb), ui_command (jsonb), created_at (timestamp with time zone), flashcards (jsonb), thought_process (text), text (text), role (text)
 
 Table: miron_threads
-id (uuid), is_pinned (boolean), last_message_at (timestamp with time zone), context_passage (text), created_at (timestamp with time zone), updated_at (timestamp with time zone), course_code (text), title (text), user_id (uuid)
+last_message_at (timestamp with time zone), created_at (timestamp with time zone), updated_at (timestamp with time zone), id (uuid), user_id (uuid), title (text), course_code (text), context_passage (text), is_pinned (boolean)
 
 Table: news_feed
-image_url (text), category (text), is_ad (boolean), telegram_id (bigint), id (bigint), created_at (timestamp with time zone), telegram_timestamp (timestamp with time zone), title (text), snippet (text), full_text (text), channel (text), post_url (text)
+title (text), post_url (text), image_url (text), is_ad (boolean), created_at (timestamp with time zone), id (bigint), telegram_id (bigint), telegram_timestamp (timestamp with time zone), full_text (text), channel (text), snippet (text), category (text)
 
 Table: notifications
-created_at (timestamp with time zone), icon (text), insight (text), description (text), title (text), type (text), is_read (boolean), user_id (uuid), id (uuid), action_data (jsonb)
+action_data (jsonb), title (text), id (uuid), icon (text), type (text), description (text), insight (text), created_at (timestamp with time zone), is_read (boolean), user_id (uuid)
 
 Table: payment_submissions
-sms_text (text), payment_method (text), plan (text), id (uuid), user_id (uuid), rejection_reason (text), status (text), screenshot_url (text), amount (integer), created_at (timestamp with time zone), updated_at (timestamp with time zone), transaction_ref (text)
+discount_applied (numeric), payment_method (text), transaction_ref (text), sms_text (text), screenshot_url (text), updated_at (timestamp with time zone), status (text), credits_applied (integer), rejection_reason (text), created_at (timestamp with time zone), amount (integer), user_id (uuid), id (uuid), plan (text)
 
 Table: peer_questions
-created_at (timestamp with time zone), id (uuid), replies_count (integer), user_id (uuid), title (text), body (text), course_tag (text)
+user_id (uuid), created_at (timestamp with time zone), replies_count (integer), course_tag (text), id (uuid), body (text), title (text)
 
 Table: poll_votes
-message_id (uuid), created_at (timestamp with time zone), option_index (integer), user_id (uuid), id (uuid)
+created_at (timestamp with time zone), option_index (integer), user_id (uuid), message_id (uuid), id (uuid)
 
 Table: profiles
-year (text), id (uuid), linkoin_balance (integer), updated_at (timestamp with time zone), last_seen_at (timestamp with time zone), university_id (uuid), last_username_change_at (timestamp with time zone), telegram_id (bigint), registered_with_telegram (boolean), current_streak (integer), longest_streak (integer), last_streak_update (date), class_id (uuid), is_pro (boolean), pro_expires_at (timestamp with time zone), show_on_leaderboard (boolean), full_name (text), avatar_url (text), level (text), username (text), department (text), freshman_stream (text), target_department (text), program (text), phone (text), bio (text), theme (text), telegram_username (text), sex (text)
+avatar_url (text), level (text), username (text), department (text), sex (text), id (uuid), linkoin_balance (integer), updated_at (timestamp with time zone), last_seen_at (timestamp with time zone), university_id (uuid), last_username_change_at (timestamp with time zone), telegram_id (bigint), registered_with_telegram (boolean), current_streak (integer), longest_streak (integer), last_streak_update (date), class_id (uuid), is_pro (boolean), pro_expires_at (timestamp with time zone), show_on_leaderboard (boolean), telegram_username (text), theme (text), bio (text), phone (text), program (text), target_department (text), year (text), freshman_stream (text), full_name (text)
 
 Table: question_book_mappings
-processed_at (timestamp with time zone), is_valid (boolean), book_id (uuid), question_id (uuid), id (uuid), page_key (text), snippet (text), error_message (text), status (text), created_at (timestamp with time zone), content_index (integer)
+snippet (text), page_key (text), status (text), created_at (timestamp with time zone), processed_at (timestamp with time zone), content_index (integer), is_valid (boolean), book_id (uuid), question_id (uuid), id (uuid), error_message (text)
 
 Table: question_processing_progress
-book_id (uuid), status (text), processed_at (timestamp with time zone), created_at (timestamp with time zone), error_message (text), question_id (uuid)
+processed_at (timestamp with time zone), book_id (uuid), error_message (text), status (text), created_at (timestamp with time zone), question_id (uuid)
 
 Table: question_reports
-question_id (uuid), source (text), report_text (text), id (uuid), created_at (timestamp with time zone), status (text)
+id (uuid), created_at (timestamp with time zone), source (text), question_id (uuid), status (text), report_text (text)
 
 Table: questions
-transcription_quality (jsonb), question_type (text), question_number (text), correct_answer (jsonb), embedding_status (text), section_id (uuid), id (uuid), retry_count (integer), embedding (USER-DEFINED), created_at (timestamp with time zone), explanation (text), question_order (integer), points (numeric), options (jsonb), matching_data (jsonb), media (jsonb), text (text)
+points (numeric), explanation (text), transcription_quality (jsonb), text (text), question_order (integer), question_type (text), created_at (timestamp with time zone), retry_count (integer), question_number (text), embedding_status (text), media (jsonb), matching_data (jsonb), embedding (USER-DEFINED), correct_answer (jsonb), id (uuid), section_id (uuid), options (jsonb)
 
 Table: referrals
-referrer_id (uuid), id (uuid), referee_id (uuid), created_at (timestamp with time zone), status (text)
+id (uuid), referrer_id (uuid), referee_id (uuid), created_at (timestamp with time zone), status (text)
 
 Table: sections
-instructions (text), id (uuid), created_at (timestamp with time zone), title (text), shared_context (jsonb), exam_id (uuid), section_order (integer), total_points (numeric)
+instructions (text), exam_id (uuid), total_points (numeric), shared_context (jsonb), section_order (integer), created_at (timestamp with time zone), title (text), id (uuid)
 
 Table: squad_bans
-conversation_id (uuid), created_at (timestamp with time zone), banned_until (timestamp with time zone), user_id (uuid), id (uuid)
+banned_until (timestamp with time zone), id (uuid), user_id (uuid), conversation_id (uuid), created_at (timestamp with time zone)
 
 Table: system_config
-value (jsonb), key (text)
+key (text), value (jsonb)
 
 Table: telegram_login_tokens
-token_hash (text), expires_at (timestamp with time zone), metadata (jsonb), created_at (timestamp with time zone), id (uuid), telegram_id (bigint)
+id (uuid), metadata (jsonb), expires_at (timestamp with time zone), created_at (timestamp with time zone), token_hash (text), telegram_id (bigint)
 
 Table: universities
-name (text), created_at (timestamp with time zone), id (uuid), short_name (text)
+name (text), short_name (text), created_at (timestamp with time zone), id (uuid)
 
 Table: user_course_progress
-chapter_title (text), reading_seconds (integer), course_code (text), id (uuid), updated_at (timestamp with time zone), created_at (timestamp with time zone), last_read_at (timestamp with time zone), user_id (uuid), furthest_page (integer), book_id (uuid), completion_pct (numeric), current_page (integer), section_title (text)
+updated_at (timestamp with time zone), section_title (text), created_at (timestamp with time zone), last_read_at (timestamp with time zone), completion_pct (numeric), reading_seconds (integer), furthest_page (integer), current_page (integer), book_id (uuid), user_id (uuid), id (uuid), course_code (text), chapter_title (text)
 
 Table: user_custom_flashcards
-is_mistake (boolean), course_code (text), chapter_title (text), front (text), back (text), ref (text), created_at (timestamp with time zone), user_id (uuid), id (uuid)
+ref (text), back (text), front (text), course_code (text), id (uuid), is_mistake (boolean), created_at (timestamp with time zone), chapter_title (text), user_id (uuid)
 
 Table: user_daily_telemetry
-id (uuid), user_id (uuid), date (date), time_exam_seconds (integer), time_books_seconds (integer), time_discover_seconds (integer), time_miron_seconds (integer), updated_at (timestamp with time zone), time_home_seconds (integer), time_connect_seconds (integer), total_active_seconds (integer), total_interactions (integer)
+id (uuid), date (date), total_active_seconds (integer), time_exam_seconds (integer), time_books_seconds (integer), time_miron_seconds (integer), time_connect_seconds (integer), time_discover_seconds (integer), time_home_seconds (integer), total_interactions (integer), updated_at (timestamp with time zone), user_id (uuid)
 
 Table: user_device_seats
-last_lease_at (timestamp with time zone), device_name (text), is_primary (boolean), device_type (text), created_at (timestamp with time zone), id (uuid), last_active_at (timestamp with time zone), user_id (uuid), device_id (text)
+user_id (uuid), is_primary (boolean), last_active_at (timestamp with time zone), last_lease_at (timestamp with time zone), created_at (timestamp with time zone), device_id (text), device_type (text), device_name (text), id (uuid)
 
 Table: user_flashcard_reviews
-card_id (uuid), next_review_at (timestamp with time zone), review_count (integer), id (uuid), user_id (uuid), last_reviewed_at (timestamp with time zone), difficulty (text), card_type (text)
+card_type (text), last_reviewed_at (timestamp with time zone), next_review_at (timestamp with time zone), review_count (integer), card_id (uuid), user_id (uuid), id (uuid), difficulty (text)
 
 Table: user_flashcard_srs
-card_id (uuid), interval_days (numeric), next_review_at (timestamp with time zone), last_reviewed_at (timestamp with time zone), ease_factor (numeric), card_type (text), state (text), repetitions (integer), lapses (integer), user_id (uuid)
+last_reviewed_at (timestamp with time zone), lapses (integer), repetitions (integer), ease_factor (numeric), state (text), user_id (uuid), card_type (text), interval_days (numeric), next_review_at (timestamp with time zone), card_id (uuid)
 
 Table: user_mistake_flashcards
-created_at (timestamp with time zone), front (text), back (text), course_code (text), reference_info (text), source_question_id (uuid), user_id (uuid), id (uuid)
+reference_info (text), course_code (text), source_question_id (uuid), front (text), id (uuid), user_id (uuid), created_at (timestamp with time zone), back (text)
 
 Table: user_question_attempts
-topic_tag (text), id (uuid), source_id (text), question_snapshot (jsonb), user_id (uuid), question_id (uuid), attempted_at (timestamp with time zone), user_answer (jsonb), source_type (text), is_correct (boolean), course_code (text)
+attempted_at (timestamp with time zone), topic_tag (text), course_code (text), source_id (text), id (uuid), user_id (uuid), question_id (uuid), question_snapshot (jsonb), user_answer (jsonb), is_correct (boolean), source_type (text)
 
 -- ========================
 -- RLS POLICIES
 -- ========================
 Table: profiles | Policy: Allow update for owners | Cmd: UPDATE | Using: (auth.uid() = id)
-Table: conversations | Policy: Conversations visibility | Cmd: SELECT | Using: is_member_of(id)
 Table: conversation_members | Policy: Members visibility | Cmd: SELECT | Using: (is_member_of(conversation_id) OR (user_id = auth.uid()))
-Table: messages | Policy: Messages visibility | Cmd: SELECT | Using: is_member_of(conversation_id)
 null
 Table: messages | Policy: Users can update their own messages | Cmd: UPDATE | Using: (auth.uid() = sender_id)
 Table: messages | Policy: Users can delete their own messages | Cmd: DELETE | Using: (auth.uid() = sender_id)
 Table: user_question_attempts | Policy: Users can read their own attempts | Cmd: SELECT | Using: (auth.uid() = user_id)
+Table: exams | Policy: Auth read only | Cmd: SELECT | Using: ((EXISTS ( SELECT 1
+   FROM profiles p
+  WHERE ((p.id = auth.uid()) AND (p.is_pro = true) AND ((p.pro_expires_at IS NULL) OR (p.pro_expires_at > now()))))) OR (NOT (EXISTS ( SELECT 1
+   FROM ( SELECT e.id,
+            (row_number() OVER (PARTITION BY e.university_id, e.course_id ORDER BY e.date DESC NULLS LAST, e.exam_type, e.id) - 1) AS rk
+           FROM exams e) ranked
+  WHERE ((ranked.id = exams.id) AND ((ranked.rk % (4)::bigint) <> 0))))))
 Table: news_feed | Policy: Allow public read access | Cmd: SELECT | Using: true
 Table: conversations | Policy: Owners can update their squads | Cmd: UPDATE | Using: (auth.uid() = owner_id)
 Table: conversations | Policy: Owners can delete their squads | Cmd: DELETE | Using: (auth.uid() = owner_id)
@@ -199,9 +204,6 @@ Table: conversations | Policy: Dynamic Read Access for Conversations | Cmd: SELE
   WHERE ((conversation_members.conversation_id = conversations.id) AND (conversation_members.user_id = auth.uid())))))
 Table: books | Policy: Auth read only | Cmd: SELECT | Using: (auth.role() = 'authenticated'::text)
 Table: book_pages | Policy: Auth read only | Cmd: SELECT | Using: (auth.role() = 'authenticated'::text)
-Table: exams | Policy: Auth read only | Cmd: SELECT | Using: (auth.role() = 'authenticated'::text)
-Table: questions | Policy: Auth read only | Cmd: SELECT | Using: (auth.role() = 'authenticated'::text)
-Table: sections | Policy: Auth read only | Cmd: SELECT | Using: (auth.role() = 'authenticated'::text)
 Table: courses | Policy: Auth read only | Cmd: SELECT | Using: (auth.role() = 'authenticated'::text)
 null
 null
@@ -237,7 +239,6 @@ Table: live_stage_questions | Policy: Members can read live questions | Cmd: SEL
 Table: poll_votes | Policy: Public read for poll votes | Cmd: SELECT | Using: true
 Table: linkoin_transactions | Policy: Users can view their own transactions | Cmd: SELECT | Using: (auth.uid() = user_id)
 Table: referrals | Policy: Users can view their own referrals | Cmd: SELECT | Using: ((auth.uid() = referrer_id) OR (auth.uid() = referee_id))
-null
 Table: user_course_progress | Policy: Users can read own course progress | Cmd: SELECT | Using: (auth.uid() = user_id)
 Table: user_course_progress | Policy: Users can insert/update own course progress | Cmd: ALL | Using: (auth.uid() = user_id)
 Table: miron_threads | Policy: Users can manage their own miron threads | Cmd: ALL | Using: (auth.uid() = user_id)
@@ -246,17 +247,85 @@ Table: payment_submissions | Policy: Users can view their own payment submission
 null
 Table: payment_submissions | Policy: Users can update their pending payment submissions | Cmd: UPDATE | Using: ((auth.uid() = user_id) AND (status = 'pending'::text))
 Table: user_device_seats | Policy: Users can manage own device seats | Cmd: ALL | Using: (auth.uid() = user_id)
-Table: course_flashcards | Policy: Allow authenticated read for course_flashcards | Cmd: SELECT | Using: (auth.role() = 'authenticated'::text)
 Table: user_mistake_flashcards | Policy: Users can manage their own mistake flashcards | Cmd: ALL | Using: (auth.uid() = user_id)
 Table: user_flashcard_reviews | Policy: Users can manage their own flashcard reviews | Cmd: ALL | Using: (auth.uid() = user_id)
 Table: book_flashcard_progress | Policy: Allow authenticated read for bfp | Cmd: SELECT | Using: (auth.role() = 'authenticated'::text)
 Table: user_flashcard_srs | Policy: Users manage their own flashcard SRS | Cmd: ALL | Using: (auth.uid() = user_id)
 Table: user_custom_flashcards | Policy: Users own their custom flashcards | Cmd: ALL | Using: (auth.uid() = user_id)
 Table: course_visual_notebooks | Policy: Allow public read access to visual course notebooks | Cmd: SELECT | Using: true
+Table: telegram_login_tokens | Policy: Deny all public access to telegram_login_tokens | Cmd: ALL | Using: false
+null
+Table: course_flashcards | Policy: Allow authenticated read for course_flashcards | Cmd: SELECT | Using: ((EXISTS ( SELECT 1
+   FROM profiles p
+  WHERE ((p.id = auth.uid()) AND (p.is_pro = true) AND ((p.pro_expires_at IS NULL) OR (p.pro_expires_at > now()))))) OR (NOT (EXISTS ( SELECT 1
+   FROM ( SELECT bfp.chapter_title AS ch_title,
+            (row_number() OVER (ORDER BY (min(bfp.start_page))) - 1) AS ch_idx,
+            count(*) OVER () AS total_ch
+           FROM book_flashcard_progress bfp
+          WHERE ((bfp.course_code = course_flashcards.course_code) AND (bfp.cards_generated > 0))
+          GROUP BY bfp.chapter_title) oc
+  WHERE ((oc.ch_title = course_flashcards.chapter_title) AND (oc.ch_idx >= (oc.total_ch - LEAST((oc.total_ch - 1), ((ceil(((oc.total_ch)::numeric * 0.5)))::integer)::bigint))))))))
+Table: sections | Policy: Auth read only | Cmd: SELECT | Using: (EXISTS ( SELECT 1
+   FROM exams e
+  WHERE (e.id = sections.exam_id)))
+Table: questions | Policy: Auth read only | Cmd: SELECT | Using: (EXISTS ( SELECT 1
+   FROM sections s
+  WHERE (s.id = questions.section_id)))
 
 -- ========================
 -- FUNCTIONS & RPCs
 -- ========================
+-- Function: generate_telegram_link_token
+
+DECLARE
+    v_token text;
+BEGIN
+    v_token := encode(gen_random_bytes(16), 'hex');
+    -- Store as a temporary intent token (telegram_id = 0 indicates system intent)
+    INSERT INTO public.telegram_login_tokens (token_hash, telegram_id, expires_at, metadata)
+    VALUES (v_token, 0, now() + interval '15 minutes', jsonb_build_object('user_id', auth.uid(), 'type', 'link_intent'));
+    RETURN v_token;
+END;
+
+
+-- Function: protect_payment_status_fn
+
+BEGIN
+    IF auth.role() = 'authenticated' THEN
+        IF NEW.status IS DISTINCT FROM OLD.status THEN
+            RAISE EXCEPTION 'Security Violation: You are not authorized to approve payment statuses.';
+        END IF;
+        -- Lock financial columns from client-side tampering
+        NEW.amount := OLD.amount;
+        NEW.plan := OLD.plan;
+        NEW.credits_applied := OLD.credits_applied;
+        NEW.discount_applied := OLD.discount_applied;
+    END IF;
+    RETURN NEW;
+END;
+
+
+-- Function: force_message_sender_fn
+
+BEGIN
+    IF auth.role() = 'authenticated' THEN
+        -- Strictly force the real authenticated user as the sender
+        NEW.sender_id := auth.uid();
+    END IF;
+    RETURN NEW;
+END;
+
+
+-- Function: enforce_pending_on_insert
+
+BEGIN
+    IF auth.role() = 'authenticated' THEN
+        NEW.status := 'pending';
+    END IF;
+    RETURN NEW;
+END;
+
+
 -- Function: get_pending_mistake_batch
 
 BEGIN
@@ -348,19 +417,6 @@ BEGIN
             END IF;
         END LOOP;
     END LOOP;
-END;
-
-
--- Function: complete_flashcard_job
-
-BEGIN
-    UPDATE public.book_flashcard_progress
-    SET status = p_status,
-        cards_generated = p_cards_count,
-        error_message = p_error,
-        locked_until = NULL,
-        updated_at = now()
-    WHERE id = p_job_id;
 END;
 
 
@@ -462,6 +518,42 @@ BEGIN
 END;
 
 
+-- Function: admin_reset_semester_streaks
+
+DECLARE
+    v_old_semester int;
+BEGIN
+    -- Strict security barrier: Only backend service_role can trigger whole-campus streak resets
+    IF auth.role() IS DISTINCT FROM 'service_role' THEN
+        RAISE EXCEPTION 'Access Denied: Administrative service role authorization required.';
+    END IF;
+
+    SELECT COALESCE((value->>'semester')::int, 1) INTO v_old_semester 
+    FROM public.system_config 
+    WHERE key = 'academic_calendar';
+    
+    UPDATE public.system_config 
+    SET value = jsonb_build_object('semester', v_old_semester + 1) 
+    WHERE key = 'academic_calendar';
+
+    UPDATE public.profiles 
+    SET current_streak = 0, last_streak_update = NULL;
+END;
+
+
+-- Function: complete_flashcard_job
+
+BEGIN
+    UPDATE public.book_flashcard_progress
+    SET status = p_status,
+        cards_generated = p_cards_count,
+        error_message = p_error,
+        locked_until = NULL,
+        updated_at = now()
+    WHERE id = p_job_id;
+END;
+
+
 -- Function: acquire_next_flashcard_job
 
 #variable_conflict use_column
@@ -509,6 +601,255 @@ BEGIN
             50 AS target_cards
         FROM public.book_flashcard_progress p
         WHERE p.id = v_job_id;
+    END IF;
+END;
+
+
+-- Function: acquire_embedding_jobs
+
+DECLARE
+    v_now timestamp with time zone := now();
+BEGIN
+    -- Safeguard: Ensure there is at least one active key not in cooldown
+    IF NOT EXISTS (
+        SELECT 1 FROM public.api_keys 
+        WHERE service = 'gemini' AND is_active = true 
+          AND (cooldown_until IS NULL OR cooldown_until::timestamp with time zone < v_now)
+    ) THEN
+        RAISE EXCEPTION 'No active, non-cooled-down Gemini API keys available in key pool.';
+    END IF;
+
+    RETURN QUERY
+    WITH 
+    -- 1. Sort active keys by least recently used
+    active_keys AS (
+        SELECT 
+            id, 
+            ak.api_key,
+            row_number() OVER (ORDER BY last_used_at ASC NULLS FIRST) - 1 as seq_id,
+            count(*) OVER () as total_keys
+        FROM public.api_keys ak
+        WHERE service = 'gemini' 
+          AND is_active = true 
+          AND (cooldown_until IS NULL OR cooldown_until::timestamp with time zone < v_now)
+    ),
+    -- 2. STAGE 1: Lock a batch of blocks using SKIP LOCKED (No window functions here)
+    raw_jobs AS (
+        SELECT 
+            ep.id,
+            ep.page_number,
+            ep.block_index
+        FROM public.embedding_progress ep
+        WHERE ep.book_id = p_book_id
+          AND (ep.status = 'pending' OR ep.status = 'failed' OR (ep.status = 'processing' AND ep.locked_until < v_now))
+        ORDER BY ep.page_number, ep.block_index
+        LIMIT p_batch_size
+        FOR UPDATE SKIP LOCKED
+    ),
+    -- 3. STAGE 2: Safely apply window indexing over the locked rows
+    locked_jobs AS (
+        SELECT 
+            rj.id,
+            rj.page_number,
+            rj.block_index,
+            row_number() OVER (ORDER BY rj.page_number, rj.block_index) - 1 as seq_id
+        FROM raw_jobs rj
+    ),
+    -- 4. Mark the locked blocks as processing in the DB for 5 minutes
+    update_jobs AS (
+        UPDATE public.embedding_progress ep
+        SET status = 'processing',
+            locked_until = v_now + interval '5 minutes',
+            updated_at = v_now
+        FROM raw_jobs rj
+        WHERE ep.id = rj.id
+    ),
+    -- 5. Join jobs and keys using modulo mapping
+    mapped_assignments AS (
+        SELECT 
+            lj.id as job_id,
+            lj.page_number,
+            lj.block_index,
+            ak.api_key,
+            ak.id as api_key_id
+        FROM locked_jobs lj
+        JOIN active_keys ak ON (lj.seq_id % ak.total_keys) = ak.seq_id
+    ),
+    -- 6. Update last_used_at on the keys to rotate them instantly
+    update_keys AS (
+        UPDATE public.api_keys ak
+        SET last_used_at = v_now
+        FROM (SELECT DISTINCT ma.api_key_id FROM mapped_assignments ma) u
+        WHERE ak.id = u.api_key_id
+    )
+    SELECT 
+        ma.job_id,
+        ma.page_number,
+        ma.block_index,
+        ma.api_key,
+        ma.api_key_id
+    FROM mapped_assignments ma;
+END;
+
+
+-- Function: complete_embedding_job
+
+BEGIN
+    UPDATE public.embedding_progress
+    SET status = 'completed',
+        locked_until = NULL,
+        error_message = NULL,
+        updated_at = now()
+    WHERE id = p_job_id;
+END;
+
+
+-- Function: merge_transient_account
+
+BEGIN
+    -- Strict security barrier: Only service_role can trigger account merging
+    IF auth.role() IS DISTINCT FROM 'service_role' THEN
+        RAISE EXCEPTION 'Access Denied: Service role authorization required.';
+    END IF;
+
+    IF p_old_user_id IS NULL OR p_new_user_id IS NULL OR p_old_user_id = p_new_user_id THEN
+        RETURN;
+    END IF;
+
+    -- 1. Transfer Question Attempts
+    UPDATE public.user_question_attempts 
+    SET user_id = p_new_user_id 
+    WHERE user_id = p_old_user_id;
+
+    -- 2. Transfer Course Progress (Handle primary conflicts gracefully)
+    INSERT INTO public.user_course_progress (
+        user_id, book_id, course_code, current_page, furthest_page,
+        chapter_title, section_title, reading_seconds, completion_pct,
+        last_read_at, updated_at
+    )
+    SELECT 
+        p_new_user_id, book_id, course_code, current_page, furthest_page,
+        chapter_title, section_title, reading_seconds, completion_pct,
+        last_read_at, updated_at
+    FROM public.user_course_progress
+    WHERE user_id = p_old_user_id
+    ON CONFLICT (user_id, book_id) DO UPDATE SET
+        reading_seconds = user_course_progress.reading_seconds + EXCLUDED.reading_seconds,
+        furthest_page = GREATEST(user_course_progress.furthest_page, EXCLUDED.furthest_page),
+        completion_pct = GREATEST(user_course_progress.completion_pct, EXCLUDED.completion_pct);
+
+    DELETE FROM public.user_course_progress WHERE user_id = p_old_user_id;
+
+    -- 3. Transfer Daily Telemetry
+    INSERT INTO public.user_daily_telemetry (
+        user_id, date, total_active_seconds, time_home_seconds,
+        time_discover_seconds, time_books_seconds, time_connect_seconds,
+        time_exam_seconds, time_miron_seconds, total_interactions, updated_at
+    )
+    SELECT 
+        p_new_user_id, date, total_active_seconds, time_home_seconds,
+        time_discover_seconds, time_books_seconds, time_connect_seconds,
+        time_exam_seconds, time_miron_seconds, total_interactions, updated_at
+    FROM public.user_daily_telemetry
+    WHERE user_id = p_old_user_id
+    ON CONFLICT (user_id, date) DO UPDATE SET
+        total_active_seconds = user_daily_telemetry.total_active_seconds + EXCLUDED.total_active_seconds,
+        total_interactions = user_daily_telemetry.total_interactions + EXCLUDED.total_interactions;
+
+    DELETE FROM public.user_daily_telemetry WHERE user_id = p_old_user_id;
+
+    -- 4. Transfer Custom and Mistake Flashcards + SRS Memory Records
+    UPDATE public.user_custom_flashcards SET user_id = p_new_user_id WHERE user_id = p_old_user_id;
+    UPDATE public.user_mistake_flashcards SET user_id = p_new_user_id WHERE user_id = p_old_user_id;
+    
+    INSERT INTO public.user_flashcard_srs (
+        user_id, card_id, card_type, interval_days, ease_factor,
+        repetitions, lapses, state, last_reviewed_at, next_review_at
+    )
+    SELECT 
+        p_new_user_id, card_id, card_type, interval_days, ease_factor,
+        repetitions, lapses, state, last_reviewed_at, next_review_at
+    FROM public.user_flashcard_srs
+    WHERE user_id = p_old_user_id
+    ON CONFLICT (user_id, card_id) DO NOTHING;
+
+    DELETE FROM public.user_flashcard_srs WHERE user_id = p_old_user_id;
+
+    -- 5. Transfer Miron AI Threads and Messages
+    UPDATE public.miron_threads SET user_id = p_new_user_id WHERE user_id = p_old_user_id;
+    UPDATE public.miron_messages SET user_id = p_new_user_id WHERE user_id = p_old_user_id;
+
+    -- 6. Transfer Conversation Memberships
+    INSERT INTO public.conversation_members (conversation_id, user_id, role, last_read_at, muted_until)
+    SELECT conversation_id, p_new_user_id, role, last_read_at, muted_until
+    FROM public.conversation_members
+    WHERE user_id = p_old_user_id
+    ON CONFLICT (conversation_id, user_id) DO NOTHING;
+
+    DELETE FROM public.conversation_members WHERE user_id = p_old_user_id;
+
+    -- 7. Transfer Poll Votes (Avoid duplicate vote constraint collisions)
+    UPDATE public.poll_votes 
+    SET user_id = p_new_user_id 
+    WHERE user_id = p_old_user_id
+      AND NOT EXISTS (
+          SELECT 1 FROM public.poll_votes pv2 
+          WHERE pv2.message_id = poll_votes.message_id AND pv2.user_id = p_new_user_id
+      );
+    DELETE FROM public.poll_votes WHERE user_id = p_old_user_id;
+
+    -- 8. Transfer Community Peer Questions
+    UPDATE public.peer_questions SET user_id = p_new_user_id WHERE user_id = p_old_user_id;
+
+    -- 9. Transfer Payment Proof Submissions
+    UPDATE public.payment_submissions SET user_id = p_new_user_id WHERE user_id = p_old_user_id;
+
+    -- 10. Transfer Notifications
+    UPDATE public.notifications SET user_id = p_new_user_id WHERE user_id = p_old_user_id;
+
+    -- 11. Purge transient device seats so they don't lock or desync the permanent account
+    DELETE FROM public.user_device_seats WHERE user_id = p_old_user_id;
+
+    -- 12. Consolidate LinkUp Credits Balance
+    UPDATE public.profiles
+    SET linkoin_balance = COALESCE(linkoin_balance, 0) + (
+        SELECT COALESCE(linkoin_balance, 0) FROM public.profiles WHERE id = p_old_user_id
+    )
+    WHERE id = p_new_user_id;
+END;
+
+
+-- Function: register_referral
+
+DECLARE
+    v_referrer_id UUID;
+    v_is_verified BOOLEAN;
+    v_key TEXT;
+BEGIN
+    SELECT id INTO v_referrer_id FROM public.profiles WHERE username = referrer_username LIMIT 1;
+    
+    IF v_referrer_id IS NOT NULL AND v_referrer_id != auth.uid() THEN
+        -- Check if the newly joined student is ALREADY verified via Telegram
+        SELECT COALESCE(registered_with_telegram, false) INTO v_is_verified
+        FROM public.profiles
+        WHERE id = auth.uid();
+
+        IF v_is_verified THEN
+            -- Directly complete the referral and award the +30 credits immediately!
+            INSERT INTO public.referrals (referrer_id, referee_id, status)
+            VALUES (v_referrer_id, auth.uid(), 'completed')
+            ON CONFLICT (referee_id) DO NOTHING;
+
+            v_key := 'ref_bonus_referrer_' || auth.uid()::text;
+            INSERT INTO public.linkoin_transactions (user_id, amount, transaction_type, description, idempotency_key)
+            VALUES (v_referrer_id, 30, 'reward', 'Squad Network Invite Bonus', v_key)
+            ON CONFLICT (idempotency_key) DO NOTHING;
+        ELSE
+            -- Normal flow: wait for them to verify Telegram later
+            INSERT INTO public.referrals (referrer_id, referee_id, status)
+            VALUES (v_referrer_id, auth.uid(), 'pending')
+            ON CONFLICT (referee_id) DO NOTHING;
+        END IF;
     END IF;
 END;
 
@@ -632,153 +973,6 @@ BEGIN
 END;
 
 
--- Function: get_srs_session_queue
-
-DECLARE
-    v_user_id UUID := auth.uid();
-BEGIN
-    IF v_user_id IS NULL THEN
-        RAISE EXCEPTION 'Authentication required';
-    END IF;
-
-    IF p_is_vault OR p_course_code = 'VAULT' THEN
-        -- Synthesize Mistake Vault: Exam Mistakes + Mistake-flagged Miron Cards
-        RETURN QUERY
-        SELECT 
-            card.id, card.front, card.back, card.ref, card.chapter_title, card.is_mistake,
-            card.due_status, card.interval_days, card.ease_factor, card.repetitions
-        FROM (
-            SELECT 
-                umf.id,
-                umf.front,
-                umf.back,
-                COALESCE(umf.reference_info, 'Exam Mistake Review') as ref,
-                COALESCE(umf.course_code, 'Mistake Vault') as chapter_title,
-                true as is_mistake,
-                CASE 
-                    WHEN srs.card_id IS NULL THEN 'new'
-                    WHEN srs.next_review_at <= NOW() THEN 'overdue'
-                    ELSE 'future'
-                END as due_status,
-                COALESCE(srs.interval_days, 0) as interval_days,
-                COALESCE(srs.ease_factor, 2.5) as ease_factor,
-                COALESCE(srs.repetitions, 0) as repetitions,
-                COALESCE(srs.next_review_at, umf.created_at) as sort_date,
-                CASE 
-                    WHEN srs.next_review_at <= NOW() THEN 1
-                    WHEN srs.card_id IS NULL THEN 2
-                    ELSE 3
-                END as priority_bucket
-            FROM public.user_mistake_flashcards umf
-            LEFT JOIN public.user_flashcard_srs srs 
-                   ON srs.card_id = umf.id AND srs.user_id = v_user_id
-            WHERE umf.user_id = v_user_id
-
-            UNION ALL
-
-            SELECT 
-                ucf.id,
-                ucf.front,
-                ucf.back,
-                COALESCE(ucf.ref, 'Miron AI • Mistake Review') as ref,
-                COALESCE(ucf.course_code, 'Mistake Vault') as chapter_title,
-                true as is_mistake,
-                CASE 
-                    WHEN srs.card_id IS NULL THEN 'new'
-                    WHEN srs.next_review_at <= NOW() THEN 'overdue'
-                    ELSE 'future'
-                END as due_status,
-                COALESCE(srs.interval_days, 0) as interval_days,
-                COALESCE(srs.ease_factor, 2.5) as ease_factor,
-                COALESCE(srs.repetitions, 0) as repetitions,
-                COALESCE(srs.next_review_at, ucf.created_at) as sort_date,
-                CASE 
-                    WHEN srs.next_review_at <= NOW() THEN 1
-                    WHEN srs.card_id IS NULL THEN 2
-                    ELSE 3
-                END as priority_bucket
-            FROM public.user_custom_flashcards ucf
-            LEFT JOIN public.user_flashcard_srs srs 
-                   ON srs.card_id = ucf.id AND srs.user_id = v_user_id
-            WHERE ucf.user_id = v_user_id AND ucf.is_mistake = true
-        ) card
-        ORDER BY card.priority_bucket ASC, card.sort_date ASC
-        LIMIT p_limit;
-    ELSE
-        -- Synthesize Course Decks: Public Cards + User's Miron AI Cards for this Course
-        RETURN QUERY
-        SELECT 
-            card.id, card.front, card.back, card.ref, card.chapter_title, card.is_mistake,
-            card.due_status, card.interval_days, card.ease_factor, card.repetitions
-        FROM (
-            SELECT 
-                cf.id,
-                cf.front,
-                cf.back,
-                CASE 
-                    WHEN cf.ref_page IS NOT NULL THEN 'Page ' || cf.ref_page
-                    ELSE COALESCE(cf.section_title, 'Textbook Section')
-                END as ref,
-                COALESCE(cf.chapter_title, cf.course_code) as chapter_title,
-                false as is_mistake,
-                CASE 
-                    WHEN srs.card_id IS NULL THEN 'new'
-                    WHEN srs.next_review_at <= NOW() THEN 'overdue'
-                    ELSE 'future'
-                END as due_status,
-                COALESCE(srs.interval_days, 0) as interval_days,
-                COALESCE(srs.ease_factor, 2.5) as ease_factor,
-                COALESCE(srs.repetitions, 0) as repetitions,
-                COALESCE(srs.next_review_at, '9999-12-31'::timestamptz) as sort_date,
-                CASE 
-                    WHEN srs.next_review_at <= NOW() THEN 1
-                    WHEN srs.card_id IS NULL THEN 2
-                    ELSE 3
-                END as priority_bucket,
-                cf.ref_page as page_num
-            FROM public.course_flashcards cf
-            LEFT JOIN public.user_flashcard_srs srs 
-                   ON srs.card_id = cf.id AND srs.user_id = v_user_id
-            WHERE cf.course_code = p_course_code
-              AND (p_chapter_title IS NULL OR cf.chapter_title = p_chapter_title)
-
-            UNION ALL
-
-            SELECT 
-                ucf.id,
-                ucf.front,
-                ucf.back,
-                COALESCE(ucf.ref, 'Miron AI • Synthesis') as ref,
-                COALESCE(ucf.chapter_title, ucf.course_code) as chapter_title,
-                false as is_mistake,
-                CASE 
-                    WHEN srs.card_id IS NULL THEN 'new'
-                    WHEN srs.next_review_at <= NOW() THEN 'overdue'
-                    ELSE 'future'
-                END as due_status,
-                COALESCE(srs.interval_days, 0) as interval_days,
-                COALESCE(srs.ease_factor, 2.5) as ease_factor,
-                COALESCE(srs.repetitions, 0) as repetitions,
-                COALESCE(srs.next_review_at, '9999-12-31'::timestamptz) as sort_date,
-                CASE 
-                    WHEN srs.next_review_at <= NOW() THEN 1
-                    WHEN srs.card_id IS NULL THEN 2
-                    ELSE 3
-                END as priority_bucket,
-                99999 as page_num
-            FROM public.user_custom_flashcards ucf
-            LEFT JOIN public.user_flashcard_srs srs 
-                   ON srs.card_id = ucf.id AND srs.user_id = v_user_id
-            WHERE ucf.user_id = v_user_id 
-              AND ucf.course_code = p_course_code
-              AND (p_chapter_title IS NULL OR ucf.chapter_title = p_chapter_title)
-        ) card
-        ORDER BY card.priority_bucket ASC, card.sort_date ASC, card.page_num ASC NULLS LAST
-        LIMIT p_limit;
-    END IF;
-END;
-
-
 -- Function: save_miron_flashcards
 
 DECLARE
@@ -832,6 +1026,44 @@ BEGIN
     END LOOP;
 
     RETURN v_result;
+END;
+
+
+-- Function: get_student_upcoming_deadlines
+
+DECLARE
+    v_user_id uuid := auth.uid();
+    v_tg_id bigint;
+    v_class_id uuid;
+BEGIN
+    IF v_user_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    SELECT telegram_id, class_id 
+    INTO v_tg_id, v_class_id
+    FROM public.profiles
+    WHERE profiles.id = v_user_id;
+
+    RETURN QUERY
+    SELECT DISTINCT
+        e.id,
+        e.channel_id,
+        e.title,
+        e.description,
+        e.event_type,
+        e.event_date,
+        COALESCE(c.channel_title, c.channel_handle, 'Class Notice') AS channel_name
+    FROM public.extracted_events e
+    JOIN public.campus_channels c ON e.channel_id = c.id
+    WHERE e.is_active = true
+      AND e.event_date > now()
+      AND (
+          (v_tg_id IS NOT NULL AND c.members_data @> jsonb_build_array(jsonb_build_object('user_id', v_tg_id)))
+          OR (v_class_id IS NOT NULL AND (e.channel_id = v_class_id OR c.id = v_class_id))
+      )
+    ORDER BY e.event_date ASC
+    LIMIT 10;
 END;
 
 
@@ -1031,45 +1263,6 @@ BEGIN
 END;
 
 
--- Function: lease_gemini_api_key
-
-DECLARE
-    selected_id bigint;
-BEGIN
-    SELECT k.id INTO selected_id
-    FROM api_keys k
-    WHERE k.service = 'gemini'
-      AND k.is_active = true
-      AND (k.cooldown_until IS NULL OR k.cooldown_until <= NOW())
-    ORDER BY k.last_used_at ASC NULLS FIRST
-    LIMIT 1
-    FOR UPDATE SKIP LOCKED;
-
-    IF selected_id IS NOT NULL THEN
-        UPDATE api_keys AS ak
-        SET last_used_at = NOW()
-        WHERE ak.id = selected_id;
-
-        RETURN QUERY 
-        SELECT k.id, k.api_key
-        FROM api_keys k
-        WHERE k.id = selected_id;
-    END IF;
-END;
-
-
--- Function: complete_embedding_job
-
-BEGIN
-    UPDATE public.embedding_progress
-    SET status = 'completed',
-        locked_until = NULL,
-        error_message = NULL,
-        updated_at = now()
-    WHERE id = p_job_id;
-END;
-
-
 -- Function: fail_embedding_job
 
 BEGIN
@@ -1149,102 +1342,6 @@ BEGIN
     END IF;
 
     DELETE FROM public.conversation_members WHERE conversation_id = req_conv_id AND user_id = req_target_id;
-END;
-
-
--- Function: cooldown_api_key
-
-BEGIN
-    UPDATE public.api_keys
-    SET cooldown_until = (now() + interval '5 minutes')
-    WHERE id = p_key_id;
-END;
-
-
--- Function: acquire_embedding_jobs
-
-DECLARE
-    v_now timestamp with time zone := now();
-BEGIN
-    -- Safeguard: Ensure there is at least one active key not in cooldown
-    IF NOT EXISTS (
-        SELECT 1 FROM public.api_keys 
-        WHERE service = 'gemini' AND is_active = true 
-          AND (cooldown_until IS NULL OR cooldown_until::timestamp with time zone < v_now)
-    ) THEN
-        RAISE EXCEPTION 'No active, non-cooled-down Gemini API keys available in key pool.';
-    END IF;
-
-    RETURN QUERY
-    WITH 
-    -- 1. Sort active keys by least recently used
-    active_keys AS (
-        SELECT 
-            id, 
-            ak.api_key,
-            row_number() OVER (ORDER BY last_used_at ASC NULLS FIRST) - 1 as seq_id,
-            count(*) OVER () as total_keys
-        FROM public.api_keys ak
-        WHERE service = 'gemini' 
-          AND is_active = true 
-          AND (cooldown_until IS NULL OR cooldown_until::timestamp with time zone < v_now)
-    ),
-    -- 2. STAGE 1: Lock a batch of blocks using SKIP LOCKED (No window functions here)
-    raw_jobs AS (
-        SELECT 
-            ep.id,
-            ep.page_number,
-            ep.block_index
-        FROM public.embedding_progress ep
-        WHERE ep.book_id = p_book_id
-          AND (ep.status = 'pending' OR ep.status = 'failed' OR (ep.status = 'processing' AND ep.locked_until < v_now))
-        ORDER BY ep.page_number, ep.block_index
-        LIMIT p_batch_size
-        FOR UPDATE SKIP LOCKED
-    ),
-    -- 3. STAGE 2: Safely apply window indexing over the locked rows
-    locked_jobs AS (
-        SELECT 
-            rj.id,
-            rj.page_number,
-            rj.block_index,
-            row_number() OVER (ORDER BY rj.page_number, rj.block_index) - 1 as seq_id
-        FROM raw_jobs rj
-    ),
-    -- 4. Mark the locked blocks as processing in the DB for 5 minutes
-    update_jobs AS (
-        UPDATE public.embedding_progress ep
-        SET status = 'processing',
-            locked_until = v_now + interval '5 minutes',
-            updated_at = v_now
-        FROM raw_jobs rj
-        WHERE ep.id = rj.id
-    ),
-    -- 5. Join jobs and keys using modulo mapping
-    mapped_assignments AS (
-        SELECT 
-            lj.id as job_id,
-            lj.page_number,
-            lj.block_index,
-            ak.api_key,
-            ak.id as api_key_id
-        FROM locked_jobs lj
-        JOIN active_keys ak ON (lj.seq_id % ak.total_keys) = ak.seq_id
-    ),
-    -- 6. Update last_used_at on the keys to rotate them instantly
-    update_keys AS (
-        UPDATE public.api_keys ak
-        SET last_used_at = v_now
-        FROM (SELECT DISTINCT ma.api_key_id FROM mapped_assignments ma) u
-        WHERE ak.id = u.api_key_id
-    )
-    SELECT 
-        ma.job_id,
-        ma.page_number,
-        ma.block_index,
-        ma.api_key,
-        ma.api_key_id
-    FROM mapped_assignments ma;
 END;
 
 
@@ -1439,35 +1536,51 @@ BEGIN
 END;
 
 
--- Function: get_next_api_key
+-- Function: get_book_reader_payload
 
+DECLARE
+    v_book record;
+    v_pages jsonb;
 BEGIN
-  RETURN QUERY
-  SELECT ak.id, ak.api_key
-  FROM api_keys ak
-  WHERE ak.service = target_service
-    AND ak.is_active = true
-    AND (ak.cooldown_until IS NULL OR ak.cooldown_until <= NOW())
-  ORDER BY ak.last_used_at ASC NULLS FIRST
-  LIMIT 1;
-END;
+    -- 1. Fetch Book Metadata (Enforcing visibility filter)
+    SELECT id, title, course_code, toc, page_offset, custom_css, ai_explore_enabled
+    INTO v_book
+    FROM public.books
+    WHERE id = p_book_id AND is_published = true;
 
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('error', 'Book not found or unavailable');
+    END IF;
 
--- Function: mark_key_usage
+    -- 2. Aggregate all book pages sequentially
+    SELECT coalesce(
+        jsonb_agg(
+            jsonb_build_object(
+                'id', bp.id,
+                'page_number', bp.page_number,
+                'page_key', bp.page_key,
+                'manual_flag', bp.manual_flag,
+                'content_json', bp.content_json
+            )
+            ORDER BY bp.page_number ASC
+        ),
+        '[]'::jsonb
+    )
+    INTO v_pages
+    FROM public.book_pages bp
+    WHERE bp.book_id = p_book_id;
 
-BEGIN
-  UPDATE api_keys 
-  SET last_used_at = NOW() 
-  WHERE id = key_id;
-END;
-
-
--- Function: set_key_cooldown_rpc
-
-BEGIN
-  UPDATE api_keys 
-  SET cooldown_until = NOW() + interval '5 minutes' 
-  WHERE id = key_id;
+    -- 3. Return clean atomic payload
+    RETURN jsonb_build_object(
+        'book_id', v_book.id,
+        'title', v_book.title,
+        'course_code', v_book.course_code,
+        'toc', coalesce(v_book.toc, '[]'::jsonb),
+        'page_offset', coalesce(v_book.page_offset, 0),
+        'custom_css', v_book.custom_css,
+        'ai_explore_enabled', coalesce(v_book.ai_explore_enabled, false),
+        'pages', v_pages
+    );
 END;
 
 
@@ -1514,37 +1627,6 @@ BEGIN
     END IF;
 
     RETURN conv_id;
-END;
-
-
--- Function: protect_profile_fields
-
-BEGIN
-    IF auth.role() = 'authenticated' THEN
-        -- Protected Gamification
-        NEW.linkoin_balance = OLD.linkoin_balance;
-        NEW.level = OLD.level;
-        
-        -- Protected Pro / Gold Status (Zero-Trust Anti-Spoof Guard)
-        NEW.is_pro = OLD.is_pro;
-        NEW.pro_expires_at = OLD.pro_expires_at;
-
-        -- Protected Identity & Telegram Trust
-        NEW.telegram_id = OLD.telegram_id;
-        NEW.telegram_username = OLD.telegram_username;
-        NEW.registered_with_telegram = OLD.registered_with_telegram;
-
-        -- Phone Normalization (Enforce consistency on any client updates)
-        IF NEW.phone IS NOT NULL THEN
-            NEW.phone := replace(NEW.phone, ' ', '');
-            IF NEW.phone LIKE '0%' THEN
-                NEW.phone := '+251' || substring(NEW.phone from 2);
-            ELSIF NEW.phone NOT LIKE '+%' THEN
-                NEW.phone := '+' || NEW.phone;
-            END IF;
-        END IF;
-    END IF;
-    RETURN NEW;
 END;
 
 
@@ -1672,6 +1754,73 @@ BEGIN
 
     DELETE FROM public.conversation_members
     WHERE conversation_id = req_conv_id AND user_id = auth.uid();
+END;
+
+
+-- Function: handle_payment_approval_trigger
+
+DECLARE
+    v_duration INTERVAL;
+    v_expires_at TIMESTAMPTZ;
+BEGIN
+    IF NEW.status = 'approved' AND (OLD.status IS DISTINCT FROM 'approved') THEN
+        IF NEW.plan = 'semester' THEN
+            v_duration := INTERVAL '6 months';
+        ELSE
+            v_duration := INTERVAL '1 year';
+        END IF;
+
+        v_expires_at := now() + v_duration;
+
+        -- If discount was applied, burn the credits from the user's ledger!
+        IF NEW.credits_applied > 0 THEN
+            INSERT INTO public.linkoin_transactions (
+                user_id,
+                amount,
+                transaction_type,
+                description,
+                idempotency_key
+            ) VALUES (
+                NEW.user_id,
+                -NEW.credits_applied,
+                'burn',
+                'Membership Discount (' || NEW.plan || ' plan)',
+                'prem_discount_burn_' || NEW.id::text
+            ) ON CONFLICT (idempotency_key) DO NOTHING;
+        END IF;
+
+        -- Raise transaction-local bypass flag
+        PERFORM set_config('linkup.bypass_protect', 'true', true);
+
+        -- Activate Gold Pass on profile
+        UPDATE public.profiles
+        SET is_pro = true,
+            pro_expires_at = v_expires_at,
+            updated_at = now()
+        WHERE id = NEW.user_id;
+
+        -- Drop bypass flag
+        PERFORM set_config('linkup.bypass_protect', 'false', true);
+
+        -- Dispatch notification to the user
+        INSERT INTO public.notifications (
+            user_id,
+            type,
+            title,
+            description,
+            icon,
+            action_data
+        ) VALUES (
+            NEW.user_id,
+            'reward',
+            'LinkUp Gold Activated! 👑',
+            'Your payment has been verified. Welcome to LinkUp Gold Pass with full access to Miron and Exam archives!',
+            'fa-crown',
+            jsonb_build_object('action', 'open_profile')
+        );
+    END IF;
+
+    RETURN NEW;
 END;
 
 
@@ -1831,47 +1980,6 @@ BEGIN
 END;
 
 
--- Function: get_and_rotate_gemini_key
-
-DECLARE
-    target_id bigint;
-    found_key text;
-END_TIME timestamptz;
-BEGIN
-    -- Select the least-recently-used active 'gemini' key that is not on cooldown
-    SELECT id, api_key
-    INTO target_id, found_key
-    FROM public.api_keys
-    WHERE service = 'gemini'
-      AND is_active = true
-      AND (cooldown_until IS NULL OR cooldown_until <= now())
-    ORDER BY last_used_at ASC NULLS FIRST
-    LIMIT 1
-    FOR UPDATE SKIP LOCKED; -- High-concurrency safety lock
-
-    -- If we successfully found a key, update its last_used_at and return it
-    IF found_key IS NOT NULL THEN
-        UPDATE public.api_keys
-        SET last_used_at = now()
-        WHERE id = target_id;
-        
-        selected_key := found_key;
-        RETURN NEXT;
-    END IF;
-END;
-
-
--- Function: cooldown_gemini_key
-
-BEGIN
-    -- Put the specific gemini key on cooldown for 5 minutes
-    UPDATE public.api_keys
-    SET cooldown_until = now() + INTERVAL '5 minutes'
-    WHERE api_key = expired_key
-      AND service = 'gemini';
-END;
-
-
 -- Function: force_live_question_defaults_fn
 
 BEGIN
@@ -1958,6 +2066,190 @@ BEGIN
 END;
 
 
+-- Function: get_srs_session_queue
+
+#variable_conflict use_column
+DECLARE
+    v_user_id UUID := auth.uid();
+    v_is_pro BOOLEAN := false;
+    v_pro_expires_at TIMESTAMPTZ;
+    v_is_chapter_gated BOOLEAN := false;
+BEGIN
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    -- 1. Check User Pro / Gold Status
+    SELECT COALESCE(profiles.is_pro, false), profiles.pro_expires_at
+    INTO v_is_pro, v_pro_expires_at
+    FROM public.profiles
+    WHERE profiles.id = v_user_id;
+
+    IF v_is_pro AND (v_pro_expires_at IS NULL OR v_pro_expires_at > NOW()) THEN
+        v_is_pro := true;
+    ELSE
+        v_is_pro := false;
+    END IF;
+
+    -- 2. Mistake Vault: Always 100% Free for Everyone
+    IF p_is_vault OR p_course_code = 'VAULT' THEN
+        RETURN QUERY
+        SELECT 
+            card.id, card.front, card.back, card.ref, card.chapter_title, card.is_mistake,
+            card.due_status, card.interval_days, card.ease_factor, card.repetitions
+        FROM (
+            SELECT 
+                umf.id,
+                umf.front,
+                umf.back,
+                COALESCE(umf.reference_info, 'Exam Mistake Review') as ref,
+                COALESCE(umf.course_code, 'Mistake Vault') as chapter_title,
+                true as is_mistake,
+                CASE 
+                    WHEN srs.card_id IS NULL THEN 'new'
+                    WHEN srs.next_review_at <= NOW() THEN 'overdue'
+                    ELSE 'future'
+                END as due_status,
+                COALESCE(srs.interval_days, 0) as interval_days,
+                COALESCE(srs.ease_factor, 2.5) as ease_factor,
+                COALESCE(srs.repetitions, 0) as repetitions,
+                COALESCE(srs.next_review_at, umf.created_at) as sort_date,
+                CASE 
+                    WHEN srs.next_review_at <= NOW() THEN 1
+                    WHEN srs.card_id IS NULL THEN 2
+                    ELSE 3
+                END as priority_bucket
+            FROM public.user_mistake_flashcards umf
+            LEFT JOIN public.user_flashcard_srs srs 
+                   ON srs.card_id = umf.id AND srs.user_id = v_user_id
+            WHERE umf.user_id = v_user_id
+
+            UNION ALL
+
+            SELECT 
+                ucf.id,
+                ucf.front,
+                ucf.back,
+                COALESCE(ucf.ref, 'Miron AI • Mistake Review') as ref,
+                COALESCE(ucf.course_code, 'Mistake Vault') as chapter_title,
+                true as is_mistake,
+                CASE 
+                    WHEN srs.card_id IS NULL THEN 'new'
+                    WHEN srs.next_review_at <= NOW() THEN 'overdue'
+                    ELSE 'future'
+                END as due_status,
+                COALESCE(srs.interval_days, 0) as interval_days,
+                COALESCE(srs.ease_factor, 2.5) as ease_factor,
+                COALESCE(srs.repetitions, 0) as repetitions,
+                COALESCE(srs.next_review_at, ucf.created_at) as sort_date,
+                CASE 
+                    WHEN srs.next_review_at <= NOW() THEN 1
+                    WHEN srs.card_id IS NULL THEN 2
+                    ELSE 3
+                END as priority_bucket
+            FROM public.user_custom_flashcards ucf
+            LEFT JOIN public.user_flashcard_srs srs 
+                   ON srs.card_id = ucf.id AND srs.user_id = v_user_id
+            WHERE ucf.user_id = v_user_id AND ucf.is_mistake = true
+        ) card
+        ORDER BY card.priority_bucket ASC, card.sort_date ASC
+        LIMIT p_limit;
+    ELSE
+        -- 3. Course Deck Chapter Paywall Enforcement (50% Tail-Gated)
+        IF NOT v_is_pro AND p_chapter_title IS NOT NULL THEN
+            WITH ordered_chapters AS (
+                SELECT 
+                    bfp.chapter_title AS ch_title,
+                    ROW_NUMBER() OVER (ORDER BY MIN(bfp.start_page) ASC) - 1 AS ch_idx,
+                    COUNT(*) OVER () AS total_ch
+                FROM public.book_flashcard_progress bfp
+                WHERE bfp.course_code = p_course_code AND bfp.cards_generated > 0
+                GROUP BY bfp.chapter_title
+            )
+            SELECT (oc.ch_idx >= (oc.total_ch - LEAST(oc.total_ch - 1, CEIL(oc.total_ch * 0.5)::int)))
+            INTO v_is_chapter_gated
+            FROM ordered_chapters oc
+            WHERE oc.ch_title = p_chapter_title;
+
+            IF COALESCE(v_is_chapter_gated, false) = true THEN
+                RAISE EXCEPTION 'PRO_REQUIRED';
+            END IF;
+        END IF;
+
+        -- 4. Serve Course Flashcards
+        RETURN QUERY
+        SELECT 
+            card.id, card.front, card.back, card.ref, card.chapter_title, card.is_mistake,
+            card.due_status, card.interval_days, card.ease_factor, card.repetitions
+        FROM (
+            SELECT 
+                cf.id,
+                cf.front,
+                cf.back,
+                CASE 
+                    WHEN cf.ref_page IS NOT NULL THEN 'Page ' || cf.ref_page
+                    ELSE COALESCE(cf.section_title, 'Textbook Section')
+                END as ref,
+                COALESCE(cf.chapter_title, cf.course_code) as chapter_title,
+                false as is_mistake,
+                CASE 
+                    WHEN srs.card_id IS NULL THEN 'new'
+                    WHEN srs.next_review_at <= NOW() THEN 'overdue'
+                    ELSE 'future'
+                END as due_status,
+                COALESCE(srs.interval_days, 0) as interval_days,
+                COALESCE(srs.ease_factor, 2.5) as ease_factor,
+                COALESCE(srs.repetitions, 0) as repetitions,
+                COALESCE(srs.next_review_at, '9999-12-31'::timestamptz) as sort_date,
+                CASE 
+                    WHEN srs.next_review_at <= NOW() THEN 1
+                    WHEN srs.card_id IS NULL THEN 2
+                    ELSE 3
+                END as priority_bucket,
+                cf.ref_page as page_num
+            FROM public.course_flashcards cf
+            LEFT JOIN public.user_flashcard_srs srs 
+                   ON srs.card_id = cf.id AND srs.user_id = v_user_id
+            WHERE cf.course_code = p_course_code
+              AND (p_chapter_title IS NULL OR cf.chapter_title = p_chapter_title)
+
+            UNION ALL
+
+            SELECT 
+                ucf.id,
+                ucf.front,
+                ucf.back,
+                COALESCE(ucf.ref, 'Miron AI • Synthesis') as ref,
+                COALESCE(ucf.chapter_title, ucf.course_code) as chapter_title,
+                false as is_mistake,
+                CASE 
+                    WHEN srs.card_id IS NULL THEN 'new'
+                    WHEN srs.next_review_at <= NOW() THEN 'overdue'
+                    ELSE 'future'
+                END as due_status,
+                COALESCE(srs.interval_days, 0) as interval_days,
+                COALESCE(srs.ease_factor, 2.5) as ease_factor,
+                COALESCE(srs.repetitions, 0) as repetitions,
+                COALESCE(srs.next_review_at, '9999-12-31'::timestamptz) as sort_date,
+                CASE 
+                    WHEN srs.next_review_at <= NOW() THEN 1
+                    WHEN srs.card_id IS NULL THEN 2
+                    ELSE 3
+                END as priority_bucket,
+                99999 as page_num
+            FROM public.user_custom_flashcards ucf
+            LEFT JOIN public.user_flashcard_srs srs 
+                   ON srs.card_id = ucf.id AND srs.user_id = v_user_id
+            WHERE ucf.user_id = v_user_id 
+              AND ucf.course_code = p_course_code
+              AND (p_chapter_title IS NULL OR ucf.chapter_title = p_chapter_title)
+        ) card
+        ORDER BY card.priority_bucket ASC, card.sort_date ASC, card.page_num ASC NULLS LAST
+        LIMIT p_limit;
+    END IF;
+END;
+
+
 -- Function: get_available_books
 
   SELECT 
@@ -1974,6 +2266,72 @@ END;
 
 BEGIN
     RETURN EXISTS (SELECT 1 FROM public.profiles WHERE phone = req_phone);
+END;
+
+
+-- Function: get_live_study_sessions
+
+#variable_conflict use_column
+DECLARE
+    my_uni uuid;
+    my_stream text;
+BEGIN
+    -- Get the viewer's academic profile
+    SELECT university_id, freshman_stream INTO my_uni, my_stream
+    FROM public.profiles WHERE profiles.id = req_user_id;
+
+    RETURN QUERY
+    WITH EligibleSessions AS (
+        SELECT s.id, s.conversation_id, s.course_name, s.lesson_topic, s.active_user_ids, s.last_updated_at
+        FROM public.live_study_sessions s
+        JOIN public.conversations c ON s.conversation_id = c.id
+        WHERE 
+        -- Exclude Private Groups completely
+        (c.metadata->>'privacy' = 'public' OR c.metadata->>'privacy' IS NULL)
+        -- STRICT GHOST SHIELD: Session must be explicitly flagged live AND have a fresh heartbeat within 45 seconds
+        AND COALESCE((c.metadata->>'is_live')::boolean, false) = true
+        AND COALESCE(c.metadata->>'live_status', '') = 'active'
+        AND c.metadata->>'live_heartbeat' IS NOT NULL
+        AND (c.metadata->>'live_heartbeat')::timestamptz > now() - interval '45 seconds'
+        AND
+        -- Miron's Intelligent Course Routing Filter (Safely handles NULL streams)
+        CASE 
+            WHEN s.course_name ILIKE ANY(ARRAY['%Biology%', '%Chemistry%', '%Physics%']) THEN COALESCE(my_stream, '') = 'Natural Science'
+            WHEN s.course_name ILIKE ANY(ARRAY['%Geography%', '%History%', '%Anthropology%']) THEN COALESCE(my_stream, '') = 'Social Science'
+            ELSE TRUE 
+        END
+    ),
+    SessionStats AS (
+        SELECT 
+            es.id AS sid,
+            (SELECT count(*) FROM public.profiles p WHERE p.id = ANY(es.active_user_ids) AND p.id != req_user_id AND p.university_id = my_uni AND p.freshman_stream = my_stream) AS classmates_count,
+            (SELECT count(*) FROM public.profiles p WHERE p.id = ANY(es.active_user_ids) AND p.id != req_user_id AND p.university_id = my_uni AND p.freshman_stream != my_stream) AS campus_mates_count,
+            (SELECT count(*) FROM public.profiles p WHERE p.id = ANY(es.active_user_ids) AND p.id != req_user_id AND p.university_id != my_uni AND p.freshman_stream = my_stream) AS scholars_count,
+            cardinality(es.active_user_ids) AS total_count
+        FROM EligibleSessions es
+    )
+    SELECT 
+        es.id,
+        es.conversation_id,
+        es.course_name,
+        es.lesson_topic,
+        CASE
+            WHEN ss.classmates_count > 0 THEN 
+                ss.classmates_count::text || ' classmates from your stream are studying this right now. Join and share notes!'
+            WHEN ss.campus_mates_count > 0 THEN 
+                ss.campus_mates_count::text || ' students from your campus are studying this right now. Join and share notes!'
+            WHEN ss.scholars_count > 0 THEN 
+                ss.scholars_count::text || ' freshman scholars from other universities are studying this right now.'
+            ELSE 
+                ss.total_count::text || ' students are studying this right now. Join the session!'
+        END AS dynamic_message,
+        ss.total_count::integer AS participant_count,
+        es.last_updated_at
+    FROM EligibleSessions es
+    JOIN SessionStats ss ON es.id = ss.sid
+    WHERE ss.total_count > 0
+    ORDER BY ss.classmates_count DESC, ss.total_count DESC, es.last_updated_at DESC
+    LIMIT 5;
 END;
 
 
@@ -2057,22 +2415,32 @@ BEGIN
 END;
 
 
--- Function: get_compiled_book
+-- Function: kill_live_session
 
-  SELECT coalesce(
-    jsonb_object_agg(
-      kv.key, 
-      kv.value
-    ), 
-    '{}'::jsonb
-  )
-  FROM (
-    SELECT result_json
-    FROM book_results
-    WHERE pdf_name = target_pdf
-    ORDER BY page_number ASC
-  ) sub,
-  LATERAL jsonb_each(sub.result_json) kv;
+DECLARE
+    v_role text;
+    v_host_id text;
+BEGIN
+    SELECT metadata->>'live_host_id' INTO v_host_id 
+    FROM public.conversations WHERE id = conv_id;
+    
+    SELECT role INTO v_role 
+    FROM public.conversation_members 
+    WHERE conversation_id = conv_id AND user_id = auth.uid();
+
+    -- Authorize: Either active host, group admin, or group owner
+    IF auth.uid()::text != COALESCE(v_host_id, '') AND (v_role IS NULL OR v_role NOT IN ('owner', 'admin')) THEN
+        RAISE EXCEPTION 'Security Violation: You are not authorized to terminate this broadcast.';
+    END IF;
+
+    -- 1. Strip all live metadata from conversation
+    UPDATE public.conversations 
+    SET metadata = metadata - 'is_live' - 'live_host_id' - 'live_status' - 'live_heartbeat' - 'live_started_at' - 'live_topic'
+    WHERE id = conv_id;
+
+    -- 2. Hard-delete active session record
+    DELETE FROM public.live_study_sessions WHERE conversation_id = conv_id;
+END;
 
 
 -- Function: get_my_referrals
@@ -2093,16 +2461,6 @@ BEGIN
     WHERE r.referrer_id = auth.uid();
     
     RETURN COALESCE(result, '[]'::jsonb);
-END;
-
-
--- Function: sync_linkoin_balance
-
-BEGIN
-    UPDATE public.profiles
-    SET linkoin_balance = COALESCE(linkoin_balance, 0) + NEW.amount
-    WHERE id = NEW.user_id;
-    RETURN NEW;
 END;
 
 
@@ -2138,23 +2496,6 @@ BEGIN
     VALUES (v_user.id, 50, 'reward', 'Telegram Verification Mission', v_key);
 
     RETURN jsonb_build_object('success', true, 'amount_granted', 50);
-END;
-
-
--- Function: register_referral
-
-DECLARE
-    v_referrer_id UUID;
-BEGIN
-    -- Resolve the username to an ID
-    SELECT id INTO v_referrer_id FROM public.profiles WHERE username = referrer_username LIMIT 1;
-    
-    IF v_referrer_id IS NOT NULL AND v_referrer_id != auth.uid() THEN
-        -- Safely insert the pending referral (ignores if referee already has an inviter)
-        INSERT INTO public.referrals (referrer_id, referee_id, status)
-        VALUES (v_referrer_id, auth.uid(), 'pending')
-        ON CONFLICT (referee_id) DO NOTHING;
-    END IF;
 END;
 
 
@@ -2213,6 +2554,23 @@ BEGIN
             ON CONFLICT (idempotency_key) DO NOTHING;
         END IF;
     END IF;
+    RETURN NEW;
+END;
+
+
+-- Function: sync_linkoin_balance
+
+BEGIN
+    -- Raise transaction-local bypass flag
+    PERFORM set_config('linkup.bypass_protect', 'true', true);
+
+    UPDATE public.profiles
+    SET linkoin_balance = COALESCE(linkoin_balance, 0) + NEW.amount
+    WHERE id = NEW.user_id;
+
+    -- Drop bypass flag
+    PERFORM set_config('linkup.bypass_protect', 'false', true);
+
     RETURN NEW;
 END;
 
@@ -2286,18 +2644,6 @@ BEGIN
     VALUES (auth.uid(), v_reward, 'reward', p_target::text || ' Day Streak Bonus', v_key);
     
     RETURN jsonb_build_object('success', true);
-END;
-
-
--- Function: admin_reset_semester_streaks
-
-DECLARE
-    v_old_semester int;
-BEGIN
-    SELECT COALESCE((value->>'semester')::int, 1) INTO v_old_semester FROM public.system_config WHERE key = 'academic_calendar';
-    
-    UPDATE public.system_config SET value = jsonb_build_object('semester', v_old_semester + 1) WHERE key = 'academic_calendar';
-    UPDATE public.profiles SET current_streak = 0, last_streak_update = NULL;
 END;
 
 
@@ -2464,28 +2810,6 @@ BEGIN
 END;
 
 
--- Function: create_private_invite_link
-
-DECLARE
-    v_role text;
-    new_token text;
-    current_meta jsonb;
-BEGIN
-    SELECT role INTO v_role FROM public.conversation_members WHERE conversation_id = req_conv_id AND user_id = auth.uid();
-    IF v_role != 'owner' THEN
-        RAISE EXCEPTION 'Access Denied: Only the owner can generate an invite link.';
-    END IF;
-
-    new_token := substring(md5(random()::text), 1, 16);
-    
-    SELECT metadata INTO current_meta FROM public.conversations WHERE id = req_conv_id;
-    current_meta := jsonb_set(COALESCE(current_meta, '{}'::jsonb), '{private_invite_token}', to_jsonb(new_token));
-
-    UPDATE public.conversations SET metadata = current_meta WHERE id = req_conv_id;
-    RETURN new_token;
-END;
-
-
 -- Function: revoke_private_invite_link
 
 DECLARE
@@ -2537,99 +2861,26 @@ BEGIN
 END;
 
 
--- Function: kill_live_session
+-- Function: create_private_invite_link
 
 DECLARE
     v_role text;
-    v_host_id text;
+    new_token text;
+    current_meta jsonb;
 BEGIN
-    -- 1. Identify who is currently hosting
-    SELECT metadata->>'live_host_id' INTO v_host_id 
-    FROM public.conversations WHERE id = conv_id;
-    
-    -- 2. Identify the rank of the person trying to kill the session
-    SELECT role INTO v_role 
-    FROM public.conversation_members 
-    WHERE conversation_id = conv_id AND user_id = auth.uid();
-
-    -- 3. The Law: You can only kill it if you are the active host, OR an Admin/Owner
-    IF auth.uid()::text != v_host_id AND (v_role IS NULL OR v_role NOT IN ('owner', 'admin')) THEN
-        RAISE EXCEPTION 'Security Violation: You are not authorized to terminate this broadcast.';
+    SELECT role INTO v_role FROM public.conversation_members WHERE conversation_id = req_conv_id AND user_id = auth.uid();
+    IF v_role != 'owner' THEN
+        RAISE EXCEPTION 'Access Denied: Only the owner can generate an invite link.';
     END IF;
 
-    -- 4. Execute the safe cleanup of metadata
-    UPDATE public.conversations 
-    SET metadata = metadata - 'is_live' - 'live_host_id' - 'live_status' - 'live_heartbeat' - 'live_started_at'
-    WHERE id = conv_id;
+    -- Cryptographically secure generation replacing the old md5(random())
+    new_token := encode(gen_random_bytes(16), 'hex');
+    
+    SELECT metadata INTO current_meta FROM public.conversations WHERE id = req_conv_id;
+    current_meta := jsonb_set(COALESCE(current_meta, '{}'::jsonb), '{private_invite_token}', to_jsonb(new_token));
 
-    -- 5. CRITICAL FIX: Purge the discovery engine record so it disappears from the global 'Explore' feed instantly
-    DELETE FROM public.live_study_sessions WHERE conversation_id = conv_id;
-END;
-
-
--- Function: get_live_study_sessions
-
-DECLARE
-    my_uni uuid;
-    my_stream text;
-BEGIN
-    -- Get the viewer's academic profile
-    SELECT university_id, freshman_stream INTO my_uni, my_stream
-    FROM public.profiles WHERE profiles.id = req_user_id;
-
-    RETURN QUERY
-    WITH EligibleSessions AS (
-        SELECT s.id, s.conversation_id, s.course_name, s.lesson_topic, s.active_user_ids, s.last_updated_at
-        FROM public.live_study_sessions s
-        JOIN public.conversations c ON s.conversation_id = c.id
-        WHERE 
-        -- Exclude Private Groups completely
-        (c.metadata->>'privacy' = 'public' OR c.metadata->>'privacy' IS NULL)
-        -- Only consider sessions active in the last 2 hours
-        AND s.last_updated_at > now() - interval '2 hours'
-        AND
-        -- Miron's Intelligent Course Routing Filter (Safely handles NULL streams)
-        CASE 
-            WHEN s.course_name ILIKE ANY(ARRAY['%Biology%', '%Chemistry%', '%Physics%']) THEN COALESCE(my_stream, '') = 'Natural Science'
-            WHEN s.course_name ILIKE ANY(ARRAY['%Geography%', '%History%', '%Anthropology%']) THEN COALESCE(my_stream, '') = 'Social Science'
-            ELSE TRUE 
-        END
-    ),
-    SessionStats AS (
-        SELECT 
-            es.id AS sid,
-            -- Tally exact relational proximity 
-            (SELECT count(*) FROM public.profiles p WHERE p.id = ANY(es.active_user_ids) AND p.id != req_user_id AND p.university_id = my_uni AND p.freshman_stream = my_stream) AS classmates_count,
-            (SELECT count(*) FROM public.profiles p WHERE p.id = ANY(es.active_user_ids) AND p.id != req_user_id AND p.university_id = my_uni AND p.freshman_stream != my_stream) AS campus_mates_count,
-            (SELECT count(*) FROM public.profiles p WHERE p.id = ANY(es.active_user_ids) AND p.id != req_user_id AND p.university_id != my_uni AND p.freshman_stream = my_stream) AS scholars_count,
-            
-            -- FIX: Count EVERYONE using native array length so RLS doesn't block the count
-            cardinality(es.active_user_ids) AS total_count
-        FROM EligibleSessions es
-    )
-    SELECT 
-        es.id,
-        es.conversation_id,
-        es.course_name,
-        es.lesson_topic,
-        -- The Dynamic Text Engine
-        CASE
-            WHEN ss.classmates_count > 0 THEN 
-                ss.classmates_count::text || ' classmates from your stream are studying this right now. Join and share notes!'
-            WHEN ss.campus_mates_count > 0 THEN 
-                ss.campus_mates_count::text || ' students from your campus are studying this right now. Join and share notes!'
-            WHEN ss.scholars_count > 0 THEN 
-                ss.scholars_count::text || ' freshman scholars from other universities are studying this right now.'
-            ELSE 
-                ss.total_count::text || ' students are studying this right now. Join the session!'
-        END AS dynamic_message,
-        ss.total_count::integer AS participant_count,
-        es.last_updated_at
-    FROM EligibleSessions es
-    JOIN SessionStats ss ON es.id = ss.sid
-    WHERE ss.total_count > 0
-    ORDER BY ss.classmates_count DESC, ss.total_count DESC, es.last_updated_at DESC
-    LIMIT 5;
+    UPDATE public.conversations SET metadata = current_meta WHERE id = req_conv_id;
+    RETURN new_token;
 END;
 
 
@@ -2826,9 +3077,15 @@ BEGIN
         v_division := 'Division V';
     END IF;
 
+    -- Raise transaction-local bypass flag
+    PERFORM set_config('linkup.bypass_protect', 'true', true);
+
     UPDATE public.profiles
     SET level = v_division
     WHERE id = v_user_id AND level IS DISTINCT FROM v_division;
+
+    -- Drop bypass flag
+    PERFORM set_config('linkup.bypass_protect', 'false', true);
 
     WITH scholar_stats AS (
         SELECT 
@@ -2987,6 +3244,226 @@ BEGIN
 END;
 
 
+-- Function: consume_miron_credits
+
+DECLARE
+    v_user_id uuid;
+    v_is_pro boolean;
+    v_pro_expires_at timestamptz;
+    v_balance integer;
+BEGIN
+    -- Strict Identity Boundary: If an authenticated client calls this, they CANNOT pass someone else's UUID!
+    IF auth.role() = 'authenticated' THEN
+        IF p_user_id IS NOT NULL AND p_user_id != auth.uid() THEN
+            RAISE EXCEPTION 'Access Denied: You cannot spend another student''s credits.';
+        END IF;
+        v_user_id := auth.uid();
+    ELSE
+        -- service_role / internal Edge Function execution
+        v_user_id := COALESCE(p_user_id, auth.uid());
+    END IF;
+
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    -- Lock the user's row to prevent concurrent race conditions
+    SELECT is_pro, pro_expires_at, COALESCE(linkoin_balance, 0)
+    INTO v_is_pro, v_pro_expires_at, v_balance
+    FROM public.profiles
+    WHERE id = v_user_id
+    FOR UPDATE;
+
+    -- Premium Pass Holder (Unlimited Access)
+    IF v_is_pro = true AND (v_pro_expires_at IS NULL OR v_pro_expires_at > now()) THEN
+        RETURN true;
+    END IF;
+
+    -- Enforce Credit Balance
+    IF v_balance < p_cost THEN
+        RAISE EXCEPTION 'INSUFFICIENT_CREDITS';
+    END IF;
+
+    -- Record the burn in the ledger
+    INSERT INTO public.linkoin_transactions (
+        user_id, 
+        amount, 
+        transaction_type, 
+        description, 
+        idempotency_key
+    ) VALUES (
+        v_user_id, 
+        -p_cost, 
+        'burn', 
+        'Miron AI Usage', 
+        'miron_burn_' || extract(epoch from now())::text || '_' || gen_random_uuid()
+    );
+
+    RETURN true;
+END;
+
+
+-- Function: lease_gemini_api_key
+
+DECLARE
+    selected_id bigint;
+    found_key text;
+BEGIN
+    -- Pre-flight billing check: Consume credits if billable
+    IF p_cost > 0 AND p_user_id IS NOT NULL THEN
+        PERFORM public.consume_miron_credits(p_cost, p_user_id);
+    END IF;
+
+    -- Pick the oldest used active key not currently in cooldown
+    SELECT k.id, k.api_key
+    INTO selected_id, found_key
+    FROM public.api_keys k
+    WHERE k.service = 'gemini'
+      AND k.is_active = true
+      AND (k.cooldown_until IS NULL OR k.cooldown_until <= NOW())
+    ORDER BY k.last_used_at ASC NULLS FIRST
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED;
+
+    IF found_key IS NOT NULL THEN
+        UPDATE public.api_keys ak
+        SET last_used_at = NOW()
+        WHERE ak.id = selected_id;
+
+        RETURN QUERY SELECT selected_id, found_key;
+    ELSE
+        RAISE EXCEPTION 'NO_API_KEYS_AVAILABLE';
+    END IF;
+END;
+
+
+-- Function: validate_payment_submission_on_insert
+
+DECLARE
+    v_balance integer;
+    v_base_price numeric;
+    v_max_credits integer := 500;
+    v_eligible_credits integer := 0;
+    v_computed_discount numeric := 0;
+BEGIN
+    IF auth.role() = 'authenticated' THEN
+        -- Force identity alignment
+        NEW.user_id := auth.uid();
+        NEW.status := 'pending';
+
+        -- Validate plan
+        IF lower(NEW.plan) = 'annual' THEN
+            v_base_price := 299;
+            NEW.plan := 'annual';
+        ELSE
+            v_base_price := 199;
+            NEW.plan := 'semester';
+        END IF;
+
+        -- Fetch ground-truth balance
+        SELECT COALESCE(linkoin_balance, 0) INTO v_balance
+        FROM public.profiles
+        WHERE id = NEW.user_id;
+
+        IF NEW.credits_applied > 0 AND v_balance > 0 THEN
+            -- Enforce ceiling and real balance check
+            v_eligible_credits := LEAST(v_balance, v_max_credits, NEW.credits_applied);
+            v_computed_discount := FLOOR(v_eligible_credits * 0.10);
+            NEW.discount_applied := v_computed_discount;
+            NEW.credits_applied := (v_computed_discount * 10)::integer;
+            NEW.amount := v_base_price - v_computed_discount;
+        ELSE
+            NEW.credits_applied := 0;
+            NEW.discount_applied := 0;
+            NEW.amount := v_base_price;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+
+
+-- Function: resolve_verified_phone_login_target
+
+DECLARE
+    v_raw text;
+    v_normalized text;
+    v_prof record;
+    v_user record;
+    v_is_synthetic boolean;
+    v_has_password boolean;
+BEGIN
+    IF p_phone IS NULL OR trim(p_phone) = '' THEN
+        RETURN jsonb_build_object('status', 'MISSING_FIELDS', 'message', 'Phone number is required.');
+    END IF;
+
+    -- 1. Phone Normalization (E.164)
+    v_raw := regexp_replace(p_phone, '[\s\-()]', '', 'g');
+    IF v_raw ~ '^0[79]\d{8}$' THEN
+        v_normalized := '+251' || substring(v_raw from 2);
+    ELSIF v_raw ~ '^251[79]\d{8}$' THEN
+        v_normalized := '+' || v_raw;
+    ELSIF v_raw ~ '^[79]\d{8}$' THEN
+        v_normalized := '+251' || v_raw;
+    ELSIF v_raw ~ '^\+251[79]\d{8}$' THEN
+        v_normalized := v_raw;
+    ELSE
+        v_normalized := v_raw;
+    END IF;
+
+    -- 2. Gate 1: Check account existence in profiles
+    SELECT id, registered_with_telegram, telegram_id, phone
+    INTO v_prof
+    FROM public.profiles
+    WHERE phone = v_normalized
+    LIMIT 1;
+
+    IF v_prof IS NULL THEN
+        RETURN jsonb_build_object(
+            'status', 'ACCOUNT_NOT_FOUND',
+            'message', 'No account found matching this phone number.'
+        );
+    END IF;
+
+    -- 3. Gate 2: Enforce Telegram Verification
+    IF COALESCE(v_prof.registered_with_telegram, false) IS NOT TRUE OR v_prof.telegram_id IS NULL THEN
+        RETURN jsonb_build_object(
+            'status', 'UNVERIFIED_PHONE',
+            'message', 'This phone number has not been verified with Telegram yet. Please log in with your email address, then verify your phone via our Telegram bot to unlock phone login (and claim 50 free credits)!'
+        );
+    END IF;
+
+    -- 4. Gate 3: User identity resolution in auth.users
+    SELECT id, email, encrypted_password
+    INTO v_user
+    FROM auth.users
+    WHERE id = v_prof.id
+    LIMIT 1;
+
+    IF v_user IS NULL OR v_user.email IS NULL THEN
+        RETURN jsonb_build_object(
+            'status', 'NO_EMAIL_ATTACHED',
+            'message', 'Account has no email identity attached.'
+        );
+    END IF;
+
+    v_is_synthetic := v_user.email LIKE '%@linkup.invalid';
+    v_has_password := COALESCE(v_user.encrypted_password IS NOT NULL AND v_user.encrypted_password != '', false);
+
+    IF v_is_synthetic AND NOT v_has_password THEN
+        RETURN jsonb_build_object(
+            'status', 'SYNTHETIC_NO_PASSWORD',
+            'message', 'This account was created via Telegram and has no password configured yet. Please tap ''Log in with Telegram'' below to sign in.'
+        );
+    END IF;
+
+    -- 5. All Gates Passed: Return email securely to service_role caller
+    RETURN jsonb_build_object(
+        'status', 'OK',
+        'email', v_user.email
+    );
+END;
+
+
 -- Function: get_user_weaknesses
 
 BEGIN
@@ -3002,46 +3479,6 @@ BEGIN
       AND uqa.attempted_at >= NOW() - INTERVAL '30 days'
     GROUP BY uqa.course_code, uqa.topic_tag
     ORDER BY accuracy_percentage ASC, total_attempts DESC;
-END;
-
-
--- Function: record_telemetry_flush
-
-DECLARE
-    v_user_id UUID := auth.uid();
-    v_date DATE := CURRENT_DATE;
-    v_dur INT := GREATEST(p_duration_seconds, 0);
-    v_act INT := GREATEST(p_interactions, 0);
-BEGIN
-    IF v_user_id IS NULL THEN
-        RETURN;
-    END IF;
-
-    INSERT INTO public.user_daily_telemetry (
-        user_id, date, total_active_seconds,
-        time_exam_seconds, time_books_seconds, time_miron_seconds,
-        time_connect_seconds, time_discover_seconds, time_home_seconds,
-        total_interactions, updated_at
-    ) VALUES (
-        v_user_id, v_date, v_dur,
-        CASE WHEN p_feature = 'exam' THEN v_dur ELSE 0 END,
-        CASE WHEN p_feature = 'books' THEN v_dur ELSE 0 END,
-        CASE WHEN p_feature = 'miron' THEN v_dur ELSE 0 END,
-        CASE WHEN p_feature = 'connect' THEN v_dur ELSE 0 END,
-        CASE WHEN p_feature = 'discover' THEN v_dur ELSE 0 END,
-        CASE WHEN p_feature = 'home' THEN v_dur ELSE 0 END,
-        v_act, NOW()
-    )
-    ON CONFLICT (user_id, date) DO UPDATE SET
-        total_active_seconds = user_daily_telemetry.total_active_seconds + EXCLUDED.total_active_seconds,
-        time_exam_seconds = user_daily_telemetry.time_exam_seconds + EXCLUDED.time_exam_seconds,
-        time_books_seconds = user_daily_telemetry.time_books_seconds + EXCLUDED.time_books_seconds,
-        time_miron_seconds = user_daily_telemetry.time_miron_seconds + EXCLUDED.time_miron_seconds,
-        time_connect_seconds = user_daily_telemetry.time_connect_seconds + EXCLUDED.time_connect_seconds,
-        time_discover_seconds = user_daily_telemetry.time_discover_seconds + EXCLUDED.time_discover_seconds,
-        time_home_seconds = user_daily_telemetry.time_home_seconds + EXCLUDED.time_home_seconds,
-        total_interactions = user_daily_telemetry.total_interactions + EXCLUDED.total_interactions,
-        updated_at = NOW();
 END;
 
 
@@ -3084,6 +3521,75 @@ BEGIN
 END;
 
 
+-- Function: admin_broadcast_notification
+
+DECLARE
+    v_count int;
+BEGIN
+    -- Strict security: Only the backend service_role key can fire global broadcasts
+    IF auth.role() IS DISTINCT FROM 'service_role' THEN
+        RAISE EXCEPTION 'Access Denied: Only system administrators can broadcast notifications.';
+    END IF;
+
+    -- High-speed fan-out insert using PostgreSQL SELECT
+    INSERT INTO public.notifications (user_id, title, description, type, icon, action_data)
+    SELECT 
+        id, 
+        p_title, 
+        p_description, 
+        p_type, 
+        p_icon, 
+        p_action_data
+    FROM public.profiles
+    WHERE (p_target_university_id IS NULL OR university_id = p_target_university_id)
+      AND (p_target_department IS NULL OR department = p_target_department);
+
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    
+    RETURN jsonb_build_object(
+        'success', true, 
+        'users_notified', v_count,
+        'timestamp', now()
+    );
+END;
+
+
+-- Function: lease_groq_api_key
+
+DECLARE
+    selected_id bigint;
+BEGIN
+    SELECT k.id INTO selected_id
+    FROM api_keys k
+    WHERE k.service = 'groq'
+      AND k.is_active = true
+      AND (k.cooldown_until IS NULL OR k.cooldown_until <= NOW())
+    ORDER BY k.last_used_at ASC NULLS FIRST
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED;
+
+    IF selected_id IS NOT NULL THEN
+        UPDATE api_keys AS ak
+        SET last_used_at = NOW()
+        WHERE ak.id = selected_id;
+
+        RETURN QUERY 
+        SELECT k.id, k.api_key
+        FROM api_keys k
+        WHERE k.id = selected_id;
+    END IF;
+END;
+
+
+-- Function: cooldown_groq_api_key
+
+BEGIN
+    UPDATE api_keys
+    SET cooldown_until = NOW() + (p_seconds || ' seconds')::interval
+    WHERE id = p_id;
+END;
+
+
 -- Function: get_and_lock_pending_pages
 
 DECLARE
@@ -3114,6 +3620,58 @@ BEGIN
         WHERE id = ANY(target_ids)
         ORDER BY page_number ASC;
     END IF;
+END;
+
+
+-- Function: calculate_membership_quote
+
+DECLARE
+    v_user_id uuid := auth.uid();
+    v_balance integer := 0;
+    v_base_price numeric := 199;
+    v_max_credits integer := 500; -- Hard cap rule
+    v_eligible_credits integer := 0;
+    v_discount numeric := 0;
+    v_final_price numeric := 199;
+BEGIN
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'Unauthorized';
+    END IF;
+
+    -- Base pricing
+    IF lower(p_plan) = 'annual' THEN
+        v_base_price := 299;
+    ELSE
+        v_base_price := 199;
+    END IF;
+
+    -- Fetch ground-truth user balance
+    SELECT COALESCE(linkoin_balance, 0) INTO v_balance
+    FROM public.profiles
+    WHERE id = v_user_id;
+
+    IF p_use_credits AND v_balance > 0 THEN
+        -- Consume up to 500 credits max
+        v_eligible_credits := LEAST(v_balance, v_max_credits);
+        
+        -- Each 10 credits = 1 ETB (0.1 ETB per credit)
+        v_discount := FLOOR(v_eligible_credits * 0.10);
+        v_eligible_credits := (v_discount * 10)::integer; -- Only burn whole ETB increments
+        v_final_price := v_base_price - v_discount;
+    ELSE
+        v_eligible_credits := 0;
+        v_discount := 0;
+        v_final_price := v_base_price;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'base_price', v_base_price,
+        'discount_amount', v_discount,
+        'final_price', v_final_price,
+        'credits_applied', v_eligible_credits,
+        'credits_available', v_balance,
+        'credits_remaining', (v_balance - v_eligible_credits)
+    );
 END;
 
 
@@ -3172,53 +3730,6 @@ BEGIN
     LATERAL jsonb_each(sub.result_json) kv;
 
     RETURN v_result;
-END;
-
-
--- Function: get_book_reader_payload
-
-DECLARE
-    v_book record;
-    v_pages jsonb;
-BEGIN
-    -- 1. Fetch Book Metadata
-    SELECT id, title, course_code, toc, page_offset, custom_css
-    INTO v_book
-    FROM public.books
-    WHERE id = p_book_id;
-
-    IF NOT FOUND THEN
-        RETURN jsonb_build_object('error', 'Book not found');
-    END IF;
-
-    -- 2. Aggregate pages directly without naive string corruption
-    SELECT coalesce(
-        jsonb_agg(
-            jsonb_build_object(
-                'id', bp.id,
-                'page_number', bp.page_number,
-                'page_key', bp.page_key,
-                'manual_flag', bp.manual_flag,
-                'content_json', bp.content_json
-            )
-            ORDER BY bp.page_number ASC
-        ),
-        '[]'::jsonb
-    )
-    INTO v_pages
-    FROM public.book_pages bp
-    WHERE bp.book_id = p_book_id;
-
-    -- 3. Return clean atomic payload
-    RETURN jsonb_build_object(
-        'book_id', v_book.id,
-        'title', v_book.title,
-        'course_code', v_book.course_code,
-        'toc', coalesce(v_book.toc, '[]'::jsonb),
-        'page_offset', coalesce(v_book.page_offset, 0),
-        'custom_css', v_book.custom_css,
-        'pages', v_pages
-    );
 END;
 
 
@@ -3333,50 +3844,6 @@ BEGIN
 END;
 
 
--- Function: handle_payment_approval_trigger
-
-DECLARE
-    v_duration INTERVAL;
-    v_expires_at TIMESTAMPTZ;
-BEGIN
-    IF NEW.status = 'approved' AND (OLD.status IS DISTINCT FROM 'approved') THEN
-        IF NEW.plan = 'semester' THEN
-            v_duration := INTERVAL '6 months';
-        ELSE
-            v_duration := INTERVAL '1 year';
-        END IF;
-
-        v_expires_at := now() + v_duration;
-
-        -- Activate Gold Pass on profile
-        UPDATE public.profiles
-        SET is_pro = true,
-            pro_expires_at = v_expires_at,
-            updated_at = now()
-        WHERE id = NEW.user_id;
-
-        -- Dispatch notification to the user
-        INSERT INTO public.notifications (
-            user_id,
-            type,
-            title,
-            description,
-            icon,
-            action_data
-        ) VALUES (
-            NEW.user_id,
-            'reward',
-            'LinkUp Gold Activated! 👑',
-            'Your payment has been verified. Welcome to LinkUp Gold Pass with full access to Miron and Exam archives!',
-            'fa-crown',
-            jsonb_build_object('action', 'open_profile')
-        );
-    END IF;
-
-    RETURN NEW;
-END;
-
-
 -- Function: get_payment_methods
 
 DECLARE
@@ -3474,6 +3941,45 @@ BEGIN
     WHERE user_id = auth.uid();
 
     RETURN COALESCE(v_res, '[]'::jsonb);
+END;
+
+
+-- Function: protect_profile_fields
+
+BEGIN
+    IF auth.role() = 'authenticated' THEN
+        
+        -- ONLY bypass these 4 fields if the internal system flag is raised
+        IF current_setting('linkup.bypass_protect', true) IS DISTINCT FROM 'true' THEN
+            NEW.linkoin_balance = OLD.linkoin_balance;
+            NEW.level = OLD.level;
+            NEW.is_pro = OLD.is_pro;
+            NEW.pro_expires_at = OLD.pro_expires_at;
+        END IF;
+
+        -- Phone Normalization (ALWAYS enforced, never bypassed)
+        IF NEW.phone IS NOT NULL THEN
+            NEW.phone := replace(NEW.phone, ' ', '');
+            IF NEW.phone LIKE '0%' THEN
+                NEW.phone := '+251' || substring(NEW.phone from 2);
+            ELSIF NEW.phone NOT LIKE '+%' THEN
+                NEW.phone := '+' || NEW.phone;
+            END IF;
+        END IF;
+
+        -- Identity & Telegram Trust Invalidation (ALWAYS enforced, never bypassed)
+        IF NEW.phone IS DISTINCT FROM OLD.phone THEN
+            NEW.registered_with_telegram := false;
+            NEW.telegram_id := NULL;
+            NEW.telegram_username := NULL;
+        ELSE
+            NEW.telegram_id := OLD.telegram_id;
+            NEW.telegram_username := OLD.telegram_username;
+            NEW.registered_with_telegram := OLD.registered_with_telegram;
+        END IF;
+    END IF;
+    
+    RETURN NEW;
 END;
 
 
@@ -3607,6 +4113,13 @@ BEGIN
 END;
 
 
+-- Function: user_has_password
+
+  SELECT COALESCE((encrypted_password IS NOT NULL AND encrypted_password != ''), false)
+  FROM auth.users
+  WHERE id = auth.uid();
+
+
 -- Function: heartbeat_device_lease
 
 DECLARE
@@ -3618,13 +4131,13 @@ BEGIN
         RETURN jsonb_build_object('status', 'unauthenticated');
     END IF;
 
-    -- 1. Verify this device is still officially seated
+    -- 1. Verify this device is officially seated
     SELECT * INTO v_my_seat 
     FROM public.user_device_seats 
     WHERE user_id = v_user_id AND device_id = p_device_id;
 
     IF NOT FOUND THEN
-        -- Device was replaced or never registered
+        -- Device was replaced or evicted
         RETURN jsonb_build_object('status', 'evicted');
     END IF;
 
@@ -3633,12 +4146,13 @@ BEGIN
     SET last_active_at = now()
     WHERE id = v_my_seat.id;
 
-    -- 3. Check if the other device holds an active exclusive lease (< 45s old)
+    -- 3. Check if another device holds a newer active lease (< 45s old)
     SELECT device_name, device_type, last_lease_at INTO v_other_seat
     FROM public.user_device_seats
     WHERE user_id = v_user_id 
       AND device_id != p_device_id
-      AND last_lease_at > (now() - INTERVAL '45 seconds');
+      AND last_lease_at > (now() - INTERVAL '45 seconds')
+      AND last_lease_at > COALESCE(v_my_seat.last_lease_at, '1970-01-01'::timestamptz);
 
     IF FOUND THEN
         RETURN jsonb_build_object(
@@ -3648,15 +4162,13 @@ BEGIN
         );
     END IF;
 
+    -- 4. No conflict: refresh active lease so other devices cannot claim without a challenge
+    UPDATE public.user_device_seats
+    SET last_lease_at = now()
+    WHERE id = v_my_seat.id;
+
     RETURN jsonb_build_object('status', 'ok');
 END;
-
-
--- Function: user_has_password
-
-  SELECT COALESCE((encrypted_password IS NOT NULL AND encrypted_password != ''), false)
-  FROM auth.users
-  WHERE id = auth.uid();
 
 
 -- Function: get_flashcard_deck_stats
@@ -3714,40 +4226,6 @@ BEGIN
         'mistakes_due', v_mistakes_due,
         'course_decks', COALESCE(v_decks, '[]'::jsonb)
     );
-END;
-
-
--- Function: record_flashcard_review
-
-DECLARE
-    v_user_id UUID := auth.uid();
-    v_next_review TIMESTAMPTZ;
-BEGIN
-    IF v_user_id IS NULL THEN
-        RETURN jsonb_build_object('error', 'Unauthenticated');
-    END IF;
-
-    -- Clean intervals: Hard -> 1 day, Good -> 3 days, Easy -> 7 days
-    IF p_difficulty = 'hard' THEN
-        v_next_review := now() + INTERVAL '1 day';
-    ELSIF p_difficulty = 'good' THEN
-        v_next_review := now() + INTERVAL '3 days';
-    ELSE
-        v_next_review := now() + INTERVAL '7 days';
-    END IF;
-
-    INSERT INTO public.user_flashcard_reviews (
-        user_id, card_id, card_type, difficulty, review_count, next_review_at, last_reviewed_at
-    ) VALUES (
-        v_user_id, p_card_id, p_card_type, p_difficulty, 1, v_next_review, now()
-    )
-    ON CONFLICT (user_id, card_id, card_type) DO UPDATE SET
-        difficulty = EXCLUDED.difficulty,
-        review_count = user_flashcard_reviews.review_count + 1,
-        next_review_at = EXCLUDED.next_review_at,
-        last_reviewed_at = now();
-
-    RETURN jsonb_build_object('success', true, 'next_review_at', v_next_review);
 END;
 
 
