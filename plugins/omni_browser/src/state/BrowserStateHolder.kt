@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URLEncoder
+import java.util.Locale
 
 class BrowserStateHolder(
     val context: Context,
