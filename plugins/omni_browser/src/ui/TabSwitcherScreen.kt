@@ -93,8 +93,10 @@ fun TabSwitcherScreen(
     var profileMenuExpanded by remember { mutableStateOf(false) }
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
 
+    var hasMovedDuringDrag by remember { mutableStateOf(false) }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val reorderableLazyGridState = rememberReorderableLazyGridState(gridState) { from, to ->
+        hasMovedDuringDrag = true
         onReorderTabs(from.index, to.index)
     }
     val closingTabIds = remember { mutableStateListOf<String>() }
@@ -261,15 +263,44 @@ fun TabSwitcherScreen(
                             )
                         }
 
-                        Button(
-                            onClick = onPromptGroupSelection,
-                            enabled = selectedTabIds.isNotEmpty(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Text("📦 Group", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Box {
+                            IconButton(onClick = { showTabMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color.White)
+                            }
+                            DropdownMenu(
+                                expanded = showTabMenu,
+                                onDismissRequest = { showTabMenu = false },
+                                modifier = Modifier.background(Color(0xFF282C34))
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (selectedTabIds.isNotEmpty()) "📦 Group Tabs (${selectedTabIds.size})" else "📦 Group Tabs",
+                                            color = if (selectedTabIds.isNotEmpty()) Color(0xFF58A6FF) else Color(0xFF5F6368),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    enabled = selectedTabIds.isNotEmpty(),
+                                    onClick = {
+                                        showTabMenu = false
+                                        onPromptGroupSelection()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("New Tab", color = Color(0xFFE8EAED)) },
+                                    onClick = {
+                                        showTabMenu = false
+                                        onNewTab(selectedProfileId)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Close All Tabs", color = Color(0xFFF28B82)) },
+                                    onClick = {
+                                        showTabMenu = false
+                                        onCloseAll()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -568,6 +599,20 @@ fun TabSwitcherScreen(
                                     shape = RoundedCornerShape(12.dp)
                                     clip = true
                                 }
+                                .longPressDraggableHandle(
+                                    enabled = !isSelectionMode && !isClosing,
+                                    onDragStarted = {
+                                        hasMovedDuringDrag = false
+                                        bridge?.vibrate(25L)
+                                    },
+                                    onDragStopped = {
+                                        if (!hasMovedDuringDrag) {
+                                            onEnterSelectionMode(tab.id)
+                                        } else {
+                                            onSaveTabOrder()
+                                        }
+                                    }
+                                )
                                 .clickable(
                                     enabled = !isClosing,
                                     onClick = {
@@ -582,7 +627,6 @@ fun TabSwitcherScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .background(if (isSelectedInMode) Color(0xFF1F3A5F) else if (isActive) Color(0xFF333842) else Color(0xFF21252B))
-                                        .longPressDraggableHandle(enabled = !isSelectionMode)
                                         .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
@@ -823,7 +867,7 @@ fun TabGroupsListView(
                 Text("No Stashed Tab Groups", color = Color(0xFFE8EAED), fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Long-press any tab in the grid to enter selection mode, then tap 'Group' to stash tabs into 0-RAM cryostasis.",
+                    "Hold any tab and release to enter selection mode, then use the 3-dots menu to stash tabs into 0-RAM cryostasis.",
                     color = Color(0xFF8B949E),
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center
