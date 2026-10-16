@@ -4,6 +4,30 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.webkit.JavascriptInterface
 
+data class HistoryItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val url: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val visitCount: Int = 1
+)
+
+enum class SuggestionType {
+    HISTORY,
+    SHORTCUT,
+    OPEN_TAB,
+    SEARCH_QUERY
+}
+
+data class SearchSuggestion(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val text: String,
+    val subtitle: String? = null,
+    val targetUrl: String,
+    val type: SuggestionType,
+    val tabId: String? = null
+)
+
 data class GroupedTabItem(
     val id: String = java.util.UUID.randomUUID().toString(),
     val title: String,
