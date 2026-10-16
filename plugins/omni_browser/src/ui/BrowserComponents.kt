@@ -53,6 +53,8 @@ fun OmniBrowserTopBar(
     profColor: Color,
     tabCount: Int,
     isHomeOverlayOpen: Boolean,
+    isSearchFocused: Boolean,
+    onSearchFocusChange: (Boolean) -> Unit,
     onHomeClick: () -> Unit,
     onQuickToggleTab: () -> Unit,
     onTabSwitcherClick: () -> Unit,
@@ -65,7 +67,6 @@ fun OmniBrowserTopBar(
     onTopBarDragEnd: () -> Unit = {},
     onTopBarDragCancel: () -> Unit = {}
 ) {
-    var isSearchFocused by remember { mutableStateOf(false) }
     var hasGainedFocus by remember { mutableStateOf(false) }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -129,7 +130,7 @@ fun OmniBrowserTopBar(
             if (isSearchFocused) {
                 IconButton(
                     onClick = {
-                        isSearchFocused = false
+                        onSearchFocusChange(false)
                         hasGainedFocus = false
                         focusManager.clearFocus()
                         keyboardController?.hide()
@@ -157,7 +158,7 @@ fun OmniBrowserTopBar(
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                 indication = null
                             ) {
-                                isSearchFocused = true
+                                onSearchFocusChange(true)
                             }
                         } else Modifier
                     )
@@ -211,7 +212,7 @@ fun OmniBrowserTopBar(
                             ),
                             keyboardActions = KeyboardActions(
                                 onGo = {
-                                    isSearchFocused = false
+                                    onSearchFocusChange(false)
                                     hasGainedFocus = false
                                     focusManager.clearFocus()
                                     keyboardController?.hide()
@@ -247,7 +248,7 @@ fun OmniBrowserTopBar(
                                     if (it.isFocused) {
                                         hasGainedFocus = true
                                     } else if (hasGainedFocus) {
-                                        isSearchFocused = false
+                                        onSearchFocusChange(false)
                                         hasGainedFocus = false
                                     }
                                 }
@@ -973,6 +974,77 @@ fun DownloadCompletedPillBanner(
                         tint = Color(0xFF8B949E),
                         modifier = Modifier.size(16.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun OmniboxSuggestionOverlay(
+    suggestions: List<com.omni.plugin.browser.models.SearchSuggestion>,
+    onSelectSuggestion: (com.omni.plugin.browser.models.SearchSuggestion) -> Unit,
+    onFillSuggestion: (com.omni.plugin.browser.models.SearchSuggestion) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (suggestions.isEmpty()) return
+
+    Surface(
+        shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
+        color = Color(0xFF16181D),
+        border = BorderStroke(1.dp, Color(0xFF30363D)),
+        shadowElevation = 14.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp)
+    ) {
+        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            suggestions.forEach { sug ->
+                val icon = when (sug.type) {
+                    com.omni.plugin.browser.models.SuggestionType.HISTORY -> "🕒"
+                    com.omni.plugin.browser.models.SuggestionType.OPEN_TAB -> "📱"
+                    com.omni.plugin.browser.models.SuggestionType.SHORTCUT -> "⭐"
+                    com.omni.plugin.browser.models.SuggestionType.SEARCH_QUERY -> "🔍"
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onSelectSuggestion(sug) }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(icon, fontSize = 15.sp)
+                    Spacer(Modifier.width(10.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = sug.text,
+                            color = Color(0xFFE8EAED),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (!sug.subtitle.isNullOrEmpty()) {
+                            Text(
+                                text = sug.subtitle,
+                                color = if (sug.type == com.omni.plugin.browser.models.SuggestionType.OPEN_TAB) Color(0xFF58A6FF) else Color(0xFF8B949E),
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { onFillSuggestion(sug) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Text("⬈", fontSize = 16.sp, color = Color(0xFF8B949E), fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
