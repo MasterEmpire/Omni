@@ -696,6 +696,7 @@ fun DashboardScreen(context: Context) {
                                 plugin = plugin,
                                 isHeadlessRunning = isHeadlessRunning,
                                 onLaunchUI = {
+                                    OmniLogger.log("OMNI_TRACE", "🚀 [HOST] User tapped 'Open UI' for ${plugin.name} (${plugin.id})")
                                     OmniTaskManager.launchOrResume(context, plugin.id, plugin.name, plugin.entryClass)
                                 },
                                 onToggleHeadless = {
@@ -862,6 +863,7 @@ fun DashboardScreen(context: Context) {
                 ) {
                     AndroidView(
                         factory = {
+                            OmniLogger.log("OMNI_TRACE", "🖥️ [HOST] AndroidView mounting overlay for ${currentSession.pluginName} (${currentSession.pluginId})")
                             val view = currentSession.pluginView
                             (view.parent as? ViewGroup)?.removeView(view)
                             (view as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
