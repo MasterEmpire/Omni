@@ -72,6 +72,12 @@ class BrowserStateHolder(
     var isTabSwitcherOpen by mutableStateOf(false)
     var isHomeOverlayOpen by mutableStateOf(true)
 
+    // Tab Cryostasis & Grouping State
+    var tabGroups by mutableStateOf<List<TabGroup>>(emptyList())
+    var isSelectionMode by mutableStateOf(false)
+    var selectedTabIds by mutableStateOf<Set<String>>(emptySet())
+    var showGroupNamingDialog by mutableStateOf(false)
+
     var currentUrl by mutableStateOf("about:blank")
     var urlInputText by mutableStateOf("")
     var pageTitle by mutableStateOf("New Tab")
@@ -230,6 +236,10 @@ class BrowserStateHolder(
 
         vaultManager.loadSmartNotes()?.let { loaded ->
             if (loaded.isNotEmpty()) smartNotes = loaded
+        }
+
+        vaultManager.loadTabGroups()?.let { loaded ->
+            if (loaded.isNotEmpty()) tabGroups = loaded
         }
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId, savedProfileId) ->
@@ -1312,6 +1322,163 @@ class BrowserStateHolder(
         attachTabWebView(newId)
     }
 
+    fun enterSelectionMode(initialTabId: String) {
+        bridge.vibrate(35L)
+        isSelectionMode = true
+        selectedTabIds = setOf(initialTabId)
+        bridge.log("TAB_SELECTION", "Entered selection mode with tab: $initialTabId")
+    }
+
+    fun toggleTabSelection(tabId: String) {
+        bridge.vibrate(20L)
+        selectedTabIds = if (selectedTabIds.contains(tabId)) {
+            selectedTabIds - tabId
+        } else {
+            selectedTabIds + tabId
+        }
+        if (selectedTabIds.isEmpty()) {
+            isSelectionMode = false
+        }
+    }
+
+    fun selectAllTabs() {
+        selectedTabIds = if (selectedTabIds.size == tabs.size) {
+            emptySet()
+        } else {
+            tabs.map { it.id }.toSet()
+        }
+        if (selectedTabIds.isEmpty()) {
+            isSelectionMode = false
+        }
+    }
+
+    fun clearSelectionMode() {
+        isSelectionMode = false
+        selectedTabIds = emptySet()
+    }
+
+    fun promptGroupSelection() {
+        if (selectedTabIds.isEmpty()) return
+        showGroupNamingDialog = true
+    }
+
+    fun confirmCreateGroup(title: String, colorValue: Long = 0xFF2979FF) {
+        val selected = tabs.filter { selectedTabIds.contains(it.id) }
+        if (selected.isEmpty()) return
+
+        val cleanTitle = title.trim().ifEmpty { "Group ${tabGroups.size + 1}" }
+        val groupItems = selected.map {
+            GroupedTabItem(
+                id = it.id,
+                title = it.title,
+                url = it.url,
+                profileId = it.profileId,
+                isDesktop = it.isDesktop
+            )
+        }
+
+        val newGroup = TabGroup(
+            title = cleanTitle,
+            colorValue = colorValue,
+            tabs = groupItems
+        )
+
+        // Nuke selected WebViews from RAM (0 RAM footprint)
+        selected.forEach { tab ->
+            poolManager.pool.remove(tab.id)?.let { wv ->
+                try {
+                    wv.stopLoading()
+                    wv.onPause()
+                    containerLayout?.removeView(wv)
+                    wv.destroy()
+                } catch (_: Exception) {}
+            }
+            poolManager.pendingPurge.remove(tab.id)
+            tabProgressMap.remove(tab.id)
+        }
+
+        val remainingTabs = tabs.filter { !selectedTabIds.contains(it.id) }
+        val updatedGroups = tabGroups + newGroup
+        tabGroups = updatedGroups
+        vaultManager.saveTabGroups(updatedGroups)
+
+        selectedTabIds = emptySet()
+        isSelectionMode = false
+        showGroupNamingDialog = false
+
+        if (remainingTabs.isEmpty()) {
+            val newId = "tab_${System.currentTimeMillis()}"
+            val freshTab = BrowserTab(id = newId, title = "New Tab", url = "about:blank", profileId = selectedProfileId)
+            tabs = listOf(freshTab)
+            activeTabId = newId
+            vaultManager.saveSession(tabs, newId)
+            attachTabWebView(newId)
+        } else {
+            tabs = remainingTabs
+            if (!remainingTabs.any { it.id == activeTabId }) {
+                val nextTab = remainingTabs.last()
+                activeTabId = nextTab.id
+                vaultManager.saveSession(tabs, nextTab.id)
+                attachTabWebView(nextTab.id)
+            } else {
+                vaultManager.saveSession(tabs, activeTabId)
+            }
+        }
+
+        bridge.showToast("📦 Stashed ${groupItems.size} tabs into '$cleanTitle'")
+        bridge.log("TAB_GROUP", "Created group '$cleanTitle' with ${groupItems.size} tabs. WebViews destroyed.")
+    }
+
+    fun restoreTabGroup(groupId: String) {
+        val group = tabGroups.find { it.id == groupId } ?: return
+        val restoredTabs = group.tabs.map { gTab ->
+            BrowserTab(
+                id = "tab_${System.currentTimeMillis()}_${(100..999).random()}",
+                title = gTab.title,
+                url = gTab.url,
+                profileId = gTab.profileId,
+                isDesktop = gTab.isDesktop
+            )
+        }
+        tabs = tabs + restoredTabs
+        val updatedGroups = tabGroups.filter { it.id != groupId }
+        tabGroups = updatedGroups
+        vaultManager.saveTabGroups(updatedGroups)
+        vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
+        bridge.showToast("Restored ${restoredTabs.size} tabs from '${group.title}'")
+        bridge.log("TAB_GROUP", "Restored group '${group.title}' (${restoredTabs.size} tabs)")
+    }
+
+    fun restoreSingleGroupedTab(groupId: String, item: GroupedTabItem) {
+        val group = tabGroups.find { it.id == groupId } ?: return
+        val newTab = BrowserTab(
+            id = "tab_${System.currentTimeMillis()}_${(100..999).random()}",
+            title = item.title,
+            url = item.url,
+            profileId = item.profileId,
+            isDesktop = item.isDesktop
+        )
+        tabs = tabs + newTab
+        val remainingInGroup = group.tabs.filter { it.id != item.id }
+        val updatedGroups = if (remainingInGroup.isEmpty()) {
+            tabGroups.filter { it.id != groupId }
+        } else {
+            tabGroups.map { if (it.id == groupId) it.copy(tabs = remainingInGroup) else it }
+        }
+        tabGroups = updatedGroups
+        vaultManager.saveTabGroups(updatedGroups)
+        vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
+        bridge.showToast("Restored '${item.title}'")
+    }
+
+    fun deleteTabGroup(groupId: String) {
+        val group = tabGroups.find { it.id == groupId } ?: return
+        val updated = tabGroups.filter { it.id != groupId }
+        tabGroups = updated
+        vaultManager.saveTabGroups(updated)
+        bridge.showToast("Deleted group '${group.title}'")
+    }
+
     fun togglePreviousTab() {
         if (tabs.size <= 1) return
         val candidateId = previousActiveTabId
@@ -1620,6 +1787,8 @@ class BrowserStateHolder(
 
     fun handleBackPressed(): Boolean {
         return when {
+            showGroupNamingDialog -> { showGroupNamingDialog = false; true }
+            isSelectionMode -> { clearSelectionMode(); true }
             showAutoPilotConfirmDialog -> { rejectAutoPilotAction(); true }
             showDownloadBanner -> { showDownloadBanner = false; true }
             showSmartNotesDialog -> { showSmartNotesDialog = false; true }
