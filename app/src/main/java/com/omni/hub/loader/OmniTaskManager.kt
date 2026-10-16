@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.omni.hub.api.HostBridgeImpl
 import com.omni.hub.api.OmniLogger
+import java.io.File
 
 data class AppTaskSession(
     val taskId: String,
@@ -52,16 +53,26 @@ object OmniTaskManager {
         val existing = activeSessions.find { it.pluginId == pluginId }
         if (existing != null) {
             val act = existing.pluginView.context as? android.app.Activity
+            val dexFile = File(context.getDir("plugins", Context.MODE_PRIVATE), "$pluginId/classes.dex")
+            val isBytecodeNewer = dexFile.exists() && dexFile.lastModified() > existing.startedAt
+
             if (act != null && (act.isDestroyed || act.isFinishing)) {
                 OmniLogger.log("TASK_MANAGER", "Existing session for [$pluginName] has dead activity context. Purging.")
                 killTask(context, existing.taskId)
+            } else if (isBytecodeNewer) {
+                OmniLogger.log(
+                    "TASK_MANAGER",
+                    "🔄 [HOT-SWAP] Newer bytecode on disk for [$pluginName] (DEX: ${dexFile.lastModified()} > Session: ${existing.startedAt}). Decapitating stale session!"
+                )
+                PluginLoader.invalidate(pluginId)
+                killTask(context, existing.taskId)
             } else {
-                            OmniLogger.log("TASK_MANAGER", "Resuming existing session for [$pluginName]")
-            if (currentForegroundSession != null && currentForegroundSession?.taskId != existing.taskId) {
-                pushHistory(currentForegroundSession!!.taskId)
-            }
-            currentForegroundSession = existing
-            return existing
+                OmniLogger.log("TASK_MANAGER", "Resuming existing session for [$pluginName]")
+                if (currentForegroundSession != null && currentForegroundSession?.taskId != existing.taskId) {
+                    pushHistory(currentForegroundSession!!.taskId)
+                }
+                currentForegroundSession = existing
+                return existing
             }
         }
 
@@ -204,6 +215,7 @@ object OmniTaskManager {
         OmniLogger.log("TASK_MANAGER", "Hot-reloading mini app session for [$pluginName] ($pluginId)")
         val wasForeground = currentForegroundSession?.pluginId == pluginId
         
+        PluginLoader.invalidate(pluginId)
         val existing = activeSessions.find { it.pluginId == pluginId }
         if (existing != null) {
             killTask(context, existing.taskId)
