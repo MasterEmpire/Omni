@@ -178,6 +178,7 @@ class VaultManager(
                 mirrorFile("config/solver.json", "solver.json")
                 mirrorFile("config/system_presets.json", "system_presets.json")
                 mirrorFile("config/smart_notes.json", "smart_notes.json")
+                mirrorFile("config/tab_groups.json", "tab_groups.json")
 
                 val ideDir = File(bridge.getPluginDir(), "ide")
                 if (ideDir.exists() && ideDir.isDirectory) {
@@ -207,6 +208,7 @@ class VaultManager(
                 restoreIfMissing("config/solver.json", "solver.json")
                 restoreIfMissing("config/system_presets.json", "system_presets.json")
                 restoreIfMissing("config/smart_notes.json", "smart_notes.json")
+                restoreIfMissing("config/tab_groups.json", "tab_groups.json")
 
                                     val vaultIdeDir = File(vaultDir, "ide")
                     if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
@@ -401,6 +403,71 @@ class VaultManager(
         }
     }
 
+    fun saveTabGroups(list: List<com.omni.plugin.browser.models.TabGroup>) {
+        try {
+            val arr = JSONArray()
+            list.forEach { g ->
+                val gObj = JSONObject().apply {
+                    put("id", g.id)
+                    put("title", g.title)
+                    put("colorValue", g.colorValue)
+                    put("createdAt", g.createdAt)
+                    val tArr = JSONArray()
+                    g.tabs.forEach { t ->
+                        tArr.put(JSONObject().apply {
+                            put("id", t.id)
+                            put("title", t.title)
+                            put("url", t.url)
+                            put("profileId", t.profileId)
+                            put("isDesktop", t.isDesktop)
+                        })
+                    }
+                    put("tabs", tArr)
+                }
+                arr.put(gObj)
+            }
+            bridge.saveFile("config/tab_groups.json", arr.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadTabGroups(): List<com.omni.plugin.browser.models.TabGroup>? {
+        return try {
+            val bytes = bridge.readFile("config/tab_groups.json") ?: return null
+            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+            val list = mutableListOf<com.omni.plugin.browser.models.TabGroup>()
+            for (i in 0 until arr.length()) {
+                val gObj = arr.getJSONObject(i)
+                val tArr = gObj.optJSONArray("tabs") ?: JSONArray()
+                val tList = mutableListOf<com.omni.plugin.browser.models.GroupedTabItem>()
+                for (j in 0 until tArr.length()) {
+                    val tObj = tArr.getJSONObject(j)
+                    tList.add(
+                        com.omni.plugin.browser.models.GroupedTabItem(
+                            id = tObj.getString("id"),
+                            title = tObj.optString("title", "Web Page"),
+                            url = tObj.optString("url", "about:blank"),
+                            profileId = tObj.optString("profileId", "default"),
+                            isDesktop = tObj.optBoolean("isDesktop", false)
+                        )
+                    )
+                }
+                list.add(
+                    com.omni.plugin.browser.models.TabGroup(
+                        id = gObj.getString("id"),
+                        title = gObj.getString("title"),
+                        colorValue = gObj.optLong("colorValue", 0xFF2979FF),
+                        createdAt = gObj.optLong("createdAt", System.currentTimeMillis()),
+                        tabs = tList
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun saveSmartNotes(list: List<com.omni.plugin.browser.models.SmartNote>) {
         try {
             val arr = JSONArray()
@@ -503,6 +570,7 @@ class VaultManager(
             addFileToZip("config/solver.json", "solver.json")
             addFileToZip("config/system_presets.json", "system_presets.json")
             addFileToZip("config/smart_notes.json", "smart_notes.json")
+            addFileToZip("config/tab_groups.json", "tab_groups.json")
 
             val ideDir = File(bridge.getPluginDir(), "ide")
             if (ideDir.exists() && ideDir.isDirectory) {
