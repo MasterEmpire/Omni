@@ -59,6 +59,7 @@ fun OmniBrowserTopBar(
     showMenu: Boolean,
     onMenuToggle: () -> Unit,
     isAutoPilotActive: Boolean = false,
+    isDataSaverActive: Boolean = false,
     onTopBarDragStart: () -> Unit = {},
     onTopBarDrag: (Float) -> Unit = {},
     onTopBarDragEnd: () -> Unit = {},
@@ -176,6 +177,10 @@ fun OmniBrowserTopBar(
 
                     Spacer(Modifier.width(6.dp))
 
+                    if (isDataSaverActive) {
+                        Text("🛡️", fontSize = 11.sp)
+                        Spacer(Modifier.width(4.dp))
+                    }
                     Icon(
                         imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
                         contentDescription = null,
@@ -550,6 +555,8 @@ fun BrowserMenuOverlay(
     canGoBack: Boolean,
     canGoForward: Boolean,
     currentUrl: String,
+    isDataSaverEnabled: Boolean = false,
+    onToggleDataSaver: () -> Unit = {},
     isLiveAutoPilotEnabled: Boolean = false,
     onToggleLiveAutoPilot: () -> Unit = {},
     isAutoPilotConfirmEnabled: Boolean = false,
@@ -696,6 +703,14 @@ fun BrowserMenuOverlay(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
+
+                InLayoutMenuItem(
+                    title = if (isDataSaverEnabled) "🛡️ Data-saver (Extreme ON)" else "🛡️ Data-saver (Off)",
+                    color = if (isDataSaverEnabled) Color(0xFF3FB950) else Color(0xFFE8EAED),
+                    isBold = isDataSaverEnabled
+                ) {
+                    onToggleDataSaver()
+                }
 
                 InLayoutMenuItem("Copy Clean URL") {
                     onCopyCleanUrl()
