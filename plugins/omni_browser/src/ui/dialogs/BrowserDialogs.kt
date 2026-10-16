@@ -309,11 +309,12 @@ fun SettingsBackupDialog(
     isErudaEnabled: Boolean = false,
     isDesktopMode: Boolean = false,
     isBackgroundAudioEnabled: Boolean = true,
+    isDataSaverEnabled: Boolean = false,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
-    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean) -> Unit,
+    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
@@ -323,6 +324,7 @@ fun SettingsBackupDialog(
     var tempEruda by remember { mutableStateOf(isErudaEnabled) }
     var tempDesktop by remember { mutableStateOf(isDesktopMode) }
     var tempAudio by remember { mutableStateOf(isBackgroundAudioEnabled) }
+    var tempDataSaver by remember { mutableStateOf(isDataSaverEnabled) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -416,6 +418,22 @@ fun SettingsBackupDialog(
                     )
                 }
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("🛡️ Extreme Data-saver", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Blocks network images, video preload, fonts & trackers. Auto-pauses on Wi-Fi.", color = Color(0xFF81C995), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempDataSaver,
+                        onCheckedChange = { tempDataSaver = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF81C995))
+                    )
+                }
+
                 HorizontalDivider(color = Color(0xFF3C4043))
 
                 Text("Developer & Diagnostics", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -500,7 +518,7 @@ fun SettingsBackupDialog(
             Button(
                 onClick = {
                     val portNum = tempPortText.toIntOrNull() ?: 8080
-                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio)
+                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio, tempDataSaver)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
