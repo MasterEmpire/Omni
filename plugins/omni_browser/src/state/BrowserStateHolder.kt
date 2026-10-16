@@ -78,6 +78,12 @@ class BrowserStateHolder(
     var selectedTabIds by mutableStateOf<Set<String>>(emptySet())
     var showGroupNamingDialog by mutableStateOf(false)
 
+    // Browsing History & Omnibox Suggestions
+    var history by mutableStateOf<List<HistoryItem>>(emptyList())
+    var suggestions by mutableStateOf<List<SearchSuggestion>>(emptyList())
+    var isSearchFocused by mutableStateOf(false)
+    private var suggestionJob: Job? = null
+
     var currentUrl by mutableStateOf("about:blank")
     var urlInputText by mutableStateOf("")
     var pageTitle by mutableStateOf("New Tab")
@@ -243,6 +249,10 @@ class BrowserStateHolder(
 
         vaultManager.loadTabGroups()?.let { loaded ->
             if (loaded.isNotEmpty()) tabGroups = loaded
+        }
+
+        vaultManager.loadHistory()?.let { loaded ->
+            if (loaded.isNotEmpty()) history = loaded
         }
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId, savedProfileId) ->
@@ -1519,6 +1529,127 @@ class BrowserStateHolder(
         bridge.showToast("Deleted group '${group.title}'")
     }
 
+    fun onSearchInputChanged(input: String) {
+        urlInputText = input
+        suggestionJob?.cancel()
+        val query = input.trim()
+
+        if (query.isEmpty()) {
+            suggestions = history.take(6).map { h ->
+                SearchSuggestion(
+                    text = h.title.ifEmpty { extractDomain(h.url) },
+                    subtitle = h.url,
+                    targetUrl = h.url,
+                    type = SuggestionType.HISTORY
+                )
+            }
+            return
+        }
+
+        suggestionJob = coroutineScope.launch {
+            delay(180)
+            val qLower = query.lowercase(Locale.US)
+            val results = mutableListOf<SearchSuggestion>()
+
+            // 1. Open Tabs Match
+            tabs.filter { it.id != activeTabId && (it.title.lowercase(Locale.US).contains(qLower) || it.url.lowercase(Locale.US).contains(qLower)) }
+                .take(2).forEach { tab ->
+                    results.add(
+                        SearchSuggestion(
+                            text = tab.title.ifEmpty { extractDomain(tab.url) },
+                            subtitle = "Switch to tab • ${tab.url}",
+                            targetUrl = tab.url,
+                            type = SuggestionType.OPEN_TAB,
+                            tabId = tab.id
+                        )
+                    )
+                }
+
+            // 2. Shortcuts Match
+            shortcuts.filter { it.title.lowercase(Locale.US).contains(qLower) || it.url.lowercase(Locale.US).contains(qLower) }
+                .take(2).forEach { sc ->
+                    results.add(
+                        SearchSuggestion(
+                            text = sc.title,
+                            subtitle = sc.url,
+                            targetUrl = sc.url,
+                            type = SuggestionType.SHORTCUT
+                        )
+                    )
+                }
+
+            // 3. Local History Match
+            history.filter { it.title.lowercase(Locale.US).contains(qLower) || it.url.lowercase(Locale.US).contains(qLower) }
+                .take(4).forEach { h ->
+                    if (results.none { it.targetUrl == h.url }) {
+                        results.add(
+                            SearchSuggestion(
+                                text = h.title.ifEmpty { extractDomain(h.url) },
+                                subtitle = h.url,
+                                targetUrl = h.url,
+                                type = SuggestionType.HISTORY
+                            )
+                        )
+                    }
+                }
+
+            // 4. Remote Google Live Suggestions (Silenced when Extreme Data-Saver is active on Mobile Data)
+            if (!isEffectiveDataSaver() && query.length >= 2 && !query.startsWith("http://") && !query.startsWith("https://")) {
+                try {
+                    withContext(Dispatchers.IO) {
+                        val enc = URLEncoder.encode(query, "UTF-8")
+                        val suggestUrl = "https://suggestqueries.google.com/complete/search?client=chrome&q=$enc"
+                        val jsonStr = bridge.httpGet(suggestUrl)
+                        if (!jsonStr.isNullOrEmpty()) {
+                            val arr = org.json.JSONArray(jsonStr)
+                            if (arr.length() > 1) {
+                                val sugArr = arr.getJSONArray(1)
+                                val webSugs = mutableListOf<String>()
+                                for (i in 0 until minOf(5, sugArr.length())) {
+                                    val item = sugArr.getString(i)
+                                    if (item.isNotBlank() && !webSugs.contains(item)) {
+                                        webSugs.add(item)
+                                    }
+                                }
+                                withContext(Dispatchers.Main) {
+                                    webSugs.forEach { sugText ->
+                                        if (results.none { it.text.equals(sugText, ignoreCase = true) }) {
+                                            results.add(
+                                                SearchSuggestion(
+                                                    text = sugText,
+                                                    subtitle = "Google Search",
+                                                    targetUrl = "https://www.google.com/search?q=${URLEncoder.encode(sugText, "UTF-8")}",
+                                                    type = SuggestionType.SEARCH_QUERY
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            suggestions = results.take(7)
+        }
+    }
+
+    fun selectSuggestion(suggestion: SearchSuggestion) {
+        isSearchFocused = false
+        suggestions = emptyList()
+        if (suggestion.type == SuggestionType.OPEN_TAB && suggestion.tabId != null) {
+            switchToTab(suggestion.tabId)
+        } else {
+            navigateTo(suggestion.targetUrl)
+        }
+    }
+
+    fun fillSuggestion(suggestion: SearchSuggestion) {
+        urlInputText = suggestion.text
+        onSearchInputChanged(suggestion.text)
+    }
+
     fun togglePreviousTab() {
         if (tabs.size <= 1) return
         val candidateId = previousActiveTabId
@@ -1827,6 +1958,11 @@ class BrowserStateHolder(
 
     fun handleBackPressed(): Boolean {
         return when {
+            isSearchFocused -> {
+                isSearchFocused = false
+                suggestions = emptyList()
+                true
+            }
             showGroupNamingDialog -> { showGroupNamingDialog = false; true }
             isSelectionMode -> { clearSelectionMode(); true }
             showAutoPilotConfirmDialog -> { rejectAutoPilotAction(); true }
@@ -1897,6 +2033,17 @@ class BrowserStateHolder(
         }
         if (isErudaEnabled && url != "about:blank") {
             injectEruda()
+        }
+        if (url != "about:blank" && !url.startsWith("chrome://") && !url.contains("localhost:$localServerPort")) {
+            val titleToRecord = pageTitle.ifEmpty { extractDomain(url) }
+            val existing = history.find { it.url == url }
+            val updatedHistory = if (existing != null) {
+                listOf(existing.copy(title = titleToRecord, timestamp = System.currentTimeMillis(), visitCount = existing.visitCount + 1)) + history.filter { it.url != url }
+            } else {
+                listOf(HistoryItem(title = titleToRecord, url = url)) + history
+            }.take(800)
+            history = updatedHistory
+            vaultManager.saveHistory(updatedHistory)
         }
         if (url != null && url.contains("aistudio.google.com")) {
             com.omni.plugin.browser.engine.LiveAutoPilotEngine.syncOnPageFinished(currentWebView, url, isLiveAutoPilotEnabled)
