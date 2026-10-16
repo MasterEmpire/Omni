@@ -93,10 +93,8 @@ fun TabSwitcherScreen(
     var profileMenuExpanded by remember { mutableStateOf(false) }
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
 
-    var hasMovedDuringDrag by remember { mutableStateOf(false) }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val reorderableLazyGridState = rememberReorderableLazyGridState(gridState) { from, to ->
-        hasMovedDuringDrag = true
         onReorderTabs(from.index, to.index)
     }
     val closingTabIds = remember { mutableStateListOf<String>() }
@@ -602,15 +600,10 @@ fun TabSwitcherScreen(
                                 .longPressDraggableHandle(
                                     enabled = !isSelectionMode && !isClosing,
                                     onDragStarted = {
-                                        hasMovedDuringDrag = false
                                         bridge?.vibrate(25L)
                                     },
                                     onDragStopped = {
-                                        if (!hasMovedDuringDrag) {
-                                            onEnterSelectionMode(tab.id)
-                                        } else {
-                                            onSaveTabOrder()
-                                        }
+                                        onSaveTabOrder()
                                     }
                                 )
                                 .clickable(
@@ -867,7 +860,7 @@ fun TabGroupsListView(
                 Text("No Stashed Tab Groups", color = Color(0xFFE8EAED), fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Hold any tab and release to enter selection mode, then use the 3-dots menu to stash tabs into 0-RAM cryostasis.",
+                    "Use the 3-dots menu and choose 'Select Tabs' to group them into 0-RAM cryostasis.",
                     color = Color(0xFF8B949E),
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center
