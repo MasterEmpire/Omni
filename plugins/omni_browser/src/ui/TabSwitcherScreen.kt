@@ -105,6 +105,10 @@ fun TabSwitcherScreen(
     }
     val closingTabIds = remember { mutableStateListOf<String>() }
 
+    fun logTrace(tag: String, msg: String) {
+        bridge?.log(tag, msg) ?: OmniLogger.log(tag, msg)
+    }
+
     // Focused Anomaly Sentry: Silent during normal scrolling; only logs if a swipe is truly swallowed!
     val tabsGridScrollConnection = remember(gridState) {
         object : NestedScrollConnection {
