@@ -103,6 +103,10 @@ fun TabSwitcherScreen(
         bridge?.log(tag, msg) ?: OmniLogger.log(tag, msg)
     }
 
+    SideEffect {
+        logTrace("OMNI_TRACE", "⚡ [GRID_COMPOSED] TabSwitcherScreen active! (activeTabId='$activeTabId', tabs=${tabs.size}, segment='$activeSegment')")
+    }
+
     val tabsGridScrollConnection = remember(gridState) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -480,9 +484,9 @@ fun TabSwitcherScreen(
                                 if (change != null) {
                                     when (type) {
                                         androidx.compose.ui.input.pointer.PointerEventType.Press -> {
-                                            OmniLogger.log(
-                                                "TABS_TOUCH",
-                                                "👉 [TOUCH_DOWN] Pointer at (${change.position.x.toInt()}, ${change.position.y.toInt()}) | Grid: Item #${gridState.firstVisibleItemIndex} (${gridState.firstVisibleItemScrollOffset}px) | canUp=${gridState.canScrollBackward}, canDown=${gridState.canScrollForward} | ChildConsumed=${change.isConsumed}"
+                                            logTrace(
+                                                "OMNI_TRACE",
+                                                "👉 [GRID_TOUCH_PRESS] Finger hit grid at (${change.position.x.toInt()}, ${change.position.y.toInt()}) | Pos: Item #${gridState.firstVisibleItemIndex} (${gridState.firstVisibleItemScrollOffset}px)"
                                             )
                                         }
                                         androidx.compose.ui.input.pointer.PointerEventType.Move -> {
