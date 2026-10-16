@@ -399,6 +399,7 @@ class OmniBrowser : PluginEntry() {
                     showMenu = state.showMenu,
                     onMenuToggle = { state.showMenu = !state.showMenu },
                     isAutoPilotActive = state.isLiveAutoPilotEnabled,
+                    isDataSaverActive = state.isEffectiveDataSaver(),
                     onTopBarDragStart = { state.onTopBarDragStart() },
                     onTopBarDrag = { state.onTopBarDrag(it) },
                     onTopBarDragEnd = { state.onTopBarDragEnd() },
@@ -574,6 +575,8 @@ class OmniBrowser : PluginEntry() {
                 canGoBack = state.canGoBack,
                 canGoForward = state.canGoForward,
                 currentUrl = state.currentUrl,
+                isDataSaverEnabled = state.isDataSaverEnabled,
+                onToggleDataSaver = { state.toggleDataSaver() },
                 onBackClick = {
                     if (state.canGoBack) state.currentWebView?.goBack()
                     else if (state.currentUrl != "about:blank") state.navigateTo("about:blank")
@@ -887,6 +890,7 @@ class OmniBrowser : PluginEntry() {
                         isErudaEnabled = state.isErudaEnabled,
                         isDesktopMode = state.isDesktopMode,
                         isBackgroundAudioEnabled = state.isBackgroundAudioEnabled,
+                        isDataSaverEnabled = state.isDataSaverEnabled,
                         onExportBackup = { state.exportBackup() },
                         onRestoreBackup = {
                             restoreCallback = { uri -> state.restoreBackup(uri) }
@@ -898,7 +902,7 @@ class OmniBrowser : PluginEntry() {
                             state.currentWebView?.clearCache(true)
                             bridge.showToast("Cookies and Cache cleared.")
                         },
-                        onSave = { key, auto, dark, port, eruda, desktop, audio ->
+                        onSave = { key, auto, dark, port, eruda, desktop, audio, dataSaver ->
                             state.solverApiKey = key
                             state.autoSolveEnabled = auto
                             state.forceDarkWebPages = dark
@@ -906,15 +910,17 @@ class OmniBrowser : PluginEntry() {
                             state.isErudaEnabled = eruda
                             state.isDesktopMode = desktop
                             state.isBackgroundAudioEnabled = audio
+                            state.isDataSaverEnabled = dataSaver
                             state.poolManager.localPort = port
                             state.poolManager.updateForceDark(dark)
+                            state.syncDataSaver()
                             if (desktop != state.tabs.find { it.id == state.activeTabId }?.isDesktop) {
                                 state.toggleDesktopMode()
                             }
                             if (eruda) {
                                 state.injectEruda()
                             }
-                            state.vaultManager.saveSolverConfig(key, auto, dark, port, eruda, desktop, audio)
+                            state.vaultManager.saveSolverConfig(key, auto, dark, port, eruda, desktop, audio, dataSaver)
                             bridge.showToast("Settings saved!")
                             state.showSettingsDialog = false
                         },
