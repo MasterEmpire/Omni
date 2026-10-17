@@ -4,6 +4,7 @@ enum class KeyboardMode {
     ALPHA,
     SYMBOLS_PAGE_1,
     SYMBOLS_PAGE_2,
+    EMOJI,
     TEXT_EDITOR
 }
 
