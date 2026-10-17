@@ -20,6 +20,10 @@ class KeyboardState(val host: KeyboardHost) {
     var cursorPosition by mutableIntStateOf(0)
     var suggestions = mutableStateListOf<String>()
 
+    var onSandboxCommit: ((String) -> Unit)? = null
+    var onSandboxDelete: (() -> Unit)? = null
+    var onSandboxEnter: (() -> Unit)? = null
+
     fun cycleShift() {
         shiftState = when (shiftState) {
             ShiftState.LOWERCASE -> ShiftState.SHIFTED
@@ -41,14 +45,18 @@ class KeyboardState(val host: KeyboardHost) {
     }
 
     fun commitChar(char: String) {
-        val ic = host.getCurrentInputConnection() ?: return
         val textToCommit = if (shiftState != ShiftState.LOWERCASE && char.length == 1) {
             char.uppercase()
         } else {
             char
         }
 
-        ic.commitText(textToCommit, 1)
+        val ic = host.getCurrentInputConnection()
+        if (ic != null) {
+            ic.commitText(textToCommit, 1)
+        } else {
+            onSandboxCommit?.invoke(textToCommit)
+        }
         host.getHostBridge().vibrate(12L)
 
         if (shiftState == ShiftState.SHIFTED) {
@@ -57,39 +65,51 @@ class KeyboardState(val host: KeyboardHost) {
     }
 
     fun handleDelete() {
-        val ic = host.getCurrentInputConnection() ?: return
-        val selected = ic.getSelectedText(0)
-        if (!selected.isNullOrEmpty()) {
-            ic.commitText("", 1)
+        val ic = host.getCurrentInputConnection()
+        if (ic != null) {
+            val selected = ic.getSelectedText(0)
+            if (!selected.isNullOrEmpty()) {
+                ic.commitText("", 1)
+            } else {
+                ic.deleteSurroundingText(1, 0)
+            }
         } else {
-            ic.deleteSurroundingText(1, 0)
+            onSandboxDelete?.invoke()
         }
         host.getHostBridge().vibrate(25L)
     }
 
     fun handleEnter() {
-        val ic = host.getCurrentInputConnection() ?: return
-        val info = host.getCurrentEditorInfo()
-        val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
+        val ic = host.getCurrentInputConnection()
+        if (ic != null) {
+            val info = host.getCurrentEditorInfo()
+            val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
 
-        val handled = when (action) {
-            EditorInfo.IME_ACTION_GO,
-            EditorInfo.IME_ACTION_SEARCH,
-            EditorInfo.IME_ACTION_SEND,
-            EditorInfo.IME_ACTION_NEXT,
-            EditorInfo.IME_ACTION_DONE -> host.performHostEditorAction(action)
-            else -> false
-        }
+            val handled = when (action) {
+                EditorInfo.IME_ACTION_GO,
+                EditorInfo.IME_ACTION_SEARCH,
+                EditorInfo.IME_ACTION_SEND,
+                EditorInfo.IME_ACTION_NEXT,
+                EditorInfo.IME_ACTION_DONE -> host.performHostEditorAction(action)
+                else -> false
+            }
 
-        if (!handled) {
-            ic.commitText("\n", 1)
+            if (!handled) {
+                ic.commitText("\n", 1)
+            }
+        } else {
+            onSandboxEnter?.invoke()
         }
         host.getHostBridge().vibrate(25L)
     }
 
     fun handleSpace() {
-        val ic = host.getCurrentInputConnection() ?: return
-        ic.commitText(" ", 1)
+        val ic = host.getCurrentInputConnection()
+        if (ic != null) {
+            ic.commitText(" ", 1)
+        } else {
+            onSandboxCommit?.invoke(" ")
+        }
         host.getHostBridge().vibrate(15L)
     }
 
