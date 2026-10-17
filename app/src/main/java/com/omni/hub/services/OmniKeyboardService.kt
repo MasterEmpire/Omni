@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
@@ -104,6 +105,16 @@ class OmniKeyboardService : InputMethodService(), KeyboardHost {
         } catch (_: Exception) {}
     }
 
+    override fun onConfigureWindow(win: Window, isFullscreen: Boolean, isCandidatesOnly: Boolean) {
+        super.onConfigureWindow(win, isFullscreen, isCandidatesOnly)
+        val owner = lifecycleOwner ?: OverlayLifecycleOwner().also { lifecycleOwner = it }
+        win.decorView.let { decor ->
+            decor.setViewTreeLifecycleOwner(owner)
+            decor.setViewTreeViewModelStoreOwner(owner)
+            decor.setViewTreeSavedStateRegistryOwner(owner)
+        }
+    }
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         try {
@@ -112,15 +123,24 @@ class OmniKeyboardService : InputMethodService(), KeyboardHost {
     }
 
     private fun loadOrReloadPluginView(): View {
+        val owner = lifecycleOwner ?: OverlayLifecycleOwner().also { lifecycleOwner = it }
+
+        window?.window?.decorView?.let { decor ->
+            decor.setViewTreeLifecycleOwner(owner)
+            decor.setViewTreeViewModelStoreOwner(owner)
+            decor.setViewTreeSavedStateRegistryOwner(owner)
+        }
+
         val rootContainer = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             setBackgroundColor(android.graphics.Color.parseColor("#141414"))
+            setViewTreeLifecycleOwner(owner)
+            setViewTreeViewModelStoreOwner(owner)
+            setViewTreeSavedStateRegistryOwner(owner)
         }
-
-        val owner = lifecycleOwner ?: OverlayLifecycleOwner().also { lifecycleOwner = it }
 
         try {
             val loaded = PluginLoader.loadFromDir(this, KEYBOARD_PLUGIN_ID, DEFAULT_ENTRY_CLASS)
