@@ -24,11 +24,21 @@ object SharedLibManager {
     /**
      * Master persistent directory that survives app uninstallation.
      */
-    private fun getPersistentVaultDir(): File {
+    fun getPersistentVaultDir(): File {
         val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         val vault = File(docsDir, ".omni_runtime")
         if (!vault.exists()) vault.mkdirs()
         return vault
+    }
+
+    /**
+     * Persistent directory for dynamic keyboard dictionaries.
+     * Survives app uninstallation.
+     */
+    fun getPersistentDictDir(): File {
+        val dictDir = File(getPersistentVaultDir(), "dicts")
+        if (!dictDir.exists()) dictDir.mkdirs()
+        return dictDir
     }
 
     /**
