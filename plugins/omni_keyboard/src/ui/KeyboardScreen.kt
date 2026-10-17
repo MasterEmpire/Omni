@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import com.omni.plugin.keyboard.model.KeyboardLayouts
 import com.omni.plugin.keyboard.model.KeyboardMode
 import com.omni.plugin.keyboard.model.ShiftState
@@ -32,8 +35,24 @@ fun KeyboardScreen(
         // 1. Suggestion & Utility Toolbar
         KeyboardToolbar(state = state, palette = palette)
 
+        if (state.isPunctPopupVisible) {
+            PunctuationPopup(
+                palette = palette,
+                onSelect = {
+                    state.commitChar(it)
+                    state.isPunctPopupVisible = false
+                },
+                onDismiss = { state.isPunctPopupVisible = false }
+            )
+        }
+
         if (state.mode == KeyboardMode.TEXT_EDITOR) {
             TextEditorPad(state = state, palette = palette)
+            return@Column
+        }
+
+        if (state.mode == KeyboardMode.EMOJI) {
+            EmojiPickerPad(state = state, palette = palette)
             return@Column
         }
 
@@ -194,22 +213,50 @@ fun KeyboardScreen(
                 label = ",",
                 weight = 1.0f,
                 palette = palette,
-                onClick = { state.commitChar(",") }
+                onClick = { state.commitChar(",") },
+                onLongClick = { state.mode = KeyboardMode.EMOJI }
             )
 
-            SpaceBarKey(
-                weight = 4.2f,
-                languageLabel = if (state.isAmharic) "አማርኛ" else "English",
-                palette = palette,
-                onClick = { state.handleSpace() },
-                onLongClick = { state.toggleLanguage() }
-            )
+            val density = LocalDensity.current.density
+            val stepThreshold = 12f * density
+            var accumulatedGlide by remember { mutableFloatStateOf(0f) }
+
+            Box(
+                modifier = Modifier
+                    .weight(4.2f)
+                    .fillMaxHeight()
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = { accumulatedGlide = 0f },
+                            onDragCancel = { accumulatedGlide = 0f },
+                            onHorizontalDrag = { _, dragAmount ->
+                                accumulatedGlide += dragAmount
+                                if (kotlin.math.abs(accumulatedGlide) >= stepThreshold) {
+                                    val steps = (accumulatedGlide / stepThreshold).toInt()
+                                    if (steps != 0) {
+                                        state.onSpaceGlide(steps)
+                                        accumulatedGlide -= (steps * stepThreshold)
+                                    }
+                                }
+                            }
+                        )
+                    }
+            ) {
+                SpaceBarKey(
+                    weight = 1f,
+                    languageLabel = if (state.isAmharic) "አማርኛ" else "English",
+                    palette = palette,
+                    onClick = { state.handleSpace() },
+                    onLongClick = { state.toggleLanguage() }
+                )
+            }
 
             FunctionKey(
                 label = ".",
                 weight = 1.0f,
                 palette = palette,
-                onClick = { state.commitChar(".") }
+                onClick = { state.commitChar(".") },
+                onLongClick = { state.isPunctPopupVisible = true }
             )
 
             FunctionKey(
