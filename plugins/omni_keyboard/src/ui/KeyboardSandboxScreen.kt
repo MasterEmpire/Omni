@@ -132,6 +132,87 @@ fun KeyboardSandboxScreen(
                 }
             }
 
+            // 👻 Ghost Chameleon Mode Control Card
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (keyboardState.isGhostModeEnabled) Color(0xFF58A6FF) else Color.White.copy(alpha = 0.08f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("👻", fontSize = 18.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    "Ghost Transliteration (Gboard Overlay)",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    if (keyboardState.isGhostModeEnabled) "Active: Overlays third-party keyboards" else "Disabled: Normal keyboard mode",
+                                    color = if (keyboardState.isGhostModeEnabled) Color(0xFF3FB950) else Color(0xFF8B949E),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = keyboardState.isGhostModeEnabled,
+                            onCheckedChange = { keyboardState.toggleGhostMode(context) }
+                        )
+                    }
+
+                    val hasOverlay = bridge.canDrawOverlays()
+                    val hasA11y = com.omni.hub.api.AccessibilityDispatcher.isServiceActive(context)
+
+                    if (!hasOverlay || !hasA11y) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (!hasOverlay) {
+                                Button(
+                                    onClick = { bridge.requestOverlayPermission() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633)),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.weight(1f).height(30.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Grant Overlay Perm", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (!hasA11y) {
+                                Button(
+                                    onClick = {
+                                        bridge.runIntent(Settings.ACTION_ACCESSIBILITY_SETTINGS, null, null)
+                                        bridge.showToast("Turn on 'Omni Hub' in Accessibility")
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD29922)),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.weight(1f).height(30.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Enable Accessibility", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Real-Time Typed Text Box
             Box(
                 modifier = Modifier
