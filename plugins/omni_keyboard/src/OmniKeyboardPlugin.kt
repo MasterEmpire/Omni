@@ -12,6 +12,7 @@ import com.omni.hub.api.KeyboardHost
 import com.omni.hub.api.PluginEntry
 import com.omni.plugin.keyboard.state.KeyboardState
 import com.omni.plugin.keyboard.ui.KeyboardScreen
+import com.omni.plugin.keyboard.ui.KeyboardSandboxScreen
 
 class OmniKeyboardPlugin : PluginEntry(), DynamicKeyboardPlugin {
 
