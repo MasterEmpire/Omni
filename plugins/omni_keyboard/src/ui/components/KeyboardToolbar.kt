@@ -97,6 +97,10 @@ fun KeyboardToolbar(
                 ToolButton("📐", "Height") {
                     state.heightScalePercent = if (state.heightScalePercent >= 140) 100 else state.heightScalePercent + 15
                 }
+                val context = androidx.compose.ui.platform.LocalContext.current
+                ToolButton(if (state.isGhostModeEnabled) "👻" else "👤", "Ghost Mode") {
+                    state.toggleGhostMode(context)
+                }
                 ToolButton("📋", "Diagnostics") { state.host.getHostBridge().showDiagnostics() }
             }
         } else {
