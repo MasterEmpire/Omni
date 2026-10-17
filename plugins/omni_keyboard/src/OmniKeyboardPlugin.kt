@@ -40,11 +40,11 @@ class OmniKeyboardPlugin : PluginEntry(), DynamicKeyboardPlugin {
     }
 
     override fun onStartInput(info: EditorInfo?, restarting: Boolean) {
-        // Forward input start to keyboard state
+        keyboardState?.updateSuggestions()
     }
 
     override fun onFinishInput() {
-        // Handle input dismiss
+        keyboardState?.onDestroy()
     }
 
     override fun onUpdateSelection(
@@ -52,7 +52,7 @@ class OmniKeyboardPlugin : PluginEntry(), DynamicKeyboardPlugin {
         newSelStart: Int, newSelEnd: Int,
         candidatesStart: Int, candidatesEnd: Int
     ) {
-        keyboardState?.cursorPosition = newSelEnd
+        keyboardState?.onUpdateSelection(newSelEnd)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
