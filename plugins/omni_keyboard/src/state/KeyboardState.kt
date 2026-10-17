@@ -466,7 +466,7 @@ class KeyboardState(val host: KeyboardHost) {
         com.omni.plugin.keyboard.engine.GhostOverlayManager.setGhostEnabled(context, isGhostModeEnabled)
         host.getHostBridge().vibrate(30L)
         host.getHostBridge().showToast(
-            if (isGhostModeEnabled) "👻 Ghost Mode Active: Typing in other keyboards will transliterate!"
+            if (isGhostModeEnabled) "👻 Ghost Mode Armed: Overlay will activate on any keyboard"
             else "Ghost Mode Disabled"
         )
     }
