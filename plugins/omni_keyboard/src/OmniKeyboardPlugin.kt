@@ -58,4 +58,12 @@ class OmniKeyboardPlugin : PluginEntry(), DynamicKeyboardPlugin {
     override fun onConfigurationChanged(newConfig: Configuration) {
         // Adjust layout orientation
     }
+
+    override fun onStart(context: Context, bridge: HostBridge, baseDir: String) {
+        com.omni.plugin.keyboard.engine.GhostOverlayManager.init(context)
+    }
+
+    override fun onStop(context: Context) {
+        com.omni.plugin.keyboard.engine.GhostOverlayManager.destroy()
+    }
 }
