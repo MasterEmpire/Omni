@@ -576,6 +576,19 @@ fun DashboardScreen(context: Context) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = {
+                            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+                            val enabled = imm?.enabledInputMethodList?.any { it.packageName == context.packageName } == true
+                            if (!enabled) {
+                                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                Toast.makeText(context, "Enable 'Omni Board' in the list", Toast.LENGTH_LONG).show()
+                            } else {
+                                imm?.showInputMethodPicker()
+                            }
+                        }) {
+                            Text("⌨️", fontSize = 18.sp)
+                        }
+
                         IconButton(onClick = { toggleKeepAlive() }) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
