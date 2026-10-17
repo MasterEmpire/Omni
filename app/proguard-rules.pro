@@ -1,6 +1,7 @@
 # Main Activity & Activities
 -keep class com.omni.hub.MainActivity { *; }
 -keep class com.omni.hub.container.PluginContainerActivity { *; }
+-keep class com.omni.hub.services.OmniKeyboardService { *; }
 
 # Shared API Contracts (Crucial for Dynamic Code Execution)
 -keep class com.omni.hub.api.** { *; }
