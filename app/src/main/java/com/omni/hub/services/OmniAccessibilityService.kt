@@ -11,8 +11,20 @@ class OmniAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        try {
+            val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
+            info.eventTypes = android.view.accessibility.AccessibilityEvent.TYPES_ALL_MASK
+            info.feedbackType = android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_GENERIC
+            info.flags = info.flags or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+            serviceInfo = info
+        } catch (e: Exception) {
+            OmniLogger.log("A11Y_WARN", "Failed dynamically updating serviceInfo: ${e.message}")
+        }
         AccessibilityDispatcher.setService(this)
-        OmniLogger.log("A11Y", "OmniAccessibilityService active & listening")
+        OmniLogger.log("A11Y", "OmniAccessibilityService active & listening with full event mask")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
