@@ -1,0 +1,10 @@
+{
+  "id": "omni_keyboard",
+  "name": "Omni Board",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.keyboard.OmniKeyboardPlugin",
+  "description": "Dynamic Gboard Clone Engine with Amharic & English Support",
+  "permissions": [
+    "android.permission.VIBRATE"
+  ]
+}
