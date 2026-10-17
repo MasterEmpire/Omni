@@ -93,6 +93,13 @@ interface HostBridge {
         touchable: Boolean = true,
         autoDismissMs: Long = 0L
     ): Boolean
+    fun updateOverlay(
+        tag: String,
+        x: Int,
+        y: Int,
+        width: Int = ViewGroup.LayoutParams.WRAP_CONTENT,
+        height: Int = ViewGroup.LayoutParams.WRAP_CONTENT
+    ): Boolean
     fun dismissOverlay(tag: String): Boolean
     fun dismissAllOverlays()
 
@@ -589,7 +596,7 @@ class HostBridgeImpl(
                 if (!touchable) {
                     flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 } else {
-                    flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
                 }
 
                 val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -630,6 +637,35 @@ class HostBridgeImpl(
         } else {
             Handler(Looper.getMainLooper()).post(action)
         }
+        return true
+    }
+
+    override fun updateOverlay(
+        tag: String,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int
+    ): Boolean {
+        val entry = activeOverlays[tag] ?: return false
+        val view = entry.first
+        val action = Runnable {
+            try {
+                val appContext = context.applicationContext
+                val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return@Runnable
+                val params = view.layoutParams as? WindowManager.LayoutParams ?: return@Runnable
+                params.x = x
+                params.y = y
+                if (width != ViewGroup.LayoutParams.WRAP_CONTENT) params.width = width
+                if (height != ViewGroup.LayoutParams.WRAP_CONTENT) params.height = height
+                if (view.isAttachedToWindow) {
+                    wm.updateViewLayout(view, params)
+                }
+            } catch (e: Exception) {
+                OmniLogger.log("OVERLAY_ERR", "Error updating overlay [$tag]: ${e.message}")
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) action.run() else Handler(Looper.getMainLooper()).post(action)
         return true
     }
 
