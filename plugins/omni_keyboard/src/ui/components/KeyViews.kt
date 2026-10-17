@@ -2,6 +2,7 @@ package com.omni.plugin.keyboard.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -13,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,6 +28,7 @@ fun RowScope.KeyContainer(
     weight: Float,
     palette: KeyboardPalette,
     isAction: Boolean = false,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
@@ -43,6 +46,7 @@ fun RowScope.KeyContainer(
         modifier = Modifier
             .weight(weight)
             .fillMaxHeight()
+            .then(modifier)
             .padding(KeyboardTheme.keyPadding)
             .clip(RoundedCornerShape(KeyboardTheme.keyCornerRadius))
             .background(bgColor)
@@ -141,11 +145,36 @@ fun RowScope.SpaceBarKey(
     languageLabel: String,
     palette: KeyboardPalette,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    onGlide: ((Int) -> Unit)? = null
 ) {
+    val density = LocalDensity.current.density
+    val stepThreshold = 12f * density
+    var accumulatedGlide by remember { mutableFloatStateOf(0f) }
+
+    val glideModifier = if (onGlide != null) {
+        Modifier.pointerInput(Unit) {
+            detectHorizontalDragGestures(
+                onDragEnd = { accumulatedGlide = 0f },
+                onDragCancel = { accumulatedGlide = 0f },
+                onHorizontalDrag = { _, dragAmount ->
+                    accumulatedGlide += dragAmount
+                    if (kotlin.math.abs(accumulatedGlide) >= stepThreshold) {
+                        val steps = (accumulatedGlide / stepThreshold).toInt()
+                        if (steps != 0) {
+                            onGlide(steps)
+                            accumulatedGlide -= (steps * stepThreshold)
+                        }
+                    }
+                }
+            )
+        }
+    } else Modifier
+
     KeyContainer(
         weight = weight,
         palette = palette,
+        modifier = glideModifier,
         onClick = onClick,
         onLongClick = onLongClick
     ) {
