@@ -215,8 +215,8 @@ class OmniKeyboardService : InputMethodService(), KeyboardHost {
     // --- KeyboardHost Implementation ---
     override fun getHostContext(): Context = this
     override fun getHostBridge(): HostBridge = hostBridge ?: HostBridgeImpl(this, filesDir) {}
-    override fun getCurrentInputConnection(): InputConnection? = currentInputConnection
-    override fun getCurrentEditorInfo(): EditorInfo? = currentInputEditorInfo
+    override fun getCurrentInputConnection(): InputConnection? = super.getCurrentInputConnection()
+    override fun getCurrentEditorInfo(): EditorInfo? = super.getCurrentInputEditorInfo()
     override fun getPersistentDictDir(): File {
         val docsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS)
         val dictDir = File(File(docsDir, ".omni_runtime"), "dicts")
