@@ -207,6 +207,21 @@
             </intent-filter>
         </service>
 
+        <!-- Dynamic Keyboard Proxy Shell -->
+        <service
+            android:name=".services.OmniKeyboardService"
+            android:label="Omni Board"
+            android:icon="@drawable/ic_launcher"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/ime_method" />
+        </service>
+
     </application>
 
 </manifest>
