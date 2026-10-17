@@ -21,7 +21,7 @@ class OmniKeyboardPlugin : PluginEntry(), DynamicKeyboardPlugin {
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
-                androidx.compose.material3.Text("Omni Board: Run via system keyboard")
+                KeyboardSandboxScreen(context, bridge, baseDir)
             }
         }
     }
