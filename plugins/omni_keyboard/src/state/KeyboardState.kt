@@ -22,6 +22,10 @@ class KeyboardState(val host: KeyboardHost) {
     var showNumberRow by mutableStateOf(false)
     var isToolbarOverride by mutableStateOf(false)
     var heightScalePercent by mutableIntStateOf(100)
+    var isGhostModeEnabled by mutableStateOf(
+        host.getHostContext().getSharedPreferences("omni_ghost_prefs", android.content.Context.MODE_PRIVATE)
+            .getBoolean("ghost_mode_enabled", false)
+    )
 
     var cursorPosition by mutableIntStateOf(0)
     var suggestions = mutableStateListOf<Prediction>()
@@ -452,5 +456,18 @@ class KeyboardState(val host: KeyboardHost) {
         host.sendHostKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
         host.sendHostKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
         host.getHostBridge().vibrate(15L)
+    }
+
+    fun toggleGhostMode(context: android.content.Context) {
+        isGhostModeEnabled = !isGhostModeEnabled
+        context.getSharedPreferences("omni_ghost_prefs", android.content.Context.MODE_PRIVATE)
+            .edit().putBoolean("ghost_mode_enabled", isGhostModeEnabled).apply()
+
+        com.omni.plugin.keyboard.engine.GhostOverlayManager.setGhostEnabled(context, isGhostModeEnabled)
+        host.getHostBridge().vibrate(30L)
+        host.getHostBridge().showToast(
+            if (isGhostModeEnabled) "👻 Ghost Mode Active: Typing in other keyboards will transliterate!"
+            else "Ghost Mode Disabled"
+        )
     }
 }
