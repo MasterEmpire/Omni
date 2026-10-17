@@ -217,39 +217,14 @@ fun KeyboardScreen(
                 onLongClick = { state.mode = KeyboardMode.EMOJI }
             )
 
-            val density = LocalDensity.current.density
-            val stepThreshold = 12f * density
-            var accumulatedGlide by remember { mutableFloatStateOf(0f) }
-
-            Box(
-                modifier = Modifier
-                    .weight(4.2f)
-                    .fillMaxHeight()
-                    .pointerInput(Unit) {
-                        detectHorizontalDragGestures(
-                            onDragEnd = { accumulatedGlide = 0f },
-                            onDragCancel = { accumulatedGlide = 0f },
-                            onHorizontalDrag = { _, dragAmount ->
-                                accumulatedGlide += dragAmount
-                                if (kotlin.math.abs(accumulatedGlide) >= stepThreshold) {
-                                    val steps = (accumulatedGlide / stepThreshold).toInt()
-                                    if (steps != 0) {
-                                        state.onSpaceGlide(steps)
-                                        accumulatedGlide -= (steps * stepThreshold)
-                                    }
-                                }
-                            }
-                        )
-                    }
-            ) {
-                SpaceBarKey(
-                    weight = 1f,
-                    languageLabel = if (state.isAmharic) "አማርኛ" else "English",
-                    palette = palette,
-                    onClick = { state.handleSpace() },
-                    onLongClick = { state.toggleLanguage() }
-                )
-            }
+            SpaceBarKey(
+                weight = 4.2f,
+                languageLabel = if (state.isAmharic) "አማርኛ" else "English",
+                palette = palette,
+                onClick = { state.handleSpace() },
+                onLongClick = { state.toggleLanguage() },
+                onGlide = { steps -> state.onSpaceGlide(steps) }
+            )
 
             FunctionKey(
                 label = ".",
