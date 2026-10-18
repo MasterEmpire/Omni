@@ -44,9 +44,10 @@ object AmharicData {
 
         // 15. gn-family (gne -> ኘ)
         "gne" to "ኘ", "gnu" to "ኙ", "gni" to "ኚ", "gna" to "ኛ", "gnee" to "ኜ", "gn" to "ኝ", "gno" to "ኞ", "gnua" to "ኟ",
+        "Gn" to "ግን",
 
         // 16. A-family (Vowels)
-        "A" to "አ", "Au" to "ኡ", "Ai" to "ኢ", "Aa" to "ኣ", "E" to "ኤ", "e" to "እ", "O" to "ኦ",
+        "A" to "አ", "Au" to "ኡ", "Ai" to "ኢ", "Aa" to "ኣ", "E" to "እ", "e" to "እ", "Ee" to "ኤ", "ee" to "ኤ", "O" to "ኦ",
         "u" to "ኡ", "i" to "ኢ", "a" to "አ",
 
         // 17. k-family (ke -> ከ)
