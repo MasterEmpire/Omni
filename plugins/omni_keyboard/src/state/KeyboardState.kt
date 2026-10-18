@@ -26,6 +26,10 @@ class KeyboardState(val host: KeyboardHost) {
         host.getHostContext().getSharedPreferences("omni_ghost_prefs", android.content.Context.MODE_PRIVATE)
             .getBoolean("ghost_mode_enabled", false)
     )
+    var isClearOnInsertEnabled by mutableStateOf(
+        host.getHostContext().getSharedPreferences("omni_ghost_prefs", android.content.Context.MODE_PRIVATE)
+            .getBoolean("key_clear_on_insert", true)
+    )
 
     var cursorPosition by mutableIntStateOf(0)
     var suggestions = mutableStateListOf<Prediction>()
@@ -468,6 +472,17 @@ class KeyboardState(val host: KeyboardHost) {
         host.getHostBridge().showToast(
             if (isGhostModeEnabled) "👻 Ghost Mode Armed: Overlay will activate on any keyboard"
             else "Ghost Mode Disabled"
+        )
+    }
+
+    fun toggleClearOnInsert(context: android.content.Context) {
+        isClearOnInsertEnabled = !isClearOnInsertEnabled
+        context.getSharedPreferences("omni_ghost_prefs", android.content.Context.MODE_PRIVATE)
+            .edit().putBoolean("key_clear_on_insert", isClearOnInsertEnabled).apply()
+        host.getHostBridge().vibrate(20L)
+        host.getHostBridge().showToast(
+            if (isClearOnInsertEnabled) "Pill clears after insert"
+            else "Pill keeps text after insert"
         )
     }
 }
