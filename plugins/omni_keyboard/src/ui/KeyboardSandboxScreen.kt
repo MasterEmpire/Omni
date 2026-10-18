@@ -174,6 +174,23 @@ fun KeyboardSandboxScreen(
                         )
                     }
 
+                    Divider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(vertical = 8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Clear Pill on Insert", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Empties the preview once text is inserted", color = Color(0xFF8B949E), fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = keyboardState.isClearOnInsertEnabled,
+                            onCheckedChange = { keyboardState.toggleClearOnInsert(context) }
+                        )
+                    }
+
                     val hasOverlay = bridge.canDrawOverlays()
                     val hasA11y = com.omni.hub.api.AccessibilityDispatcher.isServiceActive(context)
 
