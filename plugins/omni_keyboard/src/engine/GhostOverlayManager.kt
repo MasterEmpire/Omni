@@ -56,16 +56,7 @@ object GhostOverlayManager {
     private var pillSavedX = 24
     private var pillSavedY = 800
 
-    private val accessibilityListener: AccessibilityListener = { event, service ->
-        // Self-Healing Sentry: Kill orphaned listeners from previous DexClassLoaders
-        val activeId = System.getProperty(PROP_ACTIVE_INSTANCE)
-        if (activeId != null && activeId != INSTANCE_ID) {
-            AccessibilityDispatcher.removeListener(accessibilityListener)
-            dismissOverlay()
-        } else {
-            handleAccessibilityEvent(event, service)
-        }
-    }
+    private var accessibilityListener: AccessibilityListener? = null
 
     fun isGhostEnabled(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -86,7 +77,17 @@ object GhostOverlayManager {
         System.setProperty(PROP_ACTIVE_INSTANCE, INSTANCE_ID)
         bustZombies(context)
         if (!isListenerAttached) {
-            AccessibilityDispatcher.addListener(accessibilityListener)
+            val listener: AccessibilityListener = { event, service ->
+                val activeId = System.getProperty(PROP_ACTIVE_INSTANCE)
+                if (activeId != null && activeId != INSTANCE_ID) {
+                    accessibilityListener?.let { AccessibilityDispatcher.removeListener(it) }
+                    dismissOverlay()
+                } else {
+                    handleAccessibilityEvent(event, service)
+                }
+            }
+            accessibilityListener = listener
+            AccessibilityDispatcher.addListener(listener)
             isListenerAttached = true
             OmniLogger.log("GHOST_PILL", "👻 Ghost Transliteration Sentinel active [$INSTANCE_ID]")
         }
@@ -95,7 +96,8 @@ object GhostOverlayManager {
     fun destroy() {
         dismissOverlay()
         if (isListenerAttached) {
-            AccessibilityDispatcher.removeListener(accessibilityListener)
+            accessibilityListener?.let { AccessibilityDispatcher.removeListener(it) }
+            accessibilityListener = null
             isListenerAttached = false
             OmniLogger.log("GHOST_PILL", "Ghost Transliteration Sentinel stopped")
         }
