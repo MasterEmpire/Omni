@@ -68,9 +68,22 @@ object AccessibilityDispatcher {
         if (activeService !== service) {
             activeService = service
         }
+        // Protect main thread looper from self-originating scroll floods
+        if (event.packageName == service.packageName &&
+            event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+            return
+        }
         listeners.forEach { listener ->
             try {
+                val t0 = System.currentTimeMillis()
                 listener(event, service)
+                val duration = System.currentTimeMillis() - t0
+                if (duration > 16) {
+                    OmniLogger.log(
+                        "A11Y_PERF",
+                        "⚠️ Slow Accessibility Listener: ${duration}ms on Main Thread! (pkg=${event.packageName}, type=${event.eventType})"
+                    )
+                }
             } catch (e: Exception) {
                 OmniLogger.log("A11Y_ERR", "Error dispatching accessibility event: ${e.message}")
             }
