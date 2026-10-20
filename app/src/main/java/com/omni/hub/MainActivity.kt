@@ -894,37 +894,17 @@ fun DashboardScreen(context: Context) {
                             }
 
                             object : FrameLayout(context) {
-                                private var downTimeMs = 0L
-                                private var moveCount = 0
-                                private var startY = 0f
-
                                 override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
                                     when (ev.actionMasked) {
-                                        MotionEvent.ACTION_DOWN -> {
-                                            downTimeMs = System.currentTimeMillis()
-                                            moveCount = 0
-                                            startY = ev.y
-                                            parent?.requestDisallowInterceptTouchEvent(true)
-                                            OmniLogger.log("SCROLL_DIAG", "👇 Touch DOWN on [${currentSession.pluginName}] at y=${ev.y.toInt()} (DisallowIntercept = TRUE)")
-                                        }
+                                        MotionEvent.ACTION_DOWN,
                                         MotionEvent.ACTION_MOVE -> {
-                                            moveCount++
                                             parent?.requestDisallowInterceptTouchEvent(true)
-                                            if (moveCount == 1 || moveCount % 35 == 0) {
-                                                val deltaY = ev.y - startY
-                                                OmniLogger.log("SCROLL_DIAG", "⚡ Scrolling [${currentSession.pluginName}]: $moveCount moves, deltaY=${deltaY.toInt()}px (DisallowIntercept = TRUE)")
-                                            }
                                         }
                                         MotionEvent.ACTION_CANCEL -> {
-                                            val duration = System.currentTimeMillis() - downTimeMs
-                                            OmniLogger.log("SCROLL_DIAG", "🚨 [BRICK_WALL_DETECTED] ACTION_CANCEL dispatched to [${currentSession.pluginName}] after $moveCount moves (${duration}ms)! Ancestor attempted gesture hijack.")
+                                            OmniLogger.log("SCROLL_DIAG", "🚨 ACTION_CANCEL intercepted on [${currentSession.pluginName}]")
                                             parent?.requestDisallowInterceptTouchEvent(false)
                                         }
                                         MotionEvent.ACTION_UP -> {
-                                            val duration = System.currentTimeMillis() - downTimeMs
-                                            if (moveCount > 3) {
-                                                OmniLogger.log("SCROLL_DIAG", "👆 Touch UP on [${currentSession.pluginName}]: Completed cleanly ($moveCount moves, ${duration}ms)")
-                                            }
                                             parent?.requestDisallowInterceptTouchEvent(false)
                                         }
                                     }
