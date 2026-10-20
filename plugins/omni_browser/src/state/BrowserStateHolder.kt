@@ -1697,6 +1697,12 @@ class BrowserStateHolder(
         onSearchInputChanged(suggestion.text)
     }
 
+    fun dismissSearch() {
+        isSearchFocused = false
+        suggestions = emptyList()
+        urlInputText = if (currentUrl == "about:blank") "" else currentUrl
+    }
+
     fun deleteHistoryItem(suggestion: SearchSuggestion) {
         val updated = history.filter { it.url != suggestion.targetUrl }
         history = updated
@@ -2021,8 +2027,7 @@ class BrowserStateHolder(
     fun handleBackPressed(): Boolean {
         return when {
             isSearchFocused -> {
-                isSearchFocused = false
-                suggestions = emptyList()
+                dismissSearch()
                 true
             }
             showGroupNamingDialog -> { showGroupNamingDialog = false; true }
