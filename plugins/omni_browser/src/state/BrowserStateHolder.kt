@@ -52,7 +52,7 @@ class BrowserStateHolder(
     var localServerPort by mutableIntStateOf(8080)
     val ideInternalPath: String get() = "http://localhost:$localServerPort/"
     val defaultShortcuts = listOf(
-        ShortcutItem(title = "Local IDE", url = "http://localhost:8080/", iconText = "💻", colorValue = 0xFF58A6FF, localSourcePath = "/storage/emulated/0/Download/F/index.html"),
+        ShortcutItem(title = "Local IDE", url = "http://localhost:8080/", iconText = "💻", colorValue = 0xFF58A6FF, localSourcePath = "/storage/emulated/0/Download/F/index.html", isDefault = true, isGlobalProfile = true),
         ShortcutItem(title = "Google", url = "https://www.google.com", iconText = "G", colorValue = 0xFF4285F4),
         ShortcutItem(title = "YouTube", url = "https://m.youtube.com", iconText = "▶", colorValue = 0xFFEA4335),
         ShortcutItem(title = "Bot Test", url = "https://bot.sannysoft.com/", iconText = "🕵️", colorValue = 0xFF34A853),
@@ -1365,7 +1365,7 @@ class BrowserStateHolder(
         val targetUrl = resolveIdeUrl(fav)
         val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
         val currentTab = tabs.find { it.id == activeTabId }
-        val targetProfId = currentTab?.profileId ?: selectedProfileId
+        val targetProfId = if (fav?.isGlobalProfile == true) "default" else (currentTab?.profileId ?: selectedProfileId)
         val insertIdx = if (currentIdx >= 0) currentIdx + 1 else tabs.size
         createNewTab(targetUrl = targetUrl, targetProfileId = targetProfId, insertAtIndex = insertIdx)
     }
@@ -1400,13 +1400,14 @@ class BrowserStateHolder(
         }.toMutableList()
 
         val targetUrl = resolveIdeUrl(item)
+        val targetProfId = if (item.isGlobalProfile) "default" else selectedProfileId
         val newId = "tab_${System.currentTimeMillis()}"
         val newTab = BrowserTab(
             id = newId,
             title = item.title,
             url = targetUrl,
             lastAccessedTime = System.currentTimeMillis(),
-            profileId = selectedProfileId
+            profileId = targetProfId
         )
         val insertIdx = if (currentIdx >= 0) (currentIdx + 1).coerceAtMost(updatedTabs.size) else updatedTabs.size
         updatedTabs.add(insertIdx, newTab)
