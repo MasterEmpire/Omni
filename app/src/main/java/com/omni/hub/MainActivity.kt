@@ -9,7 +9,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.MotionEvent
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.compose.ui.draw.alpha
 import com.omni.hub.services.OmniForegroundService
 import android.widget.Toast
@@ -876,7 +878,7 @@ fun DashboardScreen(context: Context) {
                 ) {
                     AndroidView(
                         factory = {
-                            OmniLogger.log("OMNI_TRACE", "🖥️ [HOST] AndroidView mounting overlay for ${currentSession.pluginName} (${currentSession.pluginId})")
+                            OmniLogger.log("OMNI_TRACE", "🖥️ [HOST] AndroidView mounting touch-guarded container for ${currentSession.pluginName} (${currentSession.pluginId})")
                             val view = currentSession.pluginView
                             (view.parent as? ViewGroup)?.removeView(view)
                             (view as? androidx.compose.ui.platform.AbstractComposeView)?.apply {
@@ -890,9 +892,73 @@ fun DashboardScreen(context: Context) {
                                 isFocusableInTouchMode = true
                                 requestFocus()
                             }
-                            view
+
+                            object : FrameLayout(context) {
+                                private var downTimeMs = 0L
+                                private var moveCount = 0
+                                private var startY = 0f
+
+                                override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+                                    when (ev.actionMasked) {
+                                        MotionEvent.ACTION_DOWN -> {
+                                            downTimeMs = System.currentTimeMillis()
+                                            moveCount = 0
+                                            startY = ev.y
+                                            parent?.requestDisallowInterceptTouchEvent(true)
+                                            OmniLogger.log("SCROLL_DIAG", "👇 Touch DOWN on [${currentSession.pluginName}] at y=${ev.y.toInt()} (DisallowIntercept = TRUE)")
+                                        }
+                                        MotionEvent.ACTION_MOVE -> {
+                                            moveCount++
+                                            parent?.requestDisallowInterceptTouchEvent(true)
+                                            if (moveCount == 1 || moveCount % 35 == 0) {
+                                                val deltaY = ev.y - startY
+                                                OmniLogger.log("SCROLL_DIAG", "⚡ Scrolling [${currentSession.pluginName}]: $moveCount moves, deltaY=${deltaY.toInt()}px (DisallowIntercept = TRUE)")
+                                            }
+                                        }
+                                        MotionEvent.ACTION_CANCEL -> {
+                                            val duration = System.currentTimeMillis() - downTimeMs
+                                            OmniLogger.log("SCROLL_DIAG", "🚨 [BRICK_WALL_DETECTED] ACTION_CANCEL dispatched to [${currentSession.pluginName}] after $moveCount moves (${duration}ms)! Ancestor attempted gesture hijack.")
+                                            parent?.requestDisallowInterceptTouchEvent(false)
+                                        }
+                                        MotionEvent.ACTION_UP -> {
+                                            val duration = System.currentTimeMillis() - downTimeMs
+                                            if (moveCount > 3) {
+                                                OmniLogger.log("SCROLL_DIAG", "👆 Touch UP on [${currentSession.pluginName}]: Completed cleanly ($moveCount moves, ${duration}ms)")
+                                            }
+                                            parent?.requestDisallowInterceptTouchEvent(false)
+                                        }
+                                    }
+                                    return super.dispatchTouchEvent(ev)
+                                }
+
+                                override fun onInterceptTouchEvent(ev: MotionEvent): Boolean = false
+                            }.apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                addView(
+                                    view,
+                                    FrameLayout.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                )
+                            }
                         },
-                        update = { view ->
+                        update = { container ->
+                            val view = currentSession.pluginView
+                            if (view.parent !== container) {
+                                (view.parent as? ViewGroup)?.removeView(view)
+                                container.removeAllViews()
+                                container.addView(
+                                    view,
+                                    FrameLayout.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                )
+                            }
                             view.apply {
                                 setViewTreeLifecycleOwner(context as? ComponentActivity)
                                 setViewTreeViewModelStoreOwner(context as? ComponentActivity)
