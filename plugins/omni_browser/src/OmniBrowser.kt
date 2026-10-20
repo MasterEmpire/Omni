@@ -491,9 +491,13 @@ class OmniBrowser : PluginEntry() {
                                         state.resolveIdeUrl(item)
                                     } else item.url
 
+                                    val targetProfId = if (item.isGlobalProfile) "default" else state.selectedProfileId
+
                                     if (state.isHomeOverlayOpen && state.currentUrl != "about:blank") {
                                         state.isHomeOverlayOpen = false
-                                        state.createNewTab(targetUrl)
+                                        state.createNewTab(targetUrl = targetUrl, targetProfileId = targetProfId)
+                                    } else if (item.isGlobalProfile && activeProf.id != "default") {
+                                        state.createNewTab(targetUrl = targetUrl, targetProfileId = "default")
                                     } else {
                                         state.navigateTo(targetUrl)
                                     }
@@ -975,7 +979,7 @@ class OmniBrowser : PluginEntry() {
                             state.editingShortcut = null
                             bridge.showToast("Shortcut deleted")
                         },
-                                        onSave = { name, rawUrl, isDef ->
+                                        onSave = { name, rawUrl, isDef, isGlobal ->
                     val trimmedUrl = rawUrl.trim()
                     val effectiveSource = when {
                         isLocalFilePath(trimmedUrl) && !trimmedUrl.contains("localhost") -> trimmedUrl
@@ -1001,7 +1005,7 @@ class OmniBrowser : PluginEntry() {
 
                     val updated = state.shortcuts.map {
                         if (it.id == targetItem.id) {
-                            it.copy(title = name.trim().ifEmpty { targetItem.title }, url = finalUrl, localSourcePath = srcPath, isDefault = isDef)
+                            it.copy(title = name.trim().ifEmpty { targetItem.title }, url = finalUrl, localSourcePath = srcPath, isDefault = isDef, isGlobalProfile = isGlobal)
                         } else if (isDef) {
                             it.copy(isDefault = false)
                         } else it
@@ -1031,7 +1035,7 @@ class OmniBrowser : PluginEntry() {
                                 }
                             }
                         },
-                        onAdd = { name, rawUrl, isDef ->
+                        onAdd = { name, rawUrl, isDef, isGlobal ->
                             val trimmedUrl = rawUrl.trim()
                             val isLocal = isLocalFilePath(trimmedUrl)
                             val newShortcutId = "sc_${System.currentTimeMillis()}"
@@ -1054,7 +1058,8 @@ class OmniBrowser : PluginEntry() {
                                 iconText = if (isLocal) "💻" else title.take(1).uppercase(),
                                 colorValue = 0xFF58A6FF,
                                 localSourcePath = srcPath,
-                                isDefault = isDef
+                                isDefault = isDef,
+                                isGlobalProfile = isGlobal
                             )
                             val updated = state.shortcuts.map { if (isDef) it.copy(isDefault = false) else it } + newItem
                             state.shortcuts = updated
