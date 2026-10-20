@@ -990,6 +990,7 @@ fun OmniboxSuggestionOverlay(
     suggestions: List<com.omni.plugin.browser.models.SearchSuggestion>,
     onSelectSuggestion: (com.omni.plugin.browser.models.SearchSuggestion) -> Unit,
     onFillSuggestion: (com.omni.plugin.browser.models.SearchSuggestion) -> Unit,
+    onDeleteSuggestion: (com.omni.plugin.browser.models.SearchSuggestion) -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1044,11 +1045,27 @@ fun OmniboxSuggestionOverlay(
                         }
                     }
 
-                    IconButton(
-                        onClick = { onFillSuggestion(sug) },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Text("⬈", fontSize = 16.sp, color = Color(0xFF8B949E), fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (sug.type == com.omni.plugin.browser.models.SuggestionType.HISTORY) {
+                            IconButton(
+                                onClick = { onDeleteSuggestion(sug) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Delete from history",
+                                    tint = Color(0xFFF28B82).copy(alpha = 0.8f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { onFillSuggestion(sug) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Text("⬈", fontSize = 16.sp, color = Color(0xFF8B949E), fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
