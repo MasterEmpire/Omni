@@ -433,6 +433,9 @@ class OmniBrowser : PluginEntry() {
                         onFillSuggestion = { sug ->
                             state.fillSuggestion(sug)
                         },
+                        onDeleteSuggestion = { sug ->
+                            state.deleteHistoryItem(sug)
+                        },
                         onDismiss = {
                             state.suggestions = emptyList()
                         },
