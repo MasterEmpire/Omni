@@ -15,10 +15,10 @@ class OmniAccessibilityService : AccessibilityService() {
             val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
             info.eventTypes = android.view.accessibility.AccessibilityEvent.TYPES_ALL_MASK
             info.feedbackType = android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_GENERIC
-            info.flags = info.flags or
+            info.flags = (info.flags or
                 android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-                android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-                android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS) and
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()
             serviceInfo = info
         } catch (e: Exception) {
             OmniLogger.log("A11Y_WARN", "Failed dynamically updating serviceInfo: ${e.message}")
@@ -29,6 +29,12 @@ class OmniAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event != null) {
+            // Drop self-generated view-scroll churn to prevent main-thread event loops
+            if (event.packageName == packageName &&
+                (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED ||
+                 event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)) {
+                return
+            }
             AccessibilityDispatcher.dispatchEvent(event, this)
         }
     }
