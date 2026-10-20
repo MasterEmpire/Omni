@@ -254,7 +254,13 @@ fun TabSwitcherScreen(
                                 border = BorderStroke(1.dp, Color(currentProfile.colorValue).copy(alpha = 0.6f)),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(16.dp))
-                                    .clickable { profileMenuExpanded = true }
+                                    .combinedClickable(
+                                        onClick = { profileMenuExpanded = true },
+                                        onLongClick = {
+                                            bridge?.vibrate(30L)
+                                            onRenameProfile(currentProfile)
+                                        }
+                                    )
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -319,9 +325,36 @@ fun TabSwitcherScreen(
                                         onClick = {
                                             onSelectProfile(prof.id)
                                             profileMenuExpanded = false
+                                        },
+                                        trailingIcon = {
+                                            IconButton(
+                                                onClick = {
+                                                    profileMenuExpanded = false
+                                                    onRenameProfile(prof)
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Text("✏️", fontSize = 12.sp)
+                                            }
                                         }
                                     )
                                 }
+
+                                HorizontalDivider(color = Color(0xFF3C4043))
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF8AB4F8), modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("Add Profile", color = Color(0xFF8AB4F8), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    onClick = {
+                                        profileMenuExpanded = false
+                                        onAddProfile()
+                                    }
+                                )
                             }
                         }
                     }
