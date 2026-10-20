@@ -540,12 +540,13 @@ fun EditShortcutDialog(
     onFetchFavicon: (String) -> Unit,
     onPickFile: ((String) -> Unit) -> Unit,
     onDelete: () -> Unit,
-    onSave: (String, String, Boolean) -> Unit,
+    onSave: (String, String, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var editName by remember(shortcut) { mutableStateOf(shortcut.title) }
     var editUrl by remember(shortcut) { mutableStateOf(shortcut.localSourcePath ?: shortcut.url) }
     var isDefault by remember(shortcut) { mutableStateOf(shortcut.isDefault) }
+    var isGlobalProfile by remember(shortcut) { mutableStateOf(shortcut.isGlobalProfile) }
     val previewDomain = remember(editUrl) { extractDomain(editUrl) }
 
     LaunchedEffect(previewDomain) {
@@ -649,6 +650,22 @@ fun EditShortcutDialog(
                             colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
                         )
                     }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("🌐 Global Workspace (Shared Storage)", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Pins app to Default profile so IndexedDB and localStorage are shared across all profiles", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = isGlobalProfile,
+                            onCheckedChange = { isGlobalProfile = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF58A6FF))
+                        )
+                    }
                 }
             }
         },
@@ -659,7 +676,7 @@ fun EditShortcutDialog(
                 }
 
                 Button(
-                    onClick = { onSave(editName, editUrl, isDefault) },
+                    onClick = { onSave(editName, editUrl, isDefault, isGlobalProfile) },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
                 ) {
                     Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
@@ -679,12 +696,13 @@ fun AddShortcutDialog(
     faviconCache: Map<String, Bitmap>,
     onFetchFavicon: (String) -> Unit,
     onPickFile: ((String) -> Unit) -> Unit,
-    onAdd: (String, String, Boolean) -> Unit,
+    onAdd: (String, String, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var newName by remember { mutableStateOf("") }
     var newUrl by remember { mutableStateOf("https://") }
     var isDefault by remember { mutableStateOf(false) }
+    var isGlobalProfile by remember { mutableStateOf(true) }
     val previewDomain = remember(newUrl) { extractDomain(newUrl) }
 
     LaunchedEffect(previewDomain) {
@@ -770,12 +788,28 @@ fun AddShortcutDialog(
                             colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
                         )
                     }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("🌐 Global Workspace (Shared Storage)", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Pins app to Default profile so IndexedDB and localStorage are shared across all profiles", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = isGlobalProfile,
+                            onCheckedChange = { isGlobalProfile = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF58A6FF))
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
             Button(
-                onClick = { onAdd(newName, newUrl, isDefault) },
+                onClick = { onAdd(newName, newUrl, isDefault, isGlobalProfile) },
                 enabled = newUrl.length >= 3,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
