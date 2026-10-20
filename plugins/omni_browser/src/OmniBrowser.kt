@@ -401,6 +401,7 @@ class OmniBrowser : PluginEntry() {
                         }
                     },
                     onQuickToggleTab = { state.togglePreviousTab() },
+                    onLongToggleTab = { state.switchToThirdRecentTab() },
                     onTabSwitcherClick = {
                         state.bridge.log("OMNI_TRACE", "🔘 [TAB_BTN_CLICK] User tapped tab count button (${state.tabs.size} tabs open)!")
                         val thumb = state.currentWebView?.captureThumbnail()
