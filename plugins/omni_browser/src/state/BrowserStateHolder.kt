@@ -1419,11 +1419,11 @@ class BrowserStateHolder(
         attachTabWebView(newId)
     }
 
-    fun enterSelectionMode(initialTabId: String) {
+    fun enterSelectionMode(initialTabId: String? = null) {
         bridge.vibrate(35L)
         isSelectionMode = true
-        selectedTabIds = setOf(initialTabId)
-        bridge.log("TAB_SELECTION", "Entered selection mode with tab: $initialTabId")
+        selectedTabIds = if (initialTabId != null) setOf(initialTabId) else emptySet()
+        bridge.log("TAB_SELECTION", "Entered selection mode. Initial selection count: ${selectedTabIds.size}")
     }
 
     fun toggleTabSelection(tabId: String) {
@@ -1695,6 +1695,21 @@ class BrowserStateHolder(
     fun fillSuggestion(suggestion: SearchSuggestion) {
         urlInputText = suggestion.text
         onSearchInputChanged(suggestion.text)
+    }
+
+    fun deleteHistoryItem(suggestion: SearchSuggestion) {
+        val updated = history.filter { it.url != suggestion.targetUrl }
+        history = updated
+        vaultManager.saveHistory(updated)
+        onSearchInputChanged(urlInputText)
+        bridge.showToast("Removed from history")
+    }
+
+    fun clearAllHistory() {
+        history = emptyList()
+        vaultManager.saveHistory(emptyList())
+        onSearchInputChanged(urlInputText)
+        bridge.showToast("Browsing history cleared")
     }
 
     fun togglePreviousTab() {
