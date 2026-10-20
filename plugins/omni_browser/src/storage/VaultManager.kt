@@ -230,16 +230,17 @@ class VaultManager(
         try {
             val arr = JSONArray()
             list.forEach { s ->
-                val obj = JSONObject().apply {
-                    put("id", s.id)
-                    put("title", s.title)
-                    put("url", s.url)
-                    put("iconText", s.iconText)
-                    put("colorValue", s.colorValue)
-                    put("isDefault", s.isDefault)
-                    if (!s.localSourcePath.isNullOrEmpty()) {
-                        put("localSourcePath", s.localSourcePath)
-                    }
+                                    val obj = JSONObject().apply {
+                        put("id", s.id)
+                        put("title", s.title)
+                        put("url", s.url)
+                        put("iconText", s.iconText)
+                        put("colorValue", s.colorValue)
+                        put("isDefault", s.isDefault)
+                        put("isGlobalProfile", s.isGlobalProfile)
+                        if (!s.localSourcePath.isNullOrEmpty()) {
+                            put("localSourcePath", s.localSourcePath)
+                        }
                 }
                 arr.put(obj)
             }
@@ -255,17 +256,18 @@ class VaultManager(
             val list = mutableListOf<ShortcutItem>()
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
-                list.add(
-                    ShortcutItem(
-                        id = obj.optString("id", UUID.randomUUID().toString()),
-                        title = obj.getString("title"),
-                        url = obj.getString("url"),
-                        iconText = obj.optString("iconText", ""),
-                        colorValue = obj.optLong("colorValue", 0xFF4285F4),
-                        localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() },
-                        isDefault = obj.optBoolean("isDefault", false)
+                                    list.add(
+                        ShortcutItem(
+                            id = obj.optString("id", UUID.randomUUID().toString()),
+                            title = obj.getString("title"),
+                            url = obj.getString("url"),
+                            iconText = obj.optString("iconText", ""),
+                            colorValue = obj.optLong("colorValue", 0xFF4285F4),
+                            localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() },
+                            isDefault = obj.optBoolean("isDefault", false),
+                            isGlobalProfile = obj.optBoolean("isGlobalProfile", false)
+                        )
                     )
-                )
             }
             list
         } catch (_: Exception) {
@@ -683,17 +685,18 @@ class VaultManager(
                             val scs = mutableListOf<ShortcutItem>()
                             for (i in 0 until arr.length()) {
                                 val obj = arr.getJSONObject(i)
-                                scs.add(
-                                    ShortcutItem(
-                                        id = obj.optString("id", UUID.randomUUID().toString()),
-                                        title = obj.getString("title"),
-                                        url = obj.getString("url"),
-                                        iconText = obj.optString("iconText", ""),
-                                        colorValue = obj.optLong("colorValue", 0xFF4285F4),
-                                        localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() },
-                                        isDefault = obj.optBoolean("isDefault", false)
+                                                                    scs.add(
+                                        ShortcutItem(
+                                            id = obj.optString("id", UUID.randomUUID().toString()),
+                                            title = obj.getString("title"),
+                                            url = obj.getString("url"),
+                                            iconText = obj.optString("iconText", ""),
+                                            colorValue = obj.optLong("colorValue", 0xFF4285F4),
+                                            localSourcePath = obj.optString("localSourcePath", null).takeIf { !it.isNullOrEmpty() },
+                                            isDefault = obj.optBoolean("isDefault", false),
+                                            isGlobalProfile = obj.optBoolean("isGlobalProfile", false)
+                                        )
                                     )
-                                )
                             }
                             if (scs.isNotEmpty()) loadedShortcuts = scs
                         }
