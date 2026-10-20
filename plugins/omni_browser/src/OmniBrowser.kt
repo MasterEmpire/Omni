@@ -380,8 +380,7 @@ class OmniBrowser : PluginEntry() {
                     },
                     onNavigate = {
                         state.navigateTo(it)
-                        state.isSearchFocused = false
-                        state.suggestions = emptyList()
+                        state.dismissSearch()
                         focusManager.clearFocus()
                     },
                     profColor = profColor,
@@ -389,11 +388,11 @@ class OmniBrowser : PluginEntry() {
                     isHomeOverlayOpen = state.isHomeOverlayOpen,
                     isSearchFocused = state.isSearchFocused,
                     onSearchFocusChange = { focused ->
-                        state.isSearchFocused = focused
                         if (focused) {
+                            state.isSearchFocused = true
                             state.onSearchInputChanged(state.urlInputText)
                         } else {
-                            state.suggestions = emptyList()
+                            state.dismissSearch()
                         }
                     },
                     onHomeClick = {
@@ -422,26 +421,6 @@ class OmniBrowser : PluginEntry() {
                     onTopBarDragEnd = { state.onTopBarDragEnd() },
                     onTopBarDragCancel = { state.onTopBarDragCancel() }
                 )
-
-                if (state.isSearchFocused && state.suggestions.isNotEmpty()) {
-                    OmniboxSuggestionOverlay(
-                        suggestions = state.suggestions,
-                        onSelectSuggestion = { sug ->
-                            focusManager.clearFocus()
-                            state.selectSuggestion(sug)
-                        },
-                        onFillSuggestion = { sug ->
-                            state.fillSuggestion(sug)
-                        },
-                        onDeleteSuggestion = { sug ->
-                            state.deleteHistoryItem(sug)
-                        },
-                        onDismiss = {
-                            state.suggestions = emptyList()
-                        },
-                        modifier = Modifier.zIndex(50f)
-                    )
-                }
 
                 AnimatedVisibility(
                     visible = state.isLoading,
@@ -1099,6 +1078,30 @@ class OmniBrowser : PluginEntry() {
                         onDismiss = { state.editingProfile = null }
                     )
                 }
+            }
+
+            if (state.isSearchFocused && state.suggestions.isNotEmpty()) {
+                OmniboxSuggestionOverlay(
+                    suggestions = state.suggestions,
+                    onSelectSuggestion = { sug ->
+                        focusManager.clearFocus()
+                        state.selectSuggestion(sug)
+                    },
+                    onFillSuggestion = { sug ->
+                        state.fillSuggestion(sug)
+                    },
+                    onDeleteSuggestion = { sug ->
+                        state.deleteHistoryItem(sug)
+                    },
+                    onDismiss = {
+                        state.dismissSearch()
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 52.dp)
+                        .zIndex(50f)
+                )
             }
 
             DownloadCompletedPillBanner(
