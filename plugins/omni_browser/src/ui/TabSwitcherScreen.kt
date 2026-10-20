@@ -66,7 +66,7 @@ fun TabSwitcherScreen(
     isSelectionMode: Boolean = false,
     selectedTabIds: Set<String> = emptySet(),
     showGroupNamingDialog: Boolean = false,
-    onEnterSelectionMode: (String) -> Unit = {},
+    onEnterSelectionMode: (String?) -> Unit = {},
     onToggleTabSelection: (String) -> Unit = {},
     onSelectAllTabs: () -> Unit = {},
     onClearSelectionMode: () -> Unit = {},
@@ -383,8 +383,7 @@ fun TabSwitcherScreen(
                                     text = { Text("Select Tabs", color = Color(0xFF58A6FF), fontWeight = FontWeight.Bold) },
                                     onClick = {
                                         showTabMenu = false
-                                        val firstId = tabs.firstOrNull()?.id
-                                        if (firstId != null) onEnterSelectionMode(firstId)
+                                        onEnterSelectionMode(null)
                                     }
                                 )
                                 DropdownMenuItem(
