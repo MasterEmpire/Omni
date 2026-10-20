@@ -1005,8 +1005,17 @@ fun OmniboxSuggestionOverlay(
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
     ) {
-        Column(modifier = Modifier.padding(vertical = 4.dp)) {
-            suggestions.forEach { sug ->
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 280.dp)
+                .padding(vertical = 4.dp)
+        ) {
+            items(
+                count = suggestions.size,
+                key = { idx -> suggestions[idx].id }
+            ) { idx ->
+                val sug = suggestions[idx]
                 val icon = when (sug.type) {
                     com.omni.plugin.browser.models.SuggestionType.HISTORY -> "🕒"
                     com.omni.plugin.browser.models.SuggestionType.OPEN_TAB -> "📱"
