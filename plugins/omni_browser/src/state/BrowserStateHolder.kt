@@ -1732,6 +1732,24 @@ class BrowserStateHolder(
         }
     }
 
+    fun switchToThirdRecentTab() {
+        if (tabs.size < 3) {
+            togglePreviousTab()
+            return
+        }
+        val candidates = tabs.filter { it.id != activeTabId }
+            .sortedByDescending { it.lastAccessedTime }
+        val target = candidates.getOrNull(1) // Index 0 is 2nd most recent; Index 1 is 3rd most recent
+        if (target != null) {
+            switchToTab(target.id)
+            bridge.vibrate(45L)
+            val cleanTitle = if (target.url == "about:blank") "Speed Dial" else target.title.take(20)
+            bridge.showToast("⇄ 3rd Tab: $cleanTitle")
+        } else {
+            togglePreviousTab()
+        }
+    }
+
     fun saveSmartNote(title: String, content: String, existingId: String? = null) {
         val cleanContent = content.trim()
         if (cleanContent.isEmpty()) return
