@@ -44,6 +44,7 @@ import com.omni.plugin.browser.models.BrowserProfile
 import com.omni.plugin.browser.models.ShortcutItem
 import com.omni.plugin.browser.utils.extractDomain
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OmniBrowserTopBar(
     currentUrl: String,
@@ -57,6 +58,7 @@ fun OmniBrowserTopBar(
     onSearchFocusChange: (Boolean) -> Unit,
     onHomeClick: () -> Unit,
     onQuickToggleTab: () -> Unit,
+    onLongToggleTab: () -> Unit = {},
     onTabSwitcherClick: () -> Unit,
     showMenu: Boolean,
     onMenuToggle: () -> Unit,
@@ -295,10 +297,19 @@ fun OmniBrowserTopBar(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.width(4.dp))
 
-                    IconButton(
-                        onClick = onQuickToggleTab,
-                        enabled = tabCount > 1,
-                        modifier = Modifier.size(32.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .then(
+                                if (tabCount > 1) {
+                                    Modifier.combinedClickable(
+                                        onClick = onQuickToggleTab,
+                                        onLongClick = onLongToggleTab
+                                    )
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             "⇄",
