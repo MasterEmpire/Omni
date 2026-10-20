@@ -1280,6 +1280,7 @@ class BrowserStateHolder(
     }
 
     fun getFavoriteIdeShortcut(): ShortcutItem? {
+        // Priority 1: User-designated favorite (⭐ Default Header IDE)
         return shortcuts.firstOrNull { it.isDefault }
             ?: shortcuts.firstOrNull { it.localSourcePath != null }
             ?: shortcuts.firstOrNull { it.url.contains("vault_") }
@@ -1287,14 +1288,34 @@ class BrowserStateHolder(
     }
 
     fun isMatchingIdeTab(tab: BrowserTab, targetShortcut: ShortcutItem?): Boolean {
-        val u = tab.url.lowercase(java.util.Locale.US)
-        if (u.contains("conduit_preview=true")) return false
+        val u = tab.url.lowercase(java.util.Locale.US).trim()
         if (targetShortcut == null) {
             return u.contains("localhost:$localServerPort") || u.contains("127.0.0.1:$localServerPort")
         }
-        val targetUrl = targetShortcut.url.lowercase(java.util.Locale.US)
+        val targetUrl = targetShortcut.url.lowercase(java.util.Locale.US).trim()
         val vaultToken = "vault_${targetShortcut.id}".lowercase(java.util.Locale.US)
-        return u.contains(vaultToken) || u == targetUrl || (targetUrl.contains("localhost") && u.contains("localhost:$localServerPort"))
+
+        // 1. Direct Vault Token Match (Specific isolated workspace)
+        if (u.contains(vaultToken)) {
+            return true
+        }
+
+        // 2. Exact URL Match
+        if (u == targetUrl) {
+            return true
+        }
+
+        // 3. Root IDE Fallback: Only matches if target is root index AND tab is not running in another app's vault
+        val isTargetRoot = targetUrl == "http://localhost:$localServerPort/" ||
+                           targetUrl == "http://localhost:$localServerPort/index.html" ||
+                           targetUrl == "http://127.0.0.1:$localServerPort/" ||
+                           targetUrl == "http://127.0.0.1:$localServerPort/index.html"
+        val isTabInAnyVault = u.contains("/vault_")
+        if (isTargetRoot && !isTabInAnyVault && (u.startsWith("http://localhost:$localServerPort") || u.startsWith("http://127.0.0.1:$localServerPort"))) {
+            return true
+        }
+
+        return false
     }
 
     fun isIdeTab(tab: BrowserTab): Boolean {
@@ -1302,9 +1323,35 @@ class BrowserStateHolder(
     }
 
     fun getMostRecentIdeTab(): BrowserTab? {
-        val fav = getFavoriteIdeShortcut()
-        // Trace back across all tabs in history to find the most recently accessed matching favorite IDE
-        return tabs.filter { isMatchingIdeTab(it, fav) }.maxByOrNull { it.lastAccessedTime }
+        val favShortcut = getFavoriteIdeShortcut()
+        val sortedTabs = tabs.sortedByDescending { it.lastAccessedTime }
+
+        // Priority 1: If a Favorite IDE is designated, skip any non-favorite local apps and search the timeline
+        if (favShortcut != null) {
+            val matchingFavTab = sortedTabs.firstOrNull { isMatchingIdeTab(it, favShortcut) }
+            if (matchingFavTab != null) {
+                bridge.log("AUTOPILOT_ROUTER", "🎯 [TIMELINE MATCH] Found open Favorite IDE tab: '${matchingFavTab.title}' (id='${matchingFavTab.id}')")
+                return matchingFavTab
+            } else {
+                bridge.log("AUTOPILOT_ROUTER", "⏳ [TIMELINE SKIP] Favorite IDE '${favShortcut.title}' not open. Skipping unrelated recent local tabs.")
+            }
+        }
+
+        // Priority 2: If NO shortcut is marked as favorite, fallback to any local app matching its own shortcut
+        val hasExplicitFavorite = shortcuts.any { it.isDefault }
+        if (!hasExplicitFavorite) {
+            val localShortcuts = shortcuts.filter { it.localSourcePath != null || it.url.contains("vault_") || isLocalFilePath(it.url) }
+            for (tab in sortedTabs) {
+                val matchedShortcut = localShortcuts.firstOrNull { isMatchingIdeTab(tab, it) }
+                if (matchedShortcut != null) {
+                    bridge.log("AUTOPILOT_ROUTER", "Found fallback local app tab in timeline: '${tab.title}' matching shortcut '${matchedShortcut.title}'")
+                    return tab
+                }
+            }
+        }
+
+        // Return null if the favorite IDE is not yet open, allowing openLocalIdeAsNeighbor() to spawn it
+        return null
     }
 
     fun getLocalShortcuts(): List<ShortcutItem> {
@@ -1314,7 +1361,8 @@ class BrowserStateHolder(
     }
 
     fun openLocalIdeAsNeighbor() {
-        val targetUrl = resolveIdeUrl()
+        val fav = getFavoriteIdeShortcut()
+        val targetUrl = resolveIdeUrl(fav)
         val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
         val currentTab = tabs.find { it.id == activeTabId }
         val targetProfId = currentTab?.profileId ?: selectedProfileId
@@ -1323,9 +1371,7 @@ class BrowserStateHolder(
     }
 
     fun resolveIdeUrl(shortcut: ShortcutItem? = null): String {
-        val target = shortcut ?: shortcuts.firstOrNull { it.isDefault } ?: shortcuts.firstOrNull {
-            it.localSourcePath != null || it.url.contains("/ide/") || it.url.contains("localhost") || it.title.contains("IDE", ignoreCase = true)
-        }
+        val target = shortcut ?: getFavoriteIdeShortcut()
         if (target != null) {
             val src = target.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
             val isolatedPath = "ide/vault_${target.id}/index.html"
