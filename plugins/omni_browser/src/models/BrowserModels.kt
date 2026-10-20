@@ -51,7 +51,8 @@ data class ShortcutItem(
     val iconText: String = "",
     val colorValue: Long = 0xFF4285F4,
     val localSourcePath: String? = null,
-    val isDefault: Boolean = false
+    val isDefault: Boolean = false,
+    val isGlobalProfile: Boolean = false
 )
 
 data class SmartNote(
