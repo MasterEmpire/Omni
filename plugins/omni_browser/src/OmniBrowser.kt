@@ -699,6 +699,8 @@ class OmniBrowser : PluginEntry() {
                     },
                     onRenameProfile = { prof -> state.editingProfile = prof },
                     onDeleteProfile = { prof -> state.deleteProfile(prof) },
+                    aiAnalytics = state.aiAnalytics,
+                    onClearQuotaHit = { state.clearQuotaHit(it) },
                     onSelectTab = { state.switchToTab(it) },
                     onCloseTab = { state.closeTab(it) },
                     onNewTab = { profId -> state.createNewTab(targetProfileId = profId) },
