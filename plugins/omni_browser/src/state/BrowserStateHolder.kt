@@ -329,12 +329,23 @@ class BrowserStateHolder(
 
         poolManager.pool.forEach { (id, wv) ->
             if (id != targetTabId) {
-                if (!isBackgroundAudioEnabled || id != activeMediaTabId) {
+                val tab = tabs.find { it.id == id }
+                val isAiStudio = tab?.url?.contains("aistudio.google.com") == true
+                val isMediaActive = isBackgroundAudioEnabled && id == activeMediaTabId
+
+                if (!isAiStudio && !isMediaActive) {
                     wv.onPause()
+                } else {
+                    // God-Mode VIP: Never pause AI Studio in background so token streams never disconnect
+                    wv.onResume()
                 }
             }
         }
         CookieManager.getInstance().flush()
+
+        if (tabs.any { it.url.contains("aistudio.google.com") }) {
+            bridge.acquireWakeLock("AiStudioVIP")
+        }
 
         val targetTab = tabs.find { it.id == targetTabId } ?: return
         selectedProfileId = targetTab.profileId
@@ -639,6 +650,10 @@ class BrowserStateHolder(
 
         val currentIdx = tabs.indexOfFirst { it.id == targetId }
         val remainingTabs = tabs.filter { it.id != targetId }
+
+        if (remainingTabs.none { it.url.contains("aistudio.google.com") }) {
+            bridge.releaseWakeLock()
+        }
 
         if (remainingTabs.isEmpty()) {
             val newId = "tab_${System.currentTimeMillis()}"
