@@ -136,6 +136,53 @@ object LiveAutoPilotEngine {
 
                 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
+                // 🛡️ Background rAF Unchoker: Force token typing into DOM even when tab is in background!
+                if (!window.__omniRafUnchoked) {
+                    window.__omniRafUnchoked = true;
+                    const origRaf = window.requestAnimationFrame;
+                    const origCancelRaf = window.cancelAnimationFrame;
+                    const pendingCallbacks = new Map();
+                    let rafIdCounter = 1;
+
+                    window.requestAnimationFrame = function(cb) {
+                        const id = rafIdCounter++;
+                        let executed = false;
+                        let nativeId = null;
+
+                        try {
+                            nativeId = origRaf.call(window, function(ts) {
+                                if (!executed) {
+                                    executed = true;
+                                    pendingCallbacks.delete(id);
+                                    cb(ts);
+                                }
+                            });
+                        } catch(_) {}
+
+                        // If backgrounded, native rAF stalls. Fallback timer fires so tokens mount to DOM!
+                        const timeoutId = setTimeout(function() {
+                            if (!executed) {
+                                executed = true;
+                                pendingCallbacks.delete(id);
+                                try { if (nativeId !== null) origCancelRaf.call(window, nativeId); } catch(_) {}
+                                cb(performance.now());
+                            }
+                        }, 18);
+
+                        pendingCallbacks.set(id, { nativeId: nativeId, timeoutId: timeoutId });
+                        return id;
+                    };
+
+                    window.cancelAnimationFrame = function(id) {
+                        const entry = pendingCallbacks.get(id);
+                        if (entry) {
+                            pendingCallbacks.delete(id);
+                            try { if (entry.nativeId !== null) origCancelRaf.call(window, entry.nativeId); } catch(_) {}
+                            clearTimeout(entry.timeoutId);
+                        }
+                    };
+                }
+
                 function hookPromptSubmission() {
                     const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[type="submit"]');
                     if (runBtn && !runBtn.__omniHooked) {
@@ -532,6 +579,10 @@ object LiveAutoPilotEngine {
 
                     const isGen = checkUiGenerating();
                     if (isGen) {
+                        try {
+                            const scroller = document.querySelector('ms-autoscroll-container, .chat-view-container, .chat-history');
+                            if (scroller) scroller.scrollTop = scroller.scrollHeight;
+                        } catch(_) {}
                         window.__omniWasGenerating = true;
                         window.__omniStillTicks = 0;
                         return;
