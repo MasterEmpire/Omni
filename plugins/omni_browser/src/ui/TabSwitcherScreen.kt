@@ -623,24 +623,15 @@ fun TabSwitcherScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
 
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = if (tab.url == "about:blank" || tab.title == "about:blank") "New Tab" else tab.title.ifEmpty { "Web Page" },
-                                            color = Color(0xFFE8EAED),
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = tabProfile.name,
-                                            color = Color(tabProfile.colorValue),
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                                    Text(
+                                        text = if (tab.url == "about:blank" || tab.title == "about:blank") "New Tab" else tab.title.ifEmpty { "Web Page" },
+                                        color = Color(0xFFE8EAED),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
 
                                     if (!isSelectionMode) {
                                         IconButton(
@@ -719,6 +710,36 @@ fun TabSwitcherScreen(
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
                                                 textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+
+                                    // Floating Ghost Profile Watermark
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color(0xFF161B22).copy(alpha = 0.84f),
+                                        border = BorderStroke(1.dp, Color(tabProfile.colorValue).copy(alpha = 0.45f)),
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(6.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(5.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(tabProfile.colorValue))
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                text = tabProfile.name,
+                                                color = Color(0xFFE8EAED),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1
                                             )
                                         }
                                     }
