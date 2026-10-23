@@ -193,8 +193,12 @@ class WebViewPoolManager(
     fun pruneHotPool(keepTabId: String, tabs: List<BrowserTab>, onTabStateSaved: (String, Bundle) -> Unit, containerLayout: FrameLayout?) {
         if (pool.size <= maxHotTabs) return
 
-        val tabsInPool = tabs.filter { it.id in pool.keys && it.id != keepTabId }
-            .sortedBy { it.lastAccessedTime }
+        // God-Mode VIP: AI Studio tabs are immune from hot pool eviction
+        val tabsInPool = tabs.filter {
+            it.id in pool.keys &&
+            it.id != keepTabId &&
+            !it.url.contains("aistudio.google.com")
+        }.sortedBy { it.lastAccessedTime }
 
         var numToEvict = pool.size - maxHotTabs
         for (tabToEvict in tabsInPool) {
@@ -458,6 +462,12 @@ class WebViewPoolManager(
                     }
 
                     if (isDataSaverActive) {
+                        val reqUrl = reqUri.toString().lowercase(Locale.US)
+                        // God-Mode VIP: Never throttle or block AI Studio streaming traffic
+                        if (host.contains("aistudio.google.com") || host.contains("alkalimakersuite") || reqUrl.contains("generativelanguage")) {
+                            return super.shouldInterceptRequest(view, request)
+                        }
+
                         val path = reqUri.path?.lowercase(Locale.US) ?: ""
                         val urlStr = reqUri.toString().lowercase(Locale.US)
 
