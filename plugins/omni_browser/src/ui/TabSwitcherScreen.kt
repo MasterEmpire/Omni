@@ -80,6 +80,8 @@ fun TabSwitcherScreen(
     onAddProfile: () -> Unit,
     onRenameProfile: (BrowserProfile) -> Unit,
     onDeleteProfile: (BrowserProfile) -> Unit = {},
+    aiAnalytics: Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics> = emptyMap(),
+    onClearQuotaHit: (String) -> Unit = {},
     onSelectTab: (String) -> Unit,
     onCloseTab: (String) -> Unit,
     onNewTab: (String) -> Unit,
@@ -93,6 +95,7 @@ fun TabSwitcherScreen(
     var showTabMenu by remember { mutableStateOf(false) }
     var profileMenuExpanded by remember { mutableStateOf(false) }
     var profileToDelete by remember { mutableStateOf<BrowserProfile?>(null) }
+    var showHealthDeckDialog by remember { mutableStateOf(false) }
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
 
     val initialIndex = remember {
@@ -286,19 +289,29 @@ fun TabSwitcherScreen(
                                 }
                             }
 
-                            DropdownMenu(
-                                expanded = profileMenuExpanded,
-                                onDismissRequest = { profileMenuExpanded = false },
-                                modifier = Modifier.background(Color(0xFF282C34))
-                            ) {
-                                Text(
-                                    "Account Profiles",
-                                    color = Color(0xFF9AA0A6),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
-                                HorizontalDivider(color = Color(0xFF3C4043))
+                                        DropdownMenu(
+                expanded = profileMenuExpanded,
+                onDismissRequest = { profileMenuExpanded = false },
+                modifier = Modifier.background(Color(0xFF282C34))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Account Profiles", color = Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    TextButton(
+                        onClick = {
+                            profileMenuExpanded = false
+                            showHealthDeckDialog = true
+                        },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                        modifier = Modifier.height(24.dp)
+                    ) {
+                        Text("📊 Health Deck", color = Color(0xFF58A6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                HorizontalDivider(color = Color(0xFF3C4043))
 
                                 profiles.forEach { prof ->
                                     val isSelected = prof.id == selectedProfileId
@@ -315,13 +328,45 @@ fun TabSwitcherScreen(
                                                         .background(Color(prof.colorValue))
                                                 )
                                                 Spacer(Modifier.width(8.dp))
-                                                Text(
-                                                    prof.name,
-                                                    color = if (isSelected) Color(prof.colorValue) else Color(0xFFE8EAED),
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    fontSize = 13.sp,
-                                                    modifier = Modifier.weight(1f)
-                                                )
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        prof.name,
+                                                        color = if (isSelected) Color(prof.colorValue) else Color(0xFFE8EAED),
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        fontSize = 13.sp
+                                                    )
+                                                    val aData = aiAnalytics[prof.id]
+                                                    val now = System.currentTimeMillis()
+                                                    val qTime = aData?.lastQuotaHitTimestamp ?: 0L
+                                                    val isQuotaActive = qTime > 0L && (now - qTime) < 24 * 60 * 60 * 1000L
+                                                    val healthText = when {
+                                                        isQuotaActive -> {
+                                                            val diffH = ((now - qTime) / 3_600_000L).coerceAtLeast(0)
+                                                            if (diffH == 0L) {
+                                                                val diffM = ((now - qTime) / 60_000L).coerceAtLeast(1)
+                                                                "🔴 Quota Hit (${diffM}m ago)"
+                                                            } else {
+                                                                "🔴 Quota Hit (${diffH}h ago)"
+                                                            }
+                                                        }
+                                                        (aData?.promptsSentToday ?: 0) >= 40 -> "🟡 Busy • ${aData?.promptsSentToday} prompts"
+                                                        (aData?.promptsSentToday ?: 0) > 0 -> "🟢 Fresh • ${aData?.promptsSentToday} prompts"
+                                                        else -> "🟢 Fresh • Ready"
+                                                    }
+                                                    val healthColor = when {
+                                                        isQuotaActive -> Color(0xFFF85149)
+                                                        (aData?.promptsSentToday ?: 0) >= 40 -> Color(0xFFD29922)
+                                                        else -> Color(0xFF3FB950)
+                                                    }
+                                                    Text(
+                                                        text = healthText,
+                                                        color = healthColor,
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
                                         },
                                         onClick = {
@@ -715,6 +760,131 @@ fun TabSwitcherScreen(
             tabCount = selectedTabIds.size,
             onConfirm = onConfirmCreateGroup,
             onDismiss = onDismissGroupNamingDialog
+        )
+    }
+
+    if (showHealthDeckDialog) {
+        val now = System.currentTimeMillis()
+        val totalToday = aiAnalytics.values.sumOf { it.promptsSentToday }
+        val totalLifetime = aiAnalytics.values.sumOf { it.totalPromptsLifetime }
+
+        AlertDialog(
+            onDismissRequest = { showHealthDeckDialog = false },
+            containerColor = Color(0xFF282C34),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("📊", fontSize = 20.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("AI Studio Health", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    }
+                    Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF1F2227)) {
+                        Text("$totalToday prompts today", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Daily quota resets at midnight Pacific Time (or 24h rolling cycle). Track exhausted accounts and swap effortlessly.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
+
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(profiles, key = { it.id }) { prof ->
+                            val a = aiAnalytics[prof.id]
+                            val qTime = a?.lastQuotaHitTimestamp ?: 0L
+                            val isQuotaActive = qTime > 0L && (now - qTime) < 24 * 60 * 60 * 1000L
+                            val diffH = ((now - qTime) / 3_600_000L).coerceAtLeast(0)
+                            val resetH = (24 - diffH).coerceAtLeast(1)
+
+                            Card(
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
+                                border = BorderStroke(1.dp, if (isQuotaActive) Color(0xFFF85149).copy(alpha = 0.6f) else Color(prof.colorValue).copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(modifier = Modifier.size(9.dp).clip(CircleShape).background(Color(prof.colorValue)))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(prof.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isQuotaActive) Color(0xFFF85149).copy(alpha = 0.2f) else Color(0xFF3FB950).copy(alpha = 0.2f)
+                                        ) {
+                                            Text(
+                                                if (isQuotaActive) "🔴 EXHAUSTED" else "🟢 READY",
+                                                color = if (isQuotaActive) Color(0xFFF85149) else Color(0xFF3FB950),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.height(6.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Today: ${a?.promptsSentToday ?: 0} prompts • ${a?.tabsOpenedToday ?: 0} tabs", color = Color(0xFFC9D1D9), fontSize = 11.sp)
+                                        Text("All-Time: ${a?.totalPromptsLifetime ?: 0}", color = Color(0xFF8B949E), fontSize = 10.sp)
+                                    }
+
+                                    if (isQuotaActive) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "Hit ${diffH}h ago • Resets ~${resetH}h",
+                                                color = Color(0xFFF85149),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+
+                                            TextButton(
+                                                onClick = { onClearQuotaHit(prof.id) },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                modifier = Modifier.height(24.dp)
+                                            ) {
+                                                Text("Reset Flag", color = Color(0xFF58A6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showHealthDeckDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D))
+                ) {
+                    Text("Close", color = Color(0xFFC9D1D9))
+                }
+            }
         )
     }
 
