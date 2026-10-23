@@ -203,6 +203,37 @@ data class ActiveDownloadItem(
     val status: Int
 )
 
+data class ProfileAiAnalytics(
+    val profileId: String,
+    val tabsOpenedToday: Int = 0,
+    val promptsSentToday: Int = 0,
+    val totalPromptsLifetime: Int = 0,
+    val lastPromptTimestamp: Long = 0L,
+    val lastQuotaHitTimestamp: Long = 0L,
+    val lastActiveDay: String = ""
+)
+
+class OmniAnalyticsBridge(
+    private val onPromptSent: (profileId: String) -> Unit,
+    private val onQuotaHit: (profileId: String, reason: String) -> Unit,
+    private val onLog: (tag: String, message: String) -> Unit
+) {
+    @android.webkit.JavascriptInterface
+    fun recordPrompt(profileId: String) {
+        onPromptSent(profileId)
+    }
+
+    @android.webkit.JavascriptInterface
+    fun reportQuotaHit(profileId: String, reason: String) {
+        onQuotaHit(profileId, reason)
+    }
+
+    @android.webkit.JavascriptInterface
+    fun log(tag: String, msg: String) {
+        onLog(tag, msg)
+    }
+}
+
 data class SystemInstructionPreset(
     val id: String = java.util.UUID.randomUUID().toString(),
     val title: String,
