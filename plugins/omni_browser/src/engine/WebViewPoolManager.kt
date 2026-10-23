@@ -41,6 +41,8 @@ interface WebViewEventListener {
     fun onFilePullRequested(xml: String)
     fun onFilesPulled(dumpText: String, fileCount: Int)
     fun onSyncFavoriteIde(content: String): Boolean
+    fun onAiPromptSent(profileId: String)
+    fun onAiQuotaHit(profileId: String, reason: String)
 }
 
 class WebViewPoolManager(
@@ -305,6 +307,21 @@ class WebViewPoolManager(
                 listener.onLivePythonRequested(code)
             }
             addJavascriptInterface(pythonBridge, "OmniPythonBridge")
+
+            val analyticsBridge = com.omni.plugin.browser.models.OmniAnalyticsBridge(
+                onPromptSent = { pId ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onAiPromptSent(pId)
+                    }
+                },
+                onQuotaHit = { pId, reason ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onAiQuotaHit(pId, reason)
+                    }
+                },
+                onLog = { tag, msg -> bridge.log(tag, msg) }
+            )
+            addJavascriptInterface(analyticsBridge, "OmniAnalyticsBridge")
 
             val ideBridge = com.omni.plugin.browser.models.OmniIdeBridge(
                 onCxpDispatched = { xml ->
