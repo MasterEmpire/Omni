@@ -54,17 +54,19 @@ class WebViewPoolManager(
 
     var mobileUA: String = ""
         private set
-    var isDataSaverActive: Boolean = false
+    var activeDataSaverMode: String = "MEDIUM" // "OFF", "MEDIUM", "EXTREME"
+    val isDataSaverActive: Boolean get() = activeDataSaverMode != "OFF"
 
-    fun applyDataSaver(settings: WebSettings, enabled: Boolean) {
-        settings.blockNetworkImage = enabled
-        settings.cacheMode = if (enabled) WebSettings.LOAD_CACHE_ELSE_NETWORK else WebSettings.LOAD_DEFAULT
+    fun applyDataSaver(settings: WebSettings, mode: String) {
+        val isExtreme = mode == "EXTREME"
+        settings.blockNetworkImage = isExtreme
+        settings.cacheMode = if (isExtreme) WebSettings.LOAD_CACHE_ELSE_NETWORK else WebSettings.LOAD_DEFAULT
     }
 
-    fun updateDataSaver(enabled: Boolean) {
-        isDataSaverActive = enabled
+    fun updateDataSaver(mode: String) {
+        activeDataSaverMode = mode
         pool.values.forEach { wv ->
-            applyDataSaver(wv.settings, enabled)
+            applyDataSaver(wv.settings, mode)
         }
     }
 
@@ -338,7 +340,7 @@ class WebViewPoolManager(
             tabDesktopModes[tabId] = isDesktop
             settings.userAgentString = if (isDesktop) DESKTOP_USER_AGENT else cleanMobileUA
             applyForceDark(settings, isForceDarkWebPages)
-            applyDataSaver(settings, isDataSaverActive)
+            applyDataSaver(settings, activeDataSaverMode)
 
             webChromeClient = object : WebChromeClient() {
                 override fun onCreateWindow(
