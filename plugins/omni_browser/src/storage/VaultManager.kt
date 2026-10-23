@@ -181,6 +181,7 @@ class VaultManager(
                 mirrorFile("config/smart_notes.json", "smart_notes.json")
                 mirrorFile("config/tab_groups.json", "tab_groups.json")
                 mirrorFile("config/history.json", "history.json")
+                mirrorFile("config/ai_studio_analytics.json", "ai_studio_analytics.json")
 
                 val ideDir = File(bridge.getPluginDir(), "ide")
                 if (ideDir.exists() && ideDir.isDirectory) {
@@ -212,6 +213,7 @@ class VaultManager(
                 restoreIfMissing("config/smart_notes.json", "smart_notes.json")
                 restoreIfMissing("config/tab_groups.json", "tab_groups.json")
                 restoreIfMissing("config/history.json", "history.json")
+                restoreIfMissing("config/ai_studio_analytics.json", "ai_studio_analytics.json")
 
                                     val vaultIdeDir = File(vaultDir, "ide")
                     if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
@@ -414,6 +416,50 @@ class VaultManager(
             )
         } catch (_: Exception) {
             null
+        }
+    }
+
+    fun saveAiAnalytics(analyticsMap: Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>) {
+        try {
+            val arr = JSONArray()
+            analyticsMap.values.forEach { a ->
+                val obj = JSONObject().apply {
+                    put("profileId", a.profileId)
+                    put("tabsOpenedToday", a.tabsOpenedToday)
+                    put("promptsSentToday", a.promptsSentToday)
+                    put("totalPromptsLifetime", a.totalPromptsLifetime)
+                    put("lastPromptTimestamp", a.lastPromptTimestamp)
+                    put("lastQuotaHitTimestamp", a.lastQuotaHitTimestamp)
+                    put("lastActiveDay", a.lastActiveDay)
+                }
+                arr.put(obj)
+            }
+            bridge.saveFile("config/ai_studio_analytics.json", arr.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadAiAnalytics(): Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics> {
+        return try {
+            val bytes = bridge.readFile("config/ai_studio_analytics.json") ?: return emptyMap()
+            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+            val map = mutableMapOf<String, com.omni.plugin.browser.models.ProfileAiAnalytics>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val id = obj.getString("profileId")
+                map[id] = com.omni.plugin.browser.models.ProfileAiAnalytics(
+                    profileId = id,
+                    tabsOpenedToday = obj.optInt("tabsOpenedToday", 0),
+                    promptsSentToday = obj.optInt("promptsSentToday", 0),
+                    totalPromptsLifetime = obj.optInt("totalPromptsLifetime", 0),
+                    lastPromptTimestamp = obj.optLong("lastPromptTimestamp", 0L),
+                    lastQuotaHitTimestamp = obj.optLong("lastQuotaHitTimestamp", 0L),
+                    lastActiveDay = obj.optString("lastActiveDay", "")
+                )
+            }
+            map
+        } catch (_: Exception) {
+            emptyMap()
         }
     }
 
