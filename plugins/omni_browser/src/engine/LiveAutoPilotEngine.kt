@@ -136,6 +136,44 @@ object LiveAutoPilotEngine {
 
                 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
+                function hookPromptSubmission() {
+                    const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[type="submit"]');
+                    if (runBtn && !runBtn.__omniHooked) {
+                        runBtn.__omniHooked = true;
+                        runBtn.addEventListener('click', function() {
+                            if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
+                                window.OmniAnalyticsBridge.recordPrompt(window.__omniProfileId || 'default');
+                            }
+                        }, true);
+                    }
+                    const ta = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                    if (ta && !ta.__omniHooked) {
+                        ta.__omniHooked = true;
+                        ta.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
+                                    window.OmniAnalyticsBridge.recordPrompt(window.__omniProfileId || 'default');
+                                }
+                            }
+                        }, true);
+                    }
+                }
+
+                function checkQuotaErrors() {
+                    const errorTargets = document.querySelectorAll('ms-banner .error-banner-message, ms-global-banner, .chat-turn-container.model .model-error, ms-chat-turn .model-error, .cdk-overlay-container .mat-mdc-simple-snack-bar, .model-error');
+                    for (const el of errorTargets) {
+                        const txt = (el.innerText || el.textContent || '').toLowerCase();
+                        if (txt.includes('quota') || txt.includes('resource has been exhausted') || txt.includes('resource_exhausted') || txt.includes('rate limit') || txt.includes('429')) {
+                            if (el.getAttribute('data-omni-quota-logged') !== 'true') {
+                                el.setAttribute('data-omni-quota-logged', 'true');
+                                if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.reportQuotaHit) {
+                                    window.OmniAnalyticsBridge.reportQuotaHit(window.__omniProfileId || 'default', txt.slice(0, 120));
+                                }
+                            }
+                        }
+                    }
+                }
+
                 function checkUiGenerating() {
                     const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[aria-label*="Stop"], button.stoppable');
                     if (runBtn) {
@@ -487,6 +525,9 @@ object LiveAutoPilotEngine {
             };
 
                 window.__omniSentinelInterval = setInterval(() => {
+                    hookPromptSubmission();
+                    checkQuotaErrors();
+
                     if (!window.__omniLiveAutoPilotActive) return;
 
                     const isGen = checkUiGenerating();
