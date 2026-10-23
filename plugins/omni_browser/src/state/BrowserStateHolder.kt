@@ -1794,18 +1794,67 @@ class BrowserStateHolder(
                     if (!el) return false;
 
                     el.focus();
-                    if (el.isContentEditable) {
-                        document.execCommand('insertText', false, text);
-                    } else {
-                        var proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-                        var descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-                        if (descriptor && descriptor.set) {
-                            descriptor.set.call(el, text);
-                        } else {
-                            el.value = text;
+                    if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
+                        var range = document.createRange();
+                        range.selectNodeContents(el);
+                        range.collapse(false);
+                        var sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+
+                        var currentContent = (el.innerText || el.textContent || '').trim();
+                        var separator = currentContent.length > 0 ? '\n\n' : '';
+                        var toInsert = separator + text;
+
+                        var inserted = false;
+                        try {
+                            inserted = document.execCommand('insertText', false, toInsert);
+                        } catch(_) {}
+
+                        if (!inserted) {
+                            var textNode = document.createTextNode(toInsert);
+                            el.appendChild(textNode);
+                            var newRange = document.createRange();
+                            newRange.selectNodeContents(el);
+                            newRange.collapse(false);
+                            sel.removeAllRanges();
+                            sel.addRange(newRange);
                         }
                         el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
                         el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                    } else {
+                        var currentVal = el.value || '';
+                        var isSingleLine = el.tagName === 'INPUT';
+                        var separator = '';
+                        if (currentVal.length > 0) {
+                            if (isSingleLine) {
+                                separator = currentVal.endsWith(' ') ? '' : ' ';
+                            } else {
+                                separator = currentVal.endsWith('\n\n') ? '' : (currentVal.endsWith('\n') ? '\n' : '\n\n');
+                            }
+                        }
+                        var newVal = currentVal + separator + text;
+                        var proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                        var descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+                        if (descriptor && descriptor.set) {
+                            descriptor.set.call(el, newVal);
+                        } else {
+                            el.value = newVal;
+                        }
+                        try {
+                            el.selectionStart = el.selectionEnd = newVal.length;
+                        } catch(_) {}
+                        el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                        try {
+                            el.dispatchEvent(new InputEvent('input', {
+                                bubbles: true,
+                                cancelable: true,
+                                inputType: 'insertText',
+                                data: separator + text
+                            }));
+                        } catch(_) {}
+                        el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                        el.scrollTop = el.scrollHeight;
                     }
                     return true;
                 } catch(e) {
