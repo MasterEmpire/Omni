@@ -125,7 +125,8 @@ class BrowserStateHolder(
     var autoSolveEnabled by mutableStateOf(true)
     var forceDarkWebPages by mutableStateOf(false)
     var isErudaEnabled by mutableStateOf(false)
-    var isDataSaverEnabled by mutableStateOf(false)
+    var dataSaverMode by mutableStateOf("MEDIUM") // "OFF", "MEDIUM", "EXTREME"
+    val isDataSaverEnabled: Boolean get() = dataSaverMode != "OFF"
 
     // Automator States
     var showAutomationDialog by mutableStateOf(false)
@@ -210,7 +211,7 @@ class BrowserStateHolder(
             isErudaEnabled = config.erudaEnabled
             isDesktopMode = config.desktopMode
             isBackgroundAudioEnabled = config.backgroundAudio
-            isDataSaverEnabled = config.dataSaver
+            dataSaverMode = config.dataSaverMode
             poolManager.localPort = config.localPort
             poolManager.updateForceDark(config.forceDark)
             syncDataSaver()
@@ -773,17 +774,26 @@ class BrowserStateHolder(
         }
     }
 
+    fun getEffectiveDataSaverMode(): String {
+        if (dataSaverMode == "OFF") return "OFF"
+        return if (isMeteredOrMobileConnection(context)) dataSaverMode else "OFF"
+    }
+
     fun isEffectiveDataSaver(): Boolean {
-        return isDataSaverEnabled && isMeteredOrMobileConnection(context)
+        return getEffectiveDataSaverMode() != "OFF"
     }
 
     fun syncDataSaver() {
-        val effective = isEffectiveDataSaver()
+        val effective = getEffectiveDataSaverMode()
         poolManager.updateDataSaver(effective)
     }
 
     fun toggleDataSaver() {
-        isDataSaverEnabled = !isDataSaverEnabled
+        dataSaverMode = when (dataSaverMode) {
+            "OFF" -> "MEDIUM"
+            "MEDIUM" -> "EXTREME"
+            else -> "OFF"
+        }
         vaultManager.saveSolverConfig(
             apiKey = solverApiKey,
             autoSolve = autoSolveEnabled,
@@ -792,17 +802,18 @@ class BrowserStateHolder(
             erudaEnabled = isErudaEnabled,
             desktopMode = isDesktopMode,
             backgroundAudio = isBackgroundAudioEnabled,
-            dataSaver = isDataSaverEnabled
+            dataSaverMode = dataSaverMode
         )
         syncDataSaver()
-        val effective = isEffectiveDataSaver()
-        val statusText = when {
-            !isDataSaverEnabled -> "Data-saver Disabled"
-            effective -> "🛡️ Data-saver: Extreme Mode ACTIVE (Squeezing every byte!)"
-            else -> "🛡️ Data-saver: Armed (Auto-paused on unmetered Wi-Fi)"
+        val effective = getEffectiveDataSaverMode()
+        val statusText = when (dataSaverMode) {
+            "OFF" -> "Data-saver Disabled"
+            "MEDIUM" -> if (effective == "MEDIUM") "🛡️ Data-saver: Medium ACTIVE (Images on, fonts & ads blocked)" else "🛡️ Data-saver: Medium Armed (Auto-paused on Wi-Fi)"
+            "EXTREME" -> if (effective == "EXTREME") "🔥 Data-saver: Extreme ACTIVE (Images blocked)" else "🔥 Data-saver: Extreme Armed (Auto-paused on Wi-Fi)"
+            else -> "Data-saver: $dataSaverMode"
         }
         bridge.showToast(statusText)
-        bridge.log("DATA_SAVER", "Toggled data-saver: userEnabled=$isDataSaverEnabled, effectiveActive=$effective")
+        bridge.log("DATA_SAVER", "Toggled data-saver: mode=$dataSaverMode, effective=$effective")
     }
 
     fun toggleDesktopMode() {
