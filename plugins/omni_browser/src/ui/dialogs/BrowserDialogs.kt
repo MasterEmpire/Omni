@@ -309,12 +309,12 @@ fun SettingsBackupDialog(
     isErudaEnabled: Boolean = false,
     isDesktopMode: Boolean = false,
     isBackgroundAudioEnabled: Boolean = true,
-    isDataSaverEnabled: Boolean = false,
+    dataSaverMode: String = "MEDIUM",
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
-    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, Boolean) -> Unit,
+    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
@@ -324,7 +324,7 @@ fun SettingsBackupDialog(
     var tempEruda by remember { mutableStateOf(isErudaEnabled) }
     var tempDesktop by remember { mutableStateOf(isDesktopMode) }
     var tempAudio by remember { mutableStateOf(isBackgroundAudioEnabled) }
-    var tempDataSaver by remember { mutableStateOf(isDataSaverEnabled) }
+    var tempDataSaverMode by remember { mutableStateOf(dataSaverMode) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -418,20 +418,79 @@ fun SettingsBackupDialog(
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("🛡️ Extreme Data-saver", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("Blocks network images, video preload, fonts & trackers. Auto-pauses on Wi-Fi.", color = Color(0xFF81C995), fontSize = 10.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🛡️ Data-Saver Mode", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = when (tempDataSaverMode) {
+                                "EXTREME" -> Color(0xFF3FB950).copy(alpha = 0.2f)
+                                "MEDIUM" -> Color(0xFF58A6FF).copy(alpha = 0.2f)
+                                else -> Color(0xFF3C4043)
+                            }
+                        ) {
+                            Text(
+                                text = tempDataSaverMode,
+                                color = when (tempDataSaverMode) {
+                                    "EXTREME" -> Color(0xFF3FB950)
+                                    "MEDIUM" -> Color(0xFF58A6FF)
+                                    else -> Color(0xFF9AA0A6)
+                                },
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
-                    Switch(
-                        checked = tempDataSaver,
-                        onCheckedChange = { tempDataSaver = it },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF81C995))
+                    Text(
+                        text = when (tempDataSaverMode) {
+                            "EXTREME" -> "🔥 Extreme: Blocks images, custom web fonts, media preloads & trackers."
+                            "MEDIUM" -> "🛡️ Medium (Default): Keeps images visible, but blocks heavy web fonts, video preloads & ad trackers."
+                            else -> "Off: Full unthrottled fidelity."
+                        },
+                        color = Color(0xFF9AA0A6),
+                        fontSize = 10.sp
                     )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("OFF" to "Off", "MEDIUM" to "Medium", "EXTREME" to "Extreme").forEach { (modeKey, modeLabel) ->
+                            val isSel = tempDataSaverMode == modeKey
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) {
+                                    when (modeKey) {
+                                        "EXTREME" -> Color(0xFF3FB950).copy(alpha = 0.25f)
+                                        "MEDIUM" -> Color(0xFF58A6FF).copy(alpha = 0.25f)
+                                        else -> Color(0xFF3C4043)
+                                    }
+                                } else Color(0xFF1F2227),
+                                border = BorderStroke(1.dp, if (isSel) {
+                                    when (modeKey) {
+                                        "EXTREME" -> Color(0xFF3FB950)
+                                        "MEDIUM" -> Color(0xFF58A6FF)
+                                        else -> Color(0xFF8AB4F8)
+                                    }
+                                } else Color(0xFF3C4043)),
+                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { tempDataSaverMode = modeKey }
+                            ) {
+                                Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = modeLabel,
+                                        color = if (isSel) Color.White else Color(0xFF9AA0A6),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = Color(0xFF3C4043))
@@ -518,7 +577,7 @@ fun SettingsBackupDialog(
             Button(
                 onClick = {
                     val portNum = tempPortText.toIntOrNull() ?: 8080
-                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio, tempDataSaver)
+                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio, tempDataSaverMode)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
