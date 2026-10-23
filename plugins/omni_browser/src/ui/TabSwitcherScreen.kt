@@ -79,6 +79,7 @@ fun TabSwitcherScreen(
     onSelectProfile: (String) -> Unit,
     onAddProfile: () -> Unit,
     onRenameProfile: (BrowserProfile) -> Unit,
+    onDeleteProfile: (BrowserProfile) -> Unit = {},
     onSelectTab: (String) -> Unit,
     onCloseTab: (String) -> Unit,
     onNewTab: (String) -> Unit,
@@ -91,6 +92,7 @@ fun TabSwitcherScreen(
     var activeSegment by remember { mutableStateOf("tabs") }
     var showTabMenu by remember { mutableStateOf(false) }
     var profileMenuExpanded by remember { mutableStateOf(false) }
+    var profileToDelete by remember { mutableStateOf<BrowserProfile?>(null) }
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
 
     val initialIndex = remember {
@@ -327,14 +329,34 @@ fun TabSwitcherScreen(
                                             profileMenuExpanded = false
                                         },
                                         trailingIcon = {
-                                            IconButton(
-                                                onClick = {
-                                                    profileMenuExpanded = false
-                                                    onRenameProfile(prof)
-                                                },
-                                                modifier = Modifier.size(24.dp)
-                                            ) {
-                                                Text("✏️", fontSize = 12.sp)
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                IconButton(
+                                                    onClick = {
+                                                        profileMenuExpanded = false
+                                                        onRenameProfile(prof)
+                                                    },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Text("✏️", fontSize = 12.sp)
+                                                }
+
+                                                if (prof.id != "default" && profiles.size > 1) {
+                                                    Spacer(Modifier.width(4.dp))
+                                                    IconButton(
+                                                        onClick = {
+                                                            profileMenuExpanded = false
+                                                            profileToDelete = prof
+                                                        },
+                                                        modifier = Modifier.size(24.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Delete,
+                                                            contentDescription = "Delete Profile",
+                                                            tint = Color(0xFFF28B82),
+                                                            modifier = Modifier.size(15.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     )
@@ -556,15 +578,24 @@ fun TabSwitcherScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
 
-                                    Text(
-                                        text = if (tab.url == "about:blank" || tab.title == "about:blank") "New Tab" else tab.title.ifEmpty { "Web Page" },
-                                        color = Color(0xFFE8EAED),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (tab.url == "about:blank" || tab.title == "about:blank") "New Tab" else tab.title.ifEmpty { "Web Page" },
+                                            color = Color(0xFFE8EAED),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = tabProfile.name,
+                                            color = Color(tabProfile.colorValue),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
 
                                     if (!isSelectionMode) {
                                         IconButton(
@@ -684,6 +715,54 @@ fun TabSwitcherScreen(
             tabCount = selectedTabIds.size,
             onConfirm = onConfirmCreateGroup,
             onDismiss = onDismissGroupNamingDialog
+        )
+    }
+
+    if (profileToDelete != null) {
+        val target = profileToDelete!!
+        AlertDialog(
+            onDismissRequest = { profileToDelete = null },
+            containerColor = Color(0xFF282C34),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(Color(target.colorValue))
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Delete Profile?",
+                        color = Color(0xFFE8EAED),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete '${target.name}'? Any tabs currently using this profile will be moved to Default.",
+                    color = Color(0xFF9AA0A6),
+                    fontSize = 12.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteProfile(target)
+                        profileToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633))
+                ) {
+                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { profileToDelete = null }) {
+                    Text("Cancel", color = Color(0xFF9AA0A6))
+                }
+            }
         )
     }
 }
