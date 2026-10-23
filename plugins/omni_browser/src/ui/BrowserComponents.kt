@@ -567,7 +567,7 @@ fun BrowserMenuOverlay(
     canGoBack: Boolean,
     canGoForward: Boolean,
     currentUrl: String,
-    isDataSaverEnabled: Boolean = false,
+    dataSaverMode: String = "MEDIUM",
     onToggleDataSaver: () -> Unit = {},
     isLiveAutoPilotEnabled: Boolean = false,
     onToggleLiveAutoPilot: () -> Unit = {},
@@ -716,10 +716,16 @@ fun BrowserMenuOverlay(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
 
+                val (dsTitle, dsColor) = when (dataSaverMode) {
+                    "EXTREME" -> "🔥 Data-saver (Extreme)" to Color(0xFF3FB950)
+                    "MEDIUM" -> "🛡️ Data-saver (Medium)" to Color(0xFF58A6FF)
+                    else -> "🛡️ Data-saver (Off)" to Color(0xFFE8EAED)
+                }
+
                 InLayoutMenuItem(
-                    title = if (isDataSaverEnabled) "🛡️ Data-saver (Extreme ON)" else "🛡️ Data-saver (Off)",
-                    color = if (isDataSaverEnabled) Color(0xFF3FB950) else Color(0xFFE8EAED),
-                    isBold = isDataSaverEnabled
+                    title = dsTitle,
+                    color = dsColor,
+                    isBold = dataSaverMode != "OFF"
                 ) {
                     onToggleDataSaver()
                 }
