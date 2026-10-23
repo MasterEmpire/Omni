@@ -302,6 +302,26 @@ class BrowserStateHolder(
         vaultManager.saveSession(tabs, activeTabId)
     }
 
+    fun deleteProfile(profile: BrowserProfile) {
+        if (profile.id == "default" || profiles.size <= 1) {
+            bridge.showToast("Cannot delete the Default profile.")
+            return
+        }
+        val remainingProfiles = profiles.filter { it.id != profile.id }
+        profiles = remainingProfiles
+        vaultManager.saveProfiles(remainingProfiles)
+
+        tabs = tabs.map {
+            if (it.profileId == profile.id) it.copy(profileId = "default") else it
+        }
+        if (selectedProfileId == profile.id) {
+            changeSelectedProfile("default")
+        } else {
+            vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
+        }
+        bridge.showToast("Deleted profile '${profile.name}'")
+    }
+
     fun refreshCompletedDownloads() {
         completedFilesList = downloadController.fetchCompletedDownloads()
     }
