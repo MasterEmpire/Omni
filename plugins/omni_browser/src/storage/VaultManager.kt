@@ -30,7 +30,7 @@ data class BrowserConfig(
     val erudaEnabled: Boolean = false,
     val desktopMode: Boolean = false,
     val backgroundAudio: Boolean = true,
-    val dataSaver: Boolean = false
+    val dataSaverMode: String = "MEDIUM"
 )
 
 data class VaultRestoreData(
@@ -374,7 +374,7 @@ class VaultManager(
         erudaEnabled: Boolean = false,
         desktopMode: Boolean = false,
         backgroundAudio: Boolean = true,
-        dataSaver: Boolean = false
+        dataSaverMode: String = "MEDIUM"
     ) {
         try {
             val cfg = JSONObject().apply {
@@ -385,7 +385,8 @@ class VaultManager(
                 put("erudaEnabled", erudaEnabled)
                 put("desktopMode", desktopMode)
                 put("backgroundAudio", backgroundAudio)
-                put("dataSaver", dataSaver)
+                put("dataSaverMode", dataSaverMode)
+                put("dataSaver", dataSaverMode != "OFF")
             }
             bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
@@ -396,6 +397,11 @@ class VaultManager(
         return try {
             val bytes = bridge.readFile("config/solver.json") ?: return null
             val json = JSONObject(String(bytes, Charsets.UTF_8))
+            val mode = when {
+                json.has("dataSaverMode") -> json.optString("dataSaverMode", "MEDIUM")
+                json.has("dataSaver") -> if (json.optBoolean("dataSaver", false)) "EXTREME" else "OFF"
+                else -> "MEDIUM"
+            }
             BrowserConfig(
                 apiKey = json.optString("apiKey", ""),
                 autoSolve = json.optBoolean("autoSolve", true),
@@ -404,7 +410,7 @@ class VaultManager(
                 erudaEnabled = json.optBoolean("erudaEnabled", false),
                 desktopMode = json.optBoolean("desktopMode", false),
                 backgroundAudio = json.optBoolean("backgroundAudio", true),
-                dataSaver = json.optBoolean("dataSaver", false)
+                dataSaverMode = mode
             )
         } catch (_: Exception) {
             null
