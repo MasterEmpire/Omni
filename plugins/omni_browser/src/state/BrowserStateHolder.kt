@@ -1289,6 +1289,9 @@ class BrowserStateHolder(
 
     fun isMatchingIdeTab(tab: BrowserTab, targetShortcut: ShortcutItem?): Boolean {
         val u = tab.url.lowercase(java.util.Locale.US).trim()
+        if (u.contains("preview=true") || u.contains("conduit_preview")) {
+            return false
+        }
         if (targetShortcut == null) {
             return u.contains("localhost:$localServerPort") || u.contains("127.0.0.1:$localServerPort")
         }
