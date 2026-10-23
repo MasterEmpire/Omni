@@ -406,16 +406,26 @@ class BrowserStateHolder(
         if (targetWv.parent !== container) {
             (targetWv.parent as? ViewGroup)?.removeView(targetWv)
             container.addView(targetWv)
+        } else {
+            targetWv.bringToFront()
         }
         targetWv.onResume()
         targetWv.visibility = android.view.View.VISIBLE
         container.visibility = android.view.View.VISIBLE
 
-        // Safely remove sibling views now that targetWv is active on screen
+        // Safely manage sibling views: keep AI Studio WebViews attached in background (INVISIBLE)
         for (i in container.childCount - 1 downTo 0) {
             val child = container.getChildAt(i)
             if (child !== targetWv) {
-                container.removeViewAt(i)
+                val childTab = tabs.find { poolManager.pool[it.id] === child }
+                val isChildAiStudio = childTab?.url?.contains("aistudio.google.com") == true
+
+                if (isChildAiStudio) {
+                    // God-Mode VIP: Keep AI Studio attached in ViewTree so DOM updates continue in background
+                    child.visibility = android.view.View.INVISIBLE
+                } else {
+                    container.removeViewAt(i)
+                }
             }
         }
 
