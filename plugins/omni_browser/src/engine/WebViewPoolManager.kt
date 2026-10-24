@@ -178,6 +178,7 @@ class WebViewPoolManager(
     fun updateForceDark(enabled: Boolean) {
         isForceDarkWebPages = enabled
         pool.values.forEach { wv ->
+            wv.setBackgroundColor(if (enabled) android.graphics.Color.parseColor("#1F2227") else android.graphics.Color.WHITE)
             applyForceDark(wv.settings, enabled)
         }
     }
@@ -234,7 +235,7 @@ class WebViewPoolManager(
         listener: WebViewEventListener
     ): WebView {
         val webView = WebView(context).apply {
-            setBackgroundColor(android.graphics.Color.parseColor("#1F2227"))
+            setBackgroundColor(if (isForceDarkWebPages) android.graphics.Color.parseColor("#1F2227") else android.graphics.Color.WHITE)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -566,6 +567,12 @@ class WebViewPoolManager(
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
+                    val colorSchemeScript = if (isForceDarkWebPages) {
+                        "try { document.querySelector('meta[name=\"color-scheme\"]')?.setAttribute('content', 'dark'); } catch(_) {}"
+                    } else {
+                        "try { var m = document.querySelector('meta[name=\"color-scheme\"]'); if (!m) { m = document.createElement('meta'); m.name = 'color-scheme'; (document.head || document.documentElement).appendChild(m); } m.content = 'light'; } catch(_) {}"
+                    }
+                    view?.evaluateJavascript(colorSchemeScript, null)
                     if (isDataSaverActive) {
                         view?.evaluateJavascript(DATA_SAVER_POLYFILL, null)
                     }
