@@ -74,6 +74,24 @@ fun OmniBrowserTopBar(
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
 
+    var textFieldValue by remember {
+        mutableStateOf(
+            androidx.compose.ui.text.input.TextFieldValue(
+                text = urlInputText,
+                selection = androidx.compose.ui.text.TextRange(urlInputText.length)
+            )
+        )
+    }
+
+    LaunchedEffect(urlInputText) {
+        if (textFieldValue.text != urlInputText) {
+            textFieldValue = androidx.compose.ui.text.input.TextFieldValue(
+                text = urlInputText,
+                selection = androidx.compose.ui.text.TextRange(urlInputText.length)
+            )
+        }
+    }
+
     LaunchedEffect(isSearchFocused) {
         if (isSearchFocused) {
             if (urlInputText.isEmpty() && currentUrl != "about:blank") {
@@ -81,6 +99,10 @@ fun OmniBrowserTopBar(
             }
             kotlinx.coroutines.delay(40)
             focusRequester.requestFocus()
+            textFieldValue = androidx.compose.ui.text.input.TextFieldValue(
+                text = urlInputText,
+                selection = androidx.compose.ui.text.TextRange(urlInputText.length)
+            )
             keyboardController?.show()
         } else {
             hasGainedFocus = false
@@ -195,8 +217,13 @@ fun OmniBrowserTopBar(
 
                     if (isSearchFocused) {
                         BasicTextField(
-                            value = urlInputText,
-                            onValueChange = onUrlTextChange,
+                            value = textFieldValue,
+                            onValueChange = { newValue ->
+                                textFieldValue = newValue
+                                if (newValue.text != urlInputText) {
+                                    onUrlTextChange(newValue.text)
+                                }
+                            },
                             singleLine = true,
                             maxLines = 1,
                             cursorBrush = SolidColor(profColor),
@@ -218,7 +245,7 @@ fun OmniBrowserTopBar(
                                     hasGainedFocus = false
                                     focusManager.clearFocus()
                                     keyboardController?.hide()
-                                    onNavigate(urlInputText)
+                                    onNavigate(textFieldValue.text)
                                 }
                             ),
                             decorationBox = { innerTextField ->
@@ -226,7 +253,7 @@ fun OmniBrowserTopBar(
                                     modifier = Modifier.fillMaxSize(),
                                     contentAlignment = Alignment.CenterStart
                                 ) {
-                                    if (urlInputText.isEmpty()) {
+                                    if (textFieldValue.text.isEmpty()) {
                                         Text(
                                             text = "Search or type URL",
                                             color = Color(0xFF9AA0A6),
@@ -256,9 +283,12 @@ fun OmniBrowserTopBar(
                                 }
                         )
 
-                        if (urlInputText.isNotEmpty()) {
+                        if (textFieldValue.text.isNotEmpty()) {
                             IconButton(
-                                onClick = { onUrlTextChange("") },
+                                onClick = {
+                                    textFieldValue = androidx.compose.ui.text.input.TextFieldValue("")
+                                    onUrlTextChange("")
+                                },
                                 modifier = Modifier.size(24.dp)
                             ) {
                                 Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
