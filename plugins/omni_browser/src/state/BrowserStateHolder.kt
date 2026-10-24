@@ -831,6 +831,27 @@ class BrowserStateHolder(
         poolManager.updateDataSaver(effective)
     }
 
+    fun toggleForceDark() {
+        forceDarkWebPages = !forceDarkWebPages
+        poolManager.updateForceDark(forceDarkWebPages)
+        vaultManager.saveSolverConfig(
+            apiKey = solverApiKey,
+            autoSolve = autoSolveEnabled,
+            forceDark = forceDarkWebPages,
+            localPort = localServerPort,
+            erudaEnabled = isErudaEnabled,
+            desktopMode = isDesktopMode,
+            backgroundAudio = isBackgroundAudioEnabled,
+            dataSaverMode = dataSaverMode
+        )
+        val statusMsg = if (forceDarkWebPages) "🌙 Dark Mode Enabled" else "☀️ Light Mode Enabled"
+        bridge.showToast(statusMsg)
+        bridge.log("THEME", "Toggled web force dark to $forceDarkWebPages")
+        if (currentUrl != "about:blank") {
+            currentWebView?.reload()
+        }
+    }
+
     fun toggleDataSaver() {
         dataSaverMode = when (dataSaverMode) {
             "OFF" -> "MEDIUM"
