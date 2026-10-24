@@ -599,6 +599,8 @@ fun BrowserMenuOverlay(
     currentUrl: String,
     dataSaverMode: String = "MEDIUM",
     onToggleDataSaver: () -> Unit = {},
+    forceDarkWebPages: Boolean = false,
+    onToggleForceDark: () -> Unit = {},
     isLiveAutoPilotEnabled: Boolean = false,
     onToggleLiveAutoPilot: () -> Unit = {},
     isAutoPilotConfirmEnabled: Boolean = false,
@@ -745,6 +747,14 @@ fun BrowserMenuOverlay(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
+
+                InLayoutMenuItem(
+                    title = if (forceDarkWebPages) "☀️ Switch to Light Mode" else "🌙 Switch to Dark Mode",
+                    color = if (forceDarkWebPages) Color(0xFFFDD663) else Color(0xFFE8EAED),
+                    isBold = true
+                ) {
+                    onToggleForceDark()
+                }
 
                 val (dsTitle, dsColor) = when (dataSaverMode) {
                     "EXTREME" -> "🔥 Data-saver (Extreme)" to Color(0xFF3FB950)
