@@ -1770,8 +1770,12 @@ class BrowserStateHolder(
     }
 
     fun fillSuggestion(suggestion: SearchSuggestion) {
-        urlInputText = suggestion.text
-        onSearchInputChanged(suggestion.text)
+        val textToPopulate = when (suggestion.type) {
+            SuggestionType.SEARCH_QUERY -> suggestion.text
+            else -> suggestion.targetUrl
+        }
+        urlInputText = textToPopulate
+        onSearchInputChanged(textToPopulate)
     }
 
     fun dismissSearch() {
