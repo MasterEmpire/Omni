@@ -458,6 +458,15 @@ class WebViewPoolManager(
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url?.toString() ?: return false
+
+                    // Omni Shield Hardcoded Interception
+                    if (isOmniShieldBlocked(url)) {
+                        bridge.log("OMNI_SHIELD", "🛑 Blocked explicit URL: $url")
+                        bridge.showToast("🛡️ Omni Shield: Explicit Content Blocked")
+                        view?.loadDataWithBaseURL(null, OMNI_SHIELD_BLOCKED_HTML, "text/html", "UTF-8", null)
+                        return true
+                    }
+
                     val isMainFrame = request.isForMainFrame
 
                     // Subframes & iframes (such as Conduit IDE live preview) must render in-memory blobs freely
@@ -475,6 +484,12 @@ class WebViewPoolManager(
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val reqUri = request?.url ?: return super.shouldInterceptRequest(view, request)
                     val host = reqUri.host?.lowercase(Locale.US) ?: ""
+
+                    // Omni Shield Hardcoded Network Blackhole
+                    if (isOmniShieldBlocked(reqUri.toString())) {
+                        bridge.log("OMNI_SHIELD", "🛑 Blackholed adult network request: $reqUri")
+                        return WebResourceResponse("text/html", "UTF-8", 403, "Forbidden", emptyMap(), OMNI_SHIELD_BLOCKED_HTML.byteInputStream())
+                    }
                     val port = if (reqUri.port != -1) reqUri.port else 80
 
                     if ((host == "localhost" || host == "127.0.0.1") && port == localPort) {
