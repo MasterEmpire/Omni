@@ -1,0 +1,14 @@
+{
+  "id": "focus_shield",
+  "name": "Focus Shield",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.focus.FocusShieldPlugin",
+  "description": "Hardcore Distraction & Browser Lockdown with Anti-Tamper Network Clock",
+  "icon": "res/icon.png",
+  "permissions": [
+    "android.permission.PACKAGE_USAGE_STATS",
+    "android.permission.SYSTEM_ALERT_WINDOW",
+    "android.permission.WAKE_LOCK"
+  ],
+  "autoStart": true
+}
