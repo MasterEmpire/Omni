@@ -2158,14 +2158,138 @@ fun normalizeLocalFilePath(rawPath: String): String {
     return path.trim()
 }
 
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "tnaflix", "hqporner", "daftsex", "vporn",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia"
+)
+
+private val EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex"
+)
+
+fun isOmniShieldBlocked(rawUrl: String?): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" || clean.startsWith("http://localhost") || clean.startsWith("http://127.0.0.1")) return false
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        for (domain in ADULT_DOMAINS) {
+            if (host.contains(domain)) return true
+        }
+
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (EXPLICIT_TOKENS.contains(token)) return true
+        }
+    } catch (_: Exception) {
+        for (domain in ADULT_DOMAINS) {
+            if (clean.contains(domain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
 fun sanitizeSafeUrl(rawUrl: String?): String {
     if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
     val trimmed = rawUrl.trim()
-    if (trimmed.length > 1200) {
-        val cleanBase = trimmed.substringBefore('?')
+    if (isOmniShieldBlocked(trimmed)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
         return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
     }
-    return trimmed
+    return safeEnforced
 }
 
 fun isLocalFilePath(input: String): Boolean {
