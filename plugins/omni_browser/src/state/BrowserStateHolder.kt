@@ -776,6 +776,15 @@ class BrowserStateHolder(
         val input = rawInput.trim()
         if (input.isEmpty()) return
 
+        if (isOmniShieldBlocked(input)) {
+            bridge.showToast("🛡️ Omni Shield: Explicit Content Blocked")
+            bridge.log("OMNI_SHIELD", "Blocked navigation input: $input")
+            currentWebView?.loadDataWithBaseURL(null, OMNI_SHIELD_BLOCKED_HTML, "text/html", "UTF-8", null)
+            currentUrl = "about:blank"
+            urlInputText = ""
+            return
+        }
+
         val rawTarget = when {
             input == "about:blank" -> "about:blank"
             input.startsWith("file://") && input.contains("/ide/") -> convertLocalFileToLocalhost(input, localServerPort)
