@@ -79,7 +79,7 @@ object AccessibilityDispatcher {
                 val t0 = System.currentTimeMillis()
                 listener(event, service)
                 val duration = System.currentTimeMillis() - t0
-                if (duration > 16) {
+                if (duration > 1000) {
                     OmniLogger.log(
                         "A11Y_PERF",
                         "⚠️ Slow Accessibility Listener: ${duration}ms on Main Thread! (pkg=${event.packageName}, type=${event.eventType})"
