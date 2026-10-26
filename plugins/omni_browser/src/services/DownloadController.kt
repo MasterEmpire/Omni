@@ -71,16 +71,23 @@ class DownloadController(
                             if (status == DownloadManager.STATUS_SUCCESSFUL) {
                                 var resolved: File? = null
 
-                                // 1. Query DownloadManager content URI via ContentResolver for exact DATA path
+                                var actualDisplayName: String? = null
+
+                                // 1. Query DownloadManager content URI for exact name and path
                                 try {
                                     val downloadUri = dm.getUriForDownloadedFile(dId)
                                     if (downloadUri != null) {
-                                        context.contentResolver.query(downloadUri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                                        context.contentResolver.query(downloadUri, null, null, null, null)?.use { c ->
                                             if (c.moveToFirst()) {
-                                                val path = c.getString(0)
-                                                if (!path.isNullOrEmpty()) {
-                                                    val f = File(path)
-                                                    if (f.exists() && f.length() > 0) resolved = f
+                                                val nameIdx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                                if (nameIdx >= 0) actualDisplayName = c.getString(nameIdx)
+                                                val dataIdx = c.getColumnIndex(MediaStore.MediaColumns.DATA)
+                                                if (dataIdx >= 0) {
+                                                    val path = c.getString(dataIdx)
+                                                    if (!path.isNullOrEmpty()) {
+                                                        val f = File(path)
+                                                        if (f.exists() && f.length() > 0) resolved = f
+                                                    }
                                                 }
                                             }
                                         }
@@ -104,7 +111,7 @@ class DownloadController(
                                     }
                                 }
 
-                                // 3. Decode COLUMN_LOCAL_URI (file://)
+                                // 3. Decode COLUMN_LOCAL_URI (file:// or content://)
                                 if (resolved == null && localUriCol >= 0) {
                                     val uriStr = cursor.getString(localUriCol)
                                     if (!uriStr.isNullOrEmpty()) {
@@ -112,18 +119,40 @@ class DownloadController(
                                         if (u.scheme == "file") {
                                             val f = File(u.path ?: "")
                                             if (f.exists() && f.length() > 0) resolved = f
+                                        } else if (u.scheme == "content" && actualDisplayName == null) {
+                                            try {
+                                                context.contentResolver.query(u, null, null, null, null)?.use { c ->
+                                                    if (c.moveToFirst()) {
+                                                        val nameIdx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                                        if (nameIdx >= 0) actualDisplayName = c.getString(nameIdx)
+                                                    }
+                                                }
+                                            } catch (_: Exception) {}
                                         }
                                     }
                                 }
 
-                                // 4. Search OmniDownloads and root Downloads, picking newest matching file
+                                // 4. Search OmniDownloads and root Downloads with fuzzy suffix support (-1, (1), etc.)
                                 if (resolved == null) {
                                     val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                                    val candidates = listOf(
-                                        File(File(downloadsDir, "OmniDownloads"), title),
-                                        File(downloadsDir, title)
-                                    ).filter { it.exists() && it.length() > 0 }
-                                    resolved = candidates.maxByOrNull { it.lastModified() }
+                                    val searchDirs = listOf(File(downloadsDir, "OmniDownloads"), downloadsDir)
+                                    val effectiveTargetName = actualDisplayName ?: title
+                                    val baseName = effectiveTargetName.substringBeforeLast(".")
+                                    val ext = effectiveTargetName.substringAfterLast(".", "")
+
+                                    val matchedCandidates = mutableListOf<File>()
+                                    for (dir in searchDirs) {
+                                        if (dir.exists() && dir.isDirectory) {
+                                            dir.listFiles()?.filter { f ->
+                                                f.isFile && f.length() > 0 &&
+                                                (f.name.equals(effectiveTargetName, ignoreCase = true) ||
+                                                 (ext.isNotEmpty() && f.name.startsWith(baseName, ignoreCase = true) && f.name.endsWith(".$ext", ignoreCase = true)) ||
+                                                 (ext.isEmpty() && f.name.startsWith(baseName, ignoreCase = true)))
+                                            }?.let { matchedCandidates.addAll(it) }
+                                        }
+                                    }
+                                    // Always pick the newest downloaded file matching the pattern
+                                    resolved = matchedCandidates.maxByOrNull { it.lastModified() }
                                 }
 
                                 val targetFile = resolved
