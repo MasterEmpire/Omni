@@ -15,6 +15,35 @@ jobs:
 
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.ref || github.event.client_payload.branch || github.ref }}
+          fetch-depth: 0
+
+      - name: Audit Source Code & Commit Fingerprint
+        run: |
+          echo "=========================================================="
+          echo "🔍 [CI AUDIT] CHECKED-OUT COMMIT & REPOSITORY STATE"
+          echo "=========================================================="
+          echo "📌 Checked-out SHA : $(git rev-parse HEAD)"
+          echo "🌿 Current Branch  : $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'detached HEAD')"
+          echo "👤 Last Committer  : $(git log -1 --pretty=format:'%an <%ae> on %cd')"
+          echo "💬 Last Commit Msg : $(git log -1 --pretty=format:'%s')"
+          echo "=========================================================="
+          echo "📜 RECENT 3 COMMITS:"
+          git log -3 --oneline
+          echo "=========================================================="
+          echo "🔍 [CI AUDIT] Inspecting app/build.gradle version:"
+          grep -E "versionCode|versionName" app/build.gradle
+          echo "=========================================================="
+          echo "🔍 [CI AUDIT] Inspecting MainActivity.kt for appVersion badge:"
+          grep -n "appVersion" app/src/main/java/com/omni/hub/MainActivity.kt || echo "❌ appVersion NOT FOUND in checked-out MainActivity.kt!"
+          echo "=========================================================="
+          echo "🔍 [CI AUDIT] Inspecting AccessibilityDispatcher.kt for @JvmOverloads:"
+          grep -n "isServiceActive" app/src/main/java/com/omni/hub/api/AccessibilityDispatcher.kt || echo "❌ isServiceActive NOT FOUND in checked-out code!"
+          echo "=========================================================="
+          echo "🔍 [CI AUDIT] Inspecting PluginManager.kt for focus_shield immunity:"
+          grep -n "focus_shield" app/src/main/java/com/omni/hub/loader/PluginManager.kt || echo "❌ focus_shield NOT FOUND in PluginManager.kt!"
+          echo "=========================================================="
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
