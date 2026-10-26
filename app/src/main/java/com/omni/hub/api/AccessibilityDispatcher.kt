@@ -31,6 +31,7 @@ object AccessibilityDispatcher {
      * running, connected via Binder, and capable of retrieving window tree dumps.
      * Avoids false positives from stale Settings.Secure SQLite entries after process death.
      */
+    @JvmOverloads
     fun isServiceActive(context: Context? = null): Boolean {
         val s = activeService ?: return false
         return try {
