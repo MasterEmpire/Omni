@@ -676,8 +676,14 @@ class HostBridgeImpl(
             try {
                 val appContext = context.applicationContext
                 val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-                if (view.isAttachedToWindow) {
-                    wm?.removeView(view)
+                try {
+                    if (view.parent != null || view.isAttachedToWindow) {
+                        wm?.removeViewImmediate(view)
+                    }
+                } catch (_: Exception) {
+                    try {
+                        wm?.removeView(view)
+                    } catch (_: Exception) {}
                 }
                 lifecycleOwner?.destroy()
                 OmniLogger.log("OVERLAY", "🧹 System overlay dismissed: [$tag]")
