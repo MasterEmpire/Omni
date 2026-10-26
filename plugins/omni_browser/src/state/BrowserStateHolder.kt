@@ -149,8 +149,8 @@ class BrowserStateHolder(
     // AI Studio Profile Analytics & Health
     var aiAnalytics by mutableStateOf<Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>>(emptyMap())
 
-    // Live On-Screen Auto-Pilot State
-    var isAutoPilotUserArmed by mutableStateOf(true)
+    // Live On-Screen Auto-Pilot State (In-Memory Only, Defaults to Off)
+    var isAutoPilotUserArmed by mutableStateOf(false)
     var isLiveAutoPilotEnabled by mutableStateOf(false)
     var isAutoPilotConfirmEnabled by mutableStateOf(false)
     var pendingAutoPilotPayload by mutableStateOf<String?>(null)
@@ -206,7 +206,6 @@ class BrowserStateHolder(
         try {
             val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
             isAutoPilotConfirmEnabled = prefs.getBoolean("autopilot_confirm_enabled", false)
-            isAutoPilotUserArmed = prefs.getBoolean("autopilot_user_armed", true)
         } catch (_: Exception) {}
 
         vaultManager.loadSolverConfig()?.let { config ->
@@ -969,11 +968,7 @@ class BrowserStateHolder(
             return
         }
         isAutoPilotUserArmed = !isAutoPilotUserArmed
-        try {
-            val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
-            prefs.edit().putBoolean("autopilot_user_armed", isAutoPilotUserArmed).apply()
-        } catch (_: Exception) {}
-        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot intent: userArmed=$isAutoPilotUserArmed")
+        bridge.log("AUTOPILOT_PIPELINE", "🔘 [TOGGLE] User toggled Live Auto-Pilot in RAM (userArmed=$isAutoPilotUserArmed)")
         syncAutoPilotStateForCurrentTab(isExplicitUserToggle = true)
     }
 
