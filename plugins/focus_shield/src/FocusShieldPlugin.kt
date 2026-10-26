@@ -216,20 +216,22 @@ class FocusShieldPlugin : PluginEntry() {
 
         // Fallback: Check rootInActiveWindow ONLY IF its package is a blocked target
         if (targetWindowRoot == null) {
-            val root = try {
+            val activeRoot = try {
                 service.rootInActiveWindow
             } catch (_: Exception) {
                 null
             }
-            val rootPkg = root?.packageName?.toString() ?: ""
-            if (rootPkg != context.packageName && rootPkg != "com.omni.hub" &&
-                rootPkg != "com.sec.android.app.launcher" && rootPkg != "com.android.systemui" &&
-                (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg))) {
-                val rect = Rect()
-                root.getBoundsInScreen(rect)
-                targetWindowRoot = root
-                targetWindowBounds = rect
-                targetPkg = rootPkg
+            if (activeRoot != null) {
+                val rootPkg = activeRoot.packageName?.toString() ?: ""
+                if (rootPkg != context.packageName && rootPkg != "com.omni.hub" &&
+                    rootPkg != "com.sec.android.app.launcher" && rootPkg != "com.android.systemui" &&
+                    (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg))) {
+                    val rect = Rect()
+                    activeRoot.getBoundsInScreen(rect)
+                    targetWindowRoot = activeRoot
+                    targetWindowBounds = rect
+                    targetPkg = rootPkg
+                }
             }
         }
 
@@ -245,9 +247,9 @@ class FocusShieldPlugin : PluginEntry() {
         }
 
         lastTargetSeenTimeMs = System.currentTimeMillis()
-        val root = targetWindowRoot
-        val bounds = targetWindowBounds
-        val pkg = targetPkg
+        val root: AccessibilityNodeInfo = targetWindowRoot!!
+        val bounds: Rect = targetWindowBounds!!
+        val pkg: String = targetPkg!!
 
         val appLabel = try {
             val pm = context.packageManager
