@@ -261,9 +261,12 @@ class FocusShieldPlugin : PluginEntry() {
         }
 
         // If NO window on screen belongs to a blocked app:
+        // If NO window on screen belongs to a blocked app:
         if (targetWindows.isEmpty()) {
+            targetFirstSeenTimeMs = 0L
             if (isOverlayMounted) {
                 val now = System.currentTimeMillis()
+                // Only dismiss if the target window has truly vanished for > 2.5 seconds
                 if (now - lastTargetSeenTimeMs > 2500L) {
                     dismissPopupOverlay(bridge)
                 }
@@ -271,7 +274,11 @@ class FocusShieldPlugin : PluginEntry() {
             return
         }
 
-        lastTargetSeenTimeMs = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        lastTargetSeenTimeMs = now
+        if (targetFirstSeenTimeMs == 0L) {
+            targetFirstSeenTimeMs = now
+        }
 
         // Primary content window for the overlay shield (spans full pop-up body)
         val shieldWindow = primaryContentWindow ?: targetWindows.maxByOrNull { it.bounds.height() }!!
@@ -297,16 +304,19 @@ class FocusShieldPlugin : PluginEntry() {
         // 3. Execute Dual-Window Sniper on ALL target windows (searching pill window + content window)
         val killed = huntAndKillMultiWindow(service, targetWindows, bridge, appLabel)
         if (killed) {
+            targetFirstSeenTimeMs = 0L
             return
         }
 
-        // 4. Mount or reposition precision overlay over the FULL pop-up body
+        // 4. Mount precision overlay ONLY IF sniper hasn't neutralized it within 350ms grace period
         if (isPopup) {
-            mountOrUpdatePopupOverlay(context, bridge, appLabel, bounds)
+            if (now - targetFirstSeenTimeMs >= 350L) {
+                mountOrUpdatePopupOverlay(context, bridge, appLabel, bounds)
+            }
         } else {
+            targetFirstSeenTimeMs = 0L
             dismissPopupOverlay(bridge)
         }
-    }
 
     private fun huntAndKillMultiWindow(
         service: AccessibilityService,
@@ -482,11 +492,13 @@ class FocusShieldPlugin : PluginEntry() {
     private fun engageKillSuccess(bridge: HostBridge) {
         bridge.vibrate(150L)
         isClosingPopUp = true
+        targetFirstSeenTimeMs = 0L
         dismissPopupOverlay(bridge)
         CoroutineScope(Dispatchers.Main).launch {
-            delay(150L)
+            delay(100L)
             dismissPopupOverlay(bridge)
-            delay(350L)
+            delay(250L)
+            dismissPopupOverlay(bridge)
             isClosingPopUp = false
         }
     }
@@ -1493,6 +1505,7 @@ class FocusShieldPlugin : PluginEntry() {
 
         @Volatile var isOverlayMounted = false
         @Volatile var isClosingPopUp = false
+        @Volatile var targetFirstSeenTimeMs = 0L
         @Volatile var lastOverlayBounds = Rect()
         @Volatile var lastTargetSeenTimeMs = 0L
         @Volatile var lastSubtreeDumpTimeMs = 0L
