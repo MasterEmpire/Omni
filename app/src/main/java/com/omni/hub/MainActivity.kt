@@ -177,17 +177,6 @@ fun DashboardScreen(context: Context) {
 
     var plugins by remember { mutableStateOf(PluginManager.getInstalledPlugins(context)) }
     var cloudModules by remember { mutableStateOf<List<CloudModule>>(emptyList()) }
-
-    val appVersion = remember {
-        try {
-            val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            val vName = pInfo.versionName ?: "1.0"
-            val vCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pInfo.longVersionCode else @Suppress("DEPRECATION") pInfo.versionCode.toLong()
-            "v$vName ($vCode)"
-        } catch (_: Exception) {
-            "v1.0"
-        }
-    }
     var isCloudLoading by remember { mutableStateOf(false) }
     var isBackendOnline by remember { mutableStateOf<Boolean?>(null) }
     var downloadingIds by remember { mutableStateOf(setOf<String>()) }
@@ -558,25 +547,8 @@ fun DashboardScreen(context: Context) {
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Omni Hub", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White)
-                            Spacer(Modifier.width(6.dp))
-
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF21262D),
-                                border = BorderStroke(1.dp, Color(0xFF30363D))
-                            ) {
-                                Text(
-                                    text = appVersion,
-                                    color = Color(0xFF58A6FF),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-
-                            Spacer(Modifier.width(6.dp))
-
+                            Spacer(Modifier.width(8.dp))
+                            
                             // Backend Connectivity Beacon Dot
                             Box(
                                 modifier = Modifier
