@@ -92,6 +92,9 @@ object PluginManager {
     }
 
     fun deletePlugin(context: Context, pluginId: String) {
+        if (pluginId == "scroll_lock" || pluginId == "focus_shield") {
+            return
+        }
         PluginLoader.invalidate(pluginId)
         val targetBaseDir = context.getDir("plugins", Context.MODE_PRIVATE)
         File(targetBaseDir, pluginId).deleteRecursively()
