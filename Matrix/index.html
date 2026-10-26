@@ -486,8 +486,15 @@
     let isProcessingTick = false;
 
     function initApp() {
-      const savedUrl = localStorage.getItem("matrix_sb_url");
+      let savedUrl = localStorage.getItem("matrix_sb_url");
       const savedKey = localStorage.getItem("matrix_sb_key");
+
+      // Auto-correct .supabase.com -> .supabase.co
+      if (savedUrl && savedUrl.includes(".supabase.com")) {
+        console.warn("Auto-correcting .supabase.com to .supabase.co");
+        savedUrl = savedUrl.replace(".supabase.com", ".supabase.co");
+        localStorage.setItem("matrix_sb_url", savedUrl);
+      }
 
       if (savedUrl && savedKey) {
         initSupabase(savedUrl, savedKey);
@@ -536,9 +543,15 @@
     }
 
     function saveConfig() {
-      const url = document.getElementById("cfg-url").value.trim();
+      let url = document.getElementById("cfg-url").value.trim();
       const key = document.getElementById("cfg-key").value.trim();
       if (!url || !key) return alert("Please fill both credentials");
+
+      // Auto-correct .supabase.com -> .supabase.co
+      if (url.includes(".supabase.com")) {
+        console.warn("Auto-correcting .supabase.com to .supabase.co");
+        url = url.replace(".supabase.com", ".supabase.co");
+      }
 
       localStorage.setItem("matrix_sb_url", url);
       localStorage.setItem("matrix_sb_key", key);
