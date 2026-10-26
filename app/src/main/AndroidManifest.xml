@@ -12,7 +12,24 @@
         <intent>
             <action android:name="com.spotify.mobile.android.metadatachanged" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
+
+    <!-- 👁️ Full Package Visibility for Installed Apps and Browser Detection -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
     <!-- 🛡️ Signature Trampoline Permission -->
     <permission android:name="com.omni.hub.permission.RESURRECT" android:protectionLevel="signature" />
