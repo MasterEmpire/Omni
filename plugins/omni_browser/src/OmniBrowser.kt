@@ -657,6 +657,8 @@ class OmniBrowser : PluginEntry() {
                 onOpenSettings = { state.showSettingsDialog = true },
                 onExitBrowser = {
                     state.showMenu = false
+                    state.isAutoPilotUserArmed = false
+                    state.syncAutoPilotStateForCurrentTab()
                     coroutineScope.launch {
                         delay(400)
                         bridge.close()
