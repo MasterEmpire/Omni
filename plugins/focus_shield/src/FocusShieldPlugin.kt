@@ -112,6 +112,39 @@ object NetworkClockGuard {
     }
 }
 
+object TelegramDetector {
+    private val webApkCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    fun isTelegram(context: Context, pkg: String): Boolean {
+        if (pkg.isEmpty()) return false
+        val lowerPkg = pkg.lowercase(Locale.US)
+        if (lowerPkg.contains("telegram") ||
+            lowerPkg == "org.thunderdog.challegram" ||
+            lowerPkg == "nekox.messenger" ||
+            lowerPkg == "org.forkclient.messenger" ||
+            lowerPkg == "com.ime.android" ||
+            lowerPkg == "org.aka.messenger") {
+            return true
+        }
+
+        // WebAPK PWA Detection (Chrome/Chromium PWAs)
+        if (lowerPkg.startsWith("org.chromium.webapk") || lowerPkg.contains("webapk")) {
+            return webApkCache.computeIfAbsent(pkg) {
+                try {
+                    val pm = context.packageManager
+                    val ai = pm.getApplicationInfo(pkg, 0)
+                    val label = pm.getApplicationLabel(ai).toString().lowercase(Locale.US)
+                    label.contains("telegram")
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+
+        return false
+    }
+}
+
 class FocusShieldPlugin : PluginEntry() {
 
     private val accessibilityListener: AccessibilityListener = { event, service ->
@@ -193,8 +226,9 @@ class FocusShieldPlugin : PluginEntry() {
             return
         }
 
-        // 1b. Anti-Tamper Deflection for Android Settings during active lock
-        if (eventPkg == "com.android.settings" || eventPkg.startsWith("com.android.settings.")) {
+        // 1b. Anti-Tamper Deflection for Android Settings & Telegram during active lock
+        if (eventPkg == "com.android.settings" || eventPkg.startsWith("com.android.settings.") ||
+            TelegramDetector.isTelegram(context, eventPkg)) {
             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -229,7 +263,8 @@ class FocusShieldPlugin : PluginEntry() {
                 val pkg = root.packageName?.toString() ?: continue
                 if (pkg != context.packageName && pkg != "com.omni.hub" &&
                     (KNOWN_BROWSER_PACKAGES.contains(pkg) || customPkgs.contains(pkg) ||
-                     pkg == "com.android.settings" || pkg.startsWith("com.android.settings."))) {
+                     pkg == "com.android.settings" || pkg.startsWith("com.android.settings.") ||
+                     TelegramDetector.isTelegram(context, pkg))) {
                     val rect = Rect()
                     w.getBoundsInScreen(rect)
                     val entry = TargetWindowEntry(root, rect, pkg)
@@ -257,7 +292,8 @@ class FocusShieldPlugin : PluginEntry() {
                     rootPkg != "com.sec.android.app.launcher" && rootPkg != "com.android.systemui" &&
                     !rootPkg.contains("inputmethod") &&
                     (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg) ||
-                     rootPkg == "com.android.settings" || rootPkg.startsWith("com.android.settings."))) {
+                     rootPkg == "com.android.settings" || rootPkg.startsWith("com.android.settings.") ||
+                     TelegramDetector.isTelegram(context, rootPkg))) {
                     val rect = Rect()
                     activeRoot.getBoundsInScreen(rect)
                     val entry = TargetWindowEntry(activeRoot, rect, rootPkg)
@@ -743,8 +779,9 @@ class FocusShieldPlugin : PluginEntry() {
         val isBrowser = KNOWN_BROWSER_PACKAGES.contains(fgPkg)
         val isCustomBlocked = customPkgs.contains(fgPkg)
         val isSettings = fgPkg == "com.android.settings" || fgPkg.startsWith("com.android.settings.")
+        val isTelegram = TelegramDetector.isTelegram(context, fgPkg)
 
-        val isTargetBlocked = isBrowser || isCustomBlocked || isSettings
+        val isTargetBlocked = isBrowser || isCustomBlocked || isSettings || isTelegram
 
         if (isTargetBlocked) {
             val appLabel = try {
@@ -756,6 +793,7 @@ class FocusShieldPlugin : PluginEntry() {
 
             val reason = when {
                 isSettings -> "Settings is locked to prevent tampering."
+                isTelegram -> "Telegram is locked."
                 isPanicActive -> "Focus Lock active! Browsers and blacklist trapped."
                 isNightSchedule -> "Night Guard active (10:00 PM – 6:00 AM). Sleep mode engaged."
                 else -> "App is blacklisted."
