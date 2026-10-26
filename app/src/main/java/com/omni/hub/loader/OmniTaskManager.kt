@@ -167,7 +167,7 @@ object OmniTaskManager {
         OmniLogger.log("TASK_MANAGER", "Killing task UI [${target.pluginName}]")
         sessionHistory.removeAll { it == taskId }
 
-        val isDaemonActive = PluginTaskEngine.isDaemonEnabled(context, target.pluginId) || target.pluginId == "scroll_lock"
+        val isDaemonActive = PluginTaskEngine.isDaemonEnabled(context, target.pluginId) || target.pluginId == "scroll_lock" || target.pluginId == "focus_shield"
         if (!isDaemonActive) {
             try {
                 target.bridge.dismissAllOverlays()
@@ -191,7 +191,7 @@ object OmniTaskManager {
         OmniLogger.log("TASK_MANAGER", "Clearing all ${activeSessions.size} active sessions")
         sessionHistory.clear()
         activeSessions.forEach { session ->
-            val isDaemonActive = PluginTaskEngine.isDaemonEnabled(context, session.pluginId) || session.pluginId == "scroll_lock"
+            val isDaemonActive = PluginTaskEngine.isDaemonEnabled(context, session.pluginId) || session.pluginId == "scroll_lock" || session.pluginId == "focus_shield"
             if (!isDaemonActive) {
                 try {
                     session.bridge.dismissAllOverlays()
