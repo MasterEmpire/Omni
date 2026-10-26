@@ -317,6 +317,7 @@ class FocusShieldPlugin : PluginEntry() {
             targetFirstSeenTimeMs = 0L
             dismissPopupOverlay(bridge)
         }
+    }
 
     private fun huntAndKillMultiWindow(
         service: AccessibilityService,
