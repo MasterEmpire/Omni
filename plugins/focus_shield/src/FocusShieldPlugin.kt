@@ -169,13 +169,11 @@ class FocusShieldPlugin : PluginEntry() {
         val bridge = activeBridge ?: return
         val context = activeContext ?: service
 
-        // 1. FAST-EXIT GATE: 0ms overhead for keyboards, typing events, Settings, and Omni Hub itself
+        // 1. FAST-EXIT GATE: 0ms overhead for keyboards, typing events, and Omni Hub itself
         val eventPkg = event.packageName?.toString() ?: ""
         if (eventPkg.isEmpty() ||
             eventPkg == context.packageName ||
             eventPkg == "com.omni.hub" ||
-            eventPkg == "com.android.settings" ||
-            eventPkg.startsWith("com.android.settings.") ||
             eventPkg.contains("inputmethod") ||
             event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
             event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
@@ -192,6 +190,17 @@ class FocusShieldPlugin : PluginEntry() {
             if (isOverlayMounted) {
                 dismissPopupOverlay(bridge)
             }
+            return
+        }
+
+        // 1b. Anti-Tamper Deflection for Android Settings during active lock
+        if (eventPkg == "com.android.settings" || eventPkg.startsWith("com.android.settings.")) {
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            context.startActivity(homeIntent)
+            bridge.vibrate(200L)
             return
         }
 
@@ -219,8 +228,8 @@ class FocusShieldPlugin : PluginEntry() {
 
                 val pkg = root.packageName?.toString() ?: continue
                 if (pkg != context.packageName && pkg != "com.omni.hub" &&
-                    pkg != "com.android.settings" && !pkg.startsWith("com.android.settings.") &&
-                    (KNOWN_BROWSER_PACKAGES.contains(pkg) || customPkgs.contains(pkg))) {
+                    (KNOWN_BROWSER_PACKAGES.contains(pkg) || customPkgs.contains(pkg) ||
+                     pkg == "com.android.settings" || pkg.startsWith("com.android.settings."))) {
                     val rect = Rect()
                     w.getBoundsInScreen(rect)
                     val entry = TargetWindowEntry(root, rect, pkg)
@@ -246,9 +255,9 @@ class FocusShieldPlugin : PluginEntry() {
                 val rootPkg = activeRoot.packageName?.toString() ?: ""
                 if (rootPkg != context.packageName && rootPkg != "com.omni.hub" &&
                     rootPkg != "com.sec.android.app.launcher" && rootPkg != "com.android.systemui" &&
-                    rootPkg != "com.android.settings" && !rootPkg.startsWith("com.android.settings.") &&
                     !rootPkg.contains("inputmethod") &&
-                    (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg))) {
+                    (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg) ||
+                     rootPkg == "com.android.settings" || rootPkg.startsWith("com.android.settings."))) {
                     val rect = Rect()
                     activeRoot.getBoundsInScreen(rect)
                     val entry = TargetWindowEntry(activeRoot, rect, rootPkg)
@@ -328,23 +337,15 @@ class FocusShieldPlugin : PluginEntry() {
         val now = System.currentTimeMillis()
         if (now - lastTapAttemptTimeMs < 400L) return false
 
-        bridge.log("FOCUS_SHIELD_TAP", "🎯 [SNIPER_HUNT] Scanning ${windows.size} window(s) for [$appLabel]...")
-
         // --- STAGE 1: Direct Headshot on android:id/close_window across all windows ---
         for (w in windows) {
             val root = (w as? Any)?.let { getWindowRoot(it) } ?: continue
             val closeNodes = root.findAccessibilityNodeInfosByViewId("android:id/close_window")
             if (closeNodes.isNotEmpty()) {
                 val closeBtn = closeNodes[0]
-                val btnBounds = Rect()
-                closeBtn.getBoundsInScreen(btnBounds)
-                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 1] Found 'android:id/close_window'! Bounds: ${btnBounds.toShortString()}, clickable=${closeBtn.isClickable}")
-
                 if (closeBtn.isClickable) {
                     lastTapAttemptTimeMs = now
-                    val clicked = closeBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 1] Executed ACTION_CLICK on close_window! Result: $clicked")
-                    if (clicked) {
+                    if (closeBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                         engageKillSuccess(bridge)
                         return true
                     }
@@ -352,9 +353,7 @@ class FocusShieldPlugin : PluginEntry() {
                     closeBtn.parent?.let { parent ->
                         if (parent.isClickable) {
                             lastTapAttemptTimeMs = now
-                            val clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 1] Executed ACTION_CLICK on close_window parent! Result: $clicked")
-                            if (clicked) {
+                            if (parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                                 engageKillSuccess(bridge)
                                 return true
                             }
@@ -371,8 +370,6 @@ class FocusShieldPlugin : PluginEntry() {
             if (quickPill != null) {
                 val qBounds = Rect()
                 quickPill.getBoundsInScreen(qBounds)
-                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 2] Found Samsung 'Quick options' pill handle! Bounds: ${qBounds.toShortString()}, clickable=${quickPill.isClickable}")
-
                 lastTapAttemptTimeMs = now
                 var expanded = false
                 if (quickPill.isClickable) {
@@ -381,16 +378,11 @@ class FocusShieldPlugin : PluginEntry() {
                 if (!expanded && quickPill.parent?.isClickable == true) {
                     expanded = quickPill.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 }
-
-                // If node click failed, simulate physical gesture tap at exact center
                 if (!expanded && qBounds.width() > 0 && qBounds.height() > 0) {
-                    bridge.log("FOCUS_SHIELD_TAP", "🖐️ [STAGE 2] Node click failed. Simulating physical finger tap at (${qBounds.centerX()}, ${qBounds.centerY()})...")
                     expanded = dispatchTapGesture(service, qBounds.centerX().toFloat(), qBounds.centerY().toFloat(), bridge)
                 }
-
-                bridge.log("FOCUS_SHIELD_TAP", "👉 [STAGE 2] 'Quick options' pill expansion result: $expanded")
                 if (expanded) {
-                    return false // Let next event frame click the newly revealed close_window
+                    return false
                 }
             }
         }
@@ -403,8 +395,6 @@ class FocusShieldPlugin : PluginEntry() {
                 val caption = captionNodes[0]
                 val capBounds = Rect()
                 caption.getBoundsInScreen(capBounds)
-                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 3] Found 'android:id/caption'. Bounds: ${capBounds.toShortString()}, clickable=${caption.isClickable}")
-
                 var expanded = false
                 if (caption.isClickable) {
                     expanded = caption.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -414,7 +404,6 @@ class FocusShieldPlugin : PluginEntry() {
                         val child = caption.getChild(i) ?: continue
                         if (child.isClickable) {
                             expanded = child.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            bridge.log("FOCUS_SHIELD_TAP", "👆 [STAGE 3] Tapped caption child [#$i: ${child.viewIdResourceName}]! Result: $expanded")
                             if (expanded) break
                         }
                     }
@@ -423,7 +412,6 @@ class FocusShieldPlugin : PluginEntry() {
                     expanded = dispatchTapGesture(service, capBounds.centerX().toFloat(), capBounds.centerY().toFloat(), bridge)
                 }
                 lastTapAttemptTimeMs = now
-                bridge.log("FOCUS_SHIELD_TAP", "👉 [STAGE 3] Caption fallback tap result: $expanded")
             }
         }
 
@@ -433,12 +421,9 @@ class FocusShieldPlugin : PluginEntry() {
             val minNodes = root.findAccessibilityNodeInfosByViewId("android:id/minimize_window")
             if (minNodes.isNotEmpty()) {
                 val minBtn = minNodes[0]
-                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 4] Found 'android:id/minimize_window'! Clickable=${minBtn.isClickable}")
                 if (minBtn.isClickable) {
                     lastTapAttemptTimeMs = now
-                    val minimized = minBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 4] Clicked minimize_window! Result: $minimized")
-                    if (minimized) {
+                    if (minBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                         engageKillSuccess(bridge)
                         return true
                     }
@@ -455,24 +440,10 @@ class FocusShieldPlugin : PluginEntry() {
                 if (cand.viewIdResourceName == "android:id/close_window") continue
                 if (cand.isClickable) {
                     lastTapAttemptTimeMs = now
-                    val clicked = cand.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 5] Clicked generic candidate [${cand.contentDescription ?: cand.text}]! Result: $clicked")
-                    if (clicked) {
+                    if (cand.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                         engageKillSuccess(bridge)
                         return true
                     }
-                }
-            }
-        }
-
-        // Async debug dump if still not closed (Throttled every 3.5s, background thread)
-        if (now - lastSubtreeDumpTimeMs > 3500L && windows.isNotEmpty()) {
-            lastSubtreeDumpTimeMs = now
-            val primaryRoot = getWindowRoot(windows[0])
-            if (primaryRoot != null) {
-                CoroutineScope(Dispatchers.Default).launch {
-                    val dump = dumpSubtree(primaryRoot, 0)
-                    bridge.log("FOCUS_SHIELD_DUMP", "❌ [DEBUG DUMP] Pop-up active. Hierarchy:\n$dump")
                 }
             }
         }
@@ -510,16 +481,7 @@ class FocusShieldPlugin : PluginEntry() {
                 val path = Path().apply { moveTo(x, y) }
                 val stroke = GestureDescription.StrokeDescription(path, 0, 50)
                 val gesture = GestureDescription.Builder().addStroke(stroke).build()
-                val dispatched = service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
-                    override fun onCompleted(gestureDescription: GestureDescription?) {
-                        bridge.log("FOCUS_SHIELD_TAP", "🖐️ [GESTURE_SUCCESS] Physical tap completed at ($x, $y)!")
-                    }
-                    override fun onCancelled(gestureDescription: GestureDescription?) {
-                        bridge.log("FOCUS_SHIELD_TAP", "⚠️ [GESTURE_CANCELLED] Physical tap cancelled at ($x, $y).")
-                    }
-                }, null)
-                bridge.log("FOCUS_SHIELD_TAP", "🖐️ [GESTURE_DISPATCH] Physical tap dispatched at ($x, $y). Result: $dispatched")
-                dispatched
+                service.dispatchGesture(gesture, null, null)
             } catch (e: Exception) {
                 bridge.log("FOCUS_SHIELD_TAP_ERR", "Physical gesture error: ${e.message}")
                 false
@@ -570,28 +532,7 @@ class FocusShieldPlugin : PluginEntry() {
         }
     }
 
-    private fun dumpSubtree(node: AccessibilityNodeInfo?, depth: Int): String {
-        if (node == null || depth > 5) return ""
-        val indent = "  ".repeat(depth)
-        val id = node.viewIdResourceName ?: "null"
-        val cls = node.className?.toString()?.substringAfterLast(".") ?: "View"
-        val desc = node.contentDescription ?: ""
-        val text = node.text ?: ""
-        val clickable = if (node.isClickable) " [CLICKABLE]" else ""
-        val bounds = Rect()
-        node.getBoundsInScreen(bounds)
 
-        val sb = StringBuilder()
-        sb.append("$indent- <$cls id=\"$id\" desc=\"$desc\" text=\"$text\" bounds=\"${bounds.toShortString()}\"$clickable>\n")
-
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i)
-            if (child != null) {
-                sb.append(dumpSubtree(child, depth + 1))
-            }
-        }
-        return sb.toString()
-    }
 
     private fun mountOrUpdatePopupOverlay(
         context: Context,
@@ -646,7 +587,6 @@ class FocusShieldPlugin : PluginEntry() {
             if (lastOverlayBounds != bounds) {
                 lastOverlayBounds.set(bounds)
                 bridge.updateOverlay(POPUP_OVERLAY_TAG, x, y, width, height)
-                bridge.log("FOCUS_SHIELD_POPUP", "Repositioned precision shield to [x=$x, y=$y, ${width}x${height}]")
             }
         }
     }
@@ -799,16 +739,12 @@ class FocusShieldPlugin : PluginEntry() {
         val fgPkg = getForegroundApp(context) ?: return
         if (fgPkg == context.packageName || fgPkg == "com.omni.hub") return
 
-        // Settings explicitly whitelisted
-        if (fgPkg == "com.android.settings" || fgPkg.startsWith("com.android.settings.")) {
-            return
-        }
-
         val customPkgs = customLockedApps.map { it.packageName }.toSet()
         val isBrowser = KNOWN_BROWSER_PACKAGES.contains(fgPkg)
         val isCustomBlocked = customPkgs.contains(fgPkg)
+        val isSettings = fgPkg == "com.android.settings" || fgPkg.startsWith("com.android.settings.")
 
-        val isTargetBlocked = isBrowser || isCustomBlocked
+        val isTargetBlocked = isBrowser || isCustomBlocked || isSettings
 
         if (isTargetBlocked) {
             val appLabel = try {
@@ -819,6 +755,7 @@ class FocusShieldPlugin : PluginEntry() {
             }
 
             val reason = when {
+                isSettings -> "Settings is locked to prevent tampering."
                 isPanicActive -> "Focus Lock active! Browsers and blacklist trapped."
                 isNightSchedule -> "Night Guard active (10:00 PM – 6:00 AM). Sleep mode engaged."
                 else -> "App is blacklisted."
@@ -861,7 +798,6 @@ class FocusShieldPlugin : PluginEntry() {
                                 if (isWakeLockHeld) {
                                     bridge.releaseWakeLock()
                                     isWakeLockHeld = false
-                                    bridge.log("FOCUS_SHIELD", "Screen OFF: WakeLock released. Hibernating.")
                                 }
                             }
                             Intent.ACTION_SCREEN_ON,
@@ -870,7 +806,6 @@ class FocusShieldPlugin : PluginEntry() {
                                 if (!isWakeLockHeld) {
                                     bridge.acquireWakeLock("FocusShieldSentinel")
                                     isWakeLockHeld = true
-                                    bridge.log("FOCUS_SHIELD", "Screen ON: WakeLock engaged.")
                                 }
                                 checkImmediateEviction(context, bridge)
                             }
