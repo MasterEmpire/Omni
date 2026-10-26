@@ -1,7 +1,9 @@
 package com.omni.plugin.focus
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.app.AppOpsManager
+import android.graphics.Path
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
@@ -167,11 +169,13 @@ class FocusShieldPlugin : PluginEntry() {
         val bridge = activeBridge ?: return
         val context = activeContext ?: service
 
-        // 1. FAST-EXIT GATE: 0ms overhead for keyboards, typing events, and Omni Hub itself
+        // 1. FAST-EXIT GATE: 0ms overhead for keyboards, typing events, Settings, and Omni Hub itself
         val eventPkg = event.packageName?.toString() ?: ""
         if (eventPkg.isEmpty() ||
             eventPkg == context.packageName ||
             eventPkg == "com.omni.hub" ||
+            eventPkg == "com.android.settings" ||
+            eventPkg.startsWith("com.android.settings.") ||
             eventPkg.contains("inputmethod") ||
             event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
             event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
@@ -193,19 +197,19 @@ class FocusShieldPlugin : PluginEntry() {
 
         val customPkgs = customLockedApps.map { it.packageName }.toSet()
 
-        // 2. Inspect all interactive windows (Skip auxiliary handle windows < 350px)
+        // 2. Dual-Window Inspection: Keep all target windows for sniper click, find largest for overlay shield
         val windows = try {
             service.windows
         } catch (_: Exception) {
             emptyList()
         }
 
-        var targetWindowRoot: AccessibilityNodeInfo? = null
-        var targetWindowBounds: Rect? = null
-        var targetPkg: String? = null
+        data class TargetWindowEntry(val root: AccessibilityNodeInfo, val bounds: Rect, val pkg: String)
+        val targetWindows = mutableListOf<TargetWindowEntry>()
+        var primaryContentWindow: TargetWindowEntry? = null
+        var largestArea = 0
 
         if (windows.isNotEmpty()) {
-            var largestArea = 0
             for (w in windows) {
                 val root = try {
                     w.root
@@ -215,28 +219,24 @@ class FocusShieldPlugin : PluginEntry() {
 
                 val pkg = root.packageName?.toString() ?: continue
                 if (pkg != context.packageName && pkg != "com.omni.hub" &&
+                    pkg != "com.android.settings" && !pkg.startsWith("com.android.settings.") &&
                     (KNOWN_BROWSER_PACKAGES.contains(pkg) || customPkgs.contains(pkg))) {
                     val rect = Rect()
                     w.getBoundsInScreen(rect)
-
-                    // Skip tiny auxiliary handle windows (< 350px height) if multiple windows exist
-                    if (rect.height() < 350 && windows.size > 1) {
-                        continue
-                    }
+                    val entry = TargetWindowEntry(root, rect, pkg)
+                    targetWindows.add(entry)
 
                     val area = rect.width() * rect.height()
-                    if (area > largestArea) {
+                    if (rect.height() >= 350 && area > largestArea) {
                         largestArea = area
-                        targetWindowRoot = root
-                        targetWindowBounds = rect
-                        targetPkg = pkg
+                        primaryContentWindow = entry
                     }
                 }
             }
         }
 
         // Fallback: Check rootInActiveWindow ONLY IF its package is a blocked target & height >= 350px
-        if (targetWindowRoot == null) {
+        if (targetWindows.isEmpty()) {
             val activeRoot = try {
                 service.rootInActiveWindow
             } catch (_: Exception) {
@@ -246,24 +246,24 @@ class FocusShieldPlugin : PluginEntry() {
                 val rootPkg = activeRoot.packageName?.toString() ?: ""
                 if (rootPkg != context.packageName && rootPkg != "com.omni.hub" &&
                     rootPkg != "com.sec.android.app.launcher" && rootPkg != "com.android.systemui" &&
+                    rootPkg != "com.android.settings" && !rootPkg.startsWith("com.android.settings.") &&
                     !rootPkg.contains("inputmethod") &&
                     (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg))) {
                     val rect = Rect()
                     activeRoot.getBoundsInScreen(rect)
+                    val entry = TargetWindowEntry(activeRoot, rect, rootPkg)
+                    targetWindows.add(entry)
                     if (rect.height() >= 350) {
-                        targetWindowRoot = activeRoot
-                        targetWindowBounds = rect
-                        targetPkg = rootPkg
+                        primaryContentWindow = entry
                     }
                 }
             }
         }
 
         // If NO window on screen belongs to a blocked app:
-        if (targetWindowRoot == null || targetWindowBounds == null || targetPkg == null) {
+        if (targetWindows.isEmpty()) {
             if (isOverlayMounted) {
                 val now = System.currentTimeMillis()
-                // Only dismiss if the target window has truly vanished for > 2.5 seconds
                 if (now - lastTargetSeenTimeMs > 2500L) {
                     dismissPopupOverlay(bridge)
                 }
@@ -272,9 +272,11 @@ class FocusShieldPlugin : PluginEntry() {
         }
 
         lastTargetSeenTimeMs = System.currentTimeMillis()
-        val root: AccessibilityNodeInfo = targetWindowRoot!!
-        val bounds: Rect = targetWindowBounds!!
-        val pkg: String = targetPkg!!
+
+        // Primary content window for the overlay shield (spans full pop-up body)
+        val shieldWindow = primaryContentWindow ?: targetWindows.maxByOrNull { it.bounds.height() }!!
+        val bounds = shieldWindow.bounds
+        val pkg = shieldWindow.pkg
 
         val appLabel = try {
             val pm = context.packageManager
@@ -292,18 +294,13 @@ class FocusShieldPlugin : PluginEntry() {
                       bounds.height() < (screenHeight * 0.92f) ||
                       bounds.top > 80 || bounds.left > 10
 
-        bridge.log(
-            "FOCUS_SHIELD_POPUP",
-            "Target [$appLabel] ($pkg) confirmed. Full Bounds: ${bounds.toShortString()} | isPopup=$isPopup (Screen: ${screenWidth}x${screenHeight})"
-        )
-
-        // 3. Execute Silent Headshot on Caption Bar / Quick Options
-        val killed = huntAndKillPopup(root, bridge, appLabel, isPopup)
+        // 3. Execute Dual-Window Sniper on ALL target windows (searching pill window + content window)
+        val killed = huntAndKillMultiWindow(service, targetWindows, bridge, appLabel)
         if (killed) {
             return
         }
 
-        // 4. Mount or reposition precision overlay over the FULL pop-up coordinates
+        // 4. Mount or reposition precision overlay over the FULL pop-up body
         if (isPopup) {
             mountOrUpdatePopupOverlay(context, bridge, appLabel, bounds)
         } else {
@@ -311,173 +308,210 @@ class FocusShieldPlugin : PluginEntry() {
         }
     }
 
-    private fun huntAndKillPopup(
-        root: AccessibilityNodeInfo,
+    private fun huntAndKillMultiWindow(
+        service: AccessibilityService,
+        windows: List<Any>,
         bridge: HostBridge,
-        appLabel: String,
-        isPopup: Boolean
+        appLabel: String
     ): Boolean {
         val now = System.currentTimeMillis()
-        if (now - lastTapAttemptTimeMs < 450L) return false
+        if (now - lastTapAttemptTimeMs < 400L) return false
 
-        bridge.log("FOCUS_SHIELD_TAP", "🎯 [POPUP_HUNT] Scanning caption controls for [$appLabel]...")
+        bridge.log("FOCUS_SHIELD_TAP", "🎯 [SNIPER_HUNT] Scanning ${windows.size} window(s) for [$appLabel]...")
 
-        // --- STAGE 1: Direct Headshot on android:id/close_window ---
-        val closeNodes = root.findAccessibilityNodeInfosByViewId("android:id/close_window")
-        if (closeNodes.isNotEmpty()) {
-            val closeBtn = closeNodes[0]
-            val btnBounds = Rect()
-            closeBtn.getBoundsInScreen(btnBounds)
-            bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 1] Found 'android:id/close_window'! Bounds: ${btnBounds.toShortString()}, clickable=${closeBtn.isClickable}, desc='${closeBtn.contentDescription}'")
+        // --- STAGE 1: Direct Headshot on android:id/close_window across all windows ---
+        for (w in windows) {
+            val root = (w as? Any)?.let { getWindowRoot(it) } ?: continue
+            val closeNodes = root.findAccessibilityNodeInfosByViewId("android:id/close_window")
+            if (closeNodes.isNotEmpty()) {
+                val closeBtn = closeNodes[0]
+                val btnBounds = Rect()
+                closeBtn.getBoundsInScreen(btnBounds)
+                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 1] Found 'android:id/close_window'! Bounds: ${btnBounds.toShortString()}, clickable=${closeBtn.isClickable}")
 
-            if (closeBtn.isClickable) {
-                lastTapAttemptTimeMs = now
-                val clicked = closeBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 1] Executed ACTION_CLICK on close_window button! Result: $clicked")
-                if (clicked) {
-                    bridge.vibrate(150L)
-                    isClosingPopUp = true
-                    dismissPopupOverlay(bridge)
-                    CoroutineScope(Dispatchers.Main).launch {
-                        delay(150L)
-                        dismissPopupOverlay(bridge)
-                        delay(350L)
-                        isClosingPopUp = false
+                if (closeBtn.isClickable) {
+                    lastTapAttemptTimeMs = now
+                    val clicked = closeBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 1] Executed ACTION_CLICK on close_window! Result: $clicked")
+                    if (clicked) {
+                        engageKillSuccess(bridge)
+                        return true
                     }
-                    return true
-                }
-            } else {
-                closeBtn.parent?.let { parent ->
-                    if (parent.isClickable) {
-                        lastTapAttemptTimeMs = now
-                        val clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 1] Executed ACTION_CLICK on close_window parent! Result: $clicked")
-                        if (clicked) {
-                            bridge.vibrate(150L)
-                            isClosingPopUp = true
-                            dismissPopupOverlay(bridge)
-                            CoroutineScope(Dispatchers.Main).launch {
-                                delay(150L)
-                                dismissPopupOverlay(bridge)
-                                delay(350L)
-                                isClosingPopUp = false
+                } else {
+                    closeBtn.parent?.let { parent ->
+                        if (parent.isClickable) {
+                            lastTapAttemptTimeMs = now
+                            val clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 1] Executed ACTION_CLICK on close_window parent! Result: $clicked")
+                            if (clicked) {
+                                engageKillSuccess(bridge)
+                                return true
                             }
-                            return true
                         }
                     }
                 }
             }
-        } else {
-            bridge.log("FOCUS_SHIELD_TAP", "⚠️ [STAGE 1] 'android:id/close_window' not visible yet.")
         }
 
-        // --- STAGE 2: Direct Target on Samsung One UI 'Quick options' Pill Handle ---
-        if (closeNodes.isEmpty()) {
-            val quickOptionsNode = findNodeByDescOrText(root, "Quick options")
-            if (quickOptionsNode != null) {
+        // --- STAGE 2: Direct Target on Samsung 'Quick options' Pill Handle (Window A) ---
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val quickPill = findNodeByDescOrText(root, "Quick options")
+            if (quickPill != null) {
                 val qBounds = Rect()
-                quickOptionsNode.getBoundsInScreen(qBounds)
-                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 2] Found Samsung 'Quick options' pill handle! Bounds: ${qBounds.toShortString()}, clickable=${quickOptionsNode.isClickable}")
+                quickPill.getBoundsInScreen(qBounds)
+                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 2] Found Samsung 'Quick options' pill handle! Bounds: ${qBounds.toShortString()}, clickable=${quickPill.isClickable}")
 
                 lastTapAttemptTimeMs = now
                 var expanded = false
-                if (quickOptionsNode.isClickable) {
-                    expanded = quickOptionsNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if (quickPill.isClickable) {
+                    expanded = quickPill.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 }
-                if (!expanded && quickOptionsNode.parent?.isClickable == true) {
-                    expanded = quickOptionsNode.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if (!expanded && quickPill.parent?.isClickable == true) {
+                    expanded = quickPill.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 }
-                bridge.log("FOCUS_SHIELD_TAP", "👆 [STAGE 2] Tapped 'Quick options' pill handle to expand buttons! Result: $expanded")
+
+                // If node click failed, simulate physical gesture tap at exact center
+                if (!expanded && qBounds.width() > 0 && qBounds.height() > 0) {
+                    bridge.log("FOCUS_SHIELD_TAP", "🖐️ [STAGE 2] Node click failed. Simulating physical finger tap at (${qBounds.centerX()}, ${qBounds.centerY()})...")
+                    expanded = dispatchTapGesture(service, qBounds.centerX().toFloat(), qBounds.centerY().toFloat(), bridge)
+                }
+
+                bridge.log("FOCUS_SHIELD_TAP", "👉 [STAGE 2] 'Quick options' pill expansion result: $expanded")
                 if (expanded) {
-                    return false // Let next event frame click android:id/close_window
+                    return false // Let next event frame click the newly revealed close_window
                 }
-            } else {
-                bridge.log("FOCUS_SHIELD_TAP", "⚠️ [STAGE 2] 'Quick options' pill handle not found.")
             }
         }
 
         // --- STAGE 3: Secondary Handle Fallback on android:id/caption ---
-        val captionNodes = root.findAccessibilityNodeInfosByViewId("android:id/caption")
-        if (captionNodes.isNotEmpty() && closeNodes.isEmpty()) {
-            val caption = captionNodes[0]
-            val capBounds = Rect()
-            caption.getBoundsInScreen(capBounds)
-            bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 3] Found 'android:id/caption' fallback. Bounds: ${capBounds.toShortString()}, clickable=${caption.isClickable}")
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val captionNodes = root.findAccessibilityNodeInfosByViewId("android:id/caption")
+            if (captionNodes.isNotEmpty()) {
+                val caption = captionNodes[0]
+                val capBounds = Rect()
+                caption.getBoundsInScreen(capBounds)
+                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 3] Found 'android:id/caption'. Bounds: ${capBounds.toShortString()}, clickable=${caption.isClickable}")
 
-            var expanded = false
-            if (caption.isClickable) {
-                expanded = caption.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            }
-            if (!expanded) {
-                for (i in 0 until caption.childCount) {
-                    val child = caption.getChild(i) ?: continue
-                    if (child.isClickable) {
-                        expanded = child.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        bridge.log("FOCUS_SHIELD_TAP", "👆 [STAGE 3] Tapped caption child [#$i: ${child.viewIdResourceName}]! Result: $expanded")
-                        if (expanded) break
+                var expanded = false
+                if (caption.isClickable) {
+                    expanded = caption.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                }
+                if (!expanded) {
+                    for (i in 0 until caption.childCount) {
+                        val child = caption.getChild(i) ?: continue
+                        if (child.isClickable) {
+                            expanded = child.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            bridge.log("FOCUS_SHIELD_TAP", "👆 [STAGE 3] Tapped caption child [#$i: ${child.viewIdResourceName}]! Result: $expanded")
+                            if (expanded) break
+                        }
                     }
                 }
+                if (!expanded && capBounds.width() > 0 && capBounds.height() > 0) {
+                    expanded = dispatchTapGesture(service, capBounds.centerX().toFloat(), capBounds.centerY().toFloat(), bridge)
+                }
+                lastTapAttemptTimeMs = now
+                bridge.log("FOCUS_SHIELD_TAP", "👉 [STAGE 3] Caption fallback tap result: $expanded")
             }
-            lastTapAttemptTimeMs = now
-            bridge.log("FOCUS_SHIELD_TAP", "👉 [STAGE 3] Caption fallback tap result: $expanded")
         }
 
         // --- STAGE 4: Secondary Target: android:id/minimize_window ---
-        val minNodes = root.findAccessibilityNodeInfosByViewId("android:id/minimize_window")
-        if (minNodes.isNotEmpty() && closeNodes.isEmpty()) {
-            val minBtn = minNodes[0]
-            bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 4] Falling back to 'android:id/minimize_window'! Clickable=${minBtn.isClickable}")
-            if (minBtn.isClickable) {
-                lastTapAttemptTimeMs = now
-                val minimized = minBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 4] Clicked minimize_window! Result: $minimized")
-                if (minimized) {
-                    isClosingPopUp = true
-                    dismissPopupOverlay(bridge)
-                    CoroutineScope(Dispatchers.Main).launch {
-                        delay(200L)
-                        dismissPopupOverlay(bridge)
-                        delay(300L)
-                        isClosingPopUp = false
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val minNodes = root.findAccessibilityNodeInfosByViewId("android:id/minimize_window")
+            if (minNodes.isNotEmpty()) {
+                val minBtn = minNodes[0]
+                bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 4] Found 'android:id/minimize_window'! Clickable=${minBtn.isClickable}")
+                if (minBtn.isClickable) {
+                    lastTapAttemptTimeMs = now
+                    val minimized = minBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 4] Clicked minimize_window! Result: $minimized")
+                    if (minimized) {
+                        engageKillSuccess(bridge)
+                        return true
                     }
-                    return true
                 }
             }
         }
 
         // --- STAGE 5: Generic Close Candidate Search ---
-        val candidates = mutableListOf<AccessibilityNodeInfo>()
-        findCloseCandidates(root, candidates)
-        for (cand in candidates) {
-            if (cand.viewIdResourceName == "android:id/close_window") continue
-            bridge.log("FOCUS_SHIELD_TAP", "🔍 [STAGE 5] Generic candidate found: id=${cand.viewIdResourceName}, desc='${cand.contentDescription}', text='${cand.text}', clickable=${cand.isClickable}")
-            if (cand.isClickable) {
-                lastTapAttemptTimeMs = now
-                val clicked = cand.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 5] Clicked candidate [${cand.contentDescription ?: cand.text}]! Result: $clicked")
-                if (clicked) {
-                    isClosingPopUp = true
-                    dismissPopupOverlay(bridge)
-                    CoroutineScope(Dispatchers.Main).launch {
-                        delay(200L)
-                        dismissPopupOverlay(bridge)
-                        delay(300L)
-                        isClosingPopUp = false
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val candidates = mutableListOf<AccessibilityNodeInfo>()
+            findCloseCandidates(root, candidates)
+            for (cand in candidates) {
+                if (cand.viewIdResourceName == "android:id/close_window") continue
+                if (cand.isClickable) {
+                    lastTapAttemptTimeMs = now
+                    val clicked = cand.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    bridge.log("FOCUS_SHIELD_TAP", "💥 [STAGE 5] Clicked generic candidate [${cand.contentDescription ?: cand.text}]! Result: $clicked")
+                    if (clicked) {
+                        engageKillSuccess(bridge)
+                        return true
                     }
-                    return true
                 }
             }
         }
 
-        // Async debug dump (Throttled every 3.5s, background thread)
-        if (now - lastSubtreeDumpTimeMs > 3500L) {
+        // Async debug dump if still not closed (Throttled every 3.5s, background thread)
+        if (now - lastSubtreeDumpTimeMs > 3500L && windows.isNotEmpty()) {
             lastSubtreeDumpTimeMs = now
-            CoroutineScope(Dispatchers.Default).launch {
-                val dump = dumpSubtree(root, 0)
-                bridge.log("FOCUS_SHIELD_DUMP", "❌ [DEBUG DUMP] Caption controls not clicked. Pop-up node hierarchy:\n$dump")
+            val primaryRoot = getWindowRoot(windows[0])
+            if (primaryRoot != null) {
+                CoroutineScope(Dispatchers.Default).launch {
+                    val dump = dumpSubtree(primaryRoot, 0)
+                    bridge.log("FOCUS_SHIELD_DUMP", "❌ [DEBUG DUMP] Pop-up active. Hierarchy:\n$dump")
+                }
             }
         }
 
+        return false
+    }
+
+    private fun getWindowRoot(entry: Any): AccessibilityNodeInfo? {
+        return try {
+            val field = entry.javaClass.getDeclaredField("root")
+            field.isAccessible = true
+            field.get(entry) as? AccessibilityNodeInfo
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun engageKillSuccess(bridge: HostBridge) {
+        bridge.vibrate(150L)
+        isClosingPopUp = true
+        dismissPopupOverlay(bridge)
+        CoroutineScope(Dispatchers.Main).launch {
+            delay(150L)
+            dismissPopupOverlay(bridge)
+            delay(350L)
+            isClosingPopUp = false
+        }
+    }
+
+    private fun dispatchTapGesture(service: AccessibilityService, x: Float, y: Float, bridge: HostBridge): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return try {
+                val path = Path().apply { moveTo(x, y) }
+                val stroke = GestureDescription.StrokeDescription(path, 0, 50)
+                val gesture = GestureDescription.Builder().addStroke(stroke).build()
+                val dispatched = service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        bridge.log("FOCUS_SHIELD_TAP", "🖐️ [GESTURE_SUCCESS] Physical tap completed at ($x, $y)!")
+                    }
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        bridge.log("FOCUS_SHIELD_TAP", "⚠️ [GESTURE_CANCELLED] Physical tap cancelled at ($x, $y).")
+                    }
+                }, null)
+                bridge.log("FOCUS_SHIELD_TAP", "🖐️ [GESTURE_DISPATCH] Physical tap dispatched at ($x, $y). Result: $dispatched")
+                dispatched
+            } catch (e: Exception) {
+                bridge.log("FOCUS_SHIELD_TAP_ERR", "Physical gesture error: ${e.message}")
+                false
+            }
+        }
         return false
     }
 
@@ -752,12 +786,16 @@ class FocusShieldPlugin : PluginEntry() {
         val fgPkg = getForegroundApp(context) ?: return
         if (fgPkg == context.packageName || fgPkg == "com.omni.hub") return
 
+        // Settings explicitly whitelisted
+        if (fgPkg == "com.android.settings" || fgPkg.startsWith("com.android.settings.")) {
+            return
+        }
+
         val customPkgs = customLockedApps.map { it.packageName }.toSet()
         val isBrowser = KNOWN_BROWSER_PACKAGES.contains(fgPkg)
         val isCustomBlocked = customPkgs.contains(fgPkg)
-        val isSettingsApp = fgPkg == "com.android.settings"
 
-        val isTargetBlocked = isBrowser || isCustomBlocked || isSettingsApp
+        val isTargetBlocked = isBrowser || isCustomBlocked
 
         if (isTargetBlocked) {
             val appLabel = try {
