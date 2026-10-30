@@ -130,6 +130,8 @@ class BrowserStateHolder(
     var isErudaEnabled by mutableStateOf(false)
     var dataSaverMode by mutableStateOf("MEDIUM") // "OFF", "MEDIUM", "EXTREME"
     val isDataSaverEnabled: Boolean get() = dataSaverMode != "OFF"
+    var blockAiStudioBack by mutableStateOf(true)
+    var lastAiStudioBackPressTimestamp = 0L
 
     // Automator States
     var showAutomationDialog by mutableStateOf(false)
@@ -337,6 +339,7 @@ class BrowserStateHolder(
             isBackgroundAudioEnabled = config.backgroundAudio
             dataSaverMode = config.dataSaverMode
             filePickerProvider = config.filePickerProvider
+            blockAiStudioBack = config.blockAiStudioBack
             poolManager.localPort = config.localPort
             poolManager.updateForceDark(config.forceDark)
             syncDataSaver()
@@ -2346,6 +2349,11 @@ class BrowserStateHolder(
                 true
             }
             currentUrl == "about:blank" -> false
+            blockAiStudioBack && currentUrl.contains("aistudio.google.com") && (System.currentTimeMillis() - lastAiStudioBackPressTimestamp > 2000L) -> {
+                lastAiStudioBackPressTimestamp = System.currentTimeMillis()
+                bridge.showToast("🛡️ Tap back again to leave AI Studio")
+                true
+            }
             currentWebView?.canGoBack() == true -> { currentWebView?.goBack(); true }
             else -> { navigateTo("about:blank"); true }
         }
