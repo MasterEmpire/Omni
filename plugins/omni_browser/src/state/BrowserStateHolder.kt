@@ -899,7 +899,7 @@ class BrowserStateHolder(
         val input = rawInput.trim()
         if (input.isEmpty()) return
 
-        if (isOmniShieldBlocked(input)) {
+        if (isOmniShieldBlocked(input, context)) {
             bridge.showToast("🛡️ Omni Shield: Explicit Content Blocked")
             bridge.log("OMNI_SHIELD", "Blocked navigation input: $input")
             currentWebView?.loadDataWithBaseURL(null, OMNI_SHIELD_BLOCKED_HTML, "text/html", "UTF-8", null)
@@ -1804,6 +1804,19 @@ class BrowserStateHolder(
     }
 
     fun onSearchInputChanged(input: String) {
+        if (com.omni.plugin.browser.utils.isFocusLockActive(context)) {
+            val qLower = input.lowercase(java.util.Locale.US)
+            val badWord = com.omni.plugin.browser.utils.EXTENSIVE_EXPLICIT_TOKENS.find { qLower.contains(it) }
+            if (badWord != null) {
+                bridge.log("FOCUS_SHIELD", "🛑 Vulgar search attempt blocked: '$badWord'")
+                bridge.showToast("🛡️ Focus Shield: Vulgarity blocked.")
+                urlInputText = ""
+                dismissSearch()
+                closeTab(activeTabId, suppressUndo = true)
+                return
+            }
+        }
+
         urlInputText = input
         suggestionJob?.cancel()
         val query = input.trim()
@@ -2375,7 +2388,7 @@ class BrowserStateHolder(
     }
 
     override fun onUrlChanged(tabId: String, url: String, canGoBack: Boolean, canGoForward: Boolean) {
-        val safeUrl = sanitizeSafeUrl(url)
+        val safeUrl = sanitizeSafeUrl(url, context)
         if (activeTabId == tabId) {
             this.canGoBack = canGoBack
             this.canGoForward = canGoForward
@@ -2474,6 +2487,15 @@ class BrowserStateHolder(
         vaultManager.saveAiAnalytics(newMap)
         val profName = profiles.find { it.id == profileId }?.name ?: profileId
         bridge.showToast("✅ Quota status reset for '$profName'")
+    }
+
+    override fun onFocusViolation(tabId: String) {
+        bridge.log("FOCUS_SHIELD", "🛑 Vulgarity typed on tab [$tabId]. Terminating tab.")
+        bridge.showToast("🛡️ Focus Shield: Vulgarity detected. Tab terminated.")
+        closeTab(tabId, suppressUndo = true)
+        if (currentUrl != "about:blank") {
+            navigateTo("about:blank")
+        }
     }
 
     override fun onPageFinished(tabId: String, url: String) {
