@@ -324,6 +324,7 @@ fun SettingsBackupDialog(
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
+    onCustomizeMenu: () -> Unit,
     onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String, String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -601,6 +602,27 @@ fun SettingsBackupDialog(
 
                 HorizontalDivider(color = Color(0xFF3C4043))
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("⋮ Dynamic Menu Matrix", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Control layout, order, and visibility of 3-dots menu", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Button(
+                        onClick = onCustomizeMenu,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text("Layout", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF3C4043))
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("NoCaptchaAI Solver", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     TextButton(onClick = onSolveNow) {
@@ -812,6 +834,167 @@ fun EditShortcutDialog(
                 ) {
                     Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
                 }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color(0xFF9AA0A6))
+            }
+        }
+    )
+}
+
+@Composable
+fun MenuCustomizerDialog(
+    initialActive: List<String>,
+    initialHidden: List<String>,
+    onSave: (List<String>, List<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var active by remember { mutableStateOf(initialActive) }
+    var hidden by remember { mutableStateOf(initialHidden) }
+
+    val names = mapOf(
+        "force_dark" to "☀️/🌙 Dark Mode Toggle",
+        "data_saver" to "🛡️ Data-saver Mode",
+        "copy_url" to "🔗 Copy Clean URL",
+        "dom_snapshot" to "📸 Capture DOM Snapshot",
+        "local_ide" to "💻 Open Local IDE",
+        "autopilot" to "⚡ Live Auto-Pilot",
+        "ai_automator" to "🤖 AI Studio Automator",
+        "smart_notes" to "📝 Smart Notes",
+        "downloads" to "📥 Downloads",
+        "recents" to "📱 Recents Deck",
+        "diagnostics" to "📋 Diagnostics Console",
+        "settings" to "⚙️ General Settings",
+        "exit" to "🚪 Exit Omni Chrome"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF282C34),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("⋮", fontSize = 24.sp, color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                Text("Customize Menu", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                item {
+                    Text("ACTIVE ITEMS", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                }
+
+                items(active.size) { index ->
+                    val id = active[index]
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF1F2227),
+                        border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(names[id] ?: id, color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(
+                                    onClick = {
+                                        if (index > 0) {
+                                            val mut = active.toMutableList()
+                                            val temp = mut[index - 1]
+                                            mut[index - 1] = id
+                                            mut[index] = temp
+                                            active = mut
+                                        }
+                                    },
+                                    enabled = index > 0,
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Up", tint = if (index > 0) Color(0xFF58A6FF) else Color(0xFF5F6368))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (index < active.size - 1) {
+                                            val mut = active.toMutableList()
+                                            val temp = mut[index + 1]
+                                            mut[index + 1] = id
+                                            mut[index] = temp
+                                            active = mut
+                                        }
+                                    },
+                                    enabled = index < active.size - 1,
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Down", tint = if (index < active.size - 1) Color(0xFF58A6FF) else Color(0xFF5F6368))
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(
+                                    onClick = {
+                                        active = active.filter { it != id }
+                                        hidden = hidden + id
+                                    },
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.height(24.dp)
+                                ) {
+                                    Text("Hide", color = Color(0xFFF28B82), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (hidden.isNotEmpty()) {
+                    item {
+                        Spacer(Modifier.height(12.dp))
+                        Text("HIDDEN ITEMS", color = Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                    }
+
+                    items(hidden.size) { index ->
+                        val id = hidden[index]
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF161B22),
+                            border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(names[id] ?: id, color = Color(0xFF9AA0A6), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                TextButton(
+                                    onClick = {
+                                        hidden = hidden.filter { it != id }
+                                        active = active + id
+                                    },
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.height(24.dp)
+                                ) {
+                                    Text("+ Show", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(active, hidden) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
+            ) {
+                Text("Save Layout", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
