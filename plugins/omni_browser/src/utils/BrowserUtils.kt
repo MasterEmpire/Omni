@@ -2230,7 +2230,19 @@ val EXTENSIVE_EXPLICIT_TOKENS = EXPLICIT_TOKENS + setOf(
     "penis", "slut", "whore", "rule34", "danbooru", "gelbooru", "e-hentai", 
     "nhentai", "hitomi", "thothub", "coomer", "kemono", "squirt", "dildo", 
     "vibrator", "stepmom", "stepbro", "futa", "erotica", "fetish", "kink", 
-    "bondage", "orgasm", "escorts"
+    "bondage", "orgasm", "escorts", "hentai", "smut", "doujin", "bitch", 
+    "cunt", "faggot", "motherfucker", "camgirl", "camshow", "stripchat", 
+    "chaturbate", "spankbang", "xvideos", "pornhub", "eporner", "beeg", 
+    "naughtyamerica", "brazzers", "bangbros", "faketaxi", "publicagent", 
+    "onlyfans", "fansly", "manyvids", "loyalfans", "xhamster", "redtube", 
+    "xnxx", "xnx", "tube8", "youporn", "nsfw", "gore", "bestiality", 
+    "zoophilia", "necrophilia", "pedophile", "loli", "shota", 
+    "snuff", "scat", "pegging", "gloryhole", "bukkake", "gangbang", 
+    "threesome", "swinger", "cuckold", "cuck", "jerkoff", "joi", "ceb", 
+    "sph", "sissy", "chastity", "findom", "feet", "footfetish", "bdsm", 
+    "dominatrix", "submissive", "slave", "master", "mistress", "hentaigasm", 
+    "hanime", "asshole", "buttplug", "anal", "deepthroat", 
+    "facesitting", "facial", "cum", "cumshot", "creampie", "swallow"
 )
 
 private var lastFocusLockCheckTime = 0L
