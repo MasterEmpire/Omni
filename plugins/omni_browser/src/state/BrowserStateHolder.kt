@@ -124,6 +124,7 @@ class BrowserStateHolder(
 
     // Solver & Data-saver States
     var solverApiKey by mutableStateOf("")
+    var filePickerProvider by mutableStateOf("NEXUS")
     var autoSolveEnabled by mutableStateOf(true)
     var forceDarkWebPages by mutableStateOf(false)
     var isErudaEnabled by mutableStateOf(false)
@@ -217,6 +218,7 @@ class BrowserStateHolder(
             isDesktopMode = config.desktopMode
             isBackgroundAudioEnabled = config.backgroundAudio
             dataSaverMode = config.dataSaverMode
+            filePickerProvider = config.filePickerProvider
             poolManager.localPort = config.localPort
             poolManager.updateForceDark(config.forceDark)
             syncDataSaver()
@@ -850,7 +852,8 @@ class BrowserStateHolder(
             erudaEnabled = isErudaEnabled,
             desktopMode = isDesktopMode,
             backgroundAudio = isBackgroundAudioEnabled,
-            dataSaverMode = dataSaverMode
+            dataSaverMode = dataSaverMode,
+            filePickerProvider = filePickerProvider
         )
         val statusMsg = if (forceDarkWebPages) "🌙 Dark Mode Enabled" else "☀️ Light Mode Enabled"
         bridge.showToast(statusMsg)
@@ -2440,23 +2443,57 @@ class BrowserStateHolder(
         activeFileChooserCallback = filePathCallback
 
         val launcher = fileChooserLauncherBlock
-        if (launcher != null && fileChooserParams != null) {
-            try {
-                val intent = fileChooserParams.createIntent()
-                bridge.log("FILE_CHOOSER", "Dispatching WebChromeClient file chooser intent")
-                launcher(intent)
-            } catch (e: Exception) {
-                bridge.log("FILE_CHOOSER_WARN", "createIntent failed: ${e.message}. Falling back to Intent.ACTION_GET_CONTENT")
+        if (launcher != null) {
+            val allowMultiple = fileChooserParams?.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+            val isNexusInstalled = try {
+                context.packageManager.getLaunchIntentForPackage("com.conduit.nexus") != null
+            } catch (_: Exception) { false }
+
+            if (filePickerProvider == "NEXUS" && isNexusInstalled) {
+                bridge.log("FILE_CHOOSER", "🚀 Routing file upload directly to Conduit Nexus (multiple=$allowMultiple)")
                 try {
-                    val fallbackIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "*/*"
+                    val nexusIntent = Intent("com.conduit.nexus.action.PICK_FILE").apply {
+                        setPackage("com.conduit.nexus")
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+                        putExtra("extra_picker_mode", true)
+                        val types = fileChooserParams?.acceptTypes?.filter { it.isNotBlank() }
+                        if (!types.isNullOrEmpty()) {
+                            type = types.first()
+                            if (types.size > 1) {
+                                putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+                            }
+                        } else {
+                            type = "*/*"
+                        }
                     }
-                    launcher(Intent.createChooser(fallbackIntent, "Select File"))
-                } catch (err: Exception) {
-                    bridge.log("FILE_CHOOSER_ERR", "File chooser invocation failed: ${err.message}")
-                    activeFileChooserCallback?.onReceiveValue(null)
-                    activeFileChooserCallback = null
+                    launcher(nexusIntent)
+                    return
+                } catch (e: Exception) {
+                    bridge.log("FILE_CHOOSER_WARN", "Nexus launch attempt failed: ${e.message}. Falling back.")
+                }
+            }
+
+            if (fileChooserParams != null) {
+                try {
+                    val intent = fileChooserParams.createIntent()
+                    bridge.log("FILE_CHOOSER", "Dispatching WebChromeClient system picker intent")
+                    launcher(intent)
+                    return
+                } catch (e: Exception) {
+                    bridge.log("FILE_CHOOSER_WARN", "createIntent failed: ${e.message}. Falling back to ACTION_GET_CONTENT")
+                    try {
+                        val fallbackIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+                        }
+                        launcher(Intent.createChooser(fallbackIntent, "Select File"))
+                        return
+                    } catch (err: Exception) {
+                        bridge.log("FILE_CHOOSER_ERR", "File chooser invocation failed: ${err.message}")
+                        activeFileChooserCallback?.onReceiveValue(null)
+                        activeFileChooserCallback = null
+                    }
                 }
             }
         } else if (filePathCallback != null) {
