@@ -918,13 +918,11 @@ class OmniBrowser : PluginEntry() {
                             state.trackedDownloadIds.remove(id)
                         },
                         onDeleteFile = { file ->
-                            try {
-                                file.delete()
-                                state.refreshCompletedDownloads()
-                                bridge.showToast("Deleted ${file.name}")
-                            } catch (e: Exception) {
-                                bridge.showToast("Delete failed: ${e.message}")
-                            }
+                            state.deleteDownloadedFile(file)
+                        },
+                        onAttachFile = { file ->
+                            state.showDownloadsDialog = false
+                            state.attachFileToCurrentWebPage(file)
                         },
                         onDismiss = { state.showDownloadsDialog = false }
                     )
@@ -1140,6 +1138,12 @@ class OmniBrowser : PluginEntry() {
                 file = state.latestDownloadedFile,
                 onOpen = { file ->
                     openDownloadedFile(context, file, bridge)
+                },
+                onAttach = { file ->
+                    state.attachFileToCurrentWebPage(file)
+                },
+                onDelete = { file ->
+                    state.deleteDownloadedFile(file)
                 },
                 onDismiss = { state.showDownloadBanner = false },
                 modifier = Modifier
