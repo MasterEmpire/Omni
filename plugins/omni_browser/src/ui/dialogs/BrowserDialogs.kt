@@ -300,6 +300,7 @@ fun DownloadsManagerDialog(
     )
 }
 
+@Composable
 fun SettingsBackupDialog(
     apiKey: String,
     autoSolve: Boolean,
