@@ -149,6 +149,7 @@ class BrowserStateHolder(
 
     // AI Studio Profile Analytics & Health
     var aiAnalytics by mutableStateOf<Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>>(emptyMap())
+    val domainUploadPaths = mutableStateMapOf<String, String>()
 
     // Live On-Screen Auto-Pilot State (In-Memory Only, Defaults to Off)
     var isAutoPilotUserArmed by mutableStateOf(false)
@@ -265,6 +266,7 @@ class BrowserStateHolder(
         }
 
         aiAnalytics = vaultManager.loadAiAnalytics()
+        vaultManager.loadDomainUploadPaths()?.let { domainUploadPaths.putAll(it) }
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId, savedProfileId) ->
             val cleanedTabs = loadedTabs.filter { !it.id.startsWith("tab_landing_") }
@@ -2270,6 +2272,30 @@ class BrowserStateHolder(
 
     private fun getTodayDateString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
+    fun recordDomainUploadPath(url: String, dataIntent: Intent?) {
+        if (url.isEmpty() || url == "about:blank") return
+        val domain = extractDomain(url)
+        if (domain.isEmpty()) return
+
+        val parentPath = dataIntent?.getStringExtra("extra_parent_path")
+        val resolvedPath = if (!parentPath.isNullOrEmpty()) {
+            parentPath
+        } else {
+            val singleUri = dataIntent?.data ?: dataIntent?.clipData?.getItemAt(0)?.uri
+            val p = singleUri?.path
+            if (p != null && (p.contains("/storage/") || p.contains("/sdcard/"))) {
+                val abs = p.substring(p.indexOf("/storage/").coerceAtLeast(p.indexOf("/sdcard/")))
+                java.io.File(abs).parent ?: abs
+            } else null
+        }
+
+        if (!resolvedPath.isNullOrEmpty() && java.io.File(resolvedPath).exists()) {
+            domainUploadPaths[domain] = resolvedPath
+            vaultManager.saveDomainUploadPaths(domainUploadPaths)
+            bridge.log("ORIGIN_PATH", "💾 Saved upload directory for $domain -> $resolvedPath")
+        }
+    }
+
     fun recordAiStudioTabOpened(profileId: String) {
         val today = getTodayDateString()
         val current = aiAnalytics[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
@@ -2452,10 +2478,16 @@ class BrowserStateHolder(
             if (filePickerProvider == "NEXUS" && isNexusInstalled) {
                 bridge.log("FILE_CHOOSER", "🚀 Routing file upload directly to Conduit Nexus (multiple=$allowMultiple)")
                 try {
+                    val domain = extractDomain(currentUrl)
+                    val rememberedPath = domainUploadPaths[domain]?.takeIf { java.io.File(it).exists() }
                     val nexusIntent = Intent("com.conduit.nexus.action.PICK_FILE").apply {
                         setPackage("com.conduit.nexus")
                         putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
                         putExtra("extra_picker_mode", true)
+                        if (!rememberedPath.isNullOrEmpty()) {
+                            putExtra("extra_initial_path", rememberedPath)
+                            bridge.log("FILE_CHOOSER", "📍 Landing Nexus in remembered path for $domain: $rememberedPath")
+                        }
                         val types = fileChooserParams?.acceptTypes?.filter { it.isNotBlank() }
                         if (!types.isNullOrEmpty()) {
                             type = types.first()
