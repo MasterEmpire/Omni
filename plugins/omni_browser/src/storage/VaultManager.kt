@@ -183,6 +183,7 @@ class VaultManager(
                 mirrorFile("config/tab_groups.json", "tab_groups.json")
                 mirrorFile("config/history.json", "history.json")
                 mirrorFile("config/ai_studio_analytics.json", "ai_studio_analytics.json")
+                mirrorFile("config/domain_upload_paths.json", "domain_upload_paths.json")
 
                 val ideDir = File(bridge.getPluginDir(), "ide")
                 if (ideDir.exists() && ideDir.isDirectory) {
@@ -215,6 +216,7 @@ class VaultManager(
                 restoreIfMissing("config/tab_groups.json", "tab_groups.json")
                 restoreIfMissing("config/history.json", "history.json")
                 restoreIfMissing("config/ai_studio_analytics.json", "ai_studio_analytics.json")
+                restoreIfMissing("config/domain_upload_paths.json", "domain_upload_paths.json")
 
                                     val vaultIdeDir = File(vaultDir, "ide")
                     if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
@@ -418,6 +420,27 @@ class VaultManager(
                 dataSaverMode = mode,
                 filePickerProvider = json.optString("filePickerProvider", "NEXUS")
             )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun saveDomainUploadPaths(paths: Map<String, String>) {
+        try {
+            val json = JSONObject()
+            paths.forEach { (domain, path) -> json.put(domain, path) }
+            bridge.saveFile("config/domain_upload_paths.json", json.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadDomainUploadPaths(): Map<String, String>? {
+        return try {
+            val bytes = bridge.readFile("config/domain_upload_paths.json") ?: return null
+            val json = JSONObject(String(bytes, Charsets.UTF_8))
+            val map = mutableMapOf<String, String>()
+            json.keys().forEach { k -> map[k] = json.getString(k) }
+            map
         } catch (_: Exception) {
             null
         }
@@ -677,6 +700,7 @@ class VaultManager(
             addFileToZip("config/smart_notes.json", "smart_notes.json")
             addFileToZip("config/tab_groups.json", "tab_groups.json")
             addFileToZip("config/history.json", "history.json")
+            addFileToZip("config/domain_upload_paths.json", "domain_upload_paths.json")
 
             val ideDir = File(bridge.getPluginDir(), "ide")
             if (ideDir.exists() && ideDir.isDirectory) {
