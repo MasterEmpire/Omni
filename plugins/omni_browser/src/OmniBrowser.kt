@@ -655,6 +655,7 @@ class OmniBrowser : PluginEntry() {
                 onToggleLiveAutoPilot = { state.toggleLiveAutoPilot() },
                 isAutoPilotConfirmEnabled = state.isAutoPilotConfirmEnabled,
                 onToggleAutoPilotConfirm = { state.toggleAutoPilotConfirm() },
+                activeMenuItems = state.activeMenuItems,
                 onOpenLocalIde = {
                     state.openLocalIdeAsNeighbor()
                 },
@@ -908,6 +909,26 @@ class OmniBrowser : PluginEntry() {
                     )
                 }
 
+                if (state.showMenuCustomizerDialog) {
+                    MenuCustomizerDialog(
+                        initialActive = state.activeMenuItems,
+                        initialHidden = state.hiddenMenuItems,
+                        onSave = { aMenu, hMenu ->
+                            state.activeMenuItems = aMenu
+                            state.hiddenMenuItems = hMenu
+                            state.vaultManager.saveSolverConfig(
+                                state.solverApiKey, state.autoSolveEnabled, state.forceDarkWebPages,
+                                state.localServerPort, state.isErudaEnabled, state.isDesktopMode,
+                                state.isBackgroundAudioEnabled, state.dataSaverMode, state.filePickerProvider,
+                                state.blockAiStudioBack, aMenu, hMenu
+                            )
+                            bridge.showToast("Menu layout updated!")
+                            state.showMenuCustomizerDialog = false
+                        },
+                        onDismiss = { state.showMenuCustomizerDialog = false }
+                    )
+                }
+
                 if (state.showDownloadsDialog) {
                     DownloadsManagerDialog(
                         bridge = bridge,
@@ -950,6 +971,10 @@ class OmniBrowser : PluginEntry() {
                             CookieManager.getInstance().removeAllCookies(null)
                             state.currentWebView?.clearCache(true)
                             bridge.showToast("Cookies and Cache cleared.")
+                        },
+                        onCustomizeMenu = {
+                            state.showSettingsDialog = false
+                            state.showMenuCustomizerDialog = true
                         },
                         onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack ->
                             state.solverApiKey = key
