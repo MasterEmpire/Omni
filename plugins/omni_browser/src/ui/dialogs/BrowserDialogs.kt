@@ -319,11 +319,12 @@ fun SettingsBackupDialog(
     isBackgroundAudioEnabled: Boolean = true,
     dataSaverMode: String = "MEDIUM",
     filePickerProvider: String = "NEXUS",
+    blockAiStudioBack: Boolean = true,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
-    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String, String) -> Unit,
+    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String, String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
@@ -335,6 +336,7 @@ fun SettingsBackupDialog(
     var tempAudio by remember { mutableStateOf(isBackgroundAudioEnabled) }
     var tempDataSaverMode by remember { mutableStateOf(dataSaverMode) }
     var tempPickerProvider by remember { mutableStateOf(filePickerProvider) }
+    var tempBlockAiStudioBack by remember { mutableStateOf(blockAiStudioBack) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF282C34),
@@ -423,6 +425,22 @@ fun SettingsBackupDialog(
                     Switch(
                         checked = tempForceDark,
                         onCheckedChange = { tempForceDark = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("🛡️ AI Studio Back Guard", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Requires double-tap back on AI Studio to protect your active session", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempBlockAiStudioBack,
+                        onCheckedChange = { tempBlockAiStudioBack = it },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
                     )
                 }
@@ -631,7 +649,7 @@ fun SettingsBackupDialog(
             Button(
                 onClick = {
                     val portNum = tempPortText.toIntOrNull() ?: 8080
-                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio, tempDataSaverMode, tempPickerProvider)
+                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio, tempDataSaverMode, tempPickerProvider, tempBlockAiStudioBack)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
