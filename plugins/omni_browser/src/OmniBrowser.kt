@@ -934,6 +934,7 @@ class OmniBrowser : PluginEntry() {
                         isDesktopMode = state.isDesktopMode,
                         isBackgroundAudioEnabled = state.isBackgroundAudioEnabled,
                         dataSaverMode = state.dataSaverMode,
+                        filePickerProvider = state.filePickerProvider,
                         onExportBackup = { state.exportBackup() },
                         onRestoreBackup = {
                             restoreCallback = { uri -> state.restoreBackup(uri) }
@@ -949,7 +950,7 @@ class OmniBrowser : PluginEntry() {
                             state.solverApiKey = key
                             state.autoSolveEnabled = auto
                             state.forceDarkWebPages = dark
-                            state.localPort = port
+                            state.localServerPort = port
                             state.isErudaEnabled = eruda
                             state.isDesktopMode = desktop
                             state.isBackgroundAudioEnabled = audio
