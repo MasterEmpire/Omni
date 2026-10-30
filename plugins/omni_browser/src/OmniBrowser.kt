@@ -939,6 +939,7 @@ class OmniBrowser : PluginEntry() {
                         isBackgroundAudioEnabled = state.isBackgroundAudioEnabled,
                         dataSaverMode = state.dataSaverMode,
                         filePickerProvider = state.filePickerProvider,
+                        blockAiStudioBack = state.blockAiStudioBack,
                         onExportBackup = { state.exportBackup() },
                         onRestoreBackup = {
                             restoreCallback = { uri -> state.restoreBackup(uri) }
@@ -950,7 +951,7 @@ class OmniBrowser : PluginEntry() {
                             state.currentWebView?.clearCache(true)
                             bridge.showToast("Cookies and Cache cleared.")
                         },
-                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker ->
+                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack ->
                             state.solverApiKey = key
                             state.autoSolveEnabled = auto
                             state.forceDarkWebPages = dark
@@ -959,6 +960,7 @@ class OmniBrowser : PluginEntry() {
                             state.isBackgroundAudioEnabled = audio
                             state.dataSaverMode = mode
                             state.filePickerProvider = picker
+                            state.blockAiStudioBack = blockBack
                             state.poolManager.localPort = port
                             state.poolManager.updateForceDark(dark)
                             state.syncDataSaver()
@@ -968,7 +970,7 @@ class OmniBrowser : PluginEntry() {
                             if (eruda) {
                                 state.injectEruda()
                             }
-                            state.vaultManager.saveSolverConfig(key, auto, dark, port, eruda, desktop, audio, mode, picker)
+                            state.vaultManager.saveSolverConfig(key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack)
                             bridge.showToast("Settings saved!")
                             state.showSettingsDialog = false
                         },
