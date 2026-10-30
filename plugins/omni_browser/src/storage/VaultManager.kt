@@ -32,7 +32,9 @@ data class BrowserConfig(
     val backgroundAudio: Boolean = true,
     val dataSaverMode: String = "MEDIUM",
     val filePickerProvider: String = "NEXUS",
-    val blockAiStudioBack: Boolean = true
+    val blockAiStudioBack: Boolean = true,
+    val activeMenuItems: List<String> = emptyList(),
+    val hiddenMenuItems: List<String> = emptyList()
 )
 
 data class VaultRestoreData(
@@ -382,7 +384,9 @@ class VaultManager(
         backgroundAudio: Boolean = true,
         dataSaverMode: String = "MEDIUM",
         filePickerProvider: String = "NEXUS",
-        blockAiStudioBack: Boolean = true
+        blockAiStudioBack: Boolean = true,
+        activeMenuItems: List<String> = emptyList(),
+        hiddenMenuItems: List<String> = emptyList()
     ) {
         try {
             val cfg = JSONObject().apply {
@@ -397,6 +401,8 @@ class VaultManager(
                 put("dataSaver", dataSaverMode != "OFF")
                 put("filePickerProvider", filePickerProvider)
                 put("blockAiStudioBack", blockAiStudioBack)
+                put("activeMenuItems", JSONArray(activeMenuItems))
+                put("hiddenMenuItems", JSONArray(hiddenMenuItems))
             }
             bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
@@ -412,6 +418,14 @@ class VaultManager(
                 json.has("dataSaver") -> if (json.optBoolean("dataSaver", false)) "EXTREME" else "OFF"
                 else -> "MEDIUM"
             }
+            val aMenu = mutableListOf<String>()
+            json.optJSONArray("activeMenuItems")?.let { arr ->
+                for (i in 0 until arr.length()) aMenu.add(arr.getString(i))
+            }
+            val hMenu = mutableListOf<String>()
+            json.optJSONArray("hiddenMenuItems")?.let { arr ->
+                for (i in 0 until arr.length()) hMenu.add(arr.getString(i))
+            }
             BrowserConfig(
                 apiKey = json.optString("apiKey", ""),
                 autoSolve = json.optBoolean("autoSolve", true),
@@ -422,7 +436,9 @@ class VaultManager(
                 backgroundAudio = json.optBoolean("backgroundAudio", true),
                 dataSaverMode = mode,
                 filePickerProvider = json.optString("filePickerProvider", "NEXUS"),
-                blockAiStudioBack = json.optBoolean("blockAiStudioBack", true)
+                blockAiStudioBack = json.optBoolean("blockAiStudioBack", true),
+                activeMenuItems = aMenu,
+                hiddenMenuItems = hMenu
             )
         } catch (_: Exception) {
             null
