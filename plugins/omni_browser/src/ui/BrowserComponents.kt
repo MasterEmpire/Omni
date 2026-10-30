@@ -605,6 +605,7 @@ fun BrowserMenuOverlay(
     onToggleLiveAutoPilot: () -> Unit = {},
     isAutoPilotConfirmEnabled: Boolean = false,
     onToggleAutoPilotConfirm: () -> Unit = {},
+    activeMenuItems: List<String>,
     onBackClick: () -> Unit,
     onForwardClick: () -> Unit,
     onReloadClick: () -> Unit,
@@ -744,138 +745,80 @@ fun BrowserMenuOverlay(
                     }
                 }
 
-                // Section 1: Page Controls
-                Text(
-                    text = "PAGE",
-                    color = Color(0xFF9AA0A6),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-
-                InLayoutMenuItem(
-                    title = if (forceDarkWebPages) "☀️ Switch to Light Mode" else "🌙 Switch to Dark Mode",
-                    color = if (forceDarkWebPages) Color(0xFFFDD663) else Color(0xFFE8EAED),
-                    isBold = true
-                ) {
-                    onToggleForceDark()
-                }
-
-                val (dsTitle, dsColor) = when (dataSaverMode) {
-                    "EXTREME" -> "🔥 Data-saver (Extreme)" to Color(0xFF3FB950)
-                    "MEDIUM" -> "🛡️ Data-saver (Medium)" to Color(0xFF58A6FF)
-                    else -> "🛡️ Data-saver (Off)" to Color(0xFFE8EAED)
-                }
-
-                InLayoutMenuItem(
-                    title = dsTitle,
-                    color = dsColor,
-                    isBold = dataSaverMode != "OFF"
-                ) {
-                    onToggleDataSaver()
-                }
-
-                InLayoutMenuItem("Copy Clean URL") {
-                    onCopyCleanUrl()
-                }
-
-                InLayoutMenuItem("Capture DOM Snapshot") {
-                    onCaptureDomSnapshot()
-                }
-
-                HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
-
-                // Section 2: Power Tools
-                Text(
-                    text = "WORKSPACE & TOOLS",
-                    color = Color(0xFF9AA0A6),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-
-                InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) {
-                    onOpenLocalIde()
-                }
-
-                InLayoutMenuItem(
-                    title = if (isLiveAutoPilotEnabled) "⚡ Live Auto-Pilot (ARMED)" else "⚡ Live Auto-Pilot (Off)",
-                    color = if (isLiveAutoPilotEnabled) Color(0xFF00E5FF) else Color(0xFF8AB4F8),
-                    isBold = isLiveAutoPilotEnabled
-                ) {
-                    onToggleLiveAutoPilot()
-                }
-
-                if (isLiveAutoPilotEnabled) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "🛡️ Require Confirmation",
-                            color = if (isAutoPilotConfirmEnabled) Color(0xFF00E5FF) else Color(0xFF9AA0A6),
-                            fontSize = 11.sp,
-                            fontWeight = if (isAutoPilotConfirmEnabled) FontWeight.Bold else FontWeight.Normal
-                        )
-                        Switch(
-                            checked = isAutoPilotConfirmEnabled,
-                            onCheckedChange = { onToggleAutoPilotConfirm() },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color(0xFF00E5FF),
-                                checkedTrackColor = Color(0xFF00E5FF).copy(alpha = 0.3f)
-                            ),
-                            modifier = Modifier.height(22.dp)
-                        )
+                activeMenuItems.forEach { id ->
+                    when (id) {
+                        "force_dark" -> {
+                            InLayoutMenuItem(
+                                title = if (forceDarkWebPages) "☀️ Switch to Light Mode" else "🌙 Switch to Dark Mode",
+                                color = if (forceDarkWebPages) Color(0xFFFDD663) else Color(0xFFE8EAED),
+                                isBold = true,
+                                onClick = { onToggleForceDark() }
+                            )
+                        }
+                        "data_saver" -> {
+                            val (dsTitle, dsColor) = when (dataSaverMode) {
+                                "EXTREME" -> "🔥 Data-saver (Extreme)" to Color(0xFF3FB950)
+                                "MEDIUM" -> "🛡️ Data-saver (Medium)" to Color(0xFF58A6FF)
+                                else -> "🛡️ Data-saver (Off)" to Color(0xFFE8EAED)
+                            }
+                            InLayoutMenuItem(
+                                title = dsTitle,
+                                color = dsColor,
+                                isBold = dataSaverMode != "OFF",
+                                onClick = { onToggleDataSaver() }
+                            )
+                        }
+                        "copy_url" -> InLayoutMenuItem("Copy Clean URL") { onCopyCleanUrl() }
+                        "dom_snapshot" -> InLayoutMenuItem("Capture DOM Snapshot") { onCaptureDomSnapshot() }
+                        "local_ide" -> InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) { onOpenLocalIde() }
+                        "autopilot" -> {
+                            InLayoutMenuItem(
+                                title = if (isLiveAutoPilotEnabled) "⚡ Live Auto-Pilot (ARMED)" else "⚡ Live Auto-Pilot (Off)",
+                                color = if (isLiveAutoPilotEnabled) Color(0xFF00E5FF) else Color(0xFF8AB4F8),
+                                isBold = isLiveAutoPilotEnabled,
+                                onClick = { onToggleLiveAutoPilot() }
+                            )
+                            if (isLiveAutoPilotEnabled) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "🛡️ Require Confirmation",
+                                        color = if (isAutoPilotConfirmEnabled) Color(0xFF00E5FF) else Color(0xFF9AA0A6),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isAutoPilotConfirmEnabled) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                    Switch(
+                                        checked = isAutoPilotConfirmEnabled,
+                                        onCheckedChange = { onToggleAutoPilotConfirm() },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color(0xFF00E5FF),
+                                            checkedTrackColor = Color(0xFF00E5FF).copy(alpha = 0.3f)
+                                        ),
+                                        modifier = Modifier.height(22.dp)
+                                    )
+                                }
+                            }
+                        }
+                        "ai_automator" -> InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) { onOpenAutomation() }
+                        "smart_notes" -> InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8)) { onOpenSmartNotes() }
+                        "downloads" -> {
+                            InLayoutMenuItem(
+                                title = if (activeDownloadsCount > 0) "📥 Downloads ($activeDownloadsCount)" else "📥 Downloads",
+                                color = if (activeDownloadsCount > 0) Color(0xFF81C995) else Color(0xFF8AB4F8),
+                                isBold = activeDownloadsCount > 0,
+                                onClick = { onOpenDownloads() }
+                            )
+                        }
+                        "recents" -> InLayoutMenuItem("📱 Recents Deck", color = Color(0xFF58A6FF)) { onShowRecents() }
+                        "diagnostics" -> InLayoutMenuItem("📋 Diagnostics Console", color = Color(0xFF58A6FF)) { onShowDiagnostics() }
+                        "settings" -> InLayoutMenuItem("⚙️ General Settings", color = Color(0xFF8AB4F8), isBold = true) { onOpenSettings() }
+                        "exit" -> InLayoutMenuItem("Exit Omni Chrome", color = Color(0xFFF28B82), isBold = true) { onExitBrowser() }
                     }
-                }
-
-                InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) {
-                    onOpenAutomation()
-                }
-
-                InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8)) {
-                    onOpenSmartNotes()
-                }
-
-                HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
-
-                // Section 3: Utilities
-                Text(
-                    text = "UTILITIES",
-                    color = Color(0xFF9AA0A6),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-
-                InLayoutMenuItem(
-                    title = if (activeDownloadsCount > 0) "📥 Downloads ($activeDownloadsCount)" else "📥 Downloads",
-                    color = if (activeDownloadsCount > 0) Color(0xFF81C995) else Color(0xFF8AB4F8),
-                    isBold = activeDownloadsCount > 0
-                ) {
-                    onOpenDownloads()
-                }
-
-                InLayoutMenuItem("📱 Recents Deck", color = Color(0xFF58A6FF)) {
-                    onShowRecents()
-                }
-
-                InLayoutMenuItem("📋 Diagnostics Console", color = Color(0xFF58A6FF)) {
-                    onShowDiagnostics()
-                }
-
-                HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
-
-                // Section 4: System
-                InLayoutMenuItem("⚙️ General Settings", color = Color(0xFF8AB4F8), isBold = true) {
-                    onOpenSettings()
-                }
-
-                InLayoutMenuItem("Exit Omni Chrome", color = Color(0xFFF28B82), isBold = true) {
-                    onExitBrowser()
                 }
             }
         }
