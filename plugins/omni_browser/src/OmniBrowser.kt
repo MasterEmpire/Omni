@@ -314,8 +314,8 @@ class OmniBrowser : PluginEntry() {
         val fileChooserLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult()
         ) { result ->
-            var uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
-            if (uris == null && result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+            var uris: Array<android.net.Uri>? = null
+            if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
                 val clip = result.data?.clipData
                 if (clip != null && clip.itemCount > 0) {
                     val list = mutableListOf<android.net.Uri>()
@@ -323,9 +323,15 @@ class OmniBrowser : PluginEntry() {
                         clip.getItemAt(i).uri?.let { list.add(it) }
                     }
                     if (list.isNotEmpty()) uris = list.toTypedArray()
-                } else {
-                    result.data?.data?.let { uris = arrayOf(it) }
+                } else if (result.data?.data != null) {
+                    uris = arrayOf(result.data!!.data!!)
                 }
+            }
+            if (uris == null) {
+                uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            }
+            if (result.resultCode == android.app.Activity.RESULT_OK) {
+                state.recordDomainUploadPath(state.currentUrl, result.data)
             }
             state.bridge.log("FILE_CHOOSER", "📥 Picked ${uris?.size ?: 0} URI(s) (resultCode=${result.resultCode})")
             state.activeFileChooserCallback?.onReceiveValue(uris)
