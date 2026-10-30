@@ -43,6 +43,7 @@ interface WebViewEventListener {
     fun onSyncFavoriteIde(content: String): Boolean
     fun onAiPromptSent(profileId: String)
     fun onAiQuotaHit(profileId: String, reason: String)
+    fun onFocusViolation(tabId: String)
 }
 
 class WebViewPoolManager(
@@ -324,6 +325,16 @@ class WebViewPoolManager(
             )
             addJavascriptInterface(analyticsBridge, "OmniAnalyticsBridge")
 
+            val focusBridge = com.omni.plugin.browser.models.OmniFocusBridge(
+                onViolation = {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onFocusViolation(tabId)
+                    }
+                },
+                onLog = { tag, msg -> bridge.log(tag, msg) }
+            )
+            addJavascriptInterface(focusBridge, "OmniFocusBridge")
+
             val ideBridge = com.omni.plugin.browser.models.OmniIdeBridge(
                 onCxpDispatched = { xml ->
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -460,7 +471,7 @@ class WebViewPoolManager(
                     val url = request?.url?.toString() ?: return false
 
                     // Omni Shield Hardcoded Interception
-                    if (isOmniShieldBlocked(url)) {
+                    if (isOmniShieldBlocked(url, context)) {
                         bridge.log("OMNI_SHIELD", "🛑 Blocked explicit URL: $url")
                         bridge.showToast("🛡️ Omni Shield: Explicit Content Blocked")
                         view?.loadDataWithBaseURL(null, OMNI_SHIELD_BLOCKED_HTML, "text/html", "UTF-8", null)
@@ -486,7 +497,7 @@ class WebViewPoolManager(
                     val host = reqUri.host?.lowercase(Locale.US) ?: ""
 
                     // Omni Shield Hardcoded Network Blackhole
-                    if (isOmniShieldBlocked(reqUri.toString())) {
+                    if (isOmniShieldBlocked(reqUri.toString(), context)) {
                         bridge.log("OMNI_SHIELD", "🛑 Blackholed adult network request: $reqUri")
                         return WebResourceResponse("text/html", "UTF-8", 403, "Forbidden", emptyMap(), OMNI_SHIELD_BLOCKED_HTML.byteInputStream())
                     }
@@ -572,6 +583,9 @@ class WebViewPoolManager(
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
+                    if (com.omni.plugin.browser.utils.isFocusLockActive(context)) {
+                        view?.evaluateJavascript(com.omni.plugin.browser.utils.buildFocusWatchdogScript(), null)
+                    }
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -581,6 +595,9 @@ class WebViewPoolManager(
                     view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
+                    }
+                    if (com.omni.plugin.browser.utils.isFocusLockActive(context)) {
+                        view?.evaluateJavascript(com.omni.plugin.browser.utils.buildFocusWatchdogScript(), null)
                     }
                     val colorSchemeScript = if (isForceDarkWebPages) {
                         "try { document.querySelector('meta[name=\"color-scheme\"]')?.setAttribute('content', 'dark'); } catch(_) {}"
