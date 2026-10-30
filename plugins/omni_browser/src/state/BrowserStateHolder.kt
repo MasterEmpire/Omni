@@ -194,6 +194,123 @@ class BrowserStateHolder(
         }
     }
 
+    fun deleteDownloadedFile(file: File) {
+        try {
+            if (file.exists()) {
+                file.delete()
+                refreshCompletedDownloads()
+                bridge.showToast("Deleted ${file.name}")
+            }
+        } catch (e: Exception) {
+            bridge.showToast("Delete failed: ${e.message}")
+        }
+    }
+
+    fun attachFileToCurrentWebPage(file: File) {
+        val wv = currentWebView
+        if (wv == null || currentUrl == "about:blank") {
+            bridge.showToast("No active webpage open to attach file")
+            return
+        }
+        if (!file.exists() || !file.isFile) {
+            bridge.showToast("File does not exist: ${file.name}")
+            return
+        }
+
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val bytes = file.readBytes()
+                val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                val mime = resolveMimeType(file)
+                val filename = file.name
+
+                withContext(Dispatchers.Main) {
+                    val escapedName = org.json.JSONObject.quote(filename)
+                    val escapedMime = org.json.JSONObject.quote(mime)
+                    val escapedB64 = org.json.JSONObject.quote(b64)
+
+                    val script = """
+                        (function() {
+                            try {
+                                const fileName = $escapedName;
+                                const mimeType = $escapedMime;
+                                const b64 = $escapedB64;
+                                const byteChars = atob(b64);
+                                const byteArray = new Uint8Array(byteChars.length);
+                                for (let i = 0; i < byteChars.length; i++) {
+                                    byteArray[i] = byteChars.charCodeAt(i);
+                                }
+                                const blob = new Blob([byteArray], { type: mimeType });
+                                const fileObj = new File([blob], fileName, { type: mimeType });
+                                const dt = new DataTransfer();
+                                dt.items.add(fileObj);
+
+                                const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+                                let targetInput = null;
+
+                                for (let i = fileInputs.length - 1; i >= 0; i--) {
+                                    const inp = fileInputs[i];
+                                    if (inp.offsetParent !== null || inp.style.display !== 'none' || inp.style.visibility !== 'hidden') {
+                                        targetInput = inp;
+                                        break;
+                                    }
+                                }
+                                if (!targetInput && fileInputs.length > 0) {
+                                    targetInput = fileInputs[fileInputs.length - 1];
+                                }
+
+                                if (targetInput) {
+                                    try {
+                                        targetInput.files = dt.files;
+                                    } catch (_) {
+                                        const proto = HTMLInputElement.prototype;
+                                        const desc = Object.getOwnPropertyDescriptor(proto, 'files');
+                                        if (desc && desc.set) desc.set.call(targetInput, dt.files);
+                                    }
+                                    targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                    targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                    return 'ATTACHED_INPUT';
+                                }
+
+                                const dropTarget = document.querySelector('[data-drop-zone], [dropzone], .dropzone, [role="region"], textarea:focus, div[contenteditable="true"]:focus') || document.activeElement || document.body;
+                                if (dropTarget) {
+                                    const dropEvent = new DragEvent('drop', {
+                                        bubbles: true,
+                                        cancelable: true,
+                                        dataTransfer: dt
+                                    });
+                                    dropTarget.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
+                                    dropTarget.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+                                    dropTarget.dispatchEvent(dropEvent);
+                                    return 'DROPPED';
+                                }
+
+                                return 'NO_TARGET';
+                            } catch (e) {
+                                return 'ERROR: ' + e.message;
+                            }
+                        })();
+                    """.trimIndent()
+
+                    wv.evaluateJavascript(script) { result ->
+                        val clean = result?.replace("\"", "") ?: ""
+                        if (clean.startsWith("ATTACHED") || clean == "DROPPED") {
+                            bridge.showToast("📎 Attached $filename to page!")
+                            bridge.log("DRAG_DROP", "✅ Injected $filename into web page ($clean)")
+                        } else {
+                            bridge.showToast("No active file upload field found on this page")
+                            bridge.log("DRAG_DROP_WARN", "Attachment script returned: $clean")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    bridge.showToast("Failed to attach file: ${e.message}")
+                }
+            }
+        }
+    }
+
     // File Chooser Callback & Launcher
     var activeFileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var fileChooserLauncherBlock: ((Intent) -> Unit)? = null
