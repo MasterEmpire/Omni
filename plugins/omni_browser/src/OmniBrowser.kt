@@ -951,7 +951,6 @@ class OmniBrowser : PluginEntry() {
                             state.autoSolveEnabled = auto
                             state.forceDarkWebPages = dark
                             state.localServerPort = port
-                            state.isErudaEnabled = eruda
                             state.isDesktopMode = desktop
                             state.isBackgroundAudioEnabled = audio
                             state.dataSaverMode = mode
