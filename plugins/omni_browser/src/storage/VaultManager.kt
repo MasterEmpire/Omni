@@ -31,7 +31,8 @@ data class BrowserConfig(
     val desktopMode: Boolean = false,
     val backgroundAudio: Boolean = true,
     val dataSaverMode: String = "MEDIUM",
-    val filePickerProvider: String = "NEXUS"
+    val filePickerProvider: String = "NEXUS",
+    val blockAiStudioBack: Boolean = true
 )
 
 data class VaultRestoreData(
@@ -380,7 +381,8 @@ class VaultManager(
         desktopMode: Boolean = false,
         backgroundAudio: Boolean = true,
         dataSaverMode: String = "MEDIUM",
-        filePickerProvider: String = "NEXUS"
+        filePickerProvider: String = "NEXUS",
+        blockAiStudioBack: Boolean = true
     ) {
         try {
             val cfg = JSONObject().apply {
@@ -394,6 +396,7 @@ class VaultManager(
                 put("dataSaverMode", dataSaverMode)
                 put("dataSaver", dataSaverMode != "OFF")
                 put("filePickerProvider", filePickerProvider)
+                put("blockAiStudioBack", blockAiStudioBack)
             }
             bridge.saveFile("config/solver.json", cfg.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
@@ -418,7 +421,8 @@ class VaultManager(
                 desktopMode = json.optBoolean("desktopMode", false),
                 backgroundAudio = json.optBoolean("backgroundAudio", true),
                 dataSaverMode = mode,
-                filePickerProvider = json.optString("filePickerProvider", "NEXUS")
+                filePickerProvider = json.optString("filePickerProvider", "NEXUS"),
+                blockAiStudioBack = json.optBoolean("blockAiStudioBack", true)
             )
         } catch (_: Exception) {
             null
