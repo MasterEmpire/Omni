@@ -634,19 +634,24 @@ fun BrowserMenuOverlay(
             .padding(top = 52.dp, end = 8.dp),
         contentAlignment = Alignment.TopEnd
     ) {
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = Color(0xFF282C34),
-            tonalElevation = 8.dp,
-            shadowElevation = 10.dp,
-            border = BorderStroke(1.dp, Color(0xFF3C4043)),
-            modifier = Modifier
-                .width(255.dp)
-                .pointerInput(Unit) {
-                    detectTapGestures(onTap = { /* Consume taps */ })
-                }
-        ) {
-            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF282C34),
+                tonalElevation = 8.dp,
+                shadowElevation = 10.dp,
+                border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                modifier = Modifier
+                    .width(255.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { /* Consume taps */ })
+                    }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 520.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 6.dp)
+                ) {
                 // Quick Controls Header (Back, Forward, Reload, + New Tab)
                 Row(
                     modifier = Modifier
