@@ -963,6 +963,8 @@ fun DownloadCompletedPillBanner(
     visible: Boolean,
     file: java.io.File?,
     onOpen: (java.io.File) -> Unit,
+    onAttach: (java.io.File) -> Unit = {},
+    onDelete: (java.io.File) -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -990,13 +992,13 @@ fun DownloadCompletedPillBanner(
                 .wrapContentWidth()
         ) {
             Row(
-                modifier = Modifier.padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                modifier = Modifier.padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(emoji, fontSize = 16.sp)
 
-                Column(modifier = Modifier.widthIn(max = 160.dp)) {
+                Column(modifier = Modifier.widthIn(max = 130.dp)) {
                     Text(
                         text = file.name,
                         color = Color(0xFFE8EAED),
@@ -1016,25 +1018,53 @@ fun DownloadCompletedPillBanner(
                 Button(
                     onClick = {
                         onDismiss()
+                        onAttach(file)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Text("📎 Attach", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = {
+                        onDismiss()
                         onOpen(file)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.height(30.dp)
+                    modifier = Modifier.height(28.dp)
                 ) {
-                    Text("Open", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Open", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                IconButton(
+                    onClick = {
+                        onDismiss()
+                        onDelete(file)
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = Color(0xFFF85149),
+                        modifier = Modifier.size(15.dp)
+                    )
                 }
 
                 IconButton(
                     onClick = onDismiss,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 ) {
                     Icon(
                         Icons.Default.Close,
                         contentDescription = "Dismiss",
                         tint = Color(0xFF8B949E),
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                 }
             }
