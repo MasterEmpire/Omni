@@ -300,21 +300,21 @@ fun DownloadsManagerDialog(
     )
 }
 
-@Composable
 fun SettingsBackupDialog(
     apiKey: String,
     autoSolve: Boolean,
     forceDark: Boolean = false,
     localPort: Int = 8080,
     isErudaEnabled: Boolean = false,
-    isDesktopMode: Boolean = false,
+    desktopMode: Boolean = false,
     isBackgroundAudioEnabled: Boolean = true,
     dataSaverMode: String = "MEDIUM",
+    filePickerProvider: String = "NEXUS",
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
-    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String) -> Unit,
+    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
@@ -325,7 +325,7 @@ fun SettingsBackupDialog(
     var tempDesktop by remember { mutableStateOf(isDesktopMode) }
     var tempAudio by remember { mutableStateOf(isBackgroundAudioEnabled) }
     var tempDataSaverMode by remember { mutableStateOf(dataSaverMode) }
-
+    var tempPickerProvider by remember { mutableStateOf(filePickerProvider) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF282C34),
@@ -416,6 +416,51 @@ fun SettingsBackupDialog(
                         onCheckedChange = { tempForceDark = it },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
                     )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📂 File Upload Provider", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (tempPickerProvider == "NEXUS") Color(0xFF00E5FF).copy(alpha = 0.2f) else Color(0xFF3C4043)
+                        ) {
+                            Text(
+                                text = if (tempPickerProvider == "NEXUS") "⚡ Nexus" else "📱 System",
+                                color = if (tempPickerProvider == "NEXUS") Color(0xFF00E5FF) else Color(0xFF9AA0A6),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Text("Selects file explorer app when tapping upload buttons on websites", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (tempPickerProvider == "NEXUS") Color(0xFF00E5FF).copy(alpha = 0.2f) else Color(0xFF1F2227),
+                            border = BorderStroke(1.dp, if (tempPickerProvider == "NEXUS") Color(0xFF00E5FF) else Color(0xFF3C4043)),
+                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { tempPickerProvider = "NEXUS" }
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                Text("⚡ Conduit Nexus", color = if (tempPickerProvider == "NEXUS") Color(0xFF00E5FF) else Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (tempPickerProvider == "SYSTEM") Color(0xFF8AB4F8).copy(alpha = 0.2f) else Color(0xFF1F2227),
+                            border = BorderStroke(1.dp, if (tempPickerProvider == "SYSTEM") Color(0xFF8AB4F8) else Color(0xFF3C4043)),
+                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { tempPickerProvider = "SYSTEM" }
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                Text("📱 Android System", color = if (tempPickerProvider == "SYSTEM") Color(0xFF8AB4F8) else Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -577,7 +622,7 @@ fun SettingsBackupDialog(
             Button(
                 onClick = {
                     val portNum = tempPortText.toIntOrNull() ?: 8080
-                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio, tempDataSaverMode)
+                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio, tempDataSaverMode, tempPickerProvider)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
