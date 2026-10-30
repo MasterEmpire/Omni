@@ -314,7 +314,20 @@ class OmniBrowser : PluginEntry() {
         val fileChooserLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult()
         ) { result ->
-            val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            var uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            if (uris == null && result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+                val clip = result.data?.clipData
+                if (clip != null && clip.itemCount > 0) {
+                    val list = mutableListOf<android.net.Uri>()
+                    for (i in 0 until clip.itemCount) {
+                        clip.getItemAt(i).uri?.let { list.add(it) }
+                    }
+                    if (list.isNotEmpty()) uris = list.toTypedArray()
+                } else {
+                    result.data?.data?.let { uris = arrayOf(it) }
+                }
+            }
+            state.bridge.log("FILE_CHOOSER", "📥 Picked ${uris?.size ?: 0} URI(s) (resultCode=${result.resultCode})")
             state.activeFileChooserCallback?.onReceiveValue(uris)
             state.activeFileChooserCallback = null
         }
@@ -932,15 +945,16 @@ class OmniBrowser : PluginEntry() {
                             state.currentWebView?.clearCache(true)
                             bridge.showToast("Cookies and Cache cleared.")
                         },
-                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode ->
+                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker ->
                             state.solverApiKey = key
                             state.autoSolveEnabled = auto
                             state.forceDarkWebPages = dark
-                            state.localServerPort = port
+                            state.localPort = port
                             state.isErudaEnabled = eruda
                             state.isDesktopMode = desktop
                             state.isBackgroundAudioEnabled = audio
                             state.dataSaverMode = mode
+                            state.filePickerProvider = picker
                             state.poolManager.localPort = port
                             state.poolManager.updateForceDark(dark)
                             state.syncDataSaver()
@@ -950,7 +964,7 @@ class OmniBrowser : PluginEntry() {
                             if (eruda) {
                                 state.injectEruda()
                             }
-                            state.vaultManager.saveSolverConfig(key, auto, dark, port, eruda, desktop, audio, mode)
+                            state.vaultManager.saveSolverConfig(key, auto, dark, port, eruda, desktop, audio, mode, picker)
                             bridge.showToast("Settings saved!")
                             state.showSettingsDialog = false
                         },
