@@ -213,6 +213,20 @@ data class ProfileAiAnalytics(
     val lastActiveDay: String = ""
 )
 
+class OmniFocusBridge(
+    private val onViolation: () -> Unit,
+    private val onLog: (tag: String, message: String) -> Unit
+) {
+    @android.webkit.JavascriptInterface
+    fun violationDetected() {
+        onViolation()
+    }
+    @android.webkit.JavascriptInterface
+    fun log(tag: String, msg: String) {
+        onLog(tag, msg)
+    }
+}
+
 class OmniAnalyticsBridge(
     private val onPromptSent: (profileId: String) -> Unit,
     private val onQuotaHit: (profileId: String, reason: String) -> Unit,
