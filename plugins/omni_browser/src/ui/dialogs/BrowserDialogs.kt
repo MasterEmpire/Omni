@@ -301,13 +301,14 @@ fun DownloadsManagerDialog(
 }
 
 @Composable
+@Composable
 fun SettingsBackupDialog(
     apiKey: String,
     autoSolve: Boolean,
     forceDark: Boolean = false,
     localPort: Int = 8080,
     isErudaEnabled: Boolean = false,
-    desktopMode: Boolean = false,
+    isDesktopMode: Boolean = false,
     isBackgroundAudioEnabled: Boolean = true,
     dataSaverMode: String = "MEDIUM",
     filePickerProvider: String = "NEXUS",
