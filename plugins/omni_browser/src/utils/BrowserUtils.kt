@@ -2213,31 +2213,115 @@ private val ADULT_DOMAINS = setOf(
     "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia"
 )
 
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly"
+)
+
 private val EXPLICIT_TOKENS = setOf(
     "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "gangbang",
     "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
     "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex"
 )
 
-fun isOmniShieldBlocked(rawUrl: String?): Boolean {
+val EXTENSIVE_EXPLICIT_TOKENS = EXPLICIT_TOKENS + setOf(
+    "nude", "naked", "sex", "pussy", "tits", "boobs", "dick", "cock", "vagina", 
+    "penis", "slut", "whore", "rule34", "danbooru", "gelbooru", "e-hentai", 
+    "nhentai", "hitomi", "thothub", "coomer", "kemono", "squirt", "dildo", 
+    "vibrator", "stepmom", "stepbro", "futa", "erotica", "fetish", "kink", 
+    "bondage", "orgasm", "escorts"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 5000L) return cachedFocusLockState
+
+    var isActive = false
+    try {
+        val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+        if (slState.exists()) {
+            val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+            if (now < json.optLong("manual_lock_until_ms", 0L)) isActive = true
+        }
+        val fsState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+        if (fsState.exists() && !isActive) {
+            val json = org.json.JSONObject(fsState.readText(Charsets.UTF_8))
+            if (json.optBoolean("is_active", false) || now < json.optLong("lock_until_ms", 0L)) isActive = true
+        }
+    } catch(_: Exception) {}
+    
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
     if (rawUrl.isNullOrBlank()) return false
     val clean = rawUrl.lowercase(Locale.US).trim()
     if (clean == "about:blank" || clean.startsWith("http://localhost") || clean.startsWith("http://127.0.0.1")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = if (isFocusLocked) EXTENSIVE_EXPLICIT_TOKENS else EXPLICIT_TOKENS
 
     try {
         val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
         val host = uri.host?.lowercase(Locale.US) ?: clean
 
-        for (domain in ADULT_DOMAINS) {
+        for (domain in activeDomains) {
             if (host.contains(domain)) return true
         }
 
         val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
         for (token in tokens) {
-            if (EXPLICIT_TOKENS.contains(token)) return true
+            if (activeTokens.contains(token)) return true
         }
     } catch (_: Exception) {
-        for (domain in ADULT_DOMAINS) {
+        for (domain in activeDomains) {
             if (clean.contains(domain)) return true
         }
     }
@@ -2278,10 +2362,10 @@ fun enforceSafeSearch(rawUrl: String): String {
     }
 }
 
-fun sanitizeSafeUrl(rawUrl: String?): String {
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
     if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
     val trimmed = rawUrl.trim()
-    if (isOmniShieldBlocked(trimmed)) {
+    if (isOmniShieldBlocked(trimmed, context)) {
         return "about:blank"
     }
     val safeEnforced = enforceSafeSearch(trimmed)
