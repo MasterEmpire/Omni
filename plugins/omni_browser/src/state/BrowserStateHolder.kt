@@ -122,6 +122,12 @@ class BrowserStateHolder(
     var isMediaPlaying by mutableStateOf(false)
     var activeMediaTabId by mutableStateOf<String?>(null)
 
+    // Menu Layout State
+    val defaultActiveMenu = listOf("force_dark", "data_saver", "copy_url", "dom_snapshot", "local_ide", "autopilot", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
+    var activeMenuItems by mutableStateOf(defaultActiveMenu)
+    var hiddenMenuItems by mutableStateOf<List<String>>(emptyList())
+    var showMenuCustomizerDialog by mutableStateOf(false)
+
     // Solver & Data-saver States
     var solverApiKey by mutableStateOf("")
     var filePickerProvider by mutableStateOf("NEXUS")
@@ -343,6 +349,15 @@ class BrowserStateHolder(
             poolManager.localPort = config.localPort
             poolManager.updateForceDark(config.forceDark)
             syncDataSaver()
+            
+            if (config.activeMenuItems.isNotEmpty() || config.hiddenMenuItems.isNotEmpty()) {
+                activeMenuItems = config.activeMenuItems
+                hiddenMenuItems = config.hiddenMenuItems
+            }
+            val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems }
+            if (missing.isNotEmpty()) {
+                activeMenuItems = activeMenuItems + missing
+            }
         }
 
         vaultManager.loadShortcuts()?.let { loaded ->
@@ -2352,6 +2367,7 @@ class BrowserStateHolder(
             editingShortcut != null -> { editingShortcut = null; true }
             isAddingShortcut -> { isAddingShortcut = false; true }
             editingProfile != null -> { editingProfile = null; true }
+            showMenuCustomizerDialog -> { showMenuCustomizerDialog = false; true }
             showSettingsDialog -> { showSettingsDialog = false; true }
             isTabSwitcherOpen -> { isTabSwitcherOpen = false; true }
             isHomeOverlayOpen -> {
