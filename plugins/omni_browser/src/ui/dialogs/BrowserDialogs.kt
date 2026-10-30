@@ -64,6 +64,7 @@ fun DownloadsManagerDialog(
     completedFilesList: List<File>,
     onCancelDownload: (Long) -> Unit,
     onDeleteFile: (File) -> Unit,
+    onAttachFile: (File) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -267,6 +268,13 @@ fun DownloadsManagerDialog(
                                             color = Color(0xFF9AA0A6),
                                             fontSize = 10.sp
                                         )
+                                    }
+
+                                    IconButton(
+                                        onClick = { onAttachFile(file) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Text("📎", fontSize = 14.sp)
                                     }
 
                                     IconButton(
