@@ -172,6 +172,22 @@ class DownloadController(
         return Triple(updated, finishedIds, finishedFiles)
     }
 
+    fun resolveUniqueFileName(dir: File, desiredName: String): String {
+        val cleanName = desiredName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val baseName = if (cleanName.contains(".")) cleanName.substringBeforeLast(".") else cleanName
+        val ext = if (cleanName.contains(".")) "." + cleanName.substringAfterLast(".") else ""
+
+        var candidate = "$baseName$ext"
+        var counter = 1
+        val targetDir = if (dir.exists()) dir else File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "OmniDownloads")
+
+        while (File(targetDir, candidate).exists()) {
+            candidate = "$baseName ($counter)$ext"
+            counter++
+        }
+        return candidate
+    }
+
     fun saveBase64ToDownloads(base64Data: String, mimeType: String, rawFilename: String): File? {
         bridge.log("DOWNLOAD", "Processing Base64 payload (mime: '$mimeType', rawFilename: '$rawFilename', len: ${base64Data.length})")
         try {
@@ -192,12 +208,14 @@ class DownloadController(
                 else -> "bin"
             }
 
-            var filename = rawFilename.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            if (filename.isEmpty() || filename == "null" || filename == "blob" || filename == "download") {
-                filename = "download_${System.currentTimeMillis()}.$ext"
-            } else if (!filename.contains(".")) {
-                filename = "$filename.$ext"
+            val omniDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "OmniDownloads").apply { if (!exists()) mkdirs() }
+            var rawName = rawFilename.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            if (rawName.isEmpty() || rawName == "null" || rawName == "blob" || rawName == "download") {
+                rawName = "download_${System.currentTimeMillis()}.$ext"
+            } else if (!rawName.contains(".")) {
+                rawName = "$rawName.$ext"
             }
+            val filename = resolveUniqueFileName(omniDir, rawName)
 
             var saved = false
             var savedLocation = ""
@@ -291,7 +309,9 @@ class DownloadController(
         }
 
         try {
-            val filename = URLUtil.guessFileName(url, contentDisposition, mimeType)
+            val omniDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "OmniDownloads").apply { if (!exists()) mkdirs() }
+            val rawName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+            val filename = resolveUniqueFileName(omniDir, rawName)
             val request = DownloadManager.Request(Uri.parse(url)).apply {
                 if (mimeType.isNotEmpty() && mimeType != "application/octet-stream") {
                     setMimeType(mimeType)
