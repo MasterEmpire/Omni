@@ -2209,8 +2209,9 @@ private val ADULT_DOMAINS = setOf(
     "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
     "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
     "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
-    "thothub", "coomer", "kemono", "tnaflix", "hqporner", "daftsex", "vporn",
-    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia"
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop"
 )
 
 private val DISTRACTION_DOMAINS = setOf(
@@ -2219,30 +2220,26 @@ private val DISTRACTION_DOMAINS = setOf(
     "badoo", "of.com", "fansly"
 )
 
-private val EXPLICIT_TOKENS = setOf(
-    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "gangbang",
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
     "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
-    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex"
-)
-
-val EXTENSIVE_EXPLICIT_TOKENS = EXPLICIT_TOKENS + setOf(
-    "nude", "naked", "sex", "pussy", "tits", "boobs", "dick", "cock", "vagina", 
-    "penis", "slut", "whore", "rule34", "danbooru", "gelbooru", "e-hentai", 
-    "nhentai", "hitomi", "thothub", "coomer", "kemono", "squirt", "dildo", 
-    "vibrator", "stepmom", "stepbro", "futa", "erotica", "fetish", "kink", 
-    "bondage", "orgasm", "escorts", "hentai", "smut", "doujin", "bitch", 
-    "cunt", "faggot", "motherfucker", "camgirl", "camshow", "stripchat", 
-    "chaturbate", "spankbang", "xvideos", "pornhub", "eporner", "beeg", 
-    "naughtyamerica", "brazzers", "bangbros", "faketaxi", "publicagent", 
-    "onlyfans", "fansly", "manyvids", "loyalfans", "xhamster", "redtube", 
-    "xnxx", "xnx", "tube8", "youporn", "nsfw", "gore", "bestiality", 
-    "zoophilia", "necrophilia", "pedophile", "loli", "shota", 
-    "snuff", "scat", "pegging", "gloryhole", "bukkake", "gangbang", 
-    "threesome", "swinger", "cuckold", "cuck", "jerkoff", "joi", "ceb", 
-    "sph", "sissy", "chastity", "findom", "feet", "footfetish", "bdsm", 
-    "dominatrix", "submissive", "slave", "master", "mistress", "hentaigasm", 
-    "hanime", "asshole", "buttplug", "anal", "deepthroat", 
-    "facesitting", "facial", "cum", "cumshot", "creampie", "swallow"
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
 )
 
 private var lastFocusLockCheckTime = 0L
@@ -2318,23 +2315,36 @@ fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = nul
 
     val isFocusLocked = context != null && isFocusLockActive(context)
     val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
-    val activeTokens = if (isFocusLocked) EXTENSIVE_EXPLICIT_TOKENS else EXPLICIT_TOKENS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
 
     try {
         val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
         val host = uri.host?.lowercase(Locale.US) ?: clean
 
         for (domain in activeDomains) {
-            if (host.contains(domain)) return true
+            if (host.contains(domain) || clean.contains(domain)) return true
         }
 
+        // 1. Exact word tokens
         val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
         for (token in tokens) {
             if (activeTokens.contains(token)) return true
         }
+
+        // 2. Substring matching for tokens with length >= 4 (catches compound names like freeporn, nakedcelebs)
+        for (token in activeTokens) {
+            if (token.length >= 4 && clean.contains(token)) return true
+        }
+
+        // 3. Word-boundary regex for short high-risk tokens (avoids 'unisex' / 'sussex' false positives)
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
     } catch (_: Exception) {
         for (domain in activeDomains) {
             if (clean.contains(domain)) return true
+        }
+        for (token in activeTokens) {
+            if (token.length >= 4 && clean.contains(token)) return true
         }
     }
     return false
