@@ -43,6 +43,7 @@ interface WebViewEventListener {
     fun onSyncFavoriteIde(content: String): Boolean
     fun onAiPromptSent(profileId: String)
     fun onAiQuotaHit(profileId: String, reason: String)
+    fun onAiGenerationStateChanged(tabId: String, isGenerating: Boolean)
     fun onFocusViolation(tabId: String)
 }
 
@@ -358,6 +359,11 @@ class WebViewPoolManager(
                 },
                 onSyncFavoriteIde = { content ->
                     listener.onSyncFavoriteIde(content)
+                },
+                onGenerationActive = { isGenerating ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onAiGenerationStateChanged(tabId, isGenerating)
+                    }
                 },
                 onLog = { tag, msg -> bridge.log(tag, msg) }
             )
