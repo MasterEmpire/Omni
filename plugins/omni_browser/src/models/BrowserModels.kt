@@ -161,8 +161,14 @@ class OmniIdeBridge(
     private val onFilePullRequested: (xml: String) -> Unit = {},
     private val onFilesPulled: (dumpText: String, fileCount: Int) -> Unit = { _, _ -> },
     private val onSyncFavoriteIde: (content: String) -> Boolean = { false },
+    private val onGenerationActive: (Boolean) -> Unit = {},
     private val onLog: (tag: String, message: String) -> Unit
 ) {
+    @JavascriptInterface
+    fun reportGenerationActive(active: Boolean) {
+        onGenerationActive(active)
+    }
+
     @JavascriptInterface
     fun syncFavoriteIde(htmlContent: String): Boolean {
         return onSyncFavoriteIde(htmlContent)
