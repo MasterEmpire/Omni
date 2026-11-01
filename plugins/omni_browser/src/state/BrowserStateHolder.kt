@@ -933,7 +933,15 @@ class BrowserStateHolder(
             input.contains(".") && !input.contains(" ") -> "https://$input"
             else -> "https://www.google.com/search?q=${URLEncoder.encode(input, "UTF-8")}"
         }
-        val target = sanitizeSafeUrl(rawTarget)
+        val target = sanitizeSafeUrl(rawTarget, context)
+        if (rawTarget != "about:blank" && target == "about:blank") {
+            bridge.showToast("🛡️ Omni Shield: Explicit Content Blocked")
+            bridge.log("OMNI_SHIELD", "Blocked navigation target: $rawTarget")
+            currentWebView?.loadDataWithBaseURL(null, OMNI_SHIELD_BLOCKED_HTML, "text/html", "UTF-8", null)
+            currentUrl = "about:blank"
+            urlInputText = ""
+            return
+        }
 
         if (isHomeOverlayOpen && currentUrl != "about:blank") {
             isHomeOverlayOpen = false
@@ -1819,17 +1827,17 @@ class BrowserStateHolder(
     }
 
     fun onSearchInputChanged(input: String) {
-        if (com.omni.plugin.browser.utils.isFocusLockActive(context)) {
-            val qLower = input.lowercase(java.util.Locale.US)
-            val badWord = com.omni.plugin.browser.utils.EXTENSIVE_EXPLICIT_TOKENS.find { qLower.contains(it) }
-            if (badWord != null) {
-                bridge.log("FOCUS_SHIELD", "🛑 Vulgar search attempt blocked: '$badWord'")
-                bridge.showToast("🛡️ Focus Shield: Vulgarity blocked.")
-                urlInputText = ""
-                dismissSearch()
-                closeTab(activeTabId, suppressUndo = true)
-                return
-            }
+        val qLower = input.lowercase(java.util.Locale.US)
+        val badWord = com.omni.plugin.browser.utils.EXTENSIVE_EXPLICIT_TOKENS.find {
+            it.length >= 3 && (qLower.contains(it) || Regex("\\b" + Regex.escape(it) + "\\b").containsMatchIn(qLower))
+        }
+        if (badWord != null) {
+            bridge.log("OMNI_SHIELD", "🛑 Explicit search attempt blocked 24/7: '$badWord'")
+            bridge.showToast("🛡️ Omni Shield: Explicit Content Blocked 24/7!")
+            urlInputText = ""
+            dismissSearch()
+            closeTab(activeTabId, suppressUndo = true)
+            return
         }
 
         urlInputText = input
