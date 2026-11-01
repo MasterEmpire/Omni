@@ -587,6 +587,7 @@ class BrowserStateHolder(
         targetWv.evaluateJavascript("window.__omniProfileId = '${targetTab.profileId}';", null)
         if (targetTab.url.contains("aistudio.google.com")) {
             recordAiStudioTabOpened(targetTab.profileId)
+            targetWv.evaluateJavascript("if (typeof window.__omniAuditPendingCxp === 'function') window.__omniAuditPendingCxp();", null)
         }
 
         val recordedProg = tabProgressMap[targetTabId] ?: targetWv.progress
@@ -1083,29 +1084,29 @@ class BrowserStateHolder(
         }
     }
 
-    fun syncAutoPilotStateForCurrentTab(isExplicitUserToggle: Boolean = false) {
+        fun syncAutoPilotStateForCurrentTab(isExplicitUserToggle: Boolean = false) {
         val isAiStudio = currentUrl.contains("aistudio.google.com")
-        val shouldBeArmed = isAutoPilotUserArmed && isAiStudio
 
-        if (shouldBeArmed) {
-            if (!isLiveAutoPilotEnabled || isExplicitUserToggle) {
-                isLiveAutoPilotEnabled = true
+        // 🛡️ Global Auto-Pilot Persistence: Do not disarm or kill pill when tabbing away from AI Studio!
+        if (isAutoPilotUserArmed) {
+            isLiveAutoPilotEnabled = true
+            if (isAiStudio && currentWebView != null) {
                 com.omni.plugin.browser.engine.LiveAutoPilotEngine.arm(currentWebView, bridge, showToast = isExplicitUserToggle)
                 bridge.log("AUTOPILOT_PIPELINE", "🟢 [AUTO-SYNC] Armed Auto-Pilot on AI Studio ($currentUrl). Explicit=$isExplicitUserToggle")
             }
-                    } else {
-                if (isLiveAutoPilotEnabled || isExplicitUserToggle) {
-                    isLiveAutoPilotEnabled = false
-                    if (cxpPillStatus != "PATCHING") {
-                        showCxpPill = false
-                        cxpPillStatus = null
-                        cxpPillDismissJob?.cancel()
-                    }
-                    showAutoPilotConfirmDialog = false
+        } else {
+            if (isLiveAutoPilotEnabled || isExplicitUserToggle) {
+                isLiveAutoPilotEnabled = false
+                if (cxpPillStatus != "PATCHING") {
+                    showCxpPill = false
+                    cxpPillStatus = null
+                    cxpPillDismissJob?.cancel()
+                }
+                showAutoPilotConfirmDialog = false
                 pendingAutoPilotPayload = null
                 pendingAutoPilotActionType = null
                 com.omni.plugin.browser.engine.LiveAutoPilotEngine.disarm(currentWebView, bridge, showToast = isExplicitUserToggle)
-                bridge.log("AUTOPILOT_PIPELINE", "🔴 [AUTO-SYNC] Disarmed Auto-Pilot (URL: $currentUrl, UserArmed: $isAutoPilotUserArmed). Explicit=$isExplicitUserToggle")
+                bridge.log("AUTOPILOT_PIPELINE", "🔴 [AUTO-SYNC] Disarmed Auto-Pilot (UserArmed=false). Explicit=$isExplicitUserToggle")
             }
         }
     }
@@ -1154,7 +1155,7 @@ class BrowserStateHolder(
     }
 
     override fun onLivePythonRequested(code: String) {
-        if (!isLiveAutoPilotEnabled) return
+        if (!isAutoPilotUserArmed) return
         if (isAutoPilotConfirmEnabled) {
             bridge.log("AUTOPILOT_PIPELINE", "🛡️ [CONFIRM GUARD] Python execution requires confirmation.")
             pendingAutoPilotPayload = code
@@ -1179,7 +1180,7 @@ class BrowserStateHolder(
     }
 
     override fun onCxpDispatched(xml: String) {
-        if (!isLiveAutoPilotEnabled) {
+        if (!isAutoPilotUserArmed) {
             bridge.log("AUTOPILOT_PIPELINE", "🛑 [BLOCKED] onCxpDispatched ignored because Live Auto-Pilot is OFF.")
             return
         }
@@ -1332,7 +1333,7 @@ class BrowserStateHolder(
     var activeAiStudioTabId by mutableStateOf<String?>(null)
 
     override fun onFilePullRequested(xml: String) {
-        if (!isLiveAutoPilotEnabled) return
+        if (!isAutoPilotUserArmed) return
         activeAiStudioTabId = activeTabId
         if (isAutoPilotConfirmEnabled) {
             bridge.log("AUTOPILOT_PULL", "🛡️ [CONFIRM GUARD] File pull requires confirmation.")
@@ -2511,6 +2512,23 @@ class BrowserStateHolder(
         vaultManager.saveAiAnalytics(newMap)
         val profName = profiles.find { it.id == profileId }?.name ?: profileId
         bridge.showToast("✅ Quota status reset for '$profName'")
+    }
+
+    private var isBackgroundGeneratingActive by mutableStateOf(false)
+
+    override fun onAiGenerationStateChanged(tabId: String, isGenerating: Boolean) {
+        if (isBackgroundGeneratingActive != isGenerating) {
+            isBackgroundGeneratingActive = isGenerating
+            if (isGenerating) {
+                bridge.acquireWakeLock("AiStudioGen")
+                bridge.startForegroundTask("Google AI Studio", "Generating responses in background...")
+                bridge.log("AUTOPILOT_PIPELINE", "⚡ AI Studio started generating in background. Foreground task & WakeLock engaged.")
+            } else {
+                bridge.stopForegroundTask()
+                bridge.releaseWakeLock()
+                bridge.log("AUTOPILOT_PIPELINE", "🏁 AI Studio generation finished in background. Foreground task released.")
+            }
+        }
     }
 
     override fun onFocusViolation(tabId: String) {
