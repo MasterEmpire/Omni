@@ -624,32 +624,34 @@ fun BrowserMenuOverlay(
 ) {
     if (!showMenu) return
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .zIndex(20f)
-            .pointerInput(Unit) {
-                detectTapGestures(onTap = { onDismiss() })
-            }
-            .statusBarsPadding()
-            .padding(top = 52.dp, end = 8.dp),
-        contentAlignment = Alignment.TopEnd
-    ) {
-                    Surface(
+            Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(20f)
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { onDismiss() })
+                }
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(top = 52.dp, end = 8.dp, bottom = 12.dp),
+            contentAlignment = Alignment.TopEnd
+        ) {
+            Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = Color(0xFF282C34),
                 tonalElevation = 8.dp,
                 shadowElevation = 10.dp,
                 border = BorderStroke(1.dp, Color(0xFF3C4043)),
                 modifier = Modifier
-                    .width(255.dp)
+                    .width(260.dp)
+                    .fillMaxHeight()
                     .pointerInput(Unit) {
                         detectTapGestures(onTap = { /* Consume taps */ })
                     }
             ) {
                 Column(
                     modifier = Modifier
-                        .heightIn(max = 520.dp)
+                        .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = 6.dp)
                 ) {
