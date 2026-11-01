@@ -136,7 +136,28 @@ object LiveAutoPilotEngine {
 
                 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-                // 🛡️ Background rAF Unchoker: Force token typing into DOM even when tab is in background!
+                // 🛡️ 24/7 Visibility Spoof: Deceive Angular/DOM renderer to keep streaming active even when tab/app is backgrounded
+                try {
+                    Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+                    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+                    Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+                    Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+                    document.hasFocus = function() { return true; };
+                } catch(_) {}
+
+                // Trap visibility change listeners so AI Studio doesn't freeze its rendering loop
+                if (!window.__omniVisibilityHooked) {
+                    window.__omniVisibilityHooked = true;
+                    const origAddEvent = EventTarget.prototype.addEventListener;
+                    EventTarget.prototype.addEventListener = function(type, listener, options) {
+                        if (type === 'visibilitychange' || type === 'webkitvisibilitychange' || type === 'freeze') {
+                            return;
+                        }
+                        return origAddEvent.call(this, type, listener, options);
+                    };
+                }
+
+                // 🛡️ Background rAF Unchoker: Force token typing into DOM even when tab/app is in background!
                 if (!window.__omniRafUnchoked) {
                     window.__omniRafUnchoked = true;
                     const origRaf = window.requestAnimationFrame;
@@ -617,13 +638,38 @@ object LiveAutoPilotEngine {
                 }
             };
 
+                window.__omniAuditPendingCxp = function() {
+                    if (!window.__omniLiveAutoPilotActive) return;
+                    const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"], [data-turn-role="model" i], ms-chat-turn:not(.user)'));
+                    if (allModelContainers.length === 0) return;
+                    const latestTurn = allModelContainers[allModelContainers.length - 1];
+                    const screenText = getScreenText(latestTurn);
+                    if (!screenText) return;
+                    if (latestTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
+                        const cxpPayload = extractCxpBlock(screenText);
+                        if (cxpPayload) {
+                            latestTurn.setAttribute('data-omni-cxp-executed', 'true');
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
+                                window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
+                            }
+                        }
+                    }
+                };
+
                 window.__omniSentinelInterval = setInterval(() => {
                     hookPromptSubmission();
                     checkQuotaErrors();
 
+                    const isGen = checkUiGenerating();
+                    if (isGen !== window.__omniLastReportedGenState) {
+                        window.__omniLastReportedGenState = isGen;
+                        if (window.OmniIdeBridge && window.OmniIdeBridge.reportGenerationActive) {
+                            window.OmniIdeBridge.reportGenerationActive(isGen);
+                        }
+                    }
+
                     if (!window.__omniLiveAutoPilotActive) return;
 
-                    const isGen = checkUiGenerating();
                     if (isGen) {
                         try {
                             const scroller = document.querySelector('ms-autoscroll-container, .chat-view-container, .chat-history');
