@@ -1028,16 +1028,17 @@ class BrowserStateHolder(
 
         if (isCurrentlyActive) {
             if (isNight) {
-                bridge.showToast("🌙 Night Curfew active (10 PM – 6 AM). Lock cannot be disengaged.")
-                bridge.vibrate(50L)
+                bridge.showToast("🌙 Night Curfew active (10 PM – 6 AM). Sleep mode engaged!")
+                bridge.vibrate(120L)
                 return
             }
+
+            var maxLockUntil = 0L
             try {
                 val slFile = File(context.getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
                 if (slFile.exists()) {
                     val json = org.json.JSONObject(slFile.readText(Charsets.UTF_8))
-                    json.put("manual_lock_until_ms", 0L)
-                    slFile.writeText(json.toString(2), Charsets.UTF_8)
+                    maxLockUntil = maxOf(maxLockUntil, json.optLong("manual_lock_until_ms", 0L), json.optLong("penalty_until_ms", 0L))
                 }
                 val fsDirs = listOf(
                     File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
@@ -1046,18 +1047,15 @@ class BrowserStateHolder(
                 for (f in fsDirs) {
                     if (f.exists()) {
                         val json = org.json.JSONObject(f.readText(Charsets.UTF_8))
-                        json.put("manual_lock_until_ms", 0L)
-                        json.put("lock_until_ms", 0L)
-                        json.put("is_active", false)
-                        f.writeText(json.toString(2), Charsets.UTF_8)
+                        maxLockUntil = maxOf(maxLockUntil, json.optLong("manual_lock_until_ms", 0L), json.optLong("lock_until_ms", 0L))
                     }
                 }
-                resetFocusLockCache()
-                bridge.showToast("🔓 Focus Lock Disengaged")
-                bridge.vibrate(30L)
-            } catch (e: Exception) {
-                bridge.showToast("Error updating lock: ${e.message}")
-            }
+            } catch (_: Exception) {}
+
+            val remainingMs = maxLockUntil - now
+            val remMin = if (remainingMs > 0L) ((remainingMs / 60_000L).coerceAtLeast(1)) else 1
+            bridge.showToast("⛔ Focus Lock active! ${remMin}m remaining. No early exit!")
+            bridge.vibrate(150L)
         } else {
             val newUntil = now + (60 * 60 * 1000L)
             try {
@@ -1084,8 +1082,8 @@ class BrowserStateHolder(
             } catch (_: Exception) {}
 
             resetFocusLockCache()
-            bridge.showToast("🔒 1-Hour Focus Lock Engaged! Distraction sites locked.")
-            bridge.vibrate(150L)
+            bridge.showToast("🔒 1-Hour Focus Lock Engaged! Irreversible until timer expires.")
+            bridge.vibrate(180L)
 
             val currentTab = tabs.find { it.id == activeTabId }
             if (currentTab != null && isOmniShieldBlocked(currentTab.url, context)) {
