@@ -856,10 +856,11 @@ fun MenuCustomizerDialog(
     var active by remember { mutableStateOf(initialActive) }
     var hidden by remember { mutableStateOf(initialHidden) }
 
-    val names = mapOf(
-        "force_dark" to "☀️/🌙 Dark Mode Toggle",
-        "data_saver" to "🛡️ Data-saver Mode",
-        "copy_url" to "🔗 Copy Clean URL",
+            val names = mapOf(
+            "force_dark" to "☀️/🌙 Dark Mode Toggle",
+            "data_saver" to "🛡️ Data-saver Mode",
+            "focus_lock" to "🔒 Focus Lock Toggle",
+            "copy_url" to "🔗 Copy Clean URL",
         "dom_snapshot" to "📸 Capture DOM Snapshot",
         "local_ide" to "💻 Open Local IDE",
         "autopilot" to "⚡ Live Auto-Pilot",
