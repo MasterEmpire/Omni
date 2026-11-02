@@ -2273,6 +2273,10 @@ fun buildFocusWatchdogScript(): String {
     return """
     (function() {
         if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
         window.__omniFocusWatchdogActive = true;
         const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
         
@@ -2311,7 +2315,12 @@ fun buildFocusWatchdogScript(): String {
 fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
     if (rawUrl.isNullOrBlank()) return false
     val clean = rawUrl.lowercase(Locale.US).trim()
-    if (clean == "about:blank" || clean.startsWith("http://localhost") || clean.startsWith("http://127.0.0.1")) return false
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
 
     val isFocusLocked = context != null && isFocusLockActive(context)
     val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
