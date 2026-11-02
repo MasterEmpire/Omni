@@ -536,7 +536,16 @@ class BrowserStateHolder(
             }, containerLayout)
         }
 
-        val needsUrlLoad = targetTab.url.isNotEmpty() && targetTab.url != "about:blank" &&
+        val isBlocked = isOmniShieldBlocked(targetTab.url, context)
+        if (isBlocked) {
+            bridge.showToast("🛡️ Focus Lock Active: Distraction tab blocked")
+            bridge.log("FOCUS_SHIELD", "🛑 Deflected blocked tab [${targetTab.id}] (${targetTab.url}) on attach.")
+            targetWv.loadDataWithBaseURL(null, OMNI_SHIELD_BLOCKED_HTML, "text/html", "UTF-8", null)
+            tabs = tabs.map { if (it.id == targetTabId) it.copy(url = "about:blank", title = "Blocked by Shield") else it }
+            vaultManager.saveSession(tabs, targetTabId, selectedProfileId)
+        }
+
+        val needsUrlLoad = !isBlocked && targetTab.url.isNotEmpty() && targetTab.url != "about:blank" &&
             (targetWv.url == null || targetWv.url == "about:blank" || (isNewInstance && targetWv.copyBackForwardList().size == 0))
 
         if (needsUrlLoad) {
@@ -2400,15 +2409,21 @@ class BrowserStateHolder(
     }
 
     override fun onUrlChanged(tabId: String, url: String, canGoBack: Boolean, canGoForward: Boolean) {
-        val safeUrl = sanitizeSafeUrl(url, context)
+        val isBlocked = isOmniShieldBlocked(url, context)
+        if (isBlocked) {
+            bridge.showToast("🛡️ Focus Lock Active: Page blocked")
+            bridge.log("OMNI_SHIELD", "🛑 Deflected in-page navigation to $url on tab [$tabId]")
+            poolManager.pool[tabId]?.loadDataWithBaseURL(null, OMNI_SHIELD_BLOCKED_HTML, "text/html", "UTF-8", null)
+        }
+        val safeUrl = if (isBlocked) "about:blank" else sanitizeSafeUrl(url, context)
         if (activeTabId == tabId) {
             this.canGoBack = canGoBack
             this.canGoForward = canGoForward
             currentUrl = safeUrl
-            urlInputText = safeUrl
+            urlInputText = if (isBlocked) "" else safeUrl
             syncAutoPilotStateForCurrentTab(isExplicitUserToggle = false)
         }
-        tabs = tabs.map { if (it.id == tabId) it.copy(url = safeUrl) else it }
+        tabs = tabs.map { if (it.id == tabId) it.copy(url = safeUrl, title = if (isBlocked) "Blocked by Shield" else it.title) else it }
         vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
     }
 
