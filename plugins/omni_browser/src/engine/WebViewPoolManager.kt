@@ -589,7 +589,9 @@ class WebViewPoolManager(
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
-                    view?.evaluateJavascript(com.omni.plugin.browser.utils.buildFocusWatchdogScript(), null)
+                    if (url != null && !url.contains("aistudio.google.com") && !url.contains("localhost") && url != "about:blank") {
+                        view?.evaluateJavascript(com.omni.plugin.browser.utils.buildFocusWatchdogScript(), null)
+                    }
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -600,7 +602,9 @@ class WebViewPoolManager(
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
-                    view?.evaluateJavascript(com.omni.plugin.browser.utils.buildFocusWatchdogScript(), null)
+                    if (url != null && !url.contains("aistudio.google.com") && !url.contains("localhost") && url != "about:blank") {
+                        view?.evaluateJavascript(com.omni.plugin.browser.utils.buildFocusWatchdogScript(), null)
+                    }
                     val colorSchemeScript = if (isForceDarkWebPages) {
                         "try { document.querySelector('meta[name=\"color-scheme\"]')?.setAttribute('content', 'dark'); } catch(_) {}"
                     } else {
