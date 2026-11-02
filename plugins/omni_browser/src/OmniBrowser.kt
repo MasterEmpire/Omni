@@ -615,11 +615,13 @@ class OmniBrowser : PluginEntry() {
                     canGoBack = state.canGoBack,
                     canGoForward = state.canGoForward,
                     currentUrl = state.currentUrl,
-                    dataSaverMode = state.dataSaverMode,
+                                        dataSaverMode = state.dataSaverMode,
                     onToggleDataSaver = { state.toggleDataSaver() },
                     forceDarkWebPages = state.forceDarkWebPages,
                     onToggleForceDark = { state.toggleForceDark() },
-                onBackClick = {
+                    isFocusLockActive = isFocusLockActive(context),
+                    onToggleFocusLock = { state.toggleFocusLock() },
+                    onBackClick = {
                     if (state.canGoBack) state.currentWebView?.goBack()
                     else if (state.currentUrl != "about:blank") state.navigateTo("about:blank")
                 },
