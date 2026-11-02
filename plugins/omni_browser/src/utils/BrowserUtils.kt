@@ -2245,6 +2245,10 @@ val EXTENSIVE_EXPLICIT_TOKENS = setOf(
 private var lastFocusLockCheckTime = 0L
 private var cachedFocusLockState = false
 
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
 fun isFocusLockActive(context: android.content.Context): Boolean {
     val now = System.currentTimeMillis()
     if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
