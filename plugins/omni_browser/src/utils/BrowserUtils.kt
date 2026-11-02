@@ -2358,30 +2358,50 @@ fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = nul
         val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
         val host = uri.host?.lowercase(Locale.US) ?: clean
 
-        for (domain in activeDomains) {
-            if (host.contains(domain) || clean.contains(domain)) return true
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        val isSearchEngine = host.contains("google.") || host.contains("duckduckgo.com") ||
+                             host.contains("bing.com") || host.contains("ecosia.org")
+        if (isSearchEngine) {
+            return false
         }
 
-        // 1. Exact word tokens
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
         val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
         for (token in tokens) {
-            if (activeTokens.contains(token)) return true
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
         }
 
-        // 2. Substring matching for tokens with length >= 4 (catches compound names like freeporn, nakedcelebs)
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
         for (token in activeTokens) {
-            if (token.length >= 4 && clean.contains(token)) return true
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
         }
 
-        // 3. Word-boundary regex for short high-risk tokens (avoids 'unisex' / 'sussex' false positives)
+        // 5. Word-boundary regex for short high-risk tokens
         val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
         if (shortExplicitRegex.containsMatchIn(clean)) return true
     } catch (_: Exception) {
         for (domain in activeDomains) {
-            if (clean.contains(domain)) return true
-        }
-        for (token in activeTokens) {
-            if (token.length >= 4 && clean.contains(token)) return true
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
         }
     }
     return false
