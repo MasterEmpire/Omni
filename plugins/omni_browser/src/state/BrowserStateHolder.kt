@@ -1828,19 +1828,6 @@ class BrowserStateHolder(
     }
 
     fun onSearchInputChanged(input: String) {
-        val qLower = input.lowercase(java.util.Locale.US)
-        val badWord = com.omni.plugin.browser.utils.EXTENSIVE_EXPLICIT_TOKENS.find {
-            it.length >= 3 && (qLower.contains(it) || Regex("\\b" + Regex.escape(it) + "\\b").containsMatchIn(qLower))
-        }
-        if (badWord != null) {
-            bridge.log("OMNI_SHIELD", "🛑 Explicit search attempt blocked 24/7: '$badWord'")
-            bridge.showToast("🛡️ Omni Shield: Explicit Content Blocked 24/7!")
-            urlInputText = ""
-            dismissSearch()
-            closeTab(activeTabId, suppressUndo = true)
-            return
-        }
-
         urlInputText = input
         suggestionJob?.cancel()
         val query = input.trim()
@@ -2532,11 +2519,23 @@ class BrowserStateHolder(
     }
 
     override fun onFocusViolation(tabId: String) {
-        bridge.log("FOCUS_SHIELD", "🛑 Vulgarity typed on tab [$tabId]. Terminating tab.")
-        bridge.showToast("🛡️ Focus Shield: Vulgarity detected. Tab terminated.")
-        closeTab(tabId, suppressUndo = true)
-        if (currentUrl != "about:blank") {
-            navigateTo("about:blank")
+        val targetTab = tabs.find { it.id == tabId }
+        val tabUrl = (targetTab?.url ?: currentUrl).lowercase(Locale.US)
+        if (tabUrl.contains("aistudio.google.com") || tabUrl.contains("localhost") || tabUrl == "about:blank") {
+            return
+        }
+
+        val isLocked = isFocusLockActive(context)
+        if (isLocked) {
+            bridge.log("FOCUS_SHIELD", "🛑 Focus Lock violation on tab [$tabId]. Terminating tab.")
+            bridge.showToast("🛡️ Focus Lock: Explicit input blocked during focus lock.")
+            closeTab(tabId, suppressUndo = true)
+            if (currentUrl != "about:blank") {
+                navigateTo("about:blank")
+            }
+        } else {
+            bridge.log("OMNI_SHIELD", "🛑 In-page explicit input deflected on tab [$tabId].")
+            bridge.showToast("🛡️ Omni Shield: Explicit text cleared.")
         }
     }
 
