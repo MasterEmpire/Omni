@@ -2247,22 +2247,50 @@ private var cachedFocusLockState = false
 
 fun isFocusLockActive(context: android.content.Context): Boolean {
     val now = System.currentTimeMillis()
-    if (now - lastFocusLockCheckTime < 5000L) return cachedFocusLockState
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
 
     var isActive = false
-    try {
-        val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
-        if (slState.exists()) {
-            val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
-            if (now < json.optLong("manual_lock_until_ms", 0L)) isActive = true
-        }
-        val fsState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
-        if (fsState.exists() && !isActive) {
-            val json = org.json.JSONObject(fsState.readText(Charsets.UTF_8))
-            if (json.optBoolean("is_active", false) || now < json.optLong("lock_until_ms", 0L)) isActive = true
-        }
-    } catch(_: Exception) {}
-    
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     cachedFocusLockState = isActive
     lastFocusLockCheckTime = now
     return isActive
