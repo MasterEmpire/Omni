@@ -123,7 +123,7 @@ class BrowserStateHolder(
     var activeMediaTabId by mutableStateOf<String?>(null)
 
     // Menu Layout State
-    val defaultActiveMenu = listOf("force_dark", "data_saver", "copy_url", "dom_snapshot", "local_ide", "autopilot", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
+    val defaultActiveMenu = listOf("force_dark", "data_saver", "focus_lock", "copy_url", "dom_snapshot", "local_ide", "autopilot", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
     var activeMenuItems by mutableStateOf(defaultActiveMenu)
     var hiddenMenuItems by mutableStateOf<List<String>>(emptyList())
     var showMenuCustomizerDialog by mutableStateOf(false)
@@ -1015,6 +1015,84 @@ class BrowserStateHolder(
         bridge.log("THEME", "Toggled web force dark to $forceDarkWebPages")
         if (currentUrl != "about:blank") {
             currentWebView?.reload()
+        }
+    }
+
+    fun toggleFocusLock() {
+        val now = System.currentTimeMillis()
+        val cal = java.util.Calendar.getInstance()
+        val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val isNight = hour >= 22 || hour < 6
+
+        val isCurrentlyActive = isFocusLockActive(context)
+
+        if (isCurrentlyActive) {
+            if (isNight) {
+                bridge.showToast("🌙 Night Curfew active (10 PM – 6 AM). Lock cannot be disengaged.")
+                bridge.vibrate(50L)
+                return
+            }
+            try {
+                val slFile = File(context.getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+                if (slFile.exists()) {
+                    val json = org.json.JSONObject(slFile.readText(Charsets.UTF_8))
+                    json.put("manual_lock_until_ms", 0L)
+                    slFile.writeText(json.toString(2), Charsets.UTF_8)
+                }
+                val fsDirs = listOf(
+                    File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                    File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+                )
+                for (f in fsDirs) {
+                    if (f.exists()) {
+                        val json = org.json.JSONObject(f.readText(Charsets.UTF_8))
+                        json.put("manual_lock_until_ms", 0L)
+                        json.put("lock_until_ms", 0L)
+                        json.put("is_active", false)
+                        f.writeText(json.toString(2), Charsets.UTF_8)
+                    }
+                }
+                resetFocusLockCache()
+                bridge.showToast("🔓 Focus Lock Disengaged")
+                bridge.vibrate(30L)
+            } catch (e: Exception) {
+                bridge.showToast("Error updating lock: ${e.message}")
+            }
+        } else {
+            val newUntil = now + (60 * 60 * 1000L)
+            try {
+                val slFile = File(context.getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+                slFile.parentFile?.mkdirs()
+                val slJson = if (slFile.exists()) {
+                    try { org.json.JSONObject(slFile.readText(Charsets.UTF_8)) } catch (_: Exception) { org.json.JSONObject() }
+                } else org.json.JSONObject()
+                slJson.put("manual_lock_until_ms", newUntil)
+                slFile.writeText(slJson.toString(2), Charsets.UTF_8)
+
+                val fsDirs = listOf(
+                    File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                    File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+                )
+                for (f in fsDirs) {
+                    f.parentFile?.mkdirs()
+                    val fsJson = if (f.exists()) {
+                        try { org.json.JSONObject(f.readText(Charsets.UTF_8)) } catch (_: Exception) { org.json.JSONObject() }
+                    } else org.json.JSONObject()
+                    fsJson.put("manual_lock_until_ms", newUntil)
+                    f.writeText(fsJson.toString(2), Charsets.UTF_8)
+                }
+            } catch (_: Exception) {}
+
+            resetFocusLockCache()
+            bridge.showToast("🔒 1-Hour Focus Lock Engaged! Distraction sites locked.")
+            bridge.vibrate(150L)
+
+            val currentTab = tabs.find { it.id == activeTabId }
+            if (currentTab != null && isOmniShieldBlocked(currentTab.url, context)) {
+                currentWebView?.loadDataWithBaseURL(null, OMNI_SHIELD_BLOCKED_HTML, "text/html", "UTF-8", null)
+                tabs = tabs.map { if (it.id == activeTabId) it.copy(url = "about:blank", title = "Blocked by Shield") else it }
+                vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
+            }
         }
     }
 
