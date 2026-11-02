@@ -601,6 +601,8 @@ fun BrowserMenuOverlay(
     onToggleDataSaver: () -> Unit = {},
     forceDarkWebPages: Boolean = false,
     onToggleForceDark: () -> Unit = {},
+    isFocusLockActive: Boolean = false,
+    onToggleFocusLock: () -> Unit = {},
     isLiveAutoPilotEnabled: Boolean = false,
     onToggleLiveAutoPilot: () -> Unit = {},
     isAutoPilotConfirmEnabled: Boolean = false,
@@ -768,6 +770,19 @@ fun BrowserMenuOverlay(
                                 color = dsColor,
                                 isBold = dataSaverMode != "OFF",
                                 onClick = { onToggleDataSaver() }
+                            )
+                        }
+                        "focus_lock" -> {
+                            val (fTitle, fColor) = if (isFocusLockActive) {
+                                "🔒 Focus Lock (ACTIVE)" to Color(0xFFF85149)
+                            } else {
+                                "🛡️ Enable Focus (1h)" to Color(0xFF58A6FF)
+                            }
+                            InLayoutMenuItem(
+                                title = fTitle,
+                                color = fColor,
+                                isBold = true,
+                                onClick = { onToggleFocusLock() }
                             )
                         }
                         "copy_url" -> InLayoutMenuItem("Copy Clean URL") { onCopyCleanUrl() }
