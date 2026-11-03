@@ -2217,7 +2217,7 @@ private val ADULT_DOMAINS = setOf(
 private val DISTRACTION_DOMAINS = setOf(
     "twitter", "x.com", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
     "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
-    "badoo", "of.com", "fansly"
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social"
 )
 
 val EXTENSIVE_EXPLICIT_TOKENS = setOf(
