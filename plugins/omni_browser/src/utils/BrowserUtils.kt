@@ -2211,13 +2211,23 @@ private val ADULT_DOMAINS = setOf(
     "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
     "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
     "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
-    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop"
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
 )
 
 private val DISTRACTION_DOMAINS = setOf(
-    "twitter", "x.com", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
     "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
-    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social"
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
 )
 
 val EXTENSIVE_EXPLICIT_TOKENS = setOf(
@@ -2363,8 +2373,20 @@ fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = nul
         val host = uri.host?.lowercase(Locale.US) ?: clean
 
         // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
-        val isSearchEngine = host.contains("google.") || host.contains("duckduckgo.com") ||
-                             host.contains("bing.com") || host.contains("ecosia.org")
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
         if (isSearchEngine) {
             return false
         }
