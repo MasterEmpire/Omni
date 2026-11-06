@@ -212,6 +212,12 @@ class OmniStudioLabBridge(
                             put("content", content)
                         })
                     }
+                    if (resArr.length() == 0 && dumpText.isNotBlank()) {
+                        resArr.put(JSONObject().apply {
+                            put("path", fileList.firstOrNull() ?: "project_files")
+                            put("content", dumpText)
+                        })
+                    }
                     resolve(callId, resArr)
                 }
             } catch (e: Exception) {
