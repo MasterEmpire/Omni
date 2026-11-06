@@ -60,7 +60,124 @@ class OmniStudioLabBridge(
         }
     }
 
-    // --- 1. AI Studio Puppet Commands ---
+    private fun parseAttachmentsFromJson(arr: JSONArray?): List<AutomationAttachment> {
+        val attachments = mutableListOf<AutomationAttachment>()
+        if (arr == null) return attachments
+        for (i in 0 until arr.length()) {
+            val item = arr.get(i)
+            if (item is JSONObject) {
+                attachments.add(
+                    AutomationAttachment(
+                        name = item.optString("name", "attachment_$i"),
+                        mimeType = item.optString("mime", item.optString("mimeType", "application/octet-stream")),
+                        sizeBytes = item.optLong("size", 0L),
+                        base64Data = item.optString("data", item.optString("base64Data", ""))
+                    )
+                )
+            } else if (item is String) {
+                val f = File(item)
+                if (f.exists() && f.isFile) {
+                    val bytes = f.readBytes()
+                    val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                    attachments.add(
+                        AutomationAttachment(
+                            name = f.name,
+                            mimeType = com.omni.plugin.browser.utils.resolveMimeType(f),
+                            sizeBytes = f.length(),
+                            base64Data = b64
+                        )
+                    )
+                }
+            }
+        }
+        return attachments
+    }
+
+    // --- 1. Multi-Session Puppet Pool Methods (Uncapped Concurrent Sessions) ---
+    @JavascriptInterface
+    fun studioCreateSession(callId: String, profileId: String, model: String) {
+        mainHandler.post {
+            automator.createSession(profileId.ifEmpty { "default" }, model) { sessionId, err ->
+                if (sessionId != null) {
+                    val res = JSONObject().apply { put("sessionId", sessionId) }
+                    resolve(callId, res)
+                } else {
+                    reject(callId, err ?: "Failed creating session")
+                }
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun studioConfigureSession(callId: String, sessionId: String, configJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(configJson)
+                automator.configureSession(
+                    sessionId = sessionId,
+                    sysTitle = json.optString("sysTitle", ""),
+                    sysPrompt = json.optString("sysPrompt", ""),
+                    thinkingLevel = json.optString("thinkingLevel", "Default"),
+                    model = json.optString("model", ""),
+                    fallbackEnabled = json.optBoolean("fallbackEnabled", true),
+                    temporaryChat = json.optBoolean("temporaryChat", false)
+                ) { success, err ->
+                    if (success) resolve(callId, "Configured")
+                    else reject(callId, err ?: "Configuration error")
+                }
+            } catch (e: Exception) {
+                reject(callId, "Invalid config JSON: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun studioSendSessionTurn(callId: String, sessionId: String, turnJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(turnJson)
+                val prompt = json.optString("prompt", "")
+                val label = json.optString("label", "Turn")
+                val attachments = parseAttachmentsFromJson(json.optJSONArray("attachments"))
+
+                automator.executeSessionTurn(
+                    sessionId = sessionId,
+                    prompt = prompt,
+                    attachments = attachments,
+                    label = label,
+                    onProgress = { thoughts, output ->
+                        val progObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        progress(callId, progObj)
+                    },
+                    onComplete = { thoughts, output ->
+                        val resObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        resolve(callId, resObj)
+                    },
+                    onError = { err ->
+                        reject(callId, err)
+                    }
+                )
+            } catch (e: Exception) {
+                reject(callId, "Turn execution error: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun studioCloseSession(callId: String, sessionId: String) {
+        mainHandler.post {
+            automator.closeSession(sessionId)
+            resolve(callId, "Closed")
+        }
+    }
+
+    // --- Backward-Compatible Default Session Wrappers ---
     @JavascriptInterface
     fun studioInit(callId: String, profileId: String) {
         mainHandler.post {
@@ -100,38 +217,7 @@ class OmniStudioLabBridge(
                 val json = JSONObject(turnJson)
                 val prompt = json.optString("prompt", "")
                 val label = json.optString("label", "Playbook Turn")
-
-                val attachments = mutableListOf<AutomationAttachment>()
-                val arr = json.optJSONArray("attachments")
-                if (arr != null) {
-                    for (i in 0 until arr.length()) {
-                        val item = arr.get(i)
-                        if (item is JSONObject) {
-                            attachments.add(
-                                AutomationAttachment(
-                                    name = item.optString("name", "attachment_$i"),
-                                    mimeType = item.optString("mime", item.optString("mimeType", "application/octet-stream")),
-                                    sizeBytes = item.optLong("size", 0L),
-                                    base64Data = item.optString("data", item.optString("base64Data", ""))
-                                )
-                            )
-                        } else if (item is String) {
-                            val f = File(item)
-                            if (f.exists() && f.isFile) {
-                                val bytes = f.readBytes()
-                                val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                                attachments.add(
-                                    AutomationAttachment(
-                                        name = f.name,
-                                        mimeType = com.omni.plugin.browser.utils.resolveMimeType(f),
-                                        sizeBytes = f.length(),
-                                        base64Data = b64
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
+                val attachments = parseAttachmentsFromJson(json.optJSONArray("attachments"))
 
                 automator.executeTurn(
                     prompt = prompt,
