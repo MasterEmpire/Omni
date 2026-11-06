@@ -19,6 +19,7 @@ import com.omni.plugin.browser.models.*
 import com.omni.plugin.browser.services.CaptchaSolverService
 import com.omni.plugin.browser.services.DownloadController
 import com.omni.plugin.browser.storage.VaultManager
+import com.omni.plugin.browser.models.DEFAULT_STARTER_PLAYBOOK_HTML
 import com.omni.plugin.browser.utils.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
