@@ -1408,6 +1408,11 @@ class BrowserStateHolder(
     }
 
     override fun onPatchReported(status: String, details: String) {
+        pendingPlaybookCommitCallback?.let { cb ->
+            pendingPlaybookCommitCallback = null
+            bridge.log("STUDIO_LAB", "Delivering patch result to Playbook callback (status=$status)")
+            cb(status, details)
+        }
         if (!isLiveAutoPilotEnabled && cxpPillStatus != "PATCHING") {
             bridge.log("AUTOPILOT_PIPELINE", "🛑 [BLOCKED] onPatchReported ignored because Live Auto-Pilot is OFF (Status: $status, Details: '$details').")
             return
@@ -1538,7 +1543,28 @@ class BrowserStateHolder(
         }
     }
 
+    private var pendingPlaybookPullCallback: ((String, Int) -> Unit)? = null
+    private var pendingPlaybookCommitCallback: ((String, String) -> Unit)? = null
+
+    override fun onPlaybookFilePullRequested(project: String, files: List<String>, onResult: (String, Int) -> Unit) {
+        pendingPlaybookPullCallback = onResult
+        val xml = "<pull_files project=\"${project}\" files=\"${files.joinToString(",")}\" />"
+        executeFilePullDirectly(xml)
+    }
+
+    override fun onPlaybookCxpCommitRequested(xml: String, onResult: (String, String) -> Unit) {
+        pendingPlaybookCommitCallback = onResult
+        commitCxpToIde(xml)
+    }
+
     override fun onFilesPulled(dumpText: String, fileCount: Int) {
+        val playbookCb = pendingPlaybookPullCallback
+        if (playbookCb != null) {
+            pendingPlaybookPullCallback = null
+            bridge.log("STUDIO_LAB", "Delivering pulled files directly to Playbook callback ($fileCount file(s))")
+            playbookCb(dumpText, fileCount)
+            return
+        }
         if (!isLiveAutoPilotEnabled) return
         val studioTabId = activeAiStudioTabId ?: tabs.find { it.url.contains("aistudio.google.com") }?.id ?: return
         val studioWv = poolManager.pool[studioTabId] ?: return
