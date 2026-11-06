@@ -45,6 +45,8 @@ interface WebViewEventListener {
     fun onAiQuotaHit(profileId: String, reason: String)
     fun onAiGenerationStateChanged(tabId: String, isGenerating: Boolean)
     fun onFocusViolation(tabId: String)
+    fun onPlaybookFilePullRequested(project: String, files: List<String>, onResult: (String, Int) -> Unit)
+    fun onPlaybookCxpCommitRequested(xml: String, onResult: (String, String) -> Unit)
 }
 
 class WebViewPoolManager(
@@ -341,10 +343,10 @@ class WebViewPoolManager(
                 bridge = bridge,
                 automator = com.omni.plugin.browser.engine.AiStudioAutomator(context, bridge),
                 onIdePull = { project, files, onRes ->
-                    listener.onFilePullRequested("<pull_files project=\"${project}\" files=\"${files.joinToString(",")}\" />")
+                    listener.onPlaybookFilePullRequested(project, files, onRes)
                 },
                 onIdeCommit = { xml, onRes ->
-                    listener.onCxpDispatched(xml)
+                    listener.onPlaybookCxpCommitRequested(xml, onRes)
                 },
                 scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main),
                 getActiveWebView = { this@apply }
