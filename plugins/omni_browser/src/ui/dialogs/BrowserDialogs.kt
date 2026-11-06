@@ -863,6 +863,7 @@ fun MenuCustomizerDialog(
             "copy_url" to "🔗 Copy Clean URL",
         "dom_snapshot" to "📸 Capture DOM Snapshot",
         "local_ide" to "💻 Open Local IDE",
+        "studio_lab" to "🧪 Studio Lab (Playbooks)",
         "autopilot" to "⚡ Live Auto-Pilot",
         "ai_automator" to "🤖 AI Studio Automator",
         "smart_notes" to "📝 Smart Notes",
