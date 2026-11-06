@@ -18,6 +18,7 @@ import androidx.webkit.WebViewFeature
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.browser.models.BrowserTab
 import com.omni.plugin.browser.models.OmniBlobBridge
+import com.omni.plugin.browser.models.OMNI_STUDIO_LAB_CLIENT_SCRIPT
 import com.omni.plugin.browser.utils.*
 
 interface WebViewEventListener {
