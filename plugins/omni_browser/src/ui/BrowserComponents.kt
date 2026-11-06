@@ -617,6 +617,7 @@ fun BrowserMenuOverlay(
     onOpenLocalIde: () -> Unit,
     onOpenAutomation: () -> Unit,
     onOpenSmartNotes: () -> Unit,
+    onOpenStudioLab: () -> Unit = {},
     activeDownloadsCount: Int,
     onOpenDownloads: () -> Unit,
     onShowRecents: () -> Unit = {},
@@ -821,6 +822,7 @@ fun BrowserMenuOverlay(
                                 }
                             }
                         }
+                        "studio_lab" -> InLayoutMenuItem("🧪 Studio Lab (Playbooks)", color = Color(0xFF00E5FF), isBold = true) { onOpenStudioLab() }
                         "ai_automator" -> InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) { onOpenAutomation() }
                         "smart_notes" -> InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8)) { onOpenSmartNotes() }
                         "downloads" -> {
