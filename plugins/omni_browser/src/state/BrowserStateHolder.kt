@@ -111,6 +111,8 @@ class BrowserStateHolder(
     var showDownloadsDialog by mutableStateOf(false)
     var showSmartNotesDialog by mutableStateOf(false)
     var smartNotes by mutableStateOf<List<SmartNote>>(emptyList())
+    var showStudioLabDialog by mutableStateOf(false)
+    var playbooks by mutableStateOf<List<com.omni.plugin.browser.models.StudioPlaybook>>(emptyList())
     val trackedDownloadIds = mutableStateListOf<Long>()
     var activeDownloadsList by mutableStateOf<List<ActiveDownloadItem>>(emptyList())
     var completedFilesList by mutableStateOf<List<File>>(emptyList())
@@ -398,6 +400,19 @@ class BrowserStateHolder(
 
         vaultManager.loadHistory()?.let { loaded ->
             if (loaded.isNotEmpty()) history = loaded
+        }
+
+        val loadedPbs = vaultManager.loadPlaybooks()
+        if (!loadedPbs.isNullOrEmpty()) {
+            playbooks = loadedPbs
+        } else {
+            val starter = com.omni.plugin.browser.models.StudioPlaybook(
+                title = "Autonomous Agent Starter",
+                description = "Google AI Studio Puppet + Nexus Python + Conduit IDE",
+                content = DEFAULT_STARTER_PLAYBOOK_HTML
+            )
+            playbooks = listOf(starter)
+            vaultManager.savePlaybooks(playbooks)
         }
 
         aiAnalytics = vaultManager.loadAiAnalytics()
@@ -2117,6 +2132,41 @@ class BrowserStateHolder(
         smartNotes = updated
         vaultManager.saveSmartNotes(updated)
         bridge.showToast("Note deleted")
+    }
+
+    fun savePlaybook(title: String, description: String, content: String, existingId: String? = null) {
+        val cleanTitle = title.trim().ifEmpty { "Playbook ${playbooks.size + 1}" }
+        val updated = if (existingId != null && playbooks.any { it.id == existingId }) {
+            playbooks.map {
+                if (it.id == existingId) it.copy(title = cleanTitle, description = description.trim(), content = content, updatedAt = System.currentTimeMillis())
+                else it
+            }
+        } else {
+            listOf(com.omni.plugin.browser.models.StudioPlaybook(title = cleanTitle, description = description.trim(), content = content)) + playbooks
+        }
+        playbooks = updated
+        vaultManager.savePlaybooks(updated)
+        bridge.showToast("Saved '$cleanTitle'")
+    }
+
+    fun deletePlaybook(id: String) {
+        val updated = playbooks.filter { it.id != id }
+        playbooks = updated
+        vaultManager.savePlaybooks(updated)
+        bridge.showToast("Playbook deleted")
+    }
+
+    fun launchPlaybook(playbook: com.omni.plugin.browser.models.StudioPlaybook) {
+        val cleanId = playbook.id.replace(Regex("[^a-zA-Z0-9_]"), "_")
+        val targetPath = "ide/playbooks/$cleanId.html"
+        bridge.saveFile(targetPath, playbook.content.toByteArray(Charsets.UTF_8))
+        bridge.saveFile("playbooks/$cleanId.html", playbook.content.toByteArray(Charsets.UTF_8))
+
+        showStudioLabDialog = false
+        val targetUrl = "http://localhost:$localServerPort/playbooks/$cleanId.html"
+        createNewTab(targetUrl = targetUrl, targetProfileId = selectedProfileId)
+        bridge.showToast("🚀 Launched Playbook '${playbook.title}'")
+        bridge.log("STUDIO_LAB", "Launched playbook [${playbook.id}] at $targetUrl")
     }
 
     fun injectTextToActivePage(text: String) {
