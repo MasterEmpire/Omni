@@ -336,6 +336,21 @@ class WebViewPoolManager(
             )
             addJavascriptInterface(focusBridge, "OmniFocusBridge")
 
+            val studioLabBridge = com.omni.plugin.browser.models.OmniStudioLabBridge(
+                context = context,
+                bridge = bridge,
+                automator = com.omni.plugin.browser.engine.AiStudioAutomator(context, bridge),
+                onIdePull = { project, files, onRes ->
+                    listener.onFilePullRequested("<pull_files project=\"${project}\" files=\"${files.joinToString(",")}\" />")
+                },
+                onIdeCommit = { xml, onRes ->
+                    listener.onCxpDispatched(xml)
+                },
+                scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main),
+                getActiveWebView = { this@apply }
+            )
+            addJavascriptInterface(studioLabBridge, "__OmniStudioLabBridge")
+
             val ideBridge = com.omni.plugin.browser.models.OmniIdeBridge(
                 onCxpDispatched = { xml ->
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -586,6 +601,7 @@ class WebViewPoolManager(
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
                     view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
+                    view?.evaluateJavascript(OMNI_STUDIO_LAB_CLIENT_SCRIPT, null)
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
