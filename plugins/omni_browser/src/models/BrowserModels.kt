@@ -276,3 +276,12 @@ data class SequentialPromptStep(
     val isInfinite: Boolean = false,
     val attachments: List<AutomationAttachment> = emptyList()
 )
+
+data class StudioPlaybook(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val description: String = "",
+    val content: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
