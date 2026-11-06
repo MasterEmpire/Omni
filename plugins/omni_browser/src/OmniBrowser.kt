@@ -663,6 +663,7 @@ class OmniBrowser : PluginEntry() {
                 },
                 onOpenAutomation = { state.showAutomationDialog = true },
                 onOpenSmartNotes = { state.showSmartNotesDialog = true },
+                onOpenStudioLab = { state.showStudioLabDialog = true },
                 activeDownloadsCount = state.trackedDownloadIds.size,
                 onOpenDownloads = {
                     state.refreshCompletedDownloads()
@@ -833,6 +834,17 @@ class OmniBrowser : PluginEntry() {
                             Text("Discard", color = Color(0xFFF28B82), fontSize = 12.sp)
                         }
                     }
+                )
+            }
+
+            if (state.showStudioLabDialog) {
+                com.omni.plugin.browser.ui.dialogs.StudioLabDialog(
+                    bridge = bridge,
+                    playbooks = state.playbooks,
+                    onSavePlaybook = { title, desc, content, id -> state.savePlaybook(title, desc, content, id) },
+                    onDeletePlaybook = { id -> state.deletePlaybook(id) },
+                    onLaunchPlaybook = { pb -> state.launchPlaybook(pb) },
+                    onDismiss = { state.showStudioLabDialog = false }
                 )
             }
 
