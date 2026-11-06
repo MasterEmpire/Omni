@@ -126,7 +126,7 @@ class BrowserStateHolder(
     var activeMediaTabId by mutableStateOf<String?>(null)
 
     // Menu Layout State
-    val defaultActiveMenu = listOf("force_dark", "data_saver", "focus_lock", "copy_url", "dom_snapshot", "local_ide", "autopilot", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
+    val defaultActiveMenu = listOf("force_dark", "data_saver", "focus_lock", "copy_url", "dom_snapshot", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
     var activeMenuItems by mutableStateOf(defaultActiveMenu)
     var hiddenMenuItems by mutableStateOf<List<String>>(emptyList())
     var showMenuCustomizerDialog by mutableStateOf(false)
@@ -359,7 +359,15 @@ class BrowserStateHolder(
             }
             val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems }
             if (missing.isNotEmpty()) {
-                activeMenuItems = activeMenuItems + missing
+                val autoIdx = activeMenuItems.indexOf("ai_automator")
+                if (autoIdx >= 0 && "studio_lab" in missing) {
+                    val updatedList = activeMenuItems.toMutableList()
+                    updatedList.add(autoIdx, "studio_lab")
+                    val remainingMissing = missing.filter { it != "studio_lab" }
+                    activeMenuItems = updatedList + remainingMissing
+                } else {
+                    activeMenuItems = activeMenuItems + missing
+                }
             }
         }
 
