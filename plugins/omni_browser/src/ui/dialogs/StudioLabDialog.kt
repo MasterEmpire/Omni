@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.browser.models.StudioPlaybook
-import com.omni.plugin.browser.utils.DEFAULT_STARTER_PLAYBOOK_HTML
+import com.omni.plugin.browser.models.DEFAULT_STARTER_PLAYBOOK_HTML
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
