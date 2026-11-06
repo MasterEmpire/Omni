@@ -25,35 +25,61 @@ interface AutomationCallback {
     fun onError(err: String)
 }
 
+data class ActivePuppetSession(
+    val sessionId: String,
+    val profileId: String,
+    val model: String,
+    val webView: WebView,
+    var onReadyCallback: ((Boolean, String?) -> Unit)? = null,
+    var onConfigCallback: ((Boolean, String?) -> Unit)? = null,
+    var onTurnProgressCallback: ((String, String) -> Unit)? = null,
+    var onTurnCompleteCallback: ((String, String) -> Unit)? = null,
+    var onTurnErrorCallback: ((String) -> Unit)? = null,
+    var isAborted: Boolean = false
+)
+
 /**
- * High-Level State & Puppet Session Contract for Google AI Studio
+ * High-Level Multi-Session Puppet Pool for Google AI Studio.
+ * Allows firing concurrent headless puppet sessions across multiple profiles with zero throttle cap.
  */
 class AiStudioAutomator(
     private val context: Context,
     private val bridge: HostBridge
 ) {
-    var headlessWv: WebView? = null
-        private set
-    @Volatile
-    var isAborted: Boolean = false
+    val sessions = java.util.concurrent.ConcurrentHashMap<String, ActivePuppetSession>()
+    private var defaultSessionId: String? = null
+
+    val headlessWv: WebView?
+        get() = defaultSessionId?.let { sessions[it]?.webView } ?: sessions.values.firstOrNull()?.webView
+
+    var isAborted: Boolean
+        get() = defaultSessionId?.let { sessions[it]?.isAborted } ?: false
+        set(value) {
+            defaultSessionId?.let { sessions[it]?.isAborted = value }
+            if (value) {
+                sessions.values.forEach { it.isAborted = true }
+            }
+        }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var activeCallback: AutomationCallback? = null
-    private var onSessionReadyCallback: ((Boolean, String?) -> Unit)? = null
-    private var onConfigDoneCallback: ((Boolean, String?) -> Unit)? = null
-    private var onTurnProgressCallback: ((String, String) -> Unit)? = null
-    private var onTurnCompleteCallback: ((String, String) -> Unit)? = null
-    private var onTurnErrorCallback: ((String) -> Unit)? = null
+    private var legacyBatchCallback: AutomationCallback? = null
 
-    // --- PUPPET SDK: Phase 1 - Prepare Session ---
+    private fun normalizeModelSlug(rawModel: String): String {
+        val trimmed = rawModel.trim()
+        if (trimmed.isEmpty() || trimmed.equals("Default", ignoreCase = true)) return ""
+        return trimmed.lowercase(java.util.Locale.US)
+            .replace(" ", "-")
+            .replace("_", "-")
+    }
+
+    // --- MULTI-SESSION FACTORY: Spawn Independent Profile Session ---
     @SuppressLint("SetJavaScriptEnabled")
-    fun prepareSession(
+    fun createSession(
         profileId: String,
-        onReady: (Boolean, String?) -> Unit
+        model: String = "",
+        onReady: (sessionId: String?, error: String?) -> Unit
     ) {
-        stop(null)
-        isAborted = false
-        onSessionReadyCallback = onReady
+        val sessionId = "session_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}"
 
         if (profileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             try {
@@ -68,7 +94,14 @@ class AiStudioAutomator(
         val viewWidth = displayMetrics.widthPixels.coerceAtLeast(1080)
         val viewHeight = displayMetrics.heightPixels.coerceAtLeast(2400)
 
-        val autoWv = WebView(context).apply {
+        val sessionInstance = ActivePuppetSession(
+            sessionId = sessionId,
+            profileId = profileId,
+            model = model,
+            webView = WebView(context)
+        )
+
+        val autoWv = sessionInstance.webView.apply {
             translationX = 0f
             alpha = 1f
             layoutParams = ViewGroup.LayoutParams(
@@ -80,7 +113,6 @@ class AiStudioAutomator(
                 android.view.View.MeasureSpec.makeMeasureSpec(viewHeight, android.view.View.MeasureSpec.EXACTLY)
             )
             layout(0, 0, viewWidth, viewHeight)
-            bridge.log("AI_STUDIO_VIEWPORT", "📐 Initialized & laid out background surface (${viewWidth}x${viewHeight} px)")
 
             settings.apply {
                 javaScriptEnabled = true
@@ -119,99 +151,82 @@ class AiStudioAutomator(
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                     val msg = consoleMessage?.message() ?: ""
-                    if (msg.isEmpty()) return true
-
-                    if (msg.contains("preloaded using link preload", ignoreCase = true) ||
+                    if (msg.isEmpty() ||
+                        msg.contains("preloaded using link preload", ignoreCase = true) ||
                         msg.contains("Failed to upload to drive", ignoreCase = true) ||
-                        msg.contains("GapiService.upload failed", ignoreCase = true) ||
-                        msg.contains("has an appropriate `as` value", ignoreCase = true)
-                    ) {
-                        return true
-                    }
+                        msg.contains("GapiService.upload failed", ignoreCase = true)
+                    ) return true
 
                     val lvl = consoleMessage?.messageLevel()?.name ?: "LOG"
                     val line = consoleMessage?.lineNumber() ?: 0
                     val src = consoleMessage?.sourceId() ?: ""
-                    val tag = when (consoleMessage?.messageLevel()) {
-                        ConsoleMessage.MessageLevel.ERROR -> "AI_STUDIO_ERR"
-                        ConsoleMessage.MessageLevel.WARNING -> "AI_STUDIO_WARN"
-                        else -> "AI_STUDIO_CONSOLE"
-                    }
-                    bridge.log(tag, "[$lvl] $msg (line $line in $src)")
+                    bridge.log("AI_STUDIO_[$sessionId]", "[$lvl] $msg (line $line in $src)")
                     return true
-                }
-
-                override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                    if (newProgress % 25 == 0 || newProgress == 100) {
-                        bridge.log("AI_STUDIO_LOAD", "Headless load: $newProgress%")
-                    }
                 }
             }
 
             addJavascriptInterface(object {
                 @JavascriptInterface
                 fun onStatus(msg: String) {
-                    bridge.updateForegroundTask("AI Studio: $msg")
-                    mainHandler.post { activeCallback?.onStatus(msg) }
+                    bridge.updateForegroundTask("AI Studio ($profileId): $msg")
+                    mainHandler.post { legacyBatchCallback?.onStatus(msg) }
                 }
 
                 @JavascriptInterface
                 fun onLog(tag: String, msg: String) {
-                    bridge.log("AI_STUDIO_$tag", msg)
+                    bridge.log("AI_STUDIO_${tag}[$sessionId]", msg)
                 }
 
                 @JavascriptInterface
                 fun onProgress(thoughts: String, output: String) {
-                    mainHandler.post { activeCallback?.onProgress(thoughts, output) }
+                    mainHandler.post { legacyBatchCallback?.onProgress(thoughts, output) }
                 }
 
                 @JavascriptInterface
                 fun onComplete(thoughts: String, output: String) {
-                    bridge.stopForegroundTask()
-                    mainHandler.post { activeCallback?.onComplete(thoughts, output) }
+                    mainHandler.post { legacyBatchCallback?.onComplete(thoughts, output) }
                 }
 
                 @JavascriptInterface
                 fun onError(err: String) {
-                    if (isAborted) return
-                    bridge.stopForegroundTask()
-                    mainHandler.post { activeCallback?.onError(err) }
+                    if (sessionInstance.isAborted) return
+                    mainHandler.post { legacyBatchCallback?.onError(err) }
                 }
 
                 @JavascriptInterface
                 fun onPuppetReady(success: Boolean, message: String) {
                     mainHandler.post {
-                        onSessionReadyCallback?.invoke(success, message)
-                        onSessionReadyCallback = null
+                        sessionInstance.onReadyCallback?.invoke(success, message)
+                        sessionInstance.onReadyCallback = null
                     }
                 }
 
                 @JavascriptInterface
                 fun onPuppetConfigured(success: Boolean, message: String) {
                     mainHandler.post {
-                        onConfigDoneCallback?.invoke(success, message)
-                        onConfigDoneCallback = null
+                        sessionInstance.onConfigCallback?.invoke(success, message)
+                        sessionInstance.onConfigCallback = null
                     }
                 }
 
                 @JavascriptInterface
                 fun onPuppetTurnProgress(thoughts: String, output: String) {
                     mainHandler.post {
-                        onTurnProgressCallback?.invoke(thoughts, output)
+                        sessionInstance.onTurnProgressCallback?.invoke(thoughts, output)
                     }
                 }
 
                 @JavascriptInterface
                 fun onPuppetTurnComplete(thoughts: String, output: String) {
                     mainHandler.post {
-                        onTurnCompleteCallback?.invoke(thoughts, output)
+                        sessionInstance.onTurnCompleteCallback?.invoke(thoughts, output)
                     }
                 }
 
                 @JavascriptInterface
                 fun onPuppetTurnError(err: String) {
                     mainHandler.post {
-                        onTurnErrorCallback?.invoke(err)
+                        sessionInstance.onTurnErrorCallback?.invoke(err)
                     }
                 }
             }, "OmniAutomator")
@@ -219,15 +234,13 @@ class AiStudioAutomator(
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
-                    bridge.log("AI_STUDIO_NAV", "Started loading: $url")
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    bridge.log("AI_STUDIO_NAV", "Finished loading: $url")
                     if (url != null && url.contains("aistudio.google.com")) {
-                        bridge.log("AI_STUDIO_INJECT", "Injecting Puppet Core Engine into $url")
+                        bridge.log("AI_STUDIO_INJECT", "Injecting Puppet Core Engine into [$sessionId] ($url)")
                         val script = buildAiStudioPuppetScript() + "\nwindow.__omniPuppet.init();"
                         view?.evaluateJavascript(script, null)
                     }
@@ -235,57 +248,73 @@ class AiStudioAutomator(
 
                 override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                     super.onReceivedError(view, request, error)
-                    bridge.log("AI_STUDIO_ERR", "WebView Error: ${error?.description} on URL: ${request?.url}")
-                    if (isAborted) return
+                    if (sessionInstance.isAborted) return
                     if (request?.isForMainFrame == true) {
                         mainHandler.post {
-                            activeCallback?.onError("Network error connecting to AI Studio (${error?.description})")
-                            onSessionReadyCallback?.invoke(false, "Network error: ${error?.description}")
-                            onSessionReadyCallback = null
+                            sessionInstance.onReadyCallback?.invoke(false, "Network error: ${error?.description}")
+                            sessionInstance.onReadyCallback = null
                         }
                     }
                 }
             }
         }
 
-        headlessWv = autoWv
+        sessionInstance.onReadyCallback = { success, msg ->
+            if (success) {
+                onReady(sessionId, null)
+            } else {
+                closeSession(sessionId)
+                onReady(null, msg)
+            }
+        }
+
+        sessions[sessionId] = sessionInstance
+        bridge.log("AI_STUDIO_POOL", "🚀 Initialized Session [$sessionId] for Profile '$profileId' (Active Sessions: ${sessions.size})")
+
+        val slug = normalizeModelSlug(model)
+        val targetUrl = if (slug.isNotEmpty()) {
+            "https://aistudio.google.com/prompts/new_chat?model=$slug"
+        } else {
+            "https://aistudio.google.com/prompts/new_chat"
+        }
+
         autoWv.onResume()
-        bridge.startForegroundTask("AI Studio Puppet", "Mounting AI Studio headless session...")
-        autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
+        bridge.startForegroundTask("AI Studio Puppet", "Active puppet sessions: ${sessions.size}")
+        autoWv.loadUrl(targetUrl)
     }
 
-    // --- PUPPET SDK: Phase 2 - Configure Session ---
-    fun configure(
+    fun configureSession(
+        sessionId: String,
         sysTitle: String = "",
         sysPrompt: String = "",
         thinkingLevel: String = "Default",
-        model: String = "Gemini 3.7 Flash",
+        model: String = "",
         fallbackEnabled: Boolean = true,
         temporaryChat: Boolean = false,
         onDone: (Boolean, String?) -> Unit
     ) {
-        val wv = headlessWv
-        if (wv == null) {
-            onDone(false, "Puppet WebView is not mounted.")
+        val session = sessions[sessionId]
+        if (session == null) {
+            onDone(false, "Session '$sessionId' is not active.")
             return
         }
-        onConfigDoneCallback = onDone
+        session.onConfigCallback = onDone
 
         val configObj = JSONObject().apply {
             put("sysTitle", sysTitle.trim())
             put("sysPrompt", sysPrompt.trim())
             put("thinkingLevel", thinkingLevel)
-            put("model", model)
+            put("model", model.ifEmpty { session.model })
             put("fallbackEnabled", fallbackEnabled)
             put("temporaryChat", temporaryChat)
         }
 
         val script = "if (window.__omniPuppet) { window.__omniPuppet.configure(${configObj}); }"
-        wv.evaluateJavascript(script, null)
+        session.webView.evaluateJavascript(script, null)
     }
 
-    // --- PUPPET SDK: Phase 3 - Execute Single Turn ---
-    fun executeTurn(
+    fun executeSessionTurn(
+        sessionId: String,
         prompt: String,
         attachments: List<com.omni.plugin.browser.models.AutomationAttachment> = emptyList(),
         label: String = "Turn",
@@ -293,15 +322,15 @@ class AiStudioAutomator(
         onComplete: (thoughts: String, output: String) -> Unit,
         onError: (String) -> Unit
     ) {
-        val wv = headlessWv
-        if (wv == null) {
-            onError("Puppet WebView is not mounted.")
+        val session = sessions[sessionId]
+        if (session == null) {
+            onError("Session '$sessionId' is not active.")
             return
         }
 
-        onTurnProgressCallback = onProgress
-        onTurnCompleteCallback = onComplete
-        onTurnErrorCallback = onError
+        session.onTurnProgressCallback = onProgress
+        session.onTurnCompleteCallback = onComplete
+        session.onTurnErrorCallback = onError
 
         val attachmentsArray = org.json.JSONArray()
         attachments.forEach { att ->
@@ -321,7 +350,80 @@ class AiStudioAutomator(
         }
 
         val script = "if (window.__omniPuppet) { window.__omniPuppet.executeTurn(${turnObj}); }"
-        wv.evaluateJavascript(script, null)
+        session.webView.evaluateJavascript(script, null)
+    }
+
+    fun closeSession(sessionId: String) {
+        val session = sessions.remove(sessionId) ?: return
+        bridge.log("AI_STUDIO_POOL", "🛑 Closing Session [$sessionId]. Remaining: ${sessions.size}")
+        try {
+            session.webView.evaluateJavascript("if (window.__omniPuppet) { window.__omniPuppet.abort(); }", null)
+            session.webView.stopLoading()
+            session.webView.onPause()
+            (session.webView.parent as? ViewGroup)?.removeView(session.webView)
+            session.webView.destroy()
+        } catch (_: Exception) {}
+
+        if (defaultSessionId == sessionId) {
+            defaultSessionId = null
+        }
+        if (sessions.isEmpty()) {
+            bridge.stopForegroundTask()
+        }
+    }
+
+    fun closeAllSessions() {
+        val allIds = sessions.keys.toList()
+        allIds.forEach { closeSession(it) }
+    }
+
+    // --- Backward-Compatible Default Session Wrappers ---
+    fun prepareSession(
+        profileId: String,
+        onReady: (Boolean, String?) -> Unit
+    ) {
+        defaultSessionId?.let { closeSession(it) }
+        createSession(profileId) { sId, err ->
+            if (sId != null) {
+                defaultSessionId = sId
+                onReady(true, null)
+            } else {
+                onReady(false, err)
+            }
+        }
+    }
+
+    fun configure(
+        sysTitle: String = "",
+        sysPrompt: String = "",
+        thinkingLevel: String = "Default",
+        model: String = "Gemini 3.7 Flash",
+        fallbackEnabled: Boolean = true,
+        temporaryChat: Boolean = false,
+        onDone: (Boolean, String?) -> Unit
+    ) {
+        val sId = defaultSessionId
+        if (sId == null) {
+            onDone(false, "No active session.")
+            return
+        }
+        configureSession(sId, sysTitle, sysPrompt, thinkingLevel, model, fallbackEnabled, temporaryChat, onDone)
+    }
+
+    fun executeTurn(
+        prompt: String,
+        attachments: List<com.omni.plugin.browser.models.AutomationAttachment> = emptyList(),
+        label: String = "Turn",
+        onProgress: (thoughts: String, output: String) -> Unit,
+        onComplete: (thoughts: String, output: String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val sId = defaultSessionId
+        if (sId == null) {
+            onError("No active session.")
+            return
+        }
+        executeSessionTurn(sId, prompt, attachments, label, onProgress, onComplete, onError)
     }
 
     // --- High-Level Backward Compatibility Orchestrator (Used by Exam Solver & Dialog) ---
@@ -339,7 +441,7 @@ class AiStudioAutomator(
         containerLayout: FrameLayout?,
         callback: AutomationCallback
     ) {
-        activeCallback = callback
+        legacyBatchCallback = callback
 
         val effectivePrompt = if (steps.isNotEmpty()) steps.first().prompt else userPrompt
         val jsEscapedPrompt = JSONObject.quote(effectivePrompt.trim())
@@ -397,32 +499,27 @@ class AiStudioAutomator(
             stepsJson = jsSteps
         )
 
-        prepareSession(profileId) { ready, err ->
-            if (!ready) {
+        createSession(profileId, model) { sId, err ->
+            if (sId == null) {
                 callback.onError(err ?: "Failed preparing session")
-                return@prepareSession
+                return@createSession
             }
-            headlessWv?.evaluateJavascript(automationScript, null)
+            defaultSessionId = sId
+            val wv = sessions[sId]?.webView
+            if (containerLayout != null && wv != null) {
+                containerLayout.removeAllViews()
+                containerLayout.addView(wv)
+            }
+            wv?.evaluateJavascript(automationScript, null)
         }
     }
 
     fun stop(containerLayout: FrameLayout?) {
         isAborted = true
         bridge.stopForegroundTask()
-        try {
-            headlessWv?.evaluateJavascript("if (window.__omniPuppet) { window.__omniPuppet.abort(); }", null)
-            headlessWv?.stopLoading()
-            headlessWv?.onPause()
-            (headlessWv?.parent as? ViewGroup)?.removeView(headlessWv)
-            containerLayout?.removeView(headlessWv)
-            headlessWv?.destroy()
-        } catch (_: Exception) {}
-        headlessWv = null
-        onSessionReadyCallback = null
-        onConfigDoneCallback = null
-        onTurnProgressCallback = null
-        onTurnCompleteCallback = null
-        onTurnErrorCallback = null
+        containerLayout?.removeAllViews()
+        closeAllSessions()
+        legacyBatchCallback = null
     }
 
     fun dumpDom(onResult: (String?) -> Unit) {
