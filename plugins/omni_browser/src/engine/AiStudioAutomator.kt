@@ -14,7 +14,8 @@ import androidx.webkit.WebViewFeature
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.browser.utils.BOT_BYPASS_POLYFILL
 import com.omni.plugin.browser.utils.DOM_SNAPSHOT_SCRIPT
-import com.omni.plugin.browser.utils.buildAiStudioAutomationScript
+import com.omni.plugin.browser.engine.buildAiStudioPuppetScript
+import com.omni.plugin.browser.engine.buildAiStudioAutomationScript
 import org.json.JSONObject
 
 interface AutomationCallback {
