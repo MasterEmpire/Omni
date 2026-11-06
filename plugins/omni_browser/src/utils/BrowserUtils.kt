@@ -1533,6 +1533,8321 @@ fun buildAiStudioAutomationScript(
     """.trimIndent()
 }
 
+val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
+(function() {
+    if (window.Omni) return;
+    const callbacks = new Map();
+
+    window.__omniRpcResolve = function(id, data) {
+        const cb = callbacks.get(id);
+        if (cb) {
+            callbacks.delete(id);
+            cb.resolve(data);
+        }
+    };
+
+    window.__omniRpcReject = function(id, errorMsg) {
+        const cb = callbacks.get(id);
+        if (cb) {
+            callbacks.delete(id);
+            cb.reject(new Error(errorMsg));
+        }
+    };
+
+    window.__omniRpcProgress = function(id, data) {
+        const cb = callbacks.get(id);
+        if (cb && typeof cb.onProgress === 'function') {
+            cb.onProgress(data);
+        }
+    };
+
+    function rpcCall(method, args, onProgress) {
+        return new Promise((resolve, reject) => {
+            if (!window.__OmniStudioLabBridge) {
+                return reject(new Error("OmniStudioLabBridge is not attached to this tab"));
+            }
+            const id = 'call_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+            callbacks.set(id, { resolve, reject, onProgress });
+            try {
+                window.__OmniStudioLabBridge[method](id, ...(args || []));
+            } catch(e) {
+                callbacks.delete(id);
+                reject(e);
+            }
+        });
+    }
+
+    window.Omni = {
+        studio: {
+            init: function(profileId) {
+                return rpcCall('studioInit', [profileId || 'default']);
+            },
+            configure: function(opts) {
+                return rpcCall('studioConfigure', [JSON.stringify(opts || {})]);
+            },
+            send: function(opts, onProgress) {
+                return rpcCall('studioSendTurn', [JSON.stringify(opts || {})], onProgress);
+            },
+            abort: function() {
+                if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.studioAbort();
+            },
+            close: function() {
+                if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.studioClose();
+            }
+        },
+        python: {
+            run: function(code, onProgress) {
+                return rpcCall('pythonRun', [code], onProgress);
+            }
+        },
+        ide: {
+            pullFiles: function(project, files) {
+                return rpcCall('idePullFiles', [project, JSON.stringify(files || [])]);
+            },
+            commitCxp: function(xml) {
+                return rpcCall('ideCommitCxp', [xml]);
+            }
+        },
+        fs: {
+            read: function(path) {
+                return rpcCall('fsRead', [path]);
+            },
+            write: function(path, content) {
+                return rpcCall('fsWrite', [path, content]);
+            },
+            list: function(path) {
+                return rpcCall('fsList', [path]);
+            }
+        },
+        toast: function(msg) {
+            if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.toast(String(msg));
+        },
+        vibrate: function(ms) {
+            if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.vibrate(Number(ms) || 50);
+        },
+        copy: function(text) {
+            if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.copyToClipboard(String(text));
+        },
+        getClipboard: function() {
+            if (window.__OmniStudioLabBridge) return window.__OmniStudioLabBridge.getClipboardText();
+            return "";
+        }
+    };
+    console.log("⚡ [Omni Studio Lab] window.Omni SDK initialized & ready.");
+})();
+""".trimIndent()
+
+val DEFAULT_STARTER_PLAYBOOK_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omni Autonomous Playbook</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0D1117; color: #E8EAED; font-family: ui-sans-serif, system-ui, sans-serif; }
+    </style>
+</head>
+<body class="p-4 max-w-2xl mx-auto space-y-4">
+    <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+        <div>
+            <h1 class="text-xl font-bold text-sky-400 flex items-center gap-2">
+                <span>🧪</span> Omni Studio Agent
+            </h1>
+            <p class="text-xs text-gray-400">Google AI Studio Puppet + Nexus Python + Conduit IDE</p>
+        </div>
+        <span id="status-badge" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-800 text-gray-300 border border-gray-700">
+            Idle
+        </span>
+    </div>
+
+    <!-- Quick Action Deck -->
+    <div class="grid grid-cols-2 gap-2 text-xs">
+        <button id="btn-studio-init" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 p-2.5 rounded-lg font-medium text-left">
+            🧠 1. Connect AI Studio
+        </button>
+        <button id="btn-python-test" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 p-2.5 rounded-lg font-medium text-left">
+            🐍 2. Run Python on Nexus
+        </button>
+        <button id="btn-ide-pull" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 p-2.5 rounded-lg font-medium text-left">
+            📂 3. Pull Conduit Project Files
+        </button>
+        <button id="btn-full-chain" class="bg-sky-600 hover:bg-sky-500 text-white p-2.5 rounded-lg font-bold text-left">
+            ⚡ 4. Run Full Autonomous Chain
+        </button>
+    </div>
+
+    <!-- Prompt Box -->
+    <div class="space-y-1.5">
+        <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Prompt Instruction</label>
+        <textarea id="prompt-input" rows="3" class="w-full bg-[#161B22] border border-gray-700 rounded-lg p-3 text-sm focus:border-sky-500 outline-none" placeholder="Type prompt for AI Studio puppet..."></textarea>
+    </div>
+
+    <!-- Execution Log Terminal -->
+    <div class="space-y-1.5">
+        <div class="flex items-center justify-between">
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Live Execution Stream</label>
+            <button id="btn-clear-log" class="text-xs text-gray-500 hover:text-gray-300">Clear</button>
+        </div>
+        <pre id="log-console" class="w-full h-64 bg-black/60 border border-gray-800 rounded-lg p-3 text-xs font-mono text-green-400 overflow-y-auto whitespace-pre-wrap">Waiting for commands...</pre>
+    </div>
+
+    <script>
+        const logEl = document.getElementById('log-console');
+        const statusBadge = document.getElementById('status-badge');
+        function log(msg, color = 'text-green-400') {
+            const time = new Date().toLocaleTimeString();
+            logEl.innerHTML += `<div class="${'
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    // 1. Defang Visibility & Focus Snitches
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(e) {}
+
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video silently
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                return;
+            }
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
+    window.__omniTogglePlay = function(play) {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
+            try {
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
+            } catch(e) {}
+        });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
+fun extractDomain(url: String): String {
+    return try {
+        val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val uri = Uri.parse(clean)
+        uri.host?.removePrefix("www.") ?: url
+    } catch (_: Exception) {
+        url
+    }
+}
+
+fun sanitizeUrlForCopy(rawUrl: String): String {
+    if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+        val scheme = uri.scheme ?: "https"
+
+        // 1. Google Search Sanitizer (Preserve query & filters only)
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            val q = uri.getQueryParameter("q")
+            if (!q.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("q", q)
+
+                listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+        if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+            val v = uri.getQueryParameter("v")
+            if (!v.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("v", v)
+                listOf("t", "list", "index").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        if (host == "youtu.be") {
+            val videoId = uri.path?.removePrefix("/")
+            if (!videoId.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority("youtu.be")
+                    .path("/$videoId")
+                uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                return builder.build().toString()
+            }
+        }
+
+        // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+        if (host.contains("amazon.")) {
+            val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+            val match = asinRegex.find(uri.path ?: "")
+            if (match != null) {
+                val asin = match.groupValues[1]
+                return "$scheme://$host/dp/$asin"
+            }
+        }
+
+        // 4. Universal Marketing & Tracking Parameter Stripper
+        val trackingParams = setOf(
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+            "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+            "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+            "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+            "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+            "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+        )
+
+        val queryNames = uri.queryParameterNames
+        if (queryNames.isEmpty()) {
+            return rawUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        for (name in queryNames) {
+            if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                val values = uri.getQueryParameters(name)
+                for (v in values) {
+                    builder.appendQueryParameter(name, v)
+                }
+            }
+        }
+
+        val result = builder.build().toString()
+        result.removeSuffix("?")
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun normalizeLocalFilePath(rawPath: String): String {
+    var path = rawPath.trim()
+    try {
+        path = Uri.decode(path)
+    } catch (_: Exception) {}
+
+    while (path.startsWith("file://")) {
+        path = path.removePrefix("file://")
+    }
+    while (path.startsWith("file:/")) {
+        path = path.removePrefix("file:/")
+    }
+    if (path.startsWith("/sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+    } else if (path.startsWith("sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+    }
+    if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+        path = "/$path"
+    }
+    return path.trim()
+}
+
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
+)
+
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
+)
+
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
+
+    var isActive = false
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
+        if (isSearchEngine) {
+            return false
+        }
+
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
+        }
+
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
+        for (token in activeTokens) {
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
+        }
+
+        // 5. Word-boundary regex for short high-risk tokens
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
+    } catch (_: Exception) {
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (isOmniShieldBlocked(trimmed, context)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return safeEnforced
+}
+
+fun isLocalFilePath(input: String): Boolean {
+    val clean = input.trim().lowercase()
+    return clean.startsWith("/") ||
+           clean.startsWith("file:") ||
+           clean.startsWith("content:") ||
+           clean.startsWith("sdcard/") ||
+           clean.startsWith("storage/") ||
+           clean.endsWith(".html") ||
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
+}
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}}{color}">[${'
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    // 1. Defang Visibility & Focus Snitches
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(e) {}
+
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video silently
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                return;
+            }
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
+    window.__omniTogglePlay = function(play) {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
+            try {
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
+            } catch(e) {}
+        });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
+fun extractDomain(url: String): String {
+    return try {
+        val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val uri = Uri.parse(clean)
+        uri.host?.removePrefix("www.") ?: url
+    } catch (_: Exception) {
+        url
+    }
+}
+
+fun sanitizeUrlForCopy(rawUrl: String): String {
+    if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+        val scheme = uri.scheme ?: "https"
+
+        // 1. Google Search Sanitizer (Preserve query & filters only)
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            val q = uri.getQueryParameter("q")
+            if (!q.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("q", q)
+
+                listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+        if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+            val v = uri.getQueryParameter("v")
+            if (!v.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("v", v)
+                listOf("t", "list", "index").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        if (host == "youtu.be") {
+            val videoId = uri.path?.removePrefix("/")
+            if (!videoId.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority("youtu.be")
+                    .path("/$videoId")
+                uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                return builder.build().toString()
+            }
+        }
+
+        // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+        if (host.contains("amazon.")) {
+            val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+            val match = asinRegex.find(uri.path ?: "")
+            if (match != null) {
+                val asin = match.groupValues[1]
+                return "$scheme://$host/dp/$asin"
+            }
+        }
+
+        // 4. Universal Marketing & Tracking Parameter Stripper
+        val trackingParams = setOf(
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+            "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+            "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+            "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+            "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+            "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+        )
+
+        val queryNames = uri.queryParameterNames
+        if (queryNames.isEmpty()) {
+            return rawUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        for (name in queryNames) {
+            if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                val values = uri.getQueryParameters(name)
+                for (v in values) {
+                    builder.appendQueryParameter(name, v)
+                }
+            }
+        }
+
+        val result = builder.build().toString()
+        result.removeSuffix("?")
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun normalizeLocalFilePath(rawPath: String): String {
+    var path = rawPath.trim()
+    try {
+        path = Uri.decode(path)
+    } catch (_: Exception) {}
+
+    while (path.startsWith("file://")) {
+        path = path.removePrefix("file://")
+    }
+    while (path.startsWith("file:/")) {
+        path = path.removePrefix("file:/")
+    }
+    if (path.startsWith("/sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+    } else if (path.startsWith("sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+    }
+    if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+        path = "/$path"
+    }
+    return path.trim()
+}
+
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
+)
+
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
+)
+
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
+
+    var isActive = false
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
+        if (isSearchEngine) {
+            return false
+        }
+
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
+        }
+
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
+        for (token in activeTokens) {
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
+        }
+
+        // 5. Word-boundary regex for short high-risk tokens
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
+    } catch (_: Exception) {
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (isOmniShieldBlocked(trimmed, context)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return safeEnforced
+}
+
+fun isLocalFilePath(input: String): Boolean {
+    val clean = input.trim().lowercase()
+    return clean.startsWith("/") ||
+           clean.startsWith("file:") ||
+           clean.startsWith("content:") ||
+           clean.startsWith("sdcard/") ||
+           clean.startsWith("storage/") ||
+           clean.endsWith(".html") ||
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
+}
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}}{time}] ${'
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    // 1. Defang Visibility & Focus Snitches
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(e) {}
+
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video silently
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                return;
+            }
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
+    window.__omniTogglePlay = function(play) {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
+            try {
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
+            } catch(e) {}
+        });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
+fun extractDomain(url: String): String {
+    return try {
+        val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val uri = Uri.parse(clean)
+        uri.host?.removePrefix("www.") ?: url
+    } catch (_: Exception) {
+        url
+    }
+}
+
+fun sanitizeUrlForCopy(rawUrl: String): String {
+    if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+        val scheme = uri.scheme ?: "https"
+
+        // 1. Google Search Sanitizer (Preserve query & filters only)
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            val q = uri.getQueryParameter("q")
+            if (!q.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("q", q)
+
+                listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+        if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+            val v = uri.getQueryParameter("v")
+            if (!v.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("v", v)
+                listOf("t", "list", "index").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        if (host == "youtu.be") {
+            val videoId = uri.path?.removePrefix("/")
+            if (!videoId.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority("youtu.be")
+                    .path("/$videoId")
+                uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                return builder.build().toString()
+            }
+        }
+
+        // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+        if (host.contains("amazon.")) {
+            val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+            val match = asinRegex.find(uri.path ?: "")
+            if (match != null) {
+                val asin = match.groupValues[1]
+                return "$scheme://$host/dp/$asin"
+            }
+        }
+
+        // 4. Universal Marketing & Tracking Parameter Stripper
+        val trackingParams = setOf(
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+            "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+            "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+            "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+            "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+            "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+        )
+
+        val queryNames = uri.queryParameterNames
+        if (queryNames.isEmpty()) {
+            return rawUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        for (name in queryNames) {
+            if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                val values = uri.getQueryParameters(name)
+                for (v in values) {
+                    builder.appendQueryParameter(name, v)
+                }
+            }
+        }
+
+        val result = builder.build().toString()
+        result.removeSuffix("?")
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun normalizeLocalFilePath(rawPath: String): String {
+    var path = rawPath.trim()
+    try {
+        path = Uri.decode(path)
+    } catch (_: Exception) {}
+
+    while (path.startsWith("file://")) {
+        path = path.removePrefix("file://")
+    }
+    while (path.startsWith("file:/")) {
+        path = path.removePrefix("file:/")
+    }
+    if (path.startsWith("/sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+    } else if (path.startsWith("sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+    }
+    if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+        path = "/$path"
+    }
+    return path.trim()
+}
+
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
+)
+
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
+)
+
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
+
+    var isActive = false
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
+        if (isSearchEngine) {
+            return false
+        }
+
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
+        }
+
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
+        for (token in activeTokens) {
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
+        }
+
+        // 5. Word-boundary regex for short high-risk tokens
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
+    } catch (_: Exception) {
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (isOmniShieldBlocked(trimmed, context)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return safeEnforced
+}
+
+fun isLocalFilePath(input: String): Boolean {
+    val clean = input.trim().lowercase()
+    return clean.startsWith("/") ||
+           clean.startsWith("file:") ||
+           clean.startsWith("content:") ||
+           clean.startsWith("sdcard/") ||
+           clean.startsWith("storage/") ||
+           clean.endsWith(".html") ||
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
+}
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}}{msg}</div>`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        function setStatus(text, color = 'bg-sky-900 text-sky-300 border-sky-700') {
+            statusBadge.className = `px-2.5 py-1 text-xs font-semibold rounded-full border ${'
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    // 1. Defang Visibility & Focus Snitches
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(e) {}
+
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video silently
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                return;
+            }
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
+    window.__omniTogglePlay = function(play) {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
+            try {
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
+            } catch(e) {}
+        });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
+fun extractDomain(url: String): String {
+    return try {
+        val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val uri = Uri.parse(clean)
+        uri.host?.removePrefix("www.") ?: url
+    } catch (_: Exception) {
+        url
+    }
+}
+
+fun sanitizeUrlForCopy(rawUrl: String): String {
+    if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+        val scheme = uri.scheme ?: "https"
+
+        // 1. Google Search Sanitizer (Preserve query & filters only)
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            val q = uri.getQueryParameter("q")
+            if (!q.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("q", q)
+
+                listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+        if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+            val v = uri.getQueryParameter("v")
+            if (!v.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("v", v)
+                listOf("t", "list", "index").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        if (host == "youtu.be") {
+            val videoId = uri.path?.removePrefix("/")
+            if (!videoId.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority("youtu.be")
+                    .path("/$videoId")
+                uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                return builder.build().toString()
+            }
+        }
+
+        // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+        if (host.contains("amazon.")) {
+            val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+            val match = asinRegex.find(uri.path ?: "")
+            if (match != null) {
+                val asin = match.groupValues[1]
+                return "$scheme://$host/dp/$asin"
+            }
+        }
+
+        // 4. Universal Marketing & Tracking Parameter Stripper
+        val trackingParams = setOf(
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+            "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+            "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+            "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+            "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+            "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+        )
+
+        val queryNames = uri.queryParameterNames
+        if (queryNames.isEmpty()) {
+            return rawUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        for (name in queryNames) {
+            if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                val values = uri.getQueryParameters(name)
+                for (v in values) {
+                    builder.appendQueryParameter(name, v)
+                }
+            }
+        }
+
+        val result = builder.build().toString()
+        result.removeSuffix("?")
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun normalizeLocalFilePath(rawPath: String): String {
+    var path = rawPath.trim()
+    try {
+        path = Uri.decode(path)
+    } catch (_: Exception) {}
+
+    while (path.startsWith("file://")) {
+        path = path.removePrefix("file://")
+    }
+    while (path.startsWith("file:/")) {
+        path = path.removePrefix("file:/")
+    }
+    if (path.startsWith("/sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+    } else if (path.startsWith("sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+    }
+    if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+        path = "/$path"
+    }
+    return path.trim()
+}
+
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
+)
+
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
+)
+
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
+
+    var isActive = false
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
+        if (isSearchEngine) {
+            return false
+        }
+
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
+        }
+
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
+        for (token in activeTokens) {
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
+        }
+
+        // 5. Word-boundary regex for short high-risk tokens
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
+    } catch (_: Exception) {
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (isOmniShieldBlocked(trimmed, context)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return safeEnforced
+}
+
+fun isLocalFilePath(input: String): Boolean {
+    val clean = input.trim().lowercase()
+    return clean.startsWith("/") ||
+           clean.startsWith("file:") ||
+           clean.startsWith("content:") ||
+           clean.startsWith("sdcard/") ||
+           clean.startsWith("storage/") ||
+           clean.endsWith(".html") ||
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
+}
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}}{color}`;
+            statusBadge.innerText = text;
+        }
+
+        document.getElementById('btn-clear-log').onclick = () => { logEl.innerHTML = ''; };
+
+        // 1. Connect AI Studio
+        document.getElementById('btn-studio-init').onclick = async () => {
+            try {
+                setStatus('Connecting Studio...', 'bg-amber-900 text-amber-300 border-amber-700');
+                log("🚀 Initializing AI Studio headless puppet session...");
+                await Omni.studio.init('default');
+                log("⚙️ Configuring Thinking Level to High and setting prompt preset...");
+                await Omni.studio.configure({
+                    thinkingLevel: "High",
+                    temporaryChat: true,
+                    sysTitle: "Omni Agent",
+                    sysPrompt: "You are an autonomous engineering assistant connected to Nexus Python and Conduit IDE."
+                });
+                setStatus('Studio Ready', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+                log("✅ AI Studio Puppet is fully armed and ready!", "text-emerald-400");
+                Omni.toast("AI Studio Puppet Ready!");
+            } catch(e) {
+                setStatus('Error', 'bg-rose-900 text-rose-300 border-rose-700');
+                log("❌ Studio Error: " + e.message, "text-rose-400");
+            }
+        };
+
+        // 2. Run Python on Nexus
+        document.getElementById('btn-python-test').onclick = async () => {
+            try {
+                setStatus('Python Running...', 'bg-amber-900 text-amber-300 border-amber-700');
+                log("🐍 Dispatching Python script to Nexus microkernel...");
+                const code = `
+import sys, platform
+print(f"Python {platform.python_version()} active on Nexus!")
+print(f"CPU count: {sys.platform}")
+for i in range(1, 4):
+    print(f"Counting tick {i} from background process...")
+`;
+                const output = await Omni.python.run(code, chunk => {
+                    log(chunk.trim(), "text-yellow-300");
+                });
+                setStatus('Python Done', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+                log("🏁 Output:\n" + output, "text-emerald-300");
+            } catch(e) {
+                setStatus('Error', 'bg-rose-900 text-rose-300 border-rose-700');
+                log("❌ Python Error: " + e.message, "text-rose-400");
+            }
+        };
+
+        // 3. Pull Conduit Project Files
+        document.getElementById('btn-ide-pull').onclick = async () => {
+            try {
+                setStatus('Pulling Files...', 'bg-amber-900 text-amber-300 border-amber-700');
+                log("📂 Requesting project files from Conduit IDE...");
+                const files = await Omni.ide.pullFiles("Omni", ["README.md", "build.gradle"]);
+                setStatus('Files Pulled', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+                log(`✅ Pulled ${'
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    // 1. Defang Visibility & Focus Snitches
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(e) {}
+
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video silently
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                return;
+            }
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
+    window.__omniTogglePlay = function(play) {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
+            try {
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
+            } catch(e) {}
+        });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
+fun extractDomain(url: String): String {
+    return try {
+        val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val uri = Uri.parse(clean)
+        uri.host?.removePrefix("www.") ?: url
+    } catch (_: Exception) {
+        url
+    }
+}
+
+fun sanitizeUrlForCopy(rawUrl: String): String {
+    if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+        val scheme = uri.scheme ?: "https"
+
+        // 1. Google Search Sanitizer (Preserve query & filters only)
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            val q = uri.getQueryParameter("q")
+            if (!q.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("q", q)
+
+                listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+        if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+            val v = uri.getQueryParameter("v")
+            if (!v.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("v", v)
+                listOf("t", "list", "index").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        if (host == "youtu.be") {
+            val videoId = uri.path?.removePrefix("/")
+            if (!videoId.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority("youtu.be")
+                    .path("/$videoId")
+                uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                return builder.build().toString()
+            }
+        }
+
+        // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+        if (host.contains("amazon.")) {
+            val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+            val match = asinRegex.find(uri.path ?: "")
+            if (match != null) {
+                val asin = match.groupValues[1]
+                return "$scheme://$host/dp/$asin"
+            }
+        }
+
+        // 4. Universal Marketing & Tracking Parameter Stripper
+        val trackingParams = setOf(
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+            "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+            "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+            "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+            "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+            "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+        )
+
+        val queryNames = uri.queryParameterNames
+        if (queryNames.isEmpty()) {
+            return rawUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        for (name in queryNames) {
+            if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                val values = uri.getQueryParameters(name)
+                for (v in values) {
+                    builder.appendQueryParameter(name, v)
+                }
+            }
+        }
+
+        val result = builder.build().toString()
+        result.removeSuffix("?")
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun normalizeLocalFilePath(rawPath: String): String {
+    var path = rawPath.trim()
+    try {
+        path = Uri.decode(path)
+    } catch (_: Exception) {}
+
+    while (path.startsWith("file://")) {
+        path = path.removePrefix("file://")
+    }
+    while (path.startsWith("file:/")) {
+        path = path.removePrefix("file:/")
+    }
+    if (path.startsWith("/sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+    } else if (path.startsWith("sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+    }
+    if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+        path = "/$path"
+    }
+    return path.trim()
+}
+
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
+)
+
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
+)
+
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
+
+    var isActive = false
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
+        if (isSearchEngine) {
+            return false
+        }
+
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
+        }
+
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
+        for (token in activeTokens) {
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
+        }
+
+        // 5. Word-boundary regex for short high-risk tokens
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
+    } catch (_: Exception) {
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (isOmniShieldBlocked(trimmed, context)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return safeEnforced
+}
+
+fun isLocalFilePath(input: String): Boolean {
+    val clean = input.trim().lowercase()
+    return clean.startsWith("/") ||
+           clean.startsWith("file:") ||
+           clean.startsWith("content:") ||
+           clean.startsWith("sdcard/") ||
+           clean.startsWith("storage/") ||
+           clean.endsWith(".html") ||
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
+}
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}}{files.length} file(s) from Conduit IDE!`, "text-emerald-400");
+                files.forEach(f => log(`📄 ${'
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    // 1. Defang Visibility & Focus Snitches
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(e) {}
+
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video silently
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                return;
+            }
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
+    window.__omniTogglePlay = function(play) {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
+            try {
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
+            } catch(e) {}
+        });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
+fun extractDomain(url: String): String {
+    return try {
+        val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val uri = Uri.parse(clean)
+        uri.host?.removePrefix("www.") ?: url
+    } catch (_: Exception) {
+        url
+    }
+}
+
+fun sanitizeUrlForCopy(rawUrl: String): String {
+    if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+        val scheme = uri.scheme ?: "https"
+
+        // 1. Google Search Sanitizer (Preserve query & filters only)
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            val q = uri.getQueryParameter("q")
+            if (!q.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("q", q)
+
+                listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+        if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+            val v = uri.getQueryParameter("v")
+            if (!v.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("v", v)
+                listOf("t", "list", "index").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        if (host == "youtu.be") {
+            val videoId = uri.path?.removePrefix("/")
+            if (!videoId.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority("youtu.be")
+                    .path("/$videoId")
+                uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                return builder.build().toString()
+            }
+        }
+
+        // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+        if (host.contains("amazon.")) {
+            val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+            val match = asinRegex.find(uri.path ?: "")
+            if (match != null) {
+                val asin = match.groupValues[1]
+                return "$scheme://$host/dp/$asin"
+            }
+        }
+
+        // 4. Universal Marketing & Tracking Parameter Stripper
+        val trackingParams = setOf(
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+            "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+            "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+            "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+            "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+            "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+        )
+
+        val queryNames = uri.queryParameterNames
+        if (queryNames.isEmpty()) {
+            return rawUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        for (name in queryNames) {
+            if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                val values = uri.getQueryParameters(name)
+                for (v in values) {
+                    builder.appendQueryParameter(name, v)
+                }
+            }
+        }
+
+        val result = builder.build().toString()
+        result.removeSuffix("?")
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun normalizeLocalFilePath(rawPath: String): String {
+    var path = rawPath.trim()
+    try {
+        path = Uri.decode(path)
+    } catch (_: Exception) {}
+
+    while (path.startsWith("file://")) {
+        path = path.removePrefix("file://")
+    }
+    while (path.startsWith("file:/")) {
+        path = path.removePrefix("file:/")
+    }
+    if (path.startsWith("/sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+    } else if (path.startsWith("sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+    }
+    if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+        path = "/$path"
+    }
+    return path.trim()
+}
+
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
+)
+
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
+)
+
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
+
+    var isActive = false
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
+        if (isSearchEngine) {
+            return false
+        }
+
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
+        }
+
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
+        for (token in activeTokens) {
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
+        }
+
+        // 5. Word-boundary regex for short high-risk tokens
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
+    } catch (_: Exception) {
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (isOmniShieldBlocked(trimmed, context)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return safeEnforced
+}
+
+fun isLocalFilePath(input: String): Boolean {
+    val clean = input.trim().lowercase()
+    return clean.startsWith("/") ||
+           clean.startsWith("file:") ||
+           clean.startsWith("content:") ||
+           clean.startsWith("sdcard/") ||
+           clean.startsWith("storage/") ||
+           clean.endsWith(".html") ||
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
+}
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}}{f.path} (${'
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    // 1. Defang Visibility & Focus Snitches
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(e) {}
+
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video silently
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                return;
+            }
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
+    window.__omniTogglePlay = function(play) {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
+            try {
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
+            } catch(e) {}
+        });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
+fun extractDomain(url: String): String {
+    return try {
+        val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val uri = Uri.parse(clean)
+        uri.host?.removePrefix("www.") ?: url
+    } catch (_: Exception) {
+        url
+    }
+}
+
+fun sanitizeUrlForCopy(rawUrl: String): String {
+    if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+        val scheme = uri.scheme ?: "https"
+
+        // 1. Google Search Sanitizer (Preserve query & filters only)
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            val q = uri.getQueryParameter("q")
+            if (!q.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("q", q)
+
+                listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+        if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+            val v = uri.getQueryParameter("v")
+            if (!v.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("v", v)
+                listOf("t", "list", "index").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        if (host == "youtu.be") {
+            val videoId = uri.path?.removePrefix("/")
+            if (!videoId.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority("youtu.be")
+                    .path("/$videoId")
+                uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                return builder.build().toString()
+            }
+        }
+
+        // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+        if (host.contains("amazon.")) {
+            val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+            val match = asinRegex.find(uri.path ?: "")
+            if (match != null) {
+                val asin = match.groupValues[1]
+                return "$scheme://$host/dp/$asin"
+            }
+        }
+
+        // 4. Universal Marketing & Tracking Parameter Stripper
+        val trackingParams = setOf(
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+            "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+            "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+            "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+            "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+            "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+        )
+
+        val queryNames = uri.queryParameterNames
+        if (queryNames.isEmpty()) {
+            return rawUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        for (name in queryNames) {
+            if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                val values = uri.getQueryParameters(name)
+                for (v in values) {
+                    builder.appendQueryParameter(name, v)
+                }
+            }
+        }
+
+        val result = builder.build().toString()
+        result.removeSuffix("?")
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun normalizeLocalFilePath(rawPath: String): String {
+    var path = rawPath.trim()
+    try {
+        path = Uri.decode(path)
+    } catch (_: Exception) {}
+
+    while (path.startsWith("file://")) {
+        path = path.removePrefix("file://")
+    }
+    while (path.startsWith("file:/")) {
+        path = path.removePrefix("file:/")
+    }
+    if (path.startsWith("/sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+    } else if (path.startsWith("sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+    }
+    if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+        path = "/$path"
+    }
+    return path.trim()
+}
+
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
+)
+
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
+)
+
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
+
+    var isActive = false
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
+        if (isSearchEngine) {
+            return false
+        }
+
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
+        }
+
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
+        for (token in activeTokens) {
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
+        }
+
+        // 5. Word-boundary regex for short high-risk tokens
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
+    } catch (_: Exception) {
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (isOmniShieldBlocked(trimmed, context)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return safeEnforced
+}
+
+fun isLocalFilePath(input: String): Boolean {
+    val clean = input.trim().lowercase()
+    return clean.startsWith("/") ||
+           clean.startsWith("file:") ||
+           clean.startsWith("content:") ||
+           clean.startsWith("sdcard/") ||
+           clean.startsWith("storage/") ||
+           clean.endsWith(".html") ||
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
+}
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}}{f.content ? f.content.length : 0} chars)`));
+            } catch(e) {
+                setStatus('Error', 'bg-rose-900 text-rose-300 border-rose-700');
+                log("❌ Pull Error: " + e.message, "text-rose-400");
+            }
+        };
+
+        // 4. Full Autonomous Chain
+        document.getElementById('btn-full-chain').onclick = async () => {
+            try {
+                setStatus('Executing Chain...', 'bg-purple-900 text-purple-300 border-purple-700');
+                log("⚡ Starting Autonomous Pipeline...", "text-purple-300");
+
+                // Step 1: Ensure Studio is ready
+                log("1️⃣ Ensuring Studio session...");
+                await Omni.studio.init('default');
+
+                // Step 2: Read prompt
+                const prompt = document.getElementById('prompt-input').value.trim() || 
+                    "Analyze this project structure and suggest an optimization.";
+
+                log(`2️⃣ Sending prompt to AI Studio: "${'
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxDimension: Int = 2048,
+    jpegQuality: Int = 90
+): Pair<ByteArray, String> {
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    if (!mimeType.startsWith("image/")) {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(rawBytes, mimeType)
+    }
+
+    try {
+        var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            try {
+                val exif = android.media.ExifInterface(input)
+                orientation = exif.getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL
+                )
+            } catch (_: Exception) {}
+        }
+
+        val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+
+        val origW = boundsOptions.outWidth
+        val origH = boundsOptions.outHeight
+        if (origW <= 0 || origH <= 0) {
+            val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+            return Pair(rawBytes, mimeType)
+        }
+
+        var inSampleSize = 1
+        var tempW = origW
+        var tempH = origH
+        while (tempW > maxDimension * 1.4 || tempH > maxDimension * 1.4) {
+            inSampleSize *= 2
+            tempW /= 2
+            tempH /= 2
+        }
+
+        val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, decodeOptions)
+        } ?: return Pair(context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0), mimeType)
+
+        var targetW = decodedBitmap.width
+        var targetH = decodedBitmap.height
+        if (targetW > maxDimension || targetH > maxDimension) {
+            val ratio = if (targetW > targetH) {
+                maxDimension.toFloat() / targetW
+            } else {
+                maxDimension.toFloat() / targetH
+            }
+            targetW = (targetW * ratio).toInt().coerceAtLeast(1)
+            targetH = (targetH * ratio).toInt().coerceAtLeast(1)
+        }
+
+        val matrix = android.graphics.Matrix()
+        if (targetW != decodedBitmap.width || targetH != decodedBitmap.height) {
+            val scaleX = targetW.toFloat() / decodedBitmap.width
+            val scaleY = targetH.toFloat() / decodedBitmap.height
+            matrix.postScale(scaleX, scaleY)
+        }
+
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val finalBitmap = if (!matrix.isIdentity) {
+            val transformed = android.graphics.Bitmap.createBitmap(
+                decodedBitmap, 0, 0, decodedBitmap.width, decodedBitmap.height, matrix, true
+            )
+            if (transformed != decodedBitmap) {
+                decodedBitmap.recycle()
+            }
+            transformed
+        } else {
+            decodedBitmap
+        }
+
+        val baos = java.io.ByteArrayOutputStream()
+        finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+        finalBitmap.recycle()
+
+        return Pair(baos.toByteArray(), "image/jpeg")
+    } catch (e: Exception) {
+        val fallback = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+        return Pair(fallback, mimeType)
+    }
+}
+
+fun getFileEmoji(filename: String): String {
+    val ext = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (ext) {
+        "zip", "tar", "gz", "rar", "7z" -> "📦"
+        "html", "htm", "js", "ts", "json", "kt", "java", "py", "css" -> "💻"
+        "png", "jpg", "jpeg", "webp", "gif", "svg" -> "🖼️"
+        "mp4", "mkv", "webm", "mov" -> "🎬"
+        "mp3", "wav", "m4a", "flac" -> "🎵"
+        "pdf", "doc", "docx", "txt", "md" -> "📄"
+        "apk" -> "🤖"
+        else -> "📁"
+    }
+}
+
+fun resolveMimeType(file: java.io.File): String {
+    val ext = file.extension.lowercase(Locale.US)
+    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    if (!defaultMime.isNullOrEmpty()) return defaultMime
+
+    return when (ext) {
+        "pdf" -> "application/pdf"
+        "zip" -> "application/zip"
+        "apk" -> "application/vnd.android.package-archive"
+        "json" -> "application/json"
+        "html", "htm" -> "text/html"
+        "txt", "log", "md" -> "text/plain"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "mp4", "mkv", "webm" -> "video/*"
+        "mp3", "wav", "m4a", "flac" -> "audio/*"
+        else -> "*/*"
+    }
+}
+
+fun getShareableUri(context: android.content.Context, file: java.io.File): Uri {
+    // 1. Primary & Recommended: FileProvider (Direct content URI, zero collision)
+    try {
+        val fileProviderClass = Class.forName("androidx.core.content.FileProvider")
+        val getUriMethod = fileProviderClass.getMethod(
+            "getUriForFile",
+            android.content.Context::class.java,
+            String::class.java,
+            java.io.File::class.java
+        )
+        val uri = getUriMethod.invoke(null, context, "${context.packageName}.fileprovider", file) as? Uri
+        if (uri != null) return uri
+    } catch (_: Exception) {}
+
+    // 2. Secondary: MediaStore lookup strictly verified by exact absolute disk path
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+            val exactPathSelection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+            val exactPathArgs = arrayOf(file.absolutePath)
+
+            val queryUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            context.contentResolver.query(queryUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(queryUri, id)
+                }
+            }
+
+            val filesUri = android.provider.MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, exactPathSelection, exactPathArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                    return android.content.ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 3. Fallback: Relax VM policy and return direct file:// URI
+    try {
+        val builder = android.os.StrictMode.VmPolicy.Builder()
+        android.os.StrictMode.setVmPolicy(builder.build())
+    } catch (_: Exception) {}
+
+    return Uri.fromFile(file)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+fun openDownloadedFile(context: android.content.Context, file: java.io.File, bridge: com.omni.hub.api.HostBridge) {
+    try {
+        if (!file.exists()) {
+            bridge.showToast("File no longer exists on storage")
+            return
+        }
+        val mime = resolveMimeType(file)
+        val contentUri = getShareableUri(context, file)
+        bridge.log("DOWNLOAD_OPEN", "Opening ${file.name} ($mime, ${formatFileSize(file.length())}) via $contentUri")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mime)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    } catch (e: android.content.ActivityNotFoundException) {
+        bridge.showToast("No installed app found to open .${file.extension} files")
+    } catch (e: Exception) {
+        bridge.showToast("Could not open file: ${e.message}")
+    }
+}
+
+val BACKGROUND_MEDIA_SCRIPT = """
+(function() {
+    if (window.__omniMediaHooked) return;
+    window.__omniMediaHooked = true;
+
+    function hostLog(tag, msg) {
+        try {
+            if (window.OmniMediaBridge && window.OmniMediaBridge.log) {
+                window.OmniMediaBridge.log(tag, msg);
+            }
+        } catch(_) {}
+    }
+
+    // 1. Defang Visibility & Focus Snitches
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(e) {}
+
+    // Trap property event setters
+    try {
+        Object.defineProperty(document, 'onvisibilitychange', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onblur', { get: () => null, set: () => {}, configurable: true });
+        Object.defineProperty(window, 'onpagehide', { get: () => null, set: () => {}, configurable: true });
+    } catch(e) {}
+
+    // Trap listener registrations that pause background video silently
+    const origAddEvent = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (type === 'visibilitychange' || type === 'webkitvisibilitychange') {
+            return;
+        }
+        if (type === 'blur' || type === 'pagehide' || type === 'freeze') {
+            if (this === window || this === document) {
+                return;
+            }
+        }
+        return origAddEvent.call(this, type, listener, options);
+    };
+
+    // 2. Wrap IntersectionObserver so player element is treated as 100% on-screen
+    if (window.IntersectionObserver) {
+        try {
+            const OrigIO = window.IntersectionObserver;
+            window.IntersectionObserver = function(callback, options) {
+                const wrappedCallback = function(entries, observer) {
+                    const spoofedEntries = entries.map(entry => {
+                        if (entry.target && (entry.target.tagName === 'VIDEO' || entry.target.querySelector('video') || entry.target.classList?.contains('html5-video-player'))) {
+                            return new Proxy(entry, {
+                                get: function(target, prop) {
+                                    if (prop === 'isIntersecting') return true;
+                                    if (prop === 'intersectionRatio') return 1.0;
+                                    return target[prop];
+                                }
+                            });
+                        }
+                        return entry;
+                    });
+                    return callback(spoofedEntries, observer);
+                };
+                return new OrigIO(wrappedCallback, options);
+            };
+            window.IntersectionObserver.prototype = OrigIO.prototype;
+        } catch(e) {}
+    }
+
+    // 3. Hook MediaSession action handlers (YouTube internal player controller)
+    if (navigator.mediaSession) {
+        navigator.mediaSession.__omniActionHandlers = navigator.mediaSession.__omniActionHandlers || {};
+        const origSetAction = navigator.mediaSession.setActionHandler;
+        navigator.mediaSession.setActionHandler = function(action, handler) {
+            navigator.mediaSession.__omniActionHandlers[action] = handler;
+            hostLog('MEDIA_JS', 'Captured navigator.mediaSession action handler: ' + action);
+            return origSetAction.call(this, action, handler);
+        };
+    }
+
+    // 4. Two-Way Host Playback Toggle Command
+    window.__omniTogglePlay = function(play) {
+        hostLog('MEDIA_JS', 'window.__omniTogglePlay command received (play=' + play + ')');
+
+        let handledBySession = false;
+        if (navigator.mediaSession && navigator.mediaSession.__omniActionHandlers) {
+            const targetAction = play ? 'play' : 'pause';
+            const actionFn = navigator.mediaSession.__omniActionHandlers[targetAction];
+            if (typeof actionFn === 'function') {
+                try {
+                    actionFn();
+                    handledBySession = true;
+                    hostLog('MEDIA_JS', 'Successfully dispatched to navigator.mediaSession.' + targetAction + '()');
+                } catch(e) {
+                    hostLog('MEDIA_JS_WARN', 'MediaSession action failed: ' + e.message);
+                }
+            }
+        }
+
+        // Direct HTMLMediaElement control
+        const media = Array.from(document.querySelectorAll('video, audio'));
+        hostLog('MEDIA_JS', 'Direct control applied to ' + media.length + ' media element(s)');
+        media.forEach(m => {
+            try {
+                if (play) {
+                    const p = m.play();
+                    if (p && p.catch) p.catch(err => hostLog('MEDIA_JS_WARN', 'play() caught: ' + err.message));
+                } else {
+                    m.pause();
+                }
+            } catch(e) {}
+        });
+
+        // UI button fallback
+        if (!handledBySession) {
+            const playBtn = document.querySelector('.ytp-play-button, button.play-button');
+            if (playBtn) {
+                const label = (playBtn.getAttribute('aria-label') || playBtn.getAttribute('data-title-no-tooltip') || '').toLowerCase();
+                const isPaused = label.includes('play');
+                if ((play && isPaused) || (!play && !isPaused)) {
+                    playBtn.click();
+                    hostLog('MEDIA_JS', 'Toggled YouTube player button via DOM click');
+                }
+            }
+        }
+    };
+
+    function getMediaTitle() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) {
+            return navigator.mediaSession.metadata.title;
+        }
+        const ytTitle = document.querySelector('.ytp-title-link, h1.title, .slim-video-metadata-title');
+        if (ytTitle && ytTitle.textContent) return ytTitle.textContent.trim();
+        return document.title.replace(' - YouTube', '').trim() || 'Audio Track';
+    }
+
+    function getMediaArtist() {
+        if (navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artist) {
+            return navigator.mediaSession.metadata.artist;
+        }
+        const ytChannel = document.querySelector('#owner-name, #channel-name, .ytm-channel-name');
+        if (ytChannel && ytChannel.textContent) return ytChannel.textContent.trim();
+        return window.location.hostname;
+    }
+
+    function notifyState(isPlaying) {
+        if (window.OmniMediaBridge && window.OmniMediaBridge.reportMediaState) {
+            const title = getMediaTitle();
+            const artist = getMediaArtist();
+            hostLog('MEDIA_JS', 'Notifying state -> title: "' + title + '" | artist: "' + artist + '" | isPlaying: ' + isPlaying);
+            window.OmniMediaBridge.reportMediaState(title, artist, isPlaying);
+        }
+    }
+
+    function hookMedia(el) {
+        if (el.__omniHooked) return;
+        el.__omniHooked = true;
+        el.addEventListener('play', () => notifyState(true));
+        el.addEventListener('playing', () => notifyState(true));
+        el.addEventListener('pause', () => notifyState(false));
+        el.addEventListener('ended', () => notifyState(false));
+        hostLog('MEDIA_JS', 'Hooked events on ' + el.tagName + ' element');
+    }
+
+    document.querySelectorAll('video, audio').forEach(hookMedia);
+
+    try {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') hookMedia(node);
+                        node.querySelectorAll && node.querySelectorAll('video, audio').forEach(hookMedia);
+                    }
+                });
+            });
+        });
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch(e) {}
+})();
+""".trimIndent()
+
+fun extractDomain(url: String): String {
+    return try {
+        val clean = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+        val uri = Uri.parse(clean)
+        uri.host?.removePrefix("www.") ?: url
+    } catch (_: Exception) {
+        url
+    }
+}
+
+fun sanitizeUrlForCopy(rawUrl: String): String {
+    if (rawUrl.isEmpty() || rawUrl == "about:blank") return rawUrl
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+        val scheme = uri.scheme ?: "https"
+
+        // 1. Google Search Sanitizer (Preserve query & filters only)
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            val q = uri.getQueryParameter("q")
+            if (!q.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("q", q)
+
+                listOf("tbm", "tbs", "udm", "start", "hl").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        // 2. YouTube Watch Sanitizer (Preserve video ID, playlist, timestamp)
+        if (host.contains("youtube.com") && uri.path?.contains("/watch") == true) {
+            val v = uri.getQueryParameter("v")
+            if (!v.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority(host)
+                    .path(uri.path)
+                    .appendQueryParameter("v", v)
+                listOf("t", "list", "index").forEach { param ->
+                    uri.getQueryParameter(param)?.let { builder.appendQueryParameter(param, it) }
+                }
+                return builder.build().toString()
+            }
+        }
+
+        if (host == "youtu.be") {
+            val videoId = uri.path?.removePrefix("/")
+            if (!videoId.isNullOrEmpty()) {
+                val builder = Uri.Builder()
+                    .scheme(scheme)
+                    .authority("youtu.be")
+                    .path("/$videoId")
+                uri.getQueryParameter("t")?.let { builder.appendQueryParameter("t", it) }
+                return builder.build().toString()
+            }
+        }
+
+        // 3. Amazon ASIN Canonicalizer (/dp/ASIN)
+        if (host.contains("amazon.")) {
+            val asinRegex = Regex("/(?:dp|gp/product)/([A-Z0-9]{10})")
+            val match = asinRegex.find(uri.path ?: "")
+            if (match != null) {
+                val asin = match.groupValues[1]
+                return "$scheme://$host/dp/$asin"
+            }
+        }
+
+        // 4. Universal Marketing & Tracking Parameter Stripper
+        val trackingParams = setOf(
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+            "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "igshid", "igsh",
+            "_ga", "_gl", "_hsenc", "_hsmi", "yclid", "wickedid", "rb_clickid", "s_kwcid",
+            "ref", "ref_", "ref_src", "ref_url", "si", "pp", "embeds_referring_euri", "source_ve_path",
+            "feature", "oq", "ved", "sclient", "gs_lp", "gs_lcrp", "biw", "bih", "dpr", "ei", "sei",
+            "sca_esv", "sca_upv", "pccc", "rdt", "is_from_webapp", "_r", "_d"
+        )
+
+        val queryNames = uri.queryParameterNames
+        if (queryNames.isEmpty()) {
+            return rawUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        for (name in queryNames) {
+            if (!trackingParams.contains(name.lowercase(Locale.US))) {
+                val values = uri.getQueryParameters(name)
+                for (v in values) {
+                    builder.appendQueryParameter(name, v)
+                }
+            }
+        }
+
+        val result = builder.build().toString()
+        result.removeSuffix("?")
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun normalizeLocalFilePath(rawPath: String): String {
+    var path = rawPath.trim()
+    try {
+        path = Uri.decode(path)
+    } catch (_: Exception) {}
+
+    while (path.startsWith("file://")) {
+        path = path.removePrefix("file://")
+    }
+    while (path.startsWith("file:/")) {
+        path = path.removePrefix("file:/")
+    }
+    if (path.startsWith("/sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("/sdcard/")
+    } else if (path.startsWith("sdcard/")) {
+        path = "/storage/emulated/0/" + path.removePrefix("sdcard/")
+    }
+    if (!path.startsWith("/") && (path.startsWith("storage/") || path.startsWith("data/"))) {
+        path = "/$path"
+    }
+    return path.trim()
+}
+
+val OMNI_SHIELD_BLOCKED_HTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blocked by Omni Shield</title>
+        <style>
+            body {
+                background-color: #0D1117;
+                color: #E8EAED;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                padding: 24px;
+                box-sizing: border-box;
+                text-align: center;
+            }
+            .shield-icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { color: #F85149; font-size: 22px; margin: 0 0 10px 0; }
+            p { color: #8B949E; font-size: 13px; line-height: 1.5; max-width: 320px; margin: 0; }
+            .badge {
+                margin-top: 24px;
+                background: #161B22;
+                border: 1px solid rgba(248, 81, 73, 0.4);
+                color: #F85149;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shield-icon">🛡️</div>
+        <h1>Access Strictly Restricted</h1>
+        <p>Omni Shield is permanently active in microkernel hardware mode. Explicit adult content and domains are restricted at all times.</p>
+        <div class="badge">HARDCODED SENTINEL ACTIVE</div>
+    </body>
+    </html>
+""".trimIndent()
+
+private val ADULT_DOMAINS = setOf(
+    "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans", "chaturbate", "redtube",
+    "youporn", "spankbang", "tube8", "beeg", "stripchat", "cam4", "brazzers",
+    "bangbros", "naughtyamerica", "eporner", "tnaflix", "rule34", "erome", "fapello",
+    "heavy-r", "motherless", "literotica", "danbooru", "gelbooru", "e-hentai",
+    "nhentai", "hitomi", "livejasmin", "myfreecams", "camsoda", "imlive",
+    "thothub", "coomer", "kemono", "hqporner", "daftsex", "vporn", "redgifs",
+    "pornhat", "sunporno", "nuvid", "txxx", "cumlouder", "porndoe", "upornia",
+    "nudostar", "bunkr", "fansly", "manyvids", "simpcity", "cyberdrop",
+    "bongacams", "camwhores"
+)
+
+private val DISTRACTION_DOMAINS = setOf(
+    "twitter", "x.com", "t.co", "reddit", "instagram", "tiktok", "facebook", "vk.com", 
+    "tumblr", "pinterest", "4chan", "8kun", "snapchat", "tinder", "bumble", 
+    "badoo", "of.com", "fansly", "bsky.app", "bsky.social", "bluesky", "mastodon", "mastodon.social",
+    "threads.net", "threads", "discord.com", "discord.gg", "discordapp.com", "discord",
+    "twitch.tv", "twitch", "kick.com", "kick", "9gag.com", "9gag", "ifunny.co", "ifunny",
+    "imgur.com", "imgur", "weibo.com", "weibo", "hinge.co", "hinge", "okcupid.com", "okcupid",
+    "grindr.com", "grindr", "match.com", "pof.com", "lemmy.world", "lemmy.ml", "lemmy",
+    "kbin.social", "kbin", "nitter", "redlib", "libreddit", "teddit", "proxitok",
+    "primal.net", "iris.to", "coracle.social", "snort.social", "nostr", "spoutible.com", "spoutible",
+    "croxyproxy.com", "croxyproxy", "proxysite.com", "proxysite", "blockaway.net", "blockaway",
+    "kproxy.com", "kproxy", "hide.me", "hidemyass.com", "plainproxies.com", "filterbypass.me",
+    "vpnbook.com", "zend2.com", "4everproxy.com"
+)
+
+val EXTENSIVE_EXPLICIT_TOKENS = setOf(
+    "porn", "porno", "xxx", "hentai", "jav", "incest", "milf", "milfs", "gangbang",
+    "blowjob", "handjob", "cumshot", "deepthroat", "masturbat", "masturbation",
+    "creampie", "shemale", "cuckold", "bdsm", "camgirl", "stripclub", "hardcoresex",
+    "nude", "nudes", "nudity", "naked", "sex", "sexy", "sexx", "pussy", "pussies",
+    "tits", "titties", "titty", "boobs", "boobies", "dick", "dicks", "cock", "cocks",
+    "vagina", "penis", "slut", "sluts", "whore", "whores", "rule34", "danbooru",
+    "gelbooru", "e-hentai", "nhentai", "hitomi", "thothub", "coomer", "kemono",
+    "squirt", "dildo", "vibrator", "stepmom", "stepbro", "futa", "erotica", "erotic",
+    "fetish", "kink", "bondage", "orgasm", "escorts", "smut", "doujin", "bitch",
+    "cunt", "faggot", "motherfucker", "camshow", "stripchat", "chaturbate",
+    "spankbang", "xvideos", "pornhub", "eporner", "beeg", "naughtyamerica",
+    "brazzers", "bangbros", "faketaxi", "publicagent", "onlyfans", "fansly",
+    "manyvids", "loyalfans", "xhamster", "redtube", "xnxx", "xnx", "tube8",
+    "youporn", "nsfw", "gore", "bestiality", "zoophilia", "necrophilia",
+    "pedophile", "loli", "shota", "snuff", "scat", "pegging", "gloryhole",
+    "bukkake", "threesome", "swinger", "cuck", "jerkoff", "joi", "ceb",
+    "sph", "sissy", "chastity", "findom", "footfetish", "dominatrix",
+    "submissive", "hentaigasm", "hanime", "asshole", "buttplug", "anal",
+    "facesitting", "facial", "cum", "swallow", "redgifs"
+)
+
+private var lastFocusLockCheckTime = 0L
+private var cachedFocusLockState = false
+
+fun resetFocusLockCache() {
+    lastFocusLockCheckTime = 0L
+}
+
+fun isFocusLockActive(context: android.content.Context): Boolean {
+    val now = System.currentTimeMillis()
+    if (now - lastFocusLockCheckTime < 500L) return cachedFocusLockState
+
+    var isActive = false
+
+    // 1. Automatic Night Curfew (10:00 PM – 6:00 AM)
+    val cal = java.util.Calendar.getInstance()
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    if (hour >= 22 || hour < 6) {
+        isActive = true
+    }
+
+    if (!isActive) {
+        try {
+            // 2. Check ScrollLock (both self-imposed 1-hour lock and 30m doomscroll penalty box)
+            val slState = java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
+            if (slState.exists()) {
+                val json = org.json.JSONObject(slState.readText(Charsets.UTF_8))
+                val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                val penaltyUntil = json.optLong("penalty_until_ms", 0L)
+                if (now < manualUntil || now < penaltyUntil) {
+                    isActive = true
+                }
+            }
+
+            // 3. Check FocusShield (checking config/ subpath & root, and manual_lock_until_ms)
+            val fsDirs = listOf(
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", android.content.Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (fsFile in fsDirs) {
+                if (fsFile.exists() && !isActive) {
+                    val json = org.json.JSONObject(fsFile.readText(Charsets.UTF_8))
+                    val manualUntil = json.optLong("manual_lock_until_ms", 0L)
+                    val lockUntil = json.optLong("lock_until_ms", 0L)
+                    val isExplicitActive = json.optBoolean("is_active", false)
+                    if (now < manualUntil || now < lockUntil || isExplicitActive) {
+                        isActive = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    cachedFocusLockState = isActive
+    lastFocusLockCheckTime = now
+    return isActive
+}
+
+fun buildFocusWatchdogScript(): String {
+    val regexStr = EXTENSIVE_EXPLICIT_TOKENS.joinToString("|")
+    return """
+    (function() {
+        if (window.__omniFocusWatchdogActive) return;
+        const host = (window.location.hostname || '').toLowerCase();
+        if (host.includes('aistudio.google.com') || host.includes('localhost') || host.includes('127.0.0.1')) {
+            return;
+        }
+        window.__omniFocusWatchdogActive = true;
+        const badWords = new RegExp('\\b(' + '$regexStr' + ')\\b', 'i');
+        
+        function checkText(txt) {
+            if (txt && badWords.test(txt)) {
+                if (window.OmniFocusBridge) window.OmniFocusBridge.violationDetected();
+                return true;
+            }
+            return false;
+        }
+        
+        ['input', 'change', 'keyup'].forEach(evt => {
+            document.addEventListener(evt, e => {
+                const target = e.target;
+                if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.getAttribute('contenteditable') === 'true')) {
+                    const val = target.value || target.innerText || target.textContent;
+                    if (checkText(val)) {
+                        try { target.value = ''; target.innerText = ''; target.textContent = ''; } catch(_) {}
+                    }
+                }
+            }, true);
+        });
+        
+        setInterval(() => {
+            document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                const val = el.value || el.innerText || el.textContent;
+                if (checkText(val)) {
+                    try { el.value = ''; el.innerText = ''; el.textContent = ''; } catch(_) {}
+                }
+            });
+        }, 2000);
+    })();
+    """.trimIndent()
+}
+
+fun isOmniShieldBlocked(rawUrl: String?, context: android.content.Context? = null): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val clean = rawUrl.lowercase(Locale.US).trim()
+    if (clean == "about:blank" ||
+        clean.startsWith("http://localhost") ||
+        clean.startsWith("http://127.0.0.1") ||
+        clean.contains("aistudio.google.com") ||
+        clean.contains("generativelanguage.googleapis.com") ||
+        clean.contains("alkalimakersuite")) return false
+
+    val isFocusLocked = context != null && isFocusLockActive(context)
+    val activeDomains = if (isFocusLocked) ADULT_DOMAINS + DISTRACTION_DOMAINS else ADULT_DOMAINS
+    val activeTokens = EXTENSIVE_EXPLICIT_TOKENS
+
+    try {
+        val uri = Uri.parse(if (!clean.startsWith("http://") && !clean.startsWith("https://")) "https://$clean" else clean)
+        val host = uri.host?.lowercase(Locale.US) ?: clean
+
+        // 1. Search Engine Exemption: Query strings on engines are guarded by enforceSafeSearch, not domain evictions
+        // Defend against translator and cache proxy bypasses (e.g. translate.google.com?u=...)
+        val isTranslationOrCacheProxy = host.startsWith("translate.google.") || 
+                                        host.contains("webcache.googleusercontent.") || 
+                                        host.contains("googleusercontent.com")
+        val isSearchEngine = !isTranslationOrCacheProxy && 
+                             (host.contains("google.") || host.contains("duckduckgo.com") ||
+                              host.contains("bing.com") || host.contains("ecosia.org"))
+
+        // Deep URL Probe: Catch web proxies or translators passing target URLs inside query parameters
+        val embeddedTarget = uri.getQueryParameter("url") ?: uri.getQueryParameter("u") ?: uri.getQueryParameter("target") ?: uri.getQueryParameter("dest")
+        if (!embeddedTarget.isNullOrEmpty() && isOmniShieldBlocked(embeddedTarget, context)) {
+            return true
+        }
+
+        if (isSearchEngine) {
+            return false
+        }
+
+        // 2. Strict Host-Only Domain Boundary Matching (Prevents URL path/query false alarms)
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            val matches = if (cleanDomain.contains(".")) {
+                host == cleanDomain || host.endsWith(".$cleanDomain")
+            } else {
+                host == "$cleanDomain.com" || host.endsWith(".$cleanDomain.com") || host.split('.').contains(cleanDomain)
+            }
+            if (matches) return true
+        }
+
+        // 3. Exact word tokens (split on non-alphanumeric delimiters)
+        val tokens = clean.split(Regex("[^a-z0-9]")).filter { it.length >= 3 }
+        for (token in tokens) {
+            if (activeTokens.contains(token)) {
+                // Protect engineering keywords against ambiguous roots
+                if (token == "anal" && (clean.contains("analytics") || clean.contains("analysis") || clean.contains("analog") || clean.contains("analyze"))) continue
+                if (token == "cock" && (clean.contains("peacock") || clean.contains("cocktail") || clean.contains("cockpit"))) continue
+                return true
+            }
+        }
+
+        // 4. Substring matching for distinct compound explicit words (skipping ambiguous roots)
+        val ambiguousTokens = setOf("anal", "cock", "dick", "cuck", "tit", "tits", "jerk")
+        for (token in activeTokens) {
+            if (token.length >= 4 && !ambiguousTokens.contains(token) && clean.contains(token)) {
+                return true
+            }
+        }
+
+        // 5. Word-boundary regex for short high-risk tokens
+        val shortExplicitRegex = Regex("(?:^|[^a-z])(sex|xxx|cum|fap|joi|sph)(?:[^a-z]|$)")
+        if (shortExplicitRegex.containsMatchIn(clean)) return true
+    } catch (_: Exception) {
+        for (domain in activeDomains) {
+            val cleanDomain = domain.removePrefix("www.").lowercase(Locale.US)
+            if (clean.contains(cleanDomain)) return true
+        }
+    }
+    return false
+}
+
+fun enforceSafeSearch(rawUrl: String): String {
+    return try {
+        val uri = Uri.parse(rawUrl)
+        val host = uri.host?.lowercase(Locale.US) ?: return rawUrl
+
+        if (host.contains("google.") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("safe", "active").build().toString()
+        }
+
+        if (host.contains("duckduckgo.com")) {
+            return uri.buildUpon().appendQueryParameter("kp", "1").build().toString()
+        }
+
+        if (host.contains("bing.com") && uri.path?.contains("/search") == true) {
+            return uri.buildUpon().appendQueryParameter("adlt", "strict").build().toString()
+        }
+
+        if (host.contains("youtube.com") || host == "youtu.be") {
+            return uri.buildUpon().appendQueryParameter("safe", "strict").build().toString()
+        }
+
+        if (host.contains("reddit.com")) {
+            return uri.buildUpon()
+                .appendQueryParameter("include_over_18", "0")
+                .appendQueryParameter("nsfw", "0")
+                .build().toString()
+        }
+
+        rawUrl
+    } catch (_: Exception) {
+        rawUrl
+    }
+}
+
+fun sanitizeSafeUrl(rawUrl: String?, context: android.content.Context? = null): String {
+    if (rawUrl.isNullOrBlank() || rawUrl == "about:blank") return "about:blank"
+    val trimmed = rawUrl.trim()
+    if (isOmniShieldBlocked(trimmed, context)) {
+        return "about:blank"
+    }
+    val safeEnforced = enforceSafeSearch(trimmed)
+    if (safeEnforced.length > 1200) {
+        val cleanBase = safeEnforced.substringBefore('?')
+        return if (cleanBase.length in 1..1200) cleanBase else "about:blank"
+    }
+    return safeEnforced
+}
+
+fun isLocalFilePath(input: String): Boolean {
+    val clean = input.trim().lowercase()
+    return clean.startsWith("/") ||
+           clean.startsWith("file:") ||
+           clean.startsWith("content:") ||
+           clean.startsWith("sdcard/") ||
+           clean.startsWith("storage/") ||
+           clean.endsWith(".html") ||
+           clean.endsWith(".htm") ||
+           (clean.contains("localhost") && (clean.contains("/ide") || clean.contains("vault_")))
+}
+
+fun android.webkit.WebView.captureThumbnail(): android.graphics.Bitmap? {
+    if (width <= 0 || height <= 0) return null
+    return try {
+        val scale = 0.5f
+        val w = (width * scale).toInt().coerceAtLeast(1)
+        val h = (height * scale).toInt().coerceAtLeast(1)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(scale, scale)
+        draw(canvas)
+        bitmap
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun handleExternalUri(context: android.content.Context, url: String, view: android.webkit.WebView?, bridge: com.omni.hub.api.HostBridge): Boolean {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        if (url.contains("play.google.com/store/apps/details")) {
+            val uri = Uri.parse(url)
+            val pkg = uri.getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                    setPackage("com.android.vending")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                return try {
+                    context.startActivity(marketIntent)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+        return false
+    }
+
+    if (url.startsWith("intent://")) {
+        return try {
+            val parsedIntent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val resolveInfo = context.packageManager.resolveActivity(parsedIntent, 0)
+            if (resolveInfo != null) {
+                context.startActivity(parsedIntent)
+                true
+            } else {
+                val fallbackUrl = parsedIntent.getStringExtra("browser_fallback_url")
+                if (!fallbackUrl.isNullOrEmpty()) {
+                    view?.loadUrl(fallbackUrl)
+                    true
+                } else {
+                    val pkg = parsedIntent.`package`
+                    if (!pkg.isNullOrEmpty()) {
+                        val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(marketIntent)
+                        true
+                    } else false
+                }
+            }
+        } catch (e: Exception) {
+            bridge.log("INTENT_ERR", "Could not dispatch intent URI: ${e.message}")
+            false
+        }
+    }
+
+    if (url.startsWith("market://")) {
+        return try {
+            val marketIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(marketIntent)
+            true
+        } catch (e: Exception) {
+            val pkg = Uri.parse(url).getQueryParameter("id")
+            if (!pkg.isNullOrEmpty()) {
+                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                true
+            } else false
+        }
+    }
+
+    return try {
+        val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(genericIntent)
+        true
+    } catch (e: Exception) {
+        bridge.log("INTENT_WARN", "No handler for scheme: $url")
+        false
+    }
+}
+
+fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.HostBridge, rawHtml: String, prefix: String = "DOM_Dump"): String {
+    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(java.util.Date())
+    val filename = "${prefix}_$timestamp.html"
+    var savedToDownloads = false
+
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/html")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/OmniSnapshots")
+            }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(rawHtml.toByteArray(Charsets.UTF_8))
+                }
+                savedToDownloads = true
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val targetDir = java.io.File(downloadsDir, "OmniSnapshots").apply { mkdirs() }
+            val targetFile = java.io.File(targetDir, filename)
+            java.io.FileOutputStream(targetFile).use { os ->
+                os.write(rawHtml.toByteArray(Charsets.UTF_8))
+            }
+            savedToDownloads = true
+        }
+    } catch (e: Exception) {
+        bridge.log("DOM_SNAPSHOT_ERR", "Downloads folder write failed: ${e.message}")
+    }
+
+    bridge.saveFile("snapshots/$filename", rawHtml.toByteArray(Charsets.UTF_8))
+    val locationMsg = if (savedToDownloads) "Downloads/OmniSnapshots/$filename" else "snapshots/$filename"
+    bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
+    bridge.showToast("✅ Saved DOM to $locationMsg")
+    return locationMsg
+}}{prompt}"`);
+                const turn = await Omni.studio.send({ prompt }, progress => {
+                    if (progress.thoughts) log("🧠 " + progress.thoughts.slice(-120), "text-gray-400");
+                });
+
+                log("🎉 AI Studio Responded:\n" + turn.output, "text-sky-300");
+                setStatus('Chain Complete', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+                Omni.toast("Autonomous Chain Finished!");
+            } catch(e) {
+                setStatus('Error', 'bg-rose-900 text-rose-300 border-rose-700');
+                log("💥 Chain Error: " + e.message, "text-rose-400");
+            }
+        };
+    </script>
+</body>
+</html>
+""".trimIndent()
+
 fun optimizeImageForAiStudio(
     context: android.content.Context,
     uri: android.net.Uri,
