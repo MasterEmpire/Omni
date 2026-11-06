@@ -50,8 +50,29 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
 
     window.Omni = {
         studio: {
-            init: function(profileId) {
-                return rpcCall('studioInit', [profileId || 'default']);
+            createSession: function(opts) {
+                opts = opts || {};
+                var profile = opts.profile || opts.profileId || 'default';
+                var model = opts.model || '';
+                return rpcCall('studioCreateSession', [profile, model]).then(function(res) {
+                    var sId = res.sessionId;
+                    return {
+                        id: sId,
+                        profile: profile,
+                        configure: function(configOpts) {
+                            return rpcCall('studioConfigureSession', [sId, JSON.stringify(configOpts || {})]);
+                        },
+                        send: function(turnOpts, onProgress) {
+                            return rpcCall('studioSendSessionTurn', [sId, JSON.stringify(turnOpts || {})], onProgress);
+                        },
+                        close: function() {
+                            return rpcCall('studioCloseSession', [sId]);
+                        }
+                    };
+                });
+            },
+            init: function(profileId, model) {
+                return rpcCall('studioInit', [profileId || 'default', model || '']);
             },
             configure: function(opts) {
                 return rpcCall('studioConfigure', [JSON.stringify(opts || {})]);
