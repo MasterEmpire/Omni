@@ -24,6 +24,9 @@ interface AutomationCallback {
     fun onError(err: String)
 }
 
+/**
+ * High-Level State & Puppet Session Contract for Google AI Studio
+ */
 class AiStudioAutomator(
     private val context: Context,
     private val bridge: HostBridge
@@ -33,23 +36,23 @@ class AiStudioAutomator(
     @Volatile
     var isAborted: Boolean = false
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var activeCallback: AutomationCallback? = null
+    private var onSessionReadyCallback: ((Boolean, String?) -> Unit)? = null
+    private var onConfigDoneCallback: ((Boolean, String?) -> Unit)? = null
+    private var onTurnProgressCallback: ((String, String) -> Unit)? = null
+    private var onTurnCompleteCallback: ((String, String) -> Unit)? = null
+    private var onTurnErrorCallback: ((String) -> Unit)? = null
+
+    // --- PUPPET SDK: Phase 1 - Prepare Session ---
     @SuppressLint("SetJavaScriptEnabled")
-    fun start(
+    fun prepareSession(
         profileId: String,
-        steps: List<com.omni.plugin.browser.models.SequentialPromptStep> = emptyList(),
-        userPrompt: String = "",
-        systemPromptTitle: String = "",
-        systemPrompt: String = "",
-        thinkingLevel: String = "Default",
-        model: String = "Gemini 3.7 Flash",
-        fallbackEnabled: Boolean = true,
-        temporaryChat: Boolean = false,
-        attachments: List<com.omni.plugin.browser.models.AutomationAttachment> = emptyList(),
-        containerLayout: FrameLayout?,
-        callback: AutomationCallback
+        onReady: (Boolean, String?) -> Unit
     ) {
-        stop(containerLayout)
+        stop(null)
         isAborted = false
+        onSessionReadyCallback = onReady
 
         if (profileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             try {
@@ -60,65 +63,6 @@ class AiStudioAutomator(
             CookieManager.getInstance().flush()
         }
 
-        val mainHandler = Handler(Looper.getMainLooper())
-        val effectivePrompt = if (steps.isNotEmpty()) steps.first().prompt else userPrompt
-        val jsEscapedPrompt = JSONObject.quote(effectivePrompt.trim())
-        val jsEscapedSysTitle = JSONObject.quote(systemPromptTitle.trim())
-        val jsEscapedSysPrompt = JSONObject.quote(systemPrompt.trim())
-        val jsEscapedThinking = JSONObject.quote(thinkingLevel)
-        val jsEscapedModel = JSONObject.quote(model)
-
-        val attachmentsArray = org.json.JSONArray()
-        attachments.forEach { att ->
-            attachmentsArray.put(
-                JSONObject().apply {
-                    put("name", att.name)
-                    put("mime", att.mimeType)
-                    put("data", att.base64Data)
-                }
-            )
-        }
-        val jsAttachments = attachmentsArray.toString()
-
-        val stepsArray = org.json.JSONArray()
-                val targetSteps = if (steps.isNotEmpty()) steps else listOf(com.omni.plugin.browser.models.SequentialPromptStep(prompt = userPrompt))
-        targetSteps.forEach { step ->
-            val stepAttArray = org.json.JSONArray()
-            step.attachments.forEach { att ->
-                stepAttArray.put(
-                    JSONObject().apply {
-                        put("name", att.name)
-                        put("mime", att.mimeType)
-                        put("data", att.base64Data)
-                    }
-                )
-            }
-            stepsArray.put(
-                JSONObject().apply {
-                    put("id", step.id)
-                    put("prompt", step.prompt.trim())
-                    put("repeatCount", step.repeatCount.coerceAtLeast(1))
-                    put("isInfinite", step.isInfinite)
-                    put("attachments", stepAttArray)
-                }
-            )
-        }
-        val jsSteps = stepsArray.toString()
-
-        val automationScript = buildAiStudioAutomationScript(
-            prompt = jsEscapedPrompt,
-            sysTitle = jsEscapedSysTitle,
-            sysPrompt = jsEscapedSysPrompt,
-            thinkingLevel = jsEscapedThinking,
-            model = jsEscapedModel,
-            fallbackEnabled = fallbackEnabled,
-            temporaryChat = temporaryChat,
-            attachmentsJson = jsAttachments,
-            stepsJson = jsSteps
-        )
-
-        bridge.startForegroundTask("AI Studio Automator", "Running automated AI Studio prompt sequence...")
-
         val displayMetrics = context.resources.displayMetrics
         val viewWidth = displayMetrics.widthPixels.coerceAtLeast(1080)
         val viewHeight = displayMetrics.heightPixels.coerceAtLeast(2400)
@@ -126,7 +70,6 @@ class AiStudioAutomator(
         val autoWv = WebView(context).apply {
             translationX = 0f
             alpha = 1f
-
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -177,7 +120,6 @@ class AiStudioAutomator(
                     val msg = consoleMessage?.message() ?: ""
                     if (msg.isEmpty()) return true
 
-                    // Silence noisy Google AI Studio preload warnings and internal Drive/Gapi sync noise
                     if (msg.contains("preloaded using link preload", ignoreCase = true) ||
                         msg.contains("Failed to upload to drive", ignoreCase = true) ||
                         msg.contains("GapiService.upload failed", ignoreCase = true) ||
@@ -209,7 +151,7 @@ class AiStudioAutomator(
                 @JavascriptInterface
                 fun onStatus(msg: String) {
                     bridge.updateForegroundTask("AI Studio: $msg")
-                    mainHandler.post { callback.onStatus(msg) }
+                    mainHandler.post { activeCallback?.onStatus(msg) }
                 }
 
                 @JavascriptInterface
@@ -219,20 +161,57 @@ class AiStudioAutomator(
 
                 @JavascriptInterface
                 fun onProgress(thoughts: String, output: String) {
-                    mainHandler.post { callback.onProgress(thoughts, output) }
+                    mainHandler.post { activeCallback?.onProgress(thoughts, output) }
                 }
 
                 @JavascriptInterface
                 fun onComplete(thoughts: String, output: String) {
                     bridge.stopForegroundTask()
-                    mainHandler.post { callback.onComplete(thoughts, output) }
+                    mainHandler.post { activeCallback?.onComplete(thoughts, output) }
                 }
 
                 @JavascriptInterface
                 fun onError(err: String) {
                     if (isAborted) return
                     bridge.stopForegroundTask()
-                    mainHandler.post { callback.onError(err) }
+                    mainHandler.post { activeCallback?.onError(err) }
+                }
+
+                @JavascriptInterface
+                fun onPuppetReady(success: Boolean, message: String) {
+                    mainHandler.post {
+                        onSessionReadyCallback?.invoke(success, message)
+                        onSessionReadyCallback = null
+                    }
+                }
+
+                @JavascriptInterface
+                fun onPuppetConfigured(success: Boolean, message: String) {
+                    mainHandler.post {
+                        onConfigDoneCallback?.invoke(success, message)
+                        onConfigDoneCallback = null
+                    }
+                }
+
+                @JavascriptInterface
+                fun onPuppetTurnProgress(thoughts: String, output: String) {
+                    mainHandler.post {
+                        onTurnProgressCallback?.invoke(thoughts, output)
+                    }
+                }
+
+                @JavascriptInterface
+                fun onPuppetTurnComplete(thoughts: String, output: String) {
+                    mainHandler.post {
+                        onTurnCompleteCallback?.invoke(thoughts, output)
+                    }
+                }
+
+                @JavascriptInterface
+                fun onPuppetTurnError(err: String) {
+                    mainHandler.post {
+                        onTurnErrorCallback?.invoke(err)
+                    }
                 }
             }, "OmniAutomator")
 
@@ -247,8 +226,9 @@ class AiStudioAutomator(
                     super.onPageFinished(view, url)
                     bridge.log("AI_STUDIO_NAV", "Finished loading: $url")
                     if (url != null && url.contains("aistudio.google.com")) {
-                        bridge.log("AI_STUDIO_INJECT", "Injecting automation script into $url")
-                        view?.evaluateJavascript(automationScript, null)
+                        bridge.log("AI_STUDIO_INJECT", "Injecting Puppet Core Engine into $url")
+                        val script = buildAiStudioPuppetScript() + "\nwindow.__omniPuppet.init();"
+                        view?.evaluateJavascript(script, null)
                     }
                 }
 
@@ -258,7 +238,9 @@ class AiStudioAutomator(
                     if (isAborted) return
                     if (request?.isForMainFrame == true) {
                         mainHandler.post {
-                            callback.onError("Network error connecting to AI Studio (${error?.description})")
+                            activeCallback?.onError("Network error connecting to AI Studio (${error?.description})")
+                            onSessionReadyCallback?.invoke(false, "Network error: ${error?.description}")
+                            onSessionReadyCallback = null
                         }
                     }
                 }
@@ -266,15 +248,168 @@ class AiStudioAutomator(
         }
 
         headlessWv = autoWv
-        // Prevent cross-window reparenting: keep autoWv isolated in background memory
         autoWv.onResume()
+        bridge.startForegroundTask("AI Studio Puppet", "Mounting AI Studio headless session...")
         autoWv.loadUrl("https://aistudio.google.com/prompts/new_chat")
+    }
+
+    // --- PUPPET SDK: Phase 2 - Configure Session ---
+    fun configure(
+        sysTitle: String = "",
+        sysPrompt: String = "",
+        thinkingLevel: String = "Default",
+        model: String = "Gemini 3.7 Flash",
+        fallbackEnabled: Boolean = true,
+        temporaryChat: Boolean = false,
+        onDone: (Boolean, String?) -> Unit
+    ) {
+        val wv = headlessWv
+        if (wv == null) {
+            onDone(false, "Puppet WebView is not mounted.")
+            return
+        }
+        onConfigDoneCallback = onDone
+
+        val configObj = JSONObject().apply {
+            put("sysTitle", sysTitle.trim())
+            put("sysPrompt", sysPrompt.trim())
+            put("thinkingLevel", thinkingLevel)
+            put("model", model)
+            put("fallbackEnabled", fallbackEnabled)
+            put("temporaryChat", temporaryChat)
+        }
+
+        val script = "if (window.__omniPuppet) { window.__omniPuppet.configure(${configObj}); }"
+        wv.evaluateJavascript(script, null)
+    }
+
+    // --- PUPPET SDK: Phase 3 - Execute Single Turn ---
+    fun executeTurn(
+        prompt: String,
+        attachments: List<com.omni.plugin.browser.models.AutomationAttachment> = emptyList(),
+        label: String = "Turn",
+        onProgress: (thoughts: String, output: String) -> Unit,
+        onComplete: (thoughts: String, output: String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val wv = headlessWv
+        if (wv == null) {
+            onError("Puppet WebView is not mounted.")
+            return
+        }
+
+        onTurnProgressCallback = onProgress
+        onTurnCompleteCallback = onComplete
+        onTurnErrorCallback = onError
+
+        val attachmentsArray = org.json.JSONArray()
+        attachments.forEach { att ->
+            attachmentsArray.put(
+                JSONObject().apply {
+                    put("name", att.name)
+                    put("mime", att.mimeType)
+                    put("data", att.base64Data)
+                }
+            )
+        }
+
+        val turnObj = JSONObject().apply {
+            put("prompt", prompt.trim())
+            put("attachments", attachmentsArray)
+            put("label", label)
+        }
+
+        val script = "if (window.__omniPuppet) { window.__omniPuppet.executeTurn(${turnObj}); }"
+        wv.evaluateJavascript(script, null)
+    }
+
+    // --- High-Level Backward Compatibility Orchestrator (Used by Exam Solver & Dialog) ---
+    fun start(
+        profileId: String,
+        steps: List<com.omni.plugin.browser.models.SequentialPromptStep> = emptyList(),
+        userPrompt: String = "",
+        systemPromptTitle: String = "",
+        systemPrompt: String = "",
+        thinkingLevel: String = "Default",
+        model: String = "Gemini 3.7 Flash",
+        fallbackEnabled: Boolean = true,
+        temporaryChat: Boolean = false,
+        attachments: List<com.omni.plugin.browser.models.AutomationAttachment> = emptyList(),
+        containerLayout: FrameLayout?,
+        callback: AutomationCallback
+    ) {
+        activeCallback = callback
+
+        val effectivePrompt = if (steps.isNotEmpty()) steps.first().prompt else userPrompt
+        val jsEscapedPrompt = JSONObject.quote(effectivePrompt.trim())
+        val jsEscapedSysTitle = JSONObject.quote(systemPromptTitle.trim())
+        val jsEscapedSysPrompt = JSONObject.quote(systemPrompt.trim())
+        val jsEscapedThinking = JSONObject.quote(thinkingLevel)
+        val jsEscapedModel = JSONObject.quote(model)
+
+        val attachmentsArray = org.json.JSONArray()
+        attachments.forEach { att ->
+            attachmentsArray.put(
+                JSONObject().apply {
+                    put("name", att.name)
+                    put("mime", att.mimeType)
+                    put("data", att.base64Data)
+                }
+            )
+        }
+        val jsAttachments = attachmentsArray.toString()
+
+        val stepsArray = org.json.JSONArray()
+        val targetSteps = if (steps.isNotEmpty()) steps else listOf(com.omni.plugin.browser.models.SequentialPromptStep(prompt = userPrompt))
+        targetSteps.forEach { step ->
+            val stepAttArray = org.json.JSONArray()
+            step.attachments.forEach { att ->
+                stepAttArray.put(
+                    JSONObject().apply {
+                        put("name", att.name)
+                        put("mime", att.mimeType)
+                        put("data", att.base64Data)
+                    }
+                )
+            }
+            stepsArray.put(
+                JSONObject().apply {
+                    put("id", step.id)
+                    put("prompt", step.prompt.trim())
+                    put("repeatCount", step.repeatCount.coerceAtLeast(1))
+                    put("isInfinite", step.isInfinite)
+                    put("attachments", stepAttArray)
+                }
+            )
+        }
+        val jsSteps = stepsArray.toString()
+
+        val automationScript = buildAiStudioAutomationScript(
+            prompt = jsEscapedPrompt,
+            sysTitle = jsEscapedSysTitle,
+            sysPrompt = jsEscapedSysPrompt,
+            thinkingLevel = jsEscapedThinking,
+            model = jsEscapedModel,
+            fallbackEnabled = fallbackEnabled,
+            temporaryChat = temporaryChat,
+            attachmentsJson = jsAttachments,
+            stepsJson = jsSteps
+        )
+
+        prepareSession(profileId) { ready, err ->
+            if (!ready) {
+                callback.onError(err ?: "Failed preparing session")
+                return@prepareSession
+            }
+            headlessWv?.evaluateJavascript(automationScript, null)
+        }
     }
 
     fun stop(containerLayout: FrameLayout?) {
         isAborted = true
         bridge.stopForegroundTask()
         try {
+            headlessWv?.evaluateJavascript("if (window.__omniPuppet) { window.__omniPuppet.abort(); }", null)
             headlessWv?.stopLoading()
             headlessWv?.onPause()
             (headlessWv?.parent as? ViewGroup)?.removeView(headlessWv)
@@ -282,6 +417,11 @@ class AiStudioAutomator(
             headlessWv?.destroy()
         } catch (_: Exception) {}
         headlessWv = null
+        onSessionReadyCallback = null
+        onConfigDoneCallback = null
+        onTurnProgressCallback = null
+        onTurnCompleteCallback = null
+        onTurnErrorCallback = null
     }
 
     fun dumpDom(onResult: (String?) -> Unit) {
