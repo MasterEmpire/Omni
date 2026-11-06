@@ -1,4 +1,3 @@
-FILE: plugins/omni_browser/src/utils/BrowserUtils.kt
 package com.omni.plugin.browser.utils
 
 import android.net.Uri
