@@ -657,6 +657,49 @@ class VaultManager(
         }
     }
 
+    fun savePlaybooks(list: List<com.omni.plugin.browser.models.StudioPlaybook>) {
+        try {
+            val arr = JSONArray()
+            list.forEach { p ->
+                val obj = JSONObject().apply {
+                    put("id", p.id)
+                    put("title", p.title)
+                    put("description", p.description)
+                    put("content", p.content)
+                    put("createdAt", p.createdAt)
+                    put("updatedAt", p.updatedAt)
+                }
+                arr.put(obj)
+            }
+            bridge.saveFile("config/playbooks.json", arr.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadPlaybooks(): List<com.omni.plugin.browser.models.StudioPlaybook>? {
+        return try {
+            val bytes = bridge.readFile("config/playbooks.json") ?: return null
+            val arr = JSONArray(String(bytes, Charsets.UTF_8))
+            val list = mutableListOf<com.omni.plugin.browser.models.StudioPlaybook>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    com.omni.plugin.browser.models.StudioPlaybook(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        title = obj.getString("title"),
+                        description = obj.optString("description", ""),
+                        content = obj.getString("content"),
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun saveSystemPresets(list: List<com.omni.plugin.browser.models.SystemInstructionPreset>) {
         try {
             val arr = JSONArray()
