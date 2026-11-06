@@ -388,7 +388,8 @@ fun buildAiStudioPuppetScript(): String {
                             }
                         }
 
-                        const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (SYS_TITLE && SYS_TITLE.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default');
+                        const TARGET_MODEL = opts.model || '';
+                        const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (SYS_TITLE && SYS_TITLE.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default') || (TARGET_MODEL && TARGET_MODEL !== 'Default');
                         if (needsSettings) {
                             let sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
                             if (!isElementVisible(sysCard)) {
@@ -397,6 +398,35 @@ fun buildAiStudioPuppetScript(): String {
                                 if (tuneBtn && isElementVisible(tuneBtn)) {
                                     tuneBtn.click();
                                     await randomDelay(1000, 1500);
+                                }
+                            }
+
+                            if (TARGET_MODEL && TARGET_MODEL !== 'Default' && TARGET_MODEL.length > 0) {
+                                try {
+                                    const modelSelect = document.querySelector('ms-model-setting mat-select, mat-select[aria-label*="Model"], ms-model-switcher button');
+                                    if (modelSelect) {
+                                        const curModel = (modelSelect.textContent || '').trim().toLowerCase();
+                                        const targetClean = TARGET_MODEL.toLowerCase().replace(/[-_]/g, ' ');
+                                        if (!curModel.includes(targetClean)) {
+                                            hostLog('SETTINGS', 'Switching model to: ' + TARGET_MODEL);
+                                            modelSelect.click();
+                                            await randomDelay(800, 1200);
+                                            const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option, .model-option'));
+                                            const match = options.find(o => {
+                                                const oText = (o.textContent || '').trim().toLowerCase();
+                                                return oText.includes(TARGET_MODEL.toLowerCase()) || oText.includes(targetClean);
+                                            });
+                                            if (match) {
+                                                match.click();
+                                                hostLog('SETTINGS', 'Model switched to: ' + (match.textContent || '').trim());
+                                            } else {
+                                                document.body.click();
+                                            }
+                                            await randomDelay(600, 1000);
+                                        }
+                                    }
+                                } catch(e) {
+                                    hostLog('SETTINGS_WARN', 'Model switch attempt: ' + e.message);
                                 }
                             }
 
