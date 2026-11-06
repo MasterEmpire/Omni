@@ -660,42 +660,14 @@ fun buildBlobExtractionScript(url: String, safeName: String, safeMime: String): 
     """.trimIndent()
 }
 
-fun buildAiStudioAutomationScript(
-    prompt: String,
-    sysTitle: String,
-    sysPrompt: String,
-    thinkingLevel: String,
-    model: String,
-    fallbackEnabled: Boolean = true,
-    temporaryChat: Boolean = false,
-    attachmentsJson: String = "[]",
-    stepsJson: String = "[]"
-): String {
+fun buildAiStudioPuppetScript(): String {
     return """
-        (async function() {
-            if (window.__omniAutomating) {
-                return;
-            }
-            window.__omniAutomating = true;
-
-            const STEPS_DATA = $stepsJson;
-            const FALLBACK_PROMPT = $prompt;
-            const SYS_TITLE = $sysTitle;
-            const SYS_PROMPT = $sysPrompt;
-            const THINKING_LEVEL = $thinkingLevel;
-            const TARGET_MODEL = $model;
-            const FALLBACK_ENABLED = $fallbackEnabled;
-            const TEMPORARY_CHAT = $temporaryChat;
-            const ATTACHMENTS = $attachmentsJson;
-
-            const STEPS = (STEPS_DATA && Array.isArray(STEPS_DATA) && STEPS_DATA.length > 0)
-                ? STEPS_DATA
-                : [{ prompt: FALLBACK_PROMPT, repeatCount: 1, isInfinite: false, attachments: [] }];
+        (function() {
+            if (window.__omniPuppet) return;
 
             const delay = (ms) => new Promise(r => setTimeout(r, ms));
             const randomDelay = (min, max) => delay(Math.floor(Math.random() * (max - min + 1) + min));
 
-            // Comprehensive English Interstitial & Dialog Dismissal Dictionary
             const DISMISS_DICTIONARY = [
                 'got it', 'dismiss', 'i understand', 'accept', 'agree', 'i agree',
                 'close', 'not now', 'no thanks', 'maybe later', 'continue', 'get started',
@@ -703,6 +675,29 @@ fun buildAiStudioAutomationScript(
                 'remind me later', 'never', 'dismiss all', 'accept all', 'stay here',
                 'keep using web', 'close dialog', 'understand'
             ];
+
+            function hostLog(tag, msg) {
+                try {
+                    if (window.OmniAutomator && window.OmniAutomator.onLog) {
+                        window.OmniAutomator.onLog(tag, String(msg));
+                    }
+                } catch(_) {}
+            }
+
+            function updateStatus(msg) {
+                hostLog('STATUS', msg);
+                try {
+                    if (window.OmniAutomator && window.OmniAutomator.onStatus) {
+                        window.OmniAutomator.onStatus(String(msg));
+                    }
+                } catch(_) {}
+            }
+
+            function isElementVisible(el) {
+                if (!el) return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden' && window.getComputedStyle(el).display !== 'none';
+            }
 
             async function dismissInterstitials() {
                 try {
@@ -785,7 +780,6 @@ fun buildAiStudioAutomationScript(
                         try {
                             const b64Clean = att.data.includes(',') ? att.data.split(',')[1] : att.data;
                             const byteChars = atob(b64Clean);
-                            // Allocate contiguous typed array directly (avoids 8x V8 heap pointer bloat)
                             const byteArray = new Uint8Array(byteChars.length);
                             for (let i = 0; i < byteChars.length; i++) {
                                 byteArray[i] = byteChars.charCodeAt(i);
@@ -806,14 +800,13 @@ fun buildAiStudioAutomationScript(
 
                         updateStatus('Processing attached images.');
                         let uploadWait = 0;
-                        // Dynamically scale upload window: up to 100s for 5 files on poor networks
                         const maxUploadTicks = Math.max(80, uniqueList.length * 40);
                         while (uploadWait < maxUploadTicks) {
                             const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress, ms-prompt-box .loading');
                             if (!activeUploadIndicator) break;
                             await delay(500);
                             uploadWait++;
-                            if (uploadWait % 16 === 0) { // Heartbeat every 8s
+                            if (uploadWait % 16 === 0) {
                                 updateStatus('Still uploading images...');
                             }
                         }
@@ -823,30 +816,7 @@ fun buildAiStudioAutomationScript(
                 }
             }
 
-            function hostLog(tag, msg) {
-                try {
-                    if (window.OmniAutomator && window.OmniAutomator.onLog) {
-                        window.OmniAutomator.onLog(tag, String(msg));
-                    }
-                } catch(_) {}
-            }
-
-            function updateStatus(msg) {
-                hostLog('STATUS', msg);
-                try {
-                    if (window.OmniAutomator && window.OmniAutomator.onStatus) {
-                        window.OmniAutomator.onStatus(String(msg));
-                    }
-                } catch(_) {}
-            }
-
-            function isElementVisible(el) {
-                if (!el) return false;
-                const rect = el.getBoundingClientRect();
-                return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden' && window.getComputedStyle(el).display !== 'none';
-            }
-
-            function checkUiGenerating(latest) {
+            function checkUiGenerating() {
                 const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits');
                 if (runBtn) {
                     if (runBtn.classList.contains('stoppable') ||
@@ -866,10 +836,6 @@ fun buildAiStudioAutomationScript(
                     return true;
                 }
                 return false;
-            }
-
-            function isGenerating(latest) {
-                return checkUiGenerating(latest);
             }
 
             function isBracketsBalanced(text) {
@@ -910,7 +876,6 @@ fun buildAiStudioAutomationScript(
                     return '';
                 }
                 try {
-                    // Gatekeeper: Only scrape if this turn contains actual answer nodes outside of thoughts
                     const answerCandidates = Array.from(turnEl.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
                         .filter(el => !el.closest('ms-thought-chunk'));
 
@@ -988,632 +953,580 @@ fun buildAiStudioAutomationScript(
                 }
             }
 
-            try {
-                hostLog('INIT', 'AI Studio Automator script launched. URL: ' + window.location.href);
+            function isTemporaryChatActive() {
+                return !!(
+                    document.querySelector('ms-incognito-mode-indicator') ||
+                    document.querySelector('.incognito-container') ||
+                    (document.querySelector('.page-title')?.textContent || '').toLowerCase().includes('temporary chat')
+                );
+            }
 
-                // 1. Auth check
-                if (window.location.href.includes('accounts.google.com') || window.location.href.includes('/signin/')) {
-                    const authErr = 'Account not logged in on this profile. Please log in to Google AI Studio first.';
-                    hostLog('AUTH_ERR', authErr);
-                    if (window.OmniAutomator) window.OmniAutomator.onError(authErr);
-                    window.__omniAutomating = false;
-                    return;
-                }
+            window.__omniPuppet = {
+                isConfigured: false,
+                isBusy: false,
+                aborted: false,
 
-                updateStatus('Checking solver interface.');
-                await dismissInterstitials();
+                abort: function() {
+                    this.aborted = true;
+                    this.isBusy = false;
+                    hostLog('PUPPET', 'Puppet execution aborted by host.');
+                },
 
-                updateStatus('Connecting to Omni solver.');
-                let mountAttempts = 0;
-                let promptArea = null;
+                init: async function() {
+                    hostLog('PUPPET_INIT', 'Initializing AI Studio Puppet Engine...');
+                    if (window.location.href.includes('accounts.google.com') || window.location.href.includes('/signin/')) {
+                        const authErr = 'Account not logged in on this profile. Please log in to Google AI Studio first.';
+                        hostLog('AUTH_ERR', authErr);
+                        if (window.OmniAutomator && window.OmniAutomator.onPuppetReady) {
+                            window.OmniAutomator.onPuppetReady(false, authErr);
+                        }
+                        return false;
+                    }
 
-                while (mountAttempts < 35) {
                     await dismissInterstitials();
-                    promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
-                    if (promptArea && isElementVisible(promptArea)) break;
-                    await delay(1000);
-                    mountAttempts++;
-                    if (mountAttempts % 5 === 0) {
-                        hostLog('MOUNT', 'Polling UI (' + mountAttempts + '/35)...');
-                    }
-                }
+                    let mountAttempts = 0;
+                    let promptArea = null;
 
-                if (!promptArea) {
-                    const err = 'Failed to locate prompt textarea after 30s.';
-                    hostLog('MOUNT_ERR', err);
-                    if (window.OmniAutomator) window.OmniAutomator.onError(err);
-                    window.__omniAutomating = false;
-                    return;
-                }
-
-                await randomDelay(1000, 1600);
-
-                function isTemporaryChatActive() {
-                    return !!(
-                        document.querySelector('ms-incognito-mode-indicator') ||
-                        document.querySelector('.incognito-container') ||
-                        (document.querySelector('.page-title')?.textContent || '').toLowerCase().includes('temporary chat')
-                    );
-                }
-
-                // 1.5 Sync Temporary Chat Mode with User Preference (Bi-directional)
-                const currentTempState = isTemporaryChatActive();
-                if (TEMPORARY_CHAT !== currentTempState) {
-                    const actionLabel = TEMPORARY_CHAT ? 'Enabling Temporary Chat' : 'Disabling Temporary Chat (Restoring persistent mode)';
-                    hostLog('TEMP_CHAT', actionLabel + ' in Google AI Studio...');
-                    updateStatus(TEMPORARY_CHAT ? 'Activating Temporary Chat...' : 'Restoring persistent chat...');
-
-                    const overflowBtn = document.querySelector('.overflow-menu-wrapper button, button[aria-label*="View more actions"]');
-                    if (overflowBtn && isElementVisible(overflowBtn)) {
-                        overflowBtn.click();
-                        await randomDelay(800, 1200);
-
-                        const tempChatOption = document.querySelector('button[data-test-incognito-toggle], button[aria-label*="temporary chat"]');
-                        if (tempChatOption) {
-                            tempChatOption.click();
-                            await randomDelay(1000, 1400);
-                            hostLog('TEMP_CHAT', 'Temporary Chat state synchronized. Now active: ' + isTemporaryChatActive());
-                        } else {
-                            document.body.click();
-                            await randomDelay(300, 500);
-                        }
-                    }
-                } else {
-                    hostLog('TEMP_CHAT', 'Temporary Chat already matches desired state (' + TEMPORARY_CHAT + '). Skipping.');
-                }
-
-                // 2. Open Settings Drawer if System Prompt or Thinking Level is configured
-                const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (SYS_TITLE && SYS_TITLE.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default');
-
-                if (needsSettings) {
-                    let sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
-
-                    if (!isElementVisible(sysCard)) {
-                        updateStatus('Opening Settings Drawer...');
-                        const tuneBtn = document.querySelector('button.runsettings-toggle-button, button[aria-label*="Toggle run settings"], button[aria-label*="run settings"]');
-                        if (tuneBtn && isElementVisible(tuneBtn)) {
-                            hostLog('SETTINGS', 'Clicking run settings toggle button (tune icon)...');
-                            tuneBtn.click();
-                            await randomDelay(1000, 1500);
+                    while (mountAttempts < 35) {
+                        await dismissInterstitials();
+                        promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                        if (promptArea && isElementVisible(promptArea)) break;
+                        await delay(1000);
+                        mountAttempts++;
+                        if (mountAttempts % 5 === 0) {
+                            hostLog('MOUNT', 'Polling prompt area (' + mountAttempts + '/35)...');
                         }
                     }
 
-                    // A. Configure Thinking Level if present
-                    if (THINKING_LEVEL && THINKING_LEVEL !== 'Default') {
-                        try {
-                            const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
-                            if (thinkingSelect) {
-                                const currentThinkingVal = (thinkingSelect.textContent || '').trim().toLowerCase();
-                                if (currentThinkingVal.includes(THINKING_LEVEL.toLowerCase())) {
-                                    hostLog('SETTINGS', 'Thinking Level already set to "' + THINKING_LEVEL + '". Skipping.');
+                    if (!promptArea) {
+                        const err = 'Failed to locate prompt textarea after 35s.';
+                        hostLog('MOUNT_ERR', err);
+                        if (window.OmniAutomator && window.OmniAutomator.onPuppetReady) {
+                            window.OmniAutomator.onPuppetReady(false, err);
+                        }
+                        return false;
+                    }
+
+                    hostLog('PUPPET_INIT', 'Prompt area detected and ready!');
+                    if (window.OmniAutomator && window.OmniAutomator.onPuppetReady) {
+                        window.OmniAutomator.onPuppetReady(true, 'Ready');
+                    }
+                    return true;
+                },
+
+                configure: async function(opts) {
+                    opts = opts || {};
+                    const SYS_TITLE = opts.sysTitle || '';
+                    const SYS_PROMPT = opts.sysPrompt || '';
+                    const THINKING_LEVEL = opts.thinkingLevel || 'Default';
+                    const TEMPORARY_CHAT = !!opts.temporaryChat;
+                    const FALLBACK_ENABLED = opts.fallbackEnabled !== false;
+
+                    try {
+                        await dismissInterstitials();
+                        const currentTempState = isTemporaryChatActive();
+                        if (TEMPORARY_CHAT !== currentTempState) {
+                            hostLog('TEMP_CHAT', (TEMPORARY_CHAT ? 'Enabling' : 'Disabling') + ' Temporary Chat...');
+                            updateStatus(TEMPORARY_CHAT ? 'Activating Temporary Chat...' : 'Restoring persistent chat...');
+                            const overflowBtn = document.querySelector('.overflow-menu-wrapper button, button[aria-label*="View more actions"]');
+                            if (overflowBtn && isElementVisible(overflowBtn)) {
+                                overflowBtn.click();
+                                await randomDelay(800, 1200);
+                                const tempChatOption = document.querySelector('button[data-test-incognito-toggle], button[aria-label*="temporary chat"]');
+                                if (tempChatOption) {
+                                    tempChatOption.click();
+                                    await randomDelay(1000, 1400);
                                 } else {
-                                    hostLog('SETTINGS', 'Opening Thinking Level dropdown...');
-                                    thinkingSelect.click();
-                                    await randomDelay(800, 1200);
-
-                                    const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
-                                    const match = options.find(o => (o.textContent || '').trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
-                                    if (match) {
-                                        match.click();
-                                        hostLog('SETTINGS', 'Applied Thinking Level: ' + (match.textContent || '').trim());
-                                    } else {
-                                        document.body.click();
-                                    }
-                                    await randomDelay(600, 1000);
+                                    document.body.click();
+                                    await randomDelay(300, 500);
                                 }
                             }
-                        } catch(e) {
-                            hostLog('SETTINGS_WARN', 'Thinking level setting failed: ' + e.message);
                         }
-                    }
 
-                    // B. Select or Inject System Instructions
-                    if ((SYS_TITLE && SYS_TITLE.length > 0) || (SYS_PROMPT && SYS_PROMPT.length > 0)) {
-                        try {
-                            updateStatus('Checking System Instructions...');
-                            sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
-                            
-                            const cardSub = (sysCard ? (sysCard.querySelector('.subtitle')?.textContent || '') : '').trim();
-                            const alreadyMatches = (SYS_TITLE && cardSub.toLowerCase().includes(SYS_TITLE.toLowerCase())) ||
-                                                   (SYS_PROMPT && cardSub.length > 15 && SYS_PROMPT.startsWith(cardSub.slice(0, 15)));
+                        const needsSettings = (SYS_PROMPT && SYS_PROMPT.length > 0) || (SYS_TITLE && SYS_TITLE.length > 0) || (THINKING_LEVEL && THINKING_LEVEL !== 'Default');
+                        if (needsSettings) {
+                            let sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
+                            if (!isElementVisible(sysCard)) {
+                                updateStatus('Opening Settings Drawer...');
+                                const tuneBtn = document.querySelector('button.runsettings-toggle-button, button[aria-label*="Toggle run settings"], button[aria-label*="run settings"]');
+                                if (tuneBtn && isElementVisible(tuneBtn)) {
+                                    tuneBtn.click();
+                                    await randomDelay(1000, 1500);
+                                }
+                            }
 
-                            if (alreadyMatches && !FALLBACK_ENABLED) {
-                                hostLog('SYS_PROMPT', 'System instructions already match active card preview. Skipping dialog.');
-                            } else if (sysCard) {
-                                hostLog('SYS_PROMPT', 'Opening System Instructions dialog...');
-                                sysCard.click();
-                                await randomDelay(1200, 1800);
-
-                                let matchedExisting = false;
-
-                                // 1. Scan AI Studio mat-select dropdown for existing saved preset by title
-                                const sysSelect = document.querySelector('ms-system-instructions mat-select, .select-tooltip-wrapper mat-select');
-                                if (sysSelect) {
-                                    const currentPresetText = (sysSelect.textContent || '').trim().toLowerCase();
-                                    if (SYS_TITLE && currentPresetText === SYS_TITLE.toLowerCase()) {
-                                        hostLog('SYS_PROMPT', 'Preset "' + SYS_TITLE + '" already active in dropdown.');
-                                        matchedExisting = true;
-                                    } else {
-                                        hostLog('SYS_PROMPT', 'Opening System Instructions preset dropdown...');
-                                        sysSelect.click();
-                                        await randomDelay(800, 1200);
-
-                                        const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
-
-                                        if (SYS_TITLE && SYS_TITLE.length > 0) {
-                                            const match = options.find(opt => {
-                                                const txt = (opt.textContent || '').trim().toLowerCase();
-                                                return txt === SYS_TITLE.toLowerCase();
-                                            });
-                                            if (match) {
-                                                hostLog('SYS_PROMPT', 'Found existing preset in AI Studio for title: "' + SYS_TITLE + '". Selecting...');
-                                                match.click();
-                                                matchedExisting = true;
-                                                await randomDelay(800, 1200);
-                                            }
-                                        }
-
-                                        if (!matchedExisting) {
-                                            const createNewOpt = options.find(opt => (opt.textContent || '').includes('Create new instruction'));
-                                            if (createNewOpt) {
-                                                hostLog('SYS_PROMPT', 'Selecting "+ Create new instruction" option...');
-                                                createNewOpt.click();
-                                                await randomDelay(800, 1200);
-                                            } else {
-                                                document.body.click();
-                                                await randomDelay(400, 600);
-                                            }
+                            if (THINKING_LEVEL && THINKING_LEVEL !== 'Default') {
+                                try {
+                                    const thinkingSelect = document.querySelector('ms-thinking-level-setting mat-select, mat-select[aria-label*="Thinking"]');
+                                    if (thinkingSelect) {
+                                        const currentVal = (thinkingSelect.textContent || '').trim().toLowerCase();
+                                        if (!currentVal.includes(THINKING_LEVEL.toLowerCase())) {
+                                            thinkingSelect.click();
+                                            await randomDelay(800, 1200);
+                                            const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
+                                            const match = options.find(o => (o.textContent || '').trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
+                                            if (match) match.click();
+                                            else document.body.click();
+                                            await randomDelay(600, 1000);
                                         }
                                     }
+                                } catch(e) {
+                                    hostLog('SETTINGS_WARN', 'Thinking level setting failed: ' + e.message);
                                 }
+                            }
 
-                                // 2. If new or not matched in studio, inject title + body from local vault
-                                if (!matchedExisting) {
-                                    if (FALLBACK_ENABLED && SYS_PROMPT && SYS_PROMPT.length > 0) {
-                                        hostLog('SYS_PROMPT', 'Injecting custom title and instructions body into dialog...');
+                            if ((SYS_TITLE && SYS_TITLE.length > 0) || (SYS_PROMPT && SYS_PROMPT.length > 0)) {
+                                try {
+                                    updateStatus('Checking System Instructions...');
+                                    sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
+                                    const cardSub = (sysCard ? (sysCard.querySelector('.subtitle')?.textContent || '') : '').trim();
+                                    const alreadyMatches = (SYS_TITLE && cardSub.toLowerCase().includes(SYS_TITLE.toLowerCase())) ||
+                                                           (SYS_PROMPT && cardSub.length > 15 && SYS_PROMPT.startsWith(cardSub.slice(0, 15)));
 
-                                        const titleInput = document.querySelector('ms-system-instructions .title-row input, ms-system-instructions input[placeholder*="Title"], ms-system-instructions input');
-                                        if (titleInput && SYS_TITLE && SYS_TITLE.length > 0) {
-                                            if (titleInput.value !== SYS_TITLE) {
+                                    if (alreadyMatches && !FALLBACK_ENABLED) {
+                                        hostLog('SYS_PROMPT', 'System instructions match preview. Skipping.');
+                                    } else if (sysCard) {
+                                        sysCard.click();
+                                        await randomDelay(1200, 1800);
+                                        let matchedExisting = false;
+
+                                        const sysSelect = document.querySelector('ms-system-instructions mat-select, .select-tooltip-wrapper mat-select');
+                                        if (sysSelect) {
+                                            const curPreset = (sysSelect.textContent || '').trim().toLowerCase();
+                                            if (SYS_TITLE && curPreset === SYS_TITLE.toLowerCase()) {
+                                                matchedExisting = true;
+                                            } else {
+                                                sysSelect.click();
+                                                await randomDelay(800, 1200);
+                                                const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
+                                                if (SYS_TITLE && SYS_TITLE.length > 0) {
+                                                    const match = options.find(opt => (opt.textContent || '').trim().toLowerCase() === SYS_TITLE.toLowerCase());
+                                                    if (match) {
+                                                        match.click();
+                                                        matchedExisting = true;
+                                                        await randomDelay(800, 1200);
+                                                    }
+                                                }
+                                                if (!matchedExisting) {
+                                                    const createNewOpt = options.find(opt => (opt.textContent || '').includes('Create new instruction'));
+                                                    if (createNewOpt) {
+                                                        createNewOpt.click();
+                                                        await randomDelay(800, 1200);
+                                                    } else {
+                                                        document.body.click();
+                                                        await randomDelay(400, 600);
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (!matchedExisting && FALLBACK_ENABLED && SYS_PROMPT && SYS_PROMPT.length > 0) {
+                                            const titleInput = document.querySelector('ms-system-instructions .title-row input, ms-system-instructions input[placeholder*="Title"], ms-system-instructions input');
+                                            if (titleInput && SYS_TITLE && SYS_TITLE.length > 0 && titleInput.value !== SYS_TITLE) {
                                                 safeInjectText(titleInput, SYS_TITLE);
                                                 await randomDelay(400, 700);
                                             }
-                                        }
-
-                                        let sysTa = null;
-                                        for (let a = 0; a < 15; a++) {
-                                            sysTa = document.querySelector('ms-system-instructions textarea, textarea.in-run-settings, textarea[aria-label*="System"], textarea[placeholder*="instructions"]');
-                                            if (sysTa && isElementVisible(sysTa)) break;
-                                            await delay(400);
-                                        }
-
-                                        if (sysTa) {
-                                            if (sysTa.value !== SYS_PROMPT) {
-                                                updateStatus('Typing System Instructions...');
+                                            let sysTa = null;
+                                            for (let a = 0; a < 15; a++) {
+                                                sysTa = document.querySelector('ms-system-instructions textarea, textarea.in-run-settings, textarea[aria-label*="System"], textarea[placeholder*="instructions"]');
+                                                if (sysTa && isElementVisible(sysTa)) break;
+                                                await delay(400);
+                                            }
+                                            if (sysTa && sysTa.value !== SYS_PROMPT) {
                                                 safeInjectText(sysTa, SYS_PROMPT);
-                                                hostLog('SYS_PROMPT', 'Injected ' + SYS_PROMPT.length + ' chars into System Instructions.');
                                                 await randomDelay(800, 1400);
                                             }
                                         }
-                                    } else {
-                                        hostLog('SYS_PROMPT_WARN', 'Preset title "' + SYS_TITLE + '" not in AI Studio and no fallback body provided.');
-                                    }
-                                }
 
-                                // Wait for auto-save status
-                                let saveWait = 0;
-                                while (saveWait < 12) {
-                                    const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status');
-                                    if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) {
-                                        hostLog('SYS_PROMPT', 'System instructions saved status confirmed.');
-                                        break;
-                                    }
-                                    await delay(300);
-                                    saveWait++;
-                                }
-                                await randomDelay(500, 800);
-
-                                // 3. Close dialog via close button
-                                const closeBtn = document.querySelector('mat-dialog-container button[mat-dialog-close], mat-dialog-container button[aria-label*="Close"], button[data-test-close-button]');
-                                if (closeBtn) {
-                                    hostLog('SYS_PROMPT', 'Closing System Instructions dialog...');
-                                    closeBtn.click();
-                                    await randomDelay(1000, 1500);
-                                }
-                            } else {
-                                hostLog('SYS_PROMPT_WARN', 'Could not find System Instructions card button.');
-                            }
-                        } catch(e) {
-                            hostLog('SYS_PROMPT_ERR', 'System instructions step failed: ' + e.message);
-                        } finally {
-                            window.__omniConfiguringSysPrompt = false;
-                        }
-                    }
-
-                    // C. Target-First Viewport Check: Check if prompt area is already visible/unblocked
-                    let promptReady = false;
-                    for (let w = 0; w < 6; w++) {
-                        const pa = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
-                        if (pa && isElementVisible(pa)) {
-                            promptReady = true;
-                            break;
-                        }
-                        await delay(250);
-                    }
-
-                    // Only attempt manual drawer close if prompt area remains blocked by an open drawer
-                    if (!promptReady) {
-                        const openDrawer = document.querySelector('ms-run-settings.expanded, .content-container ms-run-settings:not(.collapsed)');
-                        if (openDrawer && isElementVisible(openDrawer)) {
-                            const closeSettingsBtn = openDrawer.querySelector('button[aria-label*="Close run settings"], button[aria-label*="Close"]');
-                            if (closeSettingsBtn && isElementVisible(closeSettingsBtn)) {
-                                hostLog('SETTINGS', 'Prompt still obscured. Manually closing settings drawer...');
-                                closeSettingsBtn.click();
-                                await randomDelay(800, 1200);
-                            }
-                        }
-                    } else {
-                        hostLog('SETTINGS', 'Settings drawer auto-collapsed with dialog. UI ready.');
-                    }
-                }
-
-                await randomDelay(800, 1200);
-
-                // 3. Initial Attachments Dispatch (Turn 1 Global)
-                if (ATTACHMENTS && Array.isArray(ATTACHMENTS) && ATTACHMENTS.length > 0) {
-                    await injectAttachments(ATTACHMENTS, 'Turn 1 Global');
-                }
-
-                // 4. Sequential Multi-Turn Prompt Chain Execution
-                let totalTurnsExecuted = 0;
-                let fullCumulativeOutput = '';
-                let latestTurnThoughts = '';
-
-                for (let stepIdx = 0; stepIdx < STEPS.length; stepIdx++) {
-                    const currentStep = STEPS[stepIdx];
-                    const stepNum = stepIdx + 1;
-                    const maxRepeats = currentStep.isInfinite ? Infinity : (currentStep.repeatCount || 1);
-                    let currentRepeat = 0;
-
-                    while (currentRepeat < maxRepeats) {
-                        currentRepeat++;
-                        totalTurnsExecuted++;
-
-                        let stepPrefix = '';
-                        if (STEPS.length > 1) {
-                            stepPrefix += 'Step ' + stepNum + '. ';
-                        }
-                        if (currentStep.isInfinite) {
-                            stepPrefix += 'Loop ' + currentRepeat + '. ';
-                        } else if (maxRepeats > 1) {
-                            stepPrefix += 'Repeat ' + currentRepeat + '. ';
-                        }
-                        const stepLabel = stepPrefix.trim();
-
-                        updateStatus((stepPrefix + 'Submitting prompt.').trim());
-                        hostLog('CHAIN', 'Executing Step ' + stepNum + '/' + STEPS.length + ' (Repeat ' + currentRepeat + '/' + maxRepeats + ') [Total Turns: ' + totalTurnsExecuted + ']');
-
-                        await dismissInterstitials();
-
-                        // Ingest step-specific attachments if provided
-                        if (currentStep.attachments && Array.isArray(currentStep.attachments) && currentStep.attachments.length > 0) {
-                            await injectAttachments(currentStep.attachments, stepLabel);
-                        }
-
-                        // Find the bottom-most active textarea
-                        let activePromptArea = null;
-                        for (let a = 0; a < 25; a++) {
-                            const allAreas = Array.from(document.querySelectorAll('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea'));
-                            activePromptArea = allAreas.length > 0 ? allAreas[allAreas.length - 1] : null;
-                            if (activePromptArea && isElementVisible(activePromptArea)) break;
-                            await dismissInterstitials();
-                            await delay(400);
-                        }
-
-                        if (activePromptArea && currentStep.prompt && currentStep.prompt.trim().length > 0) {
-                            safeInjectText(activePromptArea, currentStep.prompt);
-                            await randomDelay(800, 1400);
-                        }
-
-                        // Ingestion Readiness & State-Verified Submit
-                        if (!isGenerating()) {
-                            updateStatus((stepPrefix + 'Preparing to run.').trim());
-                            let readyTicks = 0;
-                            let submitBtn = null;
-                            const totalFiles = (currentStep.attachments ? currentStep.attachments.length : 0) + (ATTACHMENTS ? ATTACHMENTS.length : 0);
-                            // Scale button readiness wait: up to 90s for multi-image chips
-                            const maxReadyTicks = Math.max(120, totalFiles * 30);
-
-                            while (readyTicks < maxReadyTicks) {
-                                if (isGenerating()) break;
-                                submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
-                                if (submitBtn && isRunButtonReady(submitBtn)) break;
-                                await delay(500);
-                                readyTicks++;
-                                if (readyTicks % 16 === 0) { // Heartbeat every 8s
-                                    updateStatus((stepPrefix + 'Attaching images to prompt.').trim());
-                                }
-                            }
-
-                            let submitTriggered = false;
-
-                            if (!isGenerating() && submitBtn && isRunButtonReady(submitBtn)) {
-                                hostLog('RUN', 'Clicking Run button for ' + stepLabel + '...');
-                                submitBtn.click();
-                                submitTriggered = true;
-
-                                // Guard against race conditions: verify if AI Studio transitions into generation state
-                                let verifyTicks = 0;
-                                while (verifyTicks < 8) { // Wait up to 4s for network transition
-                                    await delay(500);
-                                    if (isGenerating() || document.querySelector('ms-thought-chunk')) {
-                                        hostLog('RUN', 'Generation confirmed active via Run button. Suppressing fallback shortcuts.');
-                                        break;
-                                    }
-                                    verifyTicks++;
-                                }
-                            }
-
-                            // Only execute Ctrl+Enter fallback if the primary button click completely failed to engage
-                            if (!isGenerating() && !submitTriggered && activePromptArea && (activePromptArea.value || '').trim().length > 0) {
-                                hostLog('RUN', 'Fallback Ctrl+Enter for ' + stepLabel + '...');
-                                activePromptArea.focus();
-                                activePromptArea.dispatchEvent(new KeyboardEvent('keydown', {
-                                    key: 'Enter',
-                                    code: 'Enter',
-                                    keyCode: 13,
-                                    which: 13,
-                                    ctrlKey: true,
-                                    bubbles: true,
-                                    cancelable: true
-                                }));
-                                
-                                let fallbackVerify = 0;
-                                while (fallbackVerify < 6) {
-                                    await delay(500);
-                                    if (isGenerating()) break;
-                                    fallbackVerify++;
-                                }
-                            }
-                        }
-
-                        // Dynamic Response Polling via Screen Stillness Watchdog
-                        updateStatus((stepPrefix + 'Generating answers.').trim());
-                        let lastOutputText = '';
-                        let lastThoughtsText = '';
-                        let contentStaticTicks = 0;
-                        let totalTurnTicks = 0;
-                        let idleTicks = 0;
-                        const MAX_IDLE_TICKS = 100; // 60s of absolute silence before timeout/retry
-                        const MAX_TOTAL_TICKS = 300; // 3 minutes hard ceiling (300 * 0.6s = 180s)
-                        let turnRetryCount = 0;
-                        const MAX_RETRIES = 2;
-                        let currentTurnOutput = '';
-                        let lastDispatchedOutput = '';
-                        let lastDispatchedThoughts = '';
-                        let lastReportedStage = '';
-
-                        while (totalTurnTicks < MAX_TOTAL_TICKS) {
-                            await delay(600);
-                            totalTurnTicks++;
-                            idleTicks++;
-
-                            // Force active autoscroll so Angular renders nodes below viewport
-                            try {
-                                const autoscroll = document.querySelector('ms-autoscroll-container, .chat-view-container');
-                                if (autoscroll) autoscroll.scrollTop = autoscroll.scrollHeight;
-                                window.scrollTo(0, document.body.scrollHeight);
-                            } catch(_) {}
-
-                            const errBanner = document.querySelector('ms-banner .error-banner-message, ms-global-banner');
-                            const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error, ms-chat-turn:last-of-type .model-error');
-                            const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
-                            const errTxt = ((errBanner ? errBanner.innerText : "") + (turnErr ? turnErr.innerText : "") + (toast ? toast.innerText : "")).trim();
-
-                            if (errTxt && !errTxt.toLowerCase().includes('saved')) {
-                                const lowerErr = errTxt.toLowerCase();
-                                const isRetryable = lowerErr.includes('internal error') ||
-                                                    lowerErr.includes('permission denied') ||
-                                                    lowerErr.includes('overloaded') ||
-                                                    lowerErr.includes('resource exhausted') ||
-                                                    lowerErr.includes('quota') ||
-                                                    lowerErr.includes('try again') ||
-                                                    lowerErr.includes('server error');
-
-                                if (isRetryable && turnRetryCount < MAX_RETRIES) {
-                                    turnRetryCount++;
-                                    hostLog('RETRY', 'Transient error: "' + errTxt + '". Retrying attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
-                                    updateStatus((stepPrefix + 'Retrying turn, attempt ' + turnRetryCount + '.').trim());
-                                    await delay(1800 + (turnRetryCount * 600));
-
-                                    const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
-                                    const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
-                                    const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
-
-                                    if (rerunBtn && isElementVisible(rerunBtn)) {
-                                        rerunBtn.click();
-                                    } else {
-                                        const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
-                                        if (submitBtn) submitBtn.click();
-                                    }
-
-                                    lastOutputText = '';
-                                    contentStaticTicks = 0;
-                                    idleTicks = 0;
-                                    currentTurnOutput = '';
-                                    await delay(1200);
-                                    continue;
-                                } else {
-                                    hostLog('STUDIO_ERROR', 'Fatal error on ' + stepLabel + ': ' + errTxt);
-                                    if (window.OmniAutomator) window.OmniAutomator.onError(errTxt);
-                                    window.__omniAutomating = false;
-                                    return;
-                                }
-                            }
-
-                            // Capture Thoughts
-                            const thoughtBlocks = Array.from(document.querySelectorAll('ms-thought-chunk'));
-                            if (thoughtBlocks.length > 0) {
-                                latestTurnThoughts = thoughtBlocks
-                                    .map(b => (b.innerText || b.textContent || '').trim())
-                                    .filter(Boolean)
-                                    .join('\n\n')
-                                    .trim();
-                            }
-
-                            // Scrape the visual content: prioritize turns containing mounted answer nodes
-                            const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
-                            let activeModelTurn = null;
-                            for (let i = allModelContainers.length - 1; i >= 0; i--) {
-                                const t = allModelContainers[i];
-                                const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
-                                    .some(el => !el.closest('ms-thought-chunk'));
-                                if (hasRealAnswer) {
-                                    activeModelTurn = t;
-                                    break;
-                                }
-                            }
-                            if (!activeModelTurn && allModelContainers.length > 0) {
-                                activeModelTurn = allModelContainers[allModelContainers.length - 1];
-                            }
-
-                            // Audit DOM State transitions
-                            const hasThoughtContent = latestTurnThoughts.length > 0 || document.querySelector('ms-thought-chunk, .thinking-progress-icon') !== null;
-                            const hasAnswerElements = activeModelTurn && Array.from(activeModelTurn.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
-                                .some(el => !el.closest('ms-thought-chunk'));
-
-                            let currentStage = 'STAGE_1_WAITING';
-                            if (hasAnswerElements) {
-                                currentStage = 'STAGE_3_ANSWERING';
-                            } else if (hasThoughtContent) {
-                                currentStage = 'STAGE_2_THINKING';
-                            }
-
-                            if (currentStage !== lastReportedStage) {
-                                lastReportedStage = currentStage;
-                                if (currentStage === 'STAGE_1_WAITING') {
-                                    hostLog('DOM_STATE', '⏳ Stage 1: Waiting for model turn or thinking to mount. Stillness timer frozen.');
-                                } else if (currentStage === 'STAGE_2_THINKING') {
-                                    hostLog('DOM_STATE', '🧠 Stage 2: Deep Thinking in progress (' + latestTurnThoughts.length + ' chars). Answer nodes not mounted yet. Stillness timer frozen at 0.');
-                                } else if (currentStage === 'STAGE_3_ANSWERING') {
-                                    hostLog('DOM_STATE', '🎯 Stage 3: Real answer container mounted! Activating character growth and stillness watchdog.');
-                                }
-                            } else if (currentStage === 'STAGE_2_THINKING' && totalTurnTicks % 8 === 0) {
-                                hostLog('DOM_STATE', '🧠 Deep Thinking pulse: still reasoning (' + (totalTurnTicks * 0.6).toFixed(1) + 's elapsed, ' + latestTurnThoughts.length + ' thought chars). Stillness timer held at 0.');
-                            }
-
-                            if (activeModelTurn) {
-                                const screenText = getScreenText(activeModelTurn);
-                                if (screenText.length >= currentTurnOutput.length) {
-                                    currentTurnOutput = screenText;
-                                }
-                            }
-
-                            // Screen Stillness Watchdog & Deep Telemetry
-                            const hasContent = currentTurnOutput.length > 0;
-                            const textGrew = currentTurnOutput.length > lastOutputText.length;
-                            const thoughtsChanged = latestTurnThoughts !== lastThoughtsText;
-                            const isContentChanged = (currentTurnOutput !== lastOutputText) || thoughtsChanged;
-
-                            if (textGrew) {
-                                const diff = currentTurnOutput.length - lastOutputText.length;
-                                hostLog('WATCHDOG_GROWTH', '📈 Growth: ' + lastOutputText.length + ' -> ' + currentTurnOutput.length + ' chars (+' + diff + ')');
-                                idleTicks = 0;
-                                contentStaticTicks = 0;
-                                lastOutputText = currentTurnOutput;
-                                lastThoughtsText = latestTurnThoughts;
-                            } else if (thoughtsChanged) {
-                                hostLog('WATCHDOG_THOUGHTS', '🧠 Thoughts updated (' + latestTurnThoughts.length + ' chars). Resetting stillness ticks.');
-                                idleTicks = 0;
-                                contentStaticTicks = 0;
-                                lastThoughtsText = latestTurnThoughts;
-                            } else if (hasContent) {
-                                contentStaticTicks++;
-                                if (contentStaticTicks % 2 === 0 || contentStaticTicks >= 8) {
-                                    hostLog('WATCHDOG_STILL', '⏳ Stillness tick ' + contentStaticTicks + '/10: ' + currentTurnOutput.length + ' chars on screen, no changes for ' + (contentStaticTicks * 0.6).toFixed(1) + 's.');
-                                }
-                            }
-
-                            // Dead Man Watchdog: Auto-rerun if completely silent before any text appears (60s)
-                            if (!hasContent && idleTicks >= MAX_IDLE_TICKS) {
-                                if (turnRetryCount < MAX_RETRIES) {
-                                    turnRetryCount++;
-                                    hostLog('IDLE_RETRY', '⚠️ Idle watchdog tripped (' + (idleTicks * 0.6).toFixed(0) + 's silence). Executing auto-rerun attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
-                                    updateStatus((stepPrefix + 'Silence timeout, rerunning attempt ' + turnRetryCount + '.').trim());
-                                    idleTicks = 0;
-                                    contentStaticTicks = 0;
-
-                                    const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
-                                    const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
-                                    const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
-
-                                    if (rerunBtn && isElementVisible(rerunBtn)) {
-                                        rerunBtn.click();
-                                    } else {
-                                        const retrySubmit = document.querySelector('ms-run-button button:not(.stoppable), button[type="submit"]:not(.stoppable)');
-                                        if (retrySubmit && isRunButtonReady(retrySubmit)) {
-                                            retrySubmit.click();
+                                        let saveWait = 0;
+                                        while (saveWait < 12) {
+                                            const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status');
+                                            if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) break;
+                                            await delay(300);
+                                            saveWait++;
+                                        }
+                                        await randomDelay(500, 800);
+                                        const closeBtn = document.querySelector('mat-dialog-container button[mat-dialog-close], mat-dialog-container button[aria-label*="Close"], button[data-test-close-button]');
+                                        if (closeBtn) {
+                                            closeBtn.click();
+                                            await randomDelay(1000, 1500);
                                         }
                                     }
-                                    await delay(2000);
-                                    continue;
-                                } else {
-                                    const timeoutErr = 'AI Studio generation stalled after ' + MAX_RETRIES + ' rerun attempts.';
-                                    hostLog('STUDIO_TIMEOUT', timeoutErr);
-                                    if (window.OmniAutomator) window.OmniAutomator.onError(timeoutErr);
-                                    window.__omniAutomating = false;
-                                    return;
+                                } catch(e) {
+                                    hostLog('SYS_PROMPT_ERR', 'System instructions step failed: ' + e.message);
                                 }
                             }
 
-                            const combinedDisplay = fullCumulativeOutput.length > 0
-                                ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
-                                : currentTurnOutput;
-
-                            if (combinedDisplay !== lastDispatchedOutput || latestTurnThoughts !== lastDispatchedThoughts) {
-                                lastDispatchedOutput = combinedDisplay;
-                                lastDispatchedThoughts = latestTurnThoughts;
-                                if (window.OmniAutomator) window.OmniAutomator.onProgress(latestTurnThoughts, combinedDisplay);
+                            let promptReady = false;
+                            for (let w = 0; w < 6; w++) {
+                                const pa = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                                if (pa && isElementVisible(pa)) { promptReady = true; break; }
+                                await delay(250);
                             }
+                            if (!promptReady) {
+                                const openDrawer = document.querySelector('ms-run-settings.expanded, .content-container ms-run-settings:not(.collapsed)');
+                                if (openDrawer && isElementVisible(openDrawer)) {
+                                    const closeSettingsBtn = openDrawer.querySelector('button[aria-label*="Close run settings"], button[aria-label*="Close"]');
+                                    if (closeSettingsBtn && isElementVisible(closeSettingsBtn)) {
+                                        closeSettingsBtn.click();
+                                        await randomDelay(800, 1200);
+                                    }
+                                }
+                            }
+                        }
 
-                            // Bracket-Aware Screen Stillness Completion:
-                            const trimmedOutput = currentTurnOutput.trim();
-                            const looksLikeJson = trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[') || trimmedOutput.includes('"solutions"');
-                            const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
+                        this.isConfigured = true;
+                        if (window.OmniAutomator && window.OmniAutomator.onPuppetConfigured) {
+                            window.OmniAutomator.onPuppetConfigured(true, 'Configured');
+                        }
+                        return true;
+                    } catch(err) {
+                        hostLog('CONFIG_ERR', err.message);
+                        if (window.OmniAutomator && window.OmniAutomator.onPuppetConfigured) {
+                            window.OmniAutomator.onPuppetConfigured(false, err.message);
+                        }
+                        return false;
+                    }
+                },
 
-                            // If JSON is verified and fully closed, 5 ticks (3.0s) of stillness is enough.
-                            // Otherwise, wait at least 25 ticks (15.0s) across the board so pauses during thinking or multi-image ingestion never get sniped!
-                            const targetTicks = balanced ? 5 : 25;
+                executeTurn: async function(turnOpts) {
+                    turnOpts = turnOpts || {};
+                    const prompt = turnOpts.prompt || '';
+                    const attachments = turnOpts.attachments || [];
+                    const stepLabel = turnOpts.label || 'Turn';
+                    this.aborted = false;
+                    this.isBusy = true;
 
-                            if (hasContent && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
-                                hostLog('DECISION_STOP', '🛑 DECISION: Stop waiting. Target stillness reached (' + contentStaticTicks + '/' + targetTicks + ' ticks, ' + (contentStaticTicks * 0.6).toFixed(1) + 's). balanced=' + balanced + ', looksLikeJson=' + looksLikeJson);
-                                hostLog('SCRAPE_TAIL', 'Scraped content tail (last 300 chars):\n' + currentTurnOutput.slice(-300));
-                                hostLog('RAW_SCRAPE_DUMP', '=== [BEGIN FULL RAW SCRAPE PAYLOAD (' + currentTurnOutput.length + ' chars)] ===\n' + currentTurnOutput + '\n=== [END FULL RAW SCRAPE PAYLOAD] ===');
+                    updateStatus((stepLabel + ': Submitting prompt.').trim());
+                    await dismissInterstitials();
 
-                                fullCumulativeOutput = fullCumulativeOutput.length > 0
-                                    ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + stepLabel + '] ---\n' + currentTurnOutput
-                                    : currentTurnOutput;
+                    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+                        await injectAttachments(attachments, stepLabel);
+                    }
+
+                    let activePromptArea = null;
+                    for (let a = 0; a < 25; a++) {
+                        const allAreas = Array.from(document.querySelectorAll('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea'));
+                        activePromptArea = allAreas.length > 0 ? allAreas[allAreas.length - 1] : null;
+                        if (activePromptArea && isElementVisible(activePromptArea)) break;
+                        await dismissInterstitials();
+                        await delay(400);
+                    }
+
+                    if (activePromptArea && prompt && prompt.trim().length > 0) {
+                        safeInjectText(activePromptArea, prompt);
+                        await randomDelay(800, 1400);
+                    }
+
+                    if (!checkUiGenerating()) {
+                        updateStatus((stepLabel + ': Preparing to run.').trim());
+                        let readyTicks = 0;
+                        let submitBtn = null;
+                        const maxReadyTicks = Math.max(120, (attachments ? attachments.length : 0) * 30);
+
+                        while (readyTicks < maxReadyTicks) {
+                            if (checkUiGenerating()) break;
+                            submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
+                            if (submitBtn && isRunButtonReady(submitBtn)) break;
+                            await delay(500);
+                            readyTicks++;
+                        }
+
+                        let submitTriggered = false;
+                        if (!checkUiGenerating() && submitBtn && isRunButtonReady(submitBtn)) {
+                            hostLog('RUN', 'Clicking Run button for ' + stepLabel + '...');
+                            submitBtn.click();
+                            submitTriggered = true;
+                            let verifyTicks = 0;
+                            while (verifyTicks < 8) {
+                                await delay(500);
+                                if (checkUiGenerating() || document.querySelector('ms-thought-chunk')) break;
+                                verifyTicks++;
+                            }
+                        }
+
+                        if (!checkUiGenerating() && !submitTriggered && activePromptArea && (activePromptArea.value || '').trim().length > 0) {
+                            hostLog('RUN', 'Fallback Ctrl+Enter for ' + stepLabel + '...');
+                            activePromptArea.focus();
+                            activePromptArea.dispatchEvent(new KeyboardEvent('keydown', {
+                                key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, cancelable: true
+                            }));
+                            let fallbackVerify = 0;
+                            while (fallbackVerify < 6) {
+                                await delay(500);
+                                if (checkUiGenerating()) break;
+                                fallbackVerify++;
+                            }
+                        }
+                    }
+
+                    updateStatus((stepLabel + ': Generating answers.').trim());
+                    let lastOutputText = '';
+                    let lastThoughtsText = '';
+                    let contentStaticTicks = 0;
+                    let totalTurnTicks = 0;
+                    let idleTicks = 0;
+                    const MAX_IDLE_TICKS = 100;
+                    const MAX_TOTAL_TICKS = 300;
+                    let turnRetryCount = 0;
+                    const MAX_RETRIES = 2;
+                    let currentTurnOutput = '';
+                    let latestTurnThoughts = '';
+
+                    while (totalTurnTicks < MAX_TOTAL_TICKS && !this.aborted) {
+                        await delay(600);
+                        totalTurnTicks++;
+                        idleTicks++;
+
+                        try {
+                            const autoscroll = document.querySelector('ms-autoscroll-container, .chat-view-container');
+                            if (autoscroll) autoscroll.scrollTop = autoscroll.scrollHeight;
+                            window.scrollTo(0, document.body.scrollHeight);
+                        } catch(_) {}
+
+                        const errBanner = document.querySelector('ms-banner .error-banner-message, ms-global-banner');
+                        const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error, ms-chat-turn:last-of-type .model-error');
+                        const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
+                        const errTxt = ((errBanner ? errBanner.innerText : "") + (turnErr ? turnErr.innerText : "") + (toast ? toast.innerText : "")).trim();
+
+                        if (errTxt && !errTxt.toLowerCase().includes('saved')) {
+                            const lowerErr = errTxt.toLowerCase();
+                            const isRetryable = lowerErr.includes('internal error') ||
+                                                lowerErr.includes('permission denied') ||
+                                                lowerErr.includes('overloaded') ||
+                                                lowerErr.includes('resource exhausted') ||
+                                                lowerErr.includes('quota') ||
+                                                lowerErr.includes('try again') ||
+                                                lowerErr.includes('server error');
+
+                            if (isRetryable && turnRetryCount < MAX_RETRIES) {
+                                turnRetryCount++;
+                                hostLog('RETRY', 'Transient error: "' + errTxt + '". Retrying attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
+                                updateStatus((stepLabel + ': Retrying turn, attempt ' + turnRetryCount + '.').trim());
+                                await delay(1800 + (turnRetryCount * 600));
+
+                                const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
+                                const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
+                                const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
+                                if (rerunBtn && isElementVisible(rerunBtn)) {
+                                    rerunBtn.click();
+                                } else {
+                                    const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
+                                    if (submitBtn) submitBtn.click();
+                                }
+                                lastOutputText = '';
+                                contentStaticTicks = 0;
+                                idleTicks = 0;
+                                currentTurnOutput = '';
+                                await delay(1200);
+                                continue;
+                            } else {
+                                hostLog('STUDIO_ERROR', 'Fatal error on ' + stepLabel + ': ' + errTxt);
+                                this.isBusy = false;
+                                if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                    window.OmniAutomator.onPuppetTurnError(errTxt);
+                                }
+                                return { thoughts: latestTurnThoughts, output: '', error: errTxt };
+                            }
+                        }
+
+                        const thoughtBlocks = Array.from(document.querySelectorAll('ms-thought-chunk'));
+                        if (thoughtBlocks.length > 0) {
+                            latestTurnThoughts = thoughtBlocks
+                                .map(b => (b.innerText || b.textContent || '').trim())
+                                .filter(Boolean)
+                                .join('\n\n')
+                                .trim();
+                        }
+
+                        const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
+                        let activeModelTurn = null;
+                        for (let i = allModelContainers.length - 1; i >= 0; i--) {
+                            const t = allModelContainers[i];
+                            const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+                                .some(el => !el.closest('ms-thought-chunk'));
+                            if (hasRealAnswer) {
+                                activeModelTurn = t;
                                 break;
                             }
                         }
+                        if (!activeModelTurn && allModelContainers.length > 0) {
+                            activeModelTurn = allModelContainers[allModelContainers.length - 1];
+                        }
 
-                        // Settle delay before triggering next turn in chain
-                        const isLastRepeatOfLastStep = (stepIdx === STEPS.length - 1) && (currentRepeat >= maxRepeats);
-                        if (!isLastRepeatOfLastStep) {
-                            updateStatus((stepPrefix + 'Step completed. Preparing next turn.').trim());
-                            await randomDelay(1800, 2600);
+                        if (activeModelTurn) {
+                            const screenText = getScreenText(activeModelTurn);
+                            if (screenText.length >= currentTurnOutput.length) {
+                                currentTurnOutput = screenText;
+                            }
+                        }
+
+                        const hasContent = currentTurnOutput.length > 0;
+                        const textGrew = currentTurnOutput.length > lastOutputText.length;
+                        const thoughtsChanged = latestTurnThoughts !== lastThoughtsText;
+
+                        if (textGrew) {
+                            idleTicks = 0;
+                            contentStaticTicks = 0;
+                            lastOutputText = currentTurnOutput;
+                            lastThoughtsText = latestTurnThoughts;
+                        } else if (thoughtsChanged) {
+                            idleTicks = 0;
+                            contentStaticTicks = 0;
+                            lastThoughtsText = latestTurnThoughts;
+                        } else if (hasContent) {
+                            contentStaticTicks++;
+                        }
+
+                        if (!hasContent && idleTicks >= MAX_IDLE_TICKS) {
+                            if (turnRetryCount < MAX_RETRIES) {
+                                turnRetryCount++;
+                                hostLog('IDLE_RETRY', 'Silence timeout. Auto-rerun ' + turnRetryCount + '/' + MAX_RETRIES);
+                                idleTicks = 0;
+                                contentStaticTicks = 0;
+                                const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
+                                const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
+                                const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
+                                if (rerunBtn && isElementVisible(rerunBtn)) rerunBtn.click();
+                                else {
+                                    const retrySubmit = document.querySelector('ms-run-button button:not(.stoppable)');
+                                    if (retrySubmit && isRunButtonReady(retrySubmit)) retrySubmit.click();
+                                }
+                                await delay(2000);
+                                continue;
+                            } else {
+                                const timeoutErr = 'AI Studio generation stalled after ' + MAX_RETRIES + ' rerun attempts.';
+                                this.isBusy = false;
+                                if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                    window.OmniAutomator.onPuppetTurnError(timeoutErr);
+                                }
+                                return { thoughts: latestTurnThoughts, output: '', error: timeoutErr };
+                            }
+                        }
+
+                        if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnProgress) {
+                            window.OmniAutomator.onPuppetTurnProgress(latestTurnThoughts, currentTurnOutput);
+                        }
+
+                        const trimmedOutput = currentTurnOutput.trim();
+                        const looksLikeJson = trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[') || trimmedOutput.includes('"solutions"');
+                        const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
+                        const targetTicks = balanced ? 5 : 25;
+
+                        if (hasContent && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
+                            hostLog('DECISION_STOP', 'Turn completed. Output length: ' + currentTurnOutput.length);
+                            break;
                         }
                     }
+
+                    this.isBusy = false;
+                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnComplete) {
+                        window.OmniAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
+                    }
+                    return { thoughts: latestTurnThoughts, output: currentTurnOutput, error: null };
+                },
+
+                runBatch: async function(config, steps) {
+                    const ready = await this.init();
+                    if (!ready) return;
+
+                    await this.configure(config);
+                    await randomDelay(800, 1200);
+
+                    if (config.attachments && config.attachments.length > 0) {
+                        await injectAttachments(config.attachments, 'Turn 1 Global');
+                    }
+
+                    let fullCumulativeOutput = '';
+                    let latestTurnThoughts = '';
+                    let totalTurnsExecuted = 0;
+
+                    for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+                        const currentStep = steps[stepIdx];
+                        const stepNum = stepIdx + 1;
+                        const maxRepeats = currentStep.isInfinite ? Infinity : (currentStep.repeatCount || 1);
+                        let currentRepeat = 0;
+
+                        while (currentRepeat < maxRepeats && !this.aborted) {
+                            currentRepeat++;
+                            totalTurnsExecuted++;
+                            let stepPrefix = (steps.length > 1 ? 'Step ' + stepNum + '. ' : '') + (maxRepeats > 1 ? 'Repeat ' + currentRepeat + '. ' : '');
+                            const label = stepPrefix.trim();
+
+                            const result = await this.executeTurn({
+                                prompt: currentStep.prompt,
+                                attachments: currentStep.attachments,
+                                label: label
+                            });
+
+                            if (result.error) {
+                                if (window.OmniAutomator) window.OmniAutomator.onError(result.error);
+                                return;
+                            }
+
+                            latestTurnThoughts = result.thoughts;
+                            fullCumulativeOutput = fullCumulativeOutput.length > 0
+                                ? fullCumulativeOutput + '\n\n--- [Turn ' + totalTurnsExecuted + ': ' + label + '] ---\n' + result.output
+                                : result.output;
+
+                            if (window.OmniAutomator) window.OmniAutomator.onProgress(latestTurnThoughts, fullCumulativeOutput);
+
+                            const isLast = (stepIdx === steps.length - 1) && (currentRepeat >= maxRepeats);
+                            if (!isLast) {
+                                updateStatus((stepPrefix + 'Step completed. Preparing next turn.').trim());
+                                await randomDelay(1800, 2600);
+                            }
+                        }
+                    }
+
+                    updateStatus('Solution ready.');
+                    if (window.OmniAutomator) window.OmniAutomator.onComplete(latestTurnThoughts, fullCumulativeOutput);
                 }
+            };
+        })();
+    """.trimIndent()
+}
 
-                updateStatus('Solution ready.');
-                hostLog('CHAIN_DONE', 'Finished prompt chain. Total turns executed: ' + totalTurnsExecuted + '.');
-                if (window.OmniAutomator) window.OmniAutomator.onComplete(latestTurnThoughts, fullCumulativeOutput);
-                window.__omniAutomating = false;
+fun buildAiStudioAutomationScript(
+    prompt: String,
+    sysTitle: String,
+    sysPrompt: String,
+    thinkingLevel: String,
+    model: String,
+    fallbackEnabled: Boolean = true,
+    temporaryChat: Boolean = false,
+    attachmentsJson: String = "[]",
+    stepsJson: String = "[]"
+): String {
+    val puppetScript = buildAiStudioPuppetScript()
+    return """
+        (async function() {
+            if (window.__omniAutomating) return;
+            window.__omniAutomating = true;
 
-            } catch (fatalErr) {
-                hostLog('FATAL_ERR', (fatalErr.stack || fatalErr.message || String(fatalErr)));
-                if (window.OmniAutomator) window.OmniAutomator.onError('Script error: ' + fatalErr.message);
+            $puppetScript
+
+            const config = {
+                sysTitle: $sysTitle,
+                sysPrompt: $sysPrompt,
+                thinkingLevel: $thinkingLevel,
+                model: $model,
+                fallbackEnabled: $fallbackEnabled,
+                temporaryChat: $temporaryChat,
+                attachments: $attachmentsJson
+            };
+
+            const stepsData = $stepsJson;
+            const fallbackPrompt = $prompt;
+            const steps = (stepsData && Array.isArray(stepsData) && stepsData.length > 0)
+                ? stepsData
+                : [{ prompt: fallbackPrompt, repeatCount: 1, isInfinite: false, attachments: [] }];
+
+            try {
+                await window.__omniPuppet.runBatch(config, steps);
+            } catch(e) {
+                if (window.OmniAutomator) window.OmniAutomator.onError(e.message);
+            } finally {
                 window.__omniAutomating = false;
             }
         })();
