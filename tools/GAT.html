@@ -218,8 +218,20 @@
             profileList.forEach(function(p) {
                 const wrapper = document.createElement('label');
                 wrapper.className = 'flex items-center gap-2 bg-[#0D1117] border border-gray-800 hover:border-gray-700 p-2.5 rounded-lg cursor-pointer text-xs';
-                wrapper.innerHTML = '<input type="checkbox" class="profile-worker-checkbox accent-sky-500" value="' + p.id.replace(/"/g, '"') + '" data-name="' + p.name.replace(/"/g, '"') + '" checked />' +
-                                    '<span class="font-semibold text-gray-200 truncate">' + p.name + '</span>';
+                
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'profile-worker-checkbox accent-sky-500';
+                cb.value = p.id;
+                cb.setAttribute('data-name', p.name);
+                cb.checked = true;
+
+                const span = document.createElement('span');
+                span.className = 'font-semibold text-gray-200 truncate';
+                span.textContent = p.name;
+
+                wrapper.appendChild(cb);
+                wrapper.appendChild(span);
                 container.appendChild(wrapper);
             });
         }
@@ -446,14 +458,7 @@
                     return session;
                 }
 
-                try {
-                    await createAndConfigureSession();
-                    log(profileName, 'Session configured & armed! Entering work-stealing queue...', 'text-emerald-400');
-                } catch(err) {
-                    log(profileName, '❌ Session Initialization Failed: ' + err.message, 'text-rose-400');
-                    if (ui) { ui.badge.innerText = 'Failed'; ui.task.innerText = err.message; }
-                    return;
-                }
+                log(profileName, 'Worker armed and ready. Entering work-stealing queue...', 'text-emerald-400');
 
                 // Work-Stealing Loop
                 while (activeQueue.length > 0 && !isAborted) {
@@ -462,6 +467,29 @@
                     if (ui) {
                         ui.badge.innerText = 'Active';
                         ui.task.innerText = 'Ch ' + chapter.number + ': ' + chapter.title.slice(0, 22);
+                        ui.prog.innerText = 'Spawning clean session...';
+                    }
+
+                    // Fresh session per chapter to guarantee zero context contamination or file chip limits
+                    try {
+                        await createAndConfigureSession();
+                    } catch(initErr) {
+                        const errMsg = initErr.message || String(initErr);
+                        if (/429|quota|resource.*exhausted|rate.*limit/i.test(errMsg)) {
+                            log(profileName, '🛑 Quota Limit (429) on session boot! Retiring worker. Re-queuing Chapter ' + chapter.number + '...', 'text-rose-400');
+                            activeQueue.unshift(chapter);
+                            if (ui) {
+                                ui.badge.innerText = 'Exhausted (429)';
+                                ui.badge.className = 'worker-badge text-[10px] text-rose-400 font-bold';
+                                ui.task.innerText = 'Quota Limit Hit';
+                                ui.prog.innerText = 'Profile sleeping';
+                            }
+                            return;
+                        }
+                        log(profileName, '❌ Session spawn failed: ' + errMsg, 'text-rose-400');
+                        activeQueue.unshift(chapter);
+                        if (ui) { ui.badge.innerText = 'Failed'; ui.task.innerText = 'Spawn error'; }
+                        return;
                     }
 
                     let cachedChapterText = null;
@@ -581,12 +609,15 @@
                             failedChapters.push({ chapter: chapter, error: chapterFailureReason });
                         }
                     }
+
+                    // Cleanly teardown session after each chapter to purge RAM and prevent file chip accumulation
+                    if (session) {
+                        try { await session.close(); } catch(_) {}
+                        session = null;
+                    }
                 }
 
-                if (session) {
-                    try { await session.close(); } catch(_) {}
-                }
-                log(profileName, 'Session closed gracefully. Worker finished.', 'text-gray-400');
+                log(profileName, 'Work complete. Worker finished cleanly.', 'text-gray-400');
                 if (ui && !ui.badge.innerText.includes('Exhausted')) {
                     ui.badge.innerText = 'Done';
                     ui.task.innerText = 'All tasks completed';
@@ -630,7 +661,8 @@
 
         btnAbort.onclick = function() {
             isAborted = true;
-            log(null, '🛑 User triggered Emergency Stop! Halting workers...', 'text-rose-400');
+            try { Omni.studio.abort(); } catch(_) {}
+            log(null, '🛑 User triggered Emergency Stop! Halting all active workers...', 'text-rose-400');
             setFactoryStatus('Aborted', 'bg-rose-900 text-rose-300 border-rose-700');
         };
     </script>
