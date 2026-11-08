@@ -79,9 +79,9 @@ fun StudioLabDialog(
                     Button(
                         onClick = {
                             editingPlaybookId = null
-                            editTitle = "Custom Agent"
-                            editDescription = "Puppets AI Studio and executes Nexus Python"
-                            editContent = DEFAULT_STARTER_PLAYBOOK_HTML
+                            editTitle = ""
+                            editDescription = ""
+                            editContent = ""
                             isEditing = true
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
@@ -135,12 +135,41 @@ fun StudioLabDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("HTML/JS Playbook Code (Single-File Applet)", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        TextButton(
-                            onClick = { editContent = DEFAULT_STARTER_PLAYBOOK_HTML },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                        ) {
-                            Text("Reset to Boilerplate", color = Color(0xFF58A6FF), fontSize = 10.sp)
+                        Text("HTML/JS Playbook Code", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    val clip = bridge.getClipboardText()
+                                    if (!clip.isNullOrBlank()) {
+                                        editContent = clip
+                                        bridge.showToast("📋 Pasted code from clipboard!")
+                                    } else {
+                                        bridge.showToast("Clipboard is empty")
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, Color(0xFF00E5FF)),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text("📋 Paste", color = Color(0xFF00E5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                            if (editContent.isNotEmpty()) {
+                                TextButton(
+                                    onClick = { editContent = "" },
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(26.dp)
+                                ) {
+                                    Text("Clear", color = Color(0xFFF28B82), fontSize = 10.sp)
+                                }
+                            }
+                            TextButton(
+                                onClick = { editContent = DEFAULT_STARTER_PLAYBOOK_HTML },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text("Boilerplate", color = Color(0xFF58A6FF), fontSize = 10.sp)
+                            }
                         }
                     }
 
@@ -260,7 +289,7 @@ fun StudioLabDialog(
                                                 Button(
                                                     onClick = { onLaunchPlaybook(pb) },
                                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                                     shape = RoundedCornerShape(8.dp),
                                                     modifier = Modifier.height(28.dp)
                                                 ) {
@@ -284,6 +313,25 @@ fun StudioLabDialog(
                                                 ) {
                                                     Text("Edit", fontSize = 11.sp)
                                                 }
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        val clip = bridge.getClipboardText()
+                                                        if (!clip.isNullOrBlank()) {
+                                                            onSavePlaybook(pb.title, pb.description, clip, pb.id)
+                                                            bridge.showToast("📋 Updated '${pb.title}' from clipboard!")
+                                                        } else {
+                                                            bridge.showToast("Clipboard is empty")
+                                                        }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E5FF)),
+                                                    border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f)),
+                                                    modifier = Modifier.height(28.dp)
+                                                ) {
+                                                    Text("📋 Paste", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
 
                                             IconButton(
@@ -305,10 +353,11 @@ fun StudioLabDialog(
             if (isEditing) {
                 Button(
                     onClick = {
-                        onSavePlaybook(editTitle, editDescription, editContent, editingPlaybookId)
+                        val finalTitle = editTitle.trim().ifEmpty { "Playbook ${playbooks.size + 1}" }
+                        onSavePlaybook(finalTitle, editDescription, editContent, editingPlaybookId)
                         isEditing = false
                     },
-                    enabled = editTitle.isNotBlank() && editContent.isNotBlank(),
+                    enabled = editContent.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
                 ) {
                     Text("Save Playbook", fontWeight = FontWeight.Bold)
