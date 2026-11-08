@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ComposeView
@@ -1055,10 +1056,18 @@ class OmniPlayerPlugin : PluginEntry() {
         var isMuted by remember { mutableStateOf(false) }
         var currentOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_SENSOR) }
 
-        // Precision HUD Gestures
-        var hudType by remember { mutableStateOf<String?>(null) } // "BRIGHTNESS", "VOLUME", "SEEK"
+        // Precision Gestures State
+        var currentBrightness by remember { mutableIntStateOf(50) }
+        var currentVolume by remember { mutableIntStateOf(50) }
+        var hudType by remember { mutableStateOf<String?>(null) } // "BRIGHTNESS", "VOLUME", "SEEK", "DOUBLE_SEEK"
         var hudValue by remember { mutableIntStateOf(50) }
-        var hudDeltaSec by remember { mutableIntStateOf(0) }
+        var hudSeekTarget by remember { mutableLongStateOf(0L) }
+        var hudSeekDelta by remember { mutableLongStateOf(0L) }
+
+        var lastTapTime by remember { mutableLongStateOf(0L) }
+        var lastTapPos by remember { mutableStateOf(Offset.Zero) }
+
+        val scope = rememberCoroutineScope()
 
         BackHandler {
             if (isLocked) {
@@ -1122,36 +1131,128 @@ class OmniPlayerPlugin : PluginEntry() {
                 .fillMaxSize()
                 .background(Color.Black)
                 .pointerInput(isLocked) {
-                    if (!isLocked) {
-                        detectTapGestures(
-                            onTap = { showControls = !showControls },
-                            onDoubleTap = { offset ->
-                                val width = size.width
-                                when {
-                                    offset.x < width * 0.35f -> {
-                                        val target = (player.currentPosition - 10000).coerceAtLeast(0)
-                                        player.seekTo(target)
-                                        hudType = "SEEK"
-                                        hudDeltaSec = -10
+                    awaitPointerEventScope {
+                        val density = this.density
+                        val touchSlopPx = 18f * density
+
+                        while (isActive) {
+                            val downEvent = awaitPointerEvent()
+                            if (downEvent.type != PointerEventType.Press) continue
+                            val downChange = downEvent.changes.firstOrNull() ?: continue
+                            val startX = downChange.position.x
+                            val startY = downChange.position.y
+                            val sWidth = size.width.toFloat()
+                            val sHeight = size.height.toFloat()
+
+                            var isDragging = false
+                            var gestureMode = 0 // 1: Brightness, 2: Volume, 3: Seek
+
+                            val initialB = currentBrightness
+                            val initialV = currentVolume
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == downChange.id } ?: break
+
+                                if (event.type == PointerEventType.Move) {
+                                    val totalDx = change.position.x - startX
+                                    val totalDy = change.position.y - startY
+                                    val dist = kotlin.math.hypot(totalDx, totalDy)
+
+                                    if (!isDragging && dist > touchSlopPx && !isLocked) {
+                                        isDragging = true
+                                        if (kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx)) {
+                                            gestureMode = if (startX < sWidth * 0.45f) 1 else if (startX > sWidth * 0.55f) 2 else 0
+                                        } else {
+                                            gestureMode = 3
+                                        }
                                     }
-                                    offset.x > width * 0.65f -> {
-                                        val target = (player.currentPosition + 10000).coerceAtMost(totalDuration)
-                                        player.seekTo(target)
-                                        hudType = "SEEK"
-                                        hudDeltaSec = 10
+
+                                    if (isDragging) {
+                                        change.consume()
+                                        when (gestureMode) {
+                                            1 -> {
+                                                val deltaY = startY - change.position.y
+                                                val newB = (initialB + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
+                                                currentBrightness = newB
+                                                bridge.setScreenBrightness(newB)
+                                                hudType = "BRIGHTNESS"
+                                                hudValue = newB
+                                            }
+                                            2 -> {
+                                                val deltaY = startY - change.position.y
+                                                val newV = (initialV + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
+                                                currentVolume = newV
+                                                bridge.setVolume("MEDIA", newV)
+                                                hudType = "VOLUME"
+                                                hudValue = newV
+                                            }
+                                            3 -> {
+                                                val deltaX = change.position.x - startX
+                                                val deltaMs = (deltaX * 120f).toLong()
+                                                val targetMs = (player.currentPosition + deltaMs).coerceIn(0L, totalDuration)
+                                                hudType = "SEEK"
+                                                hudSeekTarget = targetMs
+                                                hudSeekDelta = deltaMs / 1000L
+                                            }
+                                        }
                                     }
-                                    else -> {
-                                        if (player.isPlaying) player.pause() else player.play()
+                                } else if (event.type == PointerEventType.Release) {
+                                    if (isDragging) {
+                                        if (gestureMode == 3) {
+                                            player.seekTo(hudSeekTarget)
+                                        }
+                                        scope.launch {
+                                            delay(900)
+                                            hudType = null
+                                        }
+                                    } else {
+                                        // Stationary Tap or Double-tap
+                                        val now = System.currentTimeMillis()
+                                        val isQuickSecondTap = (now - lastTapTime < 320L) && (kotlin.math.abs(startX - lastTapPos.x) < 50f * density)
+
+                                        if (isQuickSecondTap) {
+                                            // Double-Tap Execution
+                                            lastTapTime = 0L
+                                            if (!isLocked) {
+                                                when {
+                                                    startX < sWidth * 0.35f -> {
+                                                        player.seekTo((player.currentPosition - 10000).coerceAtLeast(0))
+                                                        hudType = "DOUBLE_SEEK"
+                                                        hudSeekDelta = -10L
+                                                        scope.launch { delay(700); hudType = null }
+                                                    }
+                                                    startX > sWidth * 0.65f -> {
+                                                        player.seekTo((player.currentPosition + 10000).coerceAtMost(totalDuration))
+                                                        hudType = "DOUBLE_SEEK"
+                                                        hudSeekDelta = 10L
+                                                        scope.launch { delay(700); hudType = null }
+                                                    }
+                                                    else -> {
+                                                        if (player.isPlaying) player.pause() else player.play()
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // First Tap Registered - Toggle Controls after double-tap window expires
+                                            lastTapTime = now
+                                            lastTapPos = Offset(startX, startY)
+                                            scope.launch {
+                                                delay(320L)
+                                                if (lastTapTime == now) {
+                                                    showControls = !showControls
+                                                }
+                                            }
+                                        }
                                     }
+                                    break
                                 }
                             }
-                        )
-                    } else {
-                        detectTapGestures(onTap = { showControls = !showControls })
+                        }
                     }
                 }
         ) {
-            // 1. AndroidView ExoPlayer Video Canvas
+            // 1. AndroidView ExoPlayer Video Surface
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
@@ -1166,90 +1267,133 @@ class OmniPlayerPlugin : PluginEntry() {
                 modifier = Modifier.fillMaxSize()
             )
 
-            // 2. Gesture Touch Gate (Left = Brightness, Right = Volume)
-            if (!isLocked) {
-                AndroidView(
-                    factory = { ctx ->
-                        object : View(ctx) {
-                            var startX = 0f
-                            var startY = 0f
-                            var activeMode = 0 // 1: Brightness, 2: Volume
-
-                            override fun onTouchEvent(ev: MotionEvent): Boolean {
-                                val sWidth = resources.displayMetrics.widthPixels.toFloat()
-                                val sHeight = resources.displayMetrics.heightPixels.toFloat()
-
-                                when (ev.actionMasked) {
-                                    MotionEvent.ACTION_DOWN -> {
-                                        startX = ev.rawX
-                                        startY = ev.rawY
-                                        activeMode = if (startX < sWidth * 0.45f) 1 else if (startX > sWidth * 0.55f) 2 else 0
-                                    }
-                                    MotionEvent.ACTION_MOVE -> {
-                                        if (activeMode != 0) {
-                                            val deltaY = startY - ev.rawY
-                                            val percent = (deltaY / sHeight * 120f).toInt()
-                                            if (activeMode == 1) {
-                                                val b = (50 + percent).coerceIn(0, 100)
-                                                bridge.setScreenBrightness(b)
-                                                hudType = "BRIGHTNESS"
-                                                hudValue = b
-                                            } else if (activeMode == 2) {
-                                                val v = (50 + percent).coerceIn(0, 100)
-                                                bridge.setVolume("MEDIA", v)
-                                                hudType = "VOLUME"
-                                                hudValue = v
-                                            }
-                                        }
-                                    }
-                                    MotionEvent.ACTION_UP,
-                                    MotionEvent.ACTION_CANCEL -> {
-                                        activeMode = 0
-                                        postDelayed({ hudType = null }, 1000)
-                                    }
-                                }
-                                return false
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // 3. Cyber HUD Glassmorphic Pill for Gesture State
-            if (hudType != null) {
+            // 2. Left Edge-Anchored Brightness HUD
+            if (hudType == "BRIGHTNESS") {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = Color.Black.copy(alpha = 0.8f),
+                    color = Color.Black.copy(alpha = 0.85f),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
                     modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(20.dp)
+                        .align(Alignment.CenterStart)
+                        .padding(start = 28.dp)
+                        .width(48.dp)
+                        .height(180.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    ) {
+                        CineSunIcon(tint = Color(0xFF00E676), modifier = Modifier.size(20.dp))
+
+                        // Vertical Progress Track
+                        Box(
+                            modifier = Modifier
+                                .width(6.dp)
+                                .height(90.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color.White.copy(alpha = 0.25f)),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(hudValue / 100f)
+                                    .background(Color(0xFF00E676))
+                            )
+                        }
+
+                        Text(
+                            text = "$hudValue%",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+
+            // 3. Right Edge-Anchored Volume HUD
+            if (hudType == "VOLUME") {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 28.dp)
+                        .width(48.dp)
+                        .height(180.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    ) {
+                        CineVolumeIcon(isMuted = false, tint = Color(0xFF00E676), modifier = Modifier.size(20.dp))
+
+                        // Vertical Progress Track
+                        Box(
+                            modifier = Modifier
+                                .width(6.dp)
+                                .height(90.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color.White.copy(alpha = 0.25f)),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(hudValue / 100f)
+                                    .background(Color(0xFF00E676))
+                            )
+                        }
+
+                        Text(
+                            text = "$hudValue%",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+
+            // 4. Center Seeking / Fast-Forward HUD
+            if (hudType == "SEEK" || hudType == "DOUBLE_SEEK") {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color.Black.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                    modifier = Modifier.align(Alignment.Center)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 14.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        when (hudType) {
-                            "BRIGHTNESS" -> {
-                                CineSunIcon(tint = Color(0xFF00E676), modifier = Modifier.size(24.dp))
-                                Column {
-                                    Text("BRIGHTNESS", color = Color(0xFF8B949E), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                                    Text("$hudValue%", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                }
-                            }
-                            "VOLUME" -> {
-                                CineVolumeIcon(isMuted = false, tint = Color(0xFF00E676), modifier = Modifier.size(24.dp))
-                                Column {
-                                    Text("VOLUME", color = Color(0xFF8B949E), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                                    Text("$hudValue%", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                }
-                            }
-                            "SEEK" -> {
-                                CineSeekArcIcon(isForward = hudDeltaSec > 0, seconds = 10, tint = Color(0xFF00E676), modifier = Modifier.size(28.dp))
+                        CineSeekArcIcon(isForward = hudSeekDelta >= 0, seconds = 10, tint = Color(0xFF00E676), modifier = Modifier.size(26.dp))
+                        Column {
+                            if (hudType == "SEEK") {
                                 Text(
-                                    text = if (hudDeltaSec > 0) "+10 SECONDS" else "-10 SECONDS",
+                                    text = VideoRepository.formatDuration(hudSeekTarget),
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = if (hudSeekDelta >= 0) "[+${hudSeekDelta}s]" else "[-${kotlin.math.abs(hudSeekDelta)}s]",
+                                    color = Color(0xFF00E676),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            } else {
+                                Text(
+                                    text = if (hudSeekDelta >= 0) "+10 SECONDS" else "-10 SECONDS",
                                     color = Color.White,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
@@ -1261,11 +1405,11 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // 4. Floating Left Lock Hotkey
+            // 5. Floating Screen Lock Key (Disappears on its spot)
             AnimatedVisibility(
                 visible = showControls || isLocked,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(200)),
+                exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(250)),
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .padding(start = 16.dp)
@@ -1289,11 +1433,11 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // 5. Floating Right Screenshot Hotkey
+            // 6. Floating Camera Shutter (Disappears on its spot)
             AnimatedVisibility(
                 visible = showControls && !isLocked,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(200)),
+                exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(250)),
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(end = 16.dp)
@@ -1316,323 +1460,330 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // 6. X-PLAYER CINEMA HUD CONTROLS (TOP & BOTTOM)
+            // 7. X-PLAYER CINEMA OVERLAYS (FADES IN-PLACE, NO SLIDING)
             AnimatedVisibility(
                 visible = showControls && !isLocked,
-                enter = fadeIn() + slideInVertically(),
-                exit = fadeOut() + slideOutVertically()
+                enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(200)),
+                exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(250))
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // --- TOP BAR ---
-                    Column {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                IconButton(onClick = onClosePlayer) {
-                                    Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = Color.White)
-                                }
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = video.name,
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    fontStyle = FontStyle.Italic,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                    // --- TOP BAR WITH CINEMA GRADIENT SCRIM ---
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.85f),
+                                        Color.Black.copy(alpha = 0.45f),
+                                        Color.Transparent
+                                    )
                                 )
-                            }
-
+                            )
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Column {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // PiP / Floating Window Vector
-                                IconButton(onClick = {
-                                    val act = context as? android.app.Activity
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                        act?.enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().build())
-                                    }
-                                }) {
-                                    CinePipIcon(tint = Color.White)
-                                }
-
-                                // HD Hardware Acceleration Pill
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.8f)),
-                                    color = Color.Transparent
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
                                 ) {
+                                    IconButton(onClick = onClosePlayer) {
+                                        Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = Color.White)
+                                    }
+                                    Spacer(Modifier.width(4.dp))
                                     Text(
-                                        text = "HD",
+                                        text = video.name,
                                         color = Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 0.5.sp,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        fontStyle = FontStyle.Italic,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
-                                // Subtitles CC Pill
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    IconButton(onClick = {
+                                        val act = context as? android.app.Activity
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                            act?.enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().build())
+                                        }
+                                    }) {
+                                        CinePipIcon(tint = Color.White)
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.8f)),
+                                        color = Color.Transparent
+                                    ) {
+                                        Text(
+                                            text = "HD",
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.5.sp,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.8f)),
+                                        color = Color.Transparent
+                                    ) {
+                                        Text(
+                                            text = "CC",
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.5.sp,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+
+                                    IconButton(onClick = { bridge.showToast("Queue: ${queue.size} videos") }) {
+                                        CinePlaylistIcon(tint = Color.White)
+                                    }
+
+                                    IconButton(onClick = { bridge.showToast("Aspect / Audio Settings") }) {
+                                        CineMoreIcon(tint = Color.White)
+                                    }
+                                }
+                            }
+
+                            // Sub-Header Frosted Quick Pills
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 12.dp, top = 4.dp)
+                            ) {
                                 Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.8f)),
-                                    color = Color.Transparent
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            currentOrientation = if (currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) {
+                                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                            } else {
+                                                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                            }
+                                            bridge.setScreenOrientation(currentOrientation)
+                                        }
+                                ) {
+                                    Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                        CineRotateIcon(tint = Color.White)
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            isMuted = !isMuted
+                                            player.volume = if (isMuted) 0f else 1f
+                                        }
+                                ) {
+                                    Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                        CineVolumeIcon(isMuted = isMuted, tint = Color.White)
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            bridge.startMediaPlayback(video.name, "Omni Background Player", true) { playState ->
+                                                if (playState) player.play() else player.pause()
+                                            }
+                                            bridge.showToast("Background audio mode armed")
+                                        }
+                                ) {
+                                    Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                        CineHeadphonesIcon(tint = Color.White)
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            currentSpeed = when (currentSpeed) {
+                                                1.0f -> 1.25f
+                                                1.25f -> 1.5f
+                                                1.5f -> 2.0f
+                                                2.0f -> 0.5f
+                                                else -> 1.0f
+                                            }
+                                            player.playbackParameters = PlaybackParameters(currentSpeed)
+                                        }
                                 ) {
                                     Text(
-                                        text = "CC",
+                                        text = "${currentSpeed}X",
                                         color = Color.White,
-                                        fontSize = 10.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        letterSpacing = 0.5.sp,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                     )
                                 }
-
-                                // Playlist Vector Icon
-                                IconButton(onClick = { bridge.showToast("Queue: ${queue.size} videos") }) {
-                                    CinePlaylistIcon(tint = Color.White)
-                                }
-
-                                // 3 Dots Menu
-                                IconButton(onClick = { bridge.showToast("Aspect / Audio Settings") }) {
-                                    CineMoreIcon(tint = Color.White)
-                                }
-                            }
-                        }
-
-                        // --- SUB-HEADER FROSTED PILL BAR ---
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(start = 12.dp, top = 6.dp)
-                        ) {
-                            // Orientation Pill
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color.Black.copy(alpha = 0.6f),
-                                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        currentOrientation = if (currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) {
-                                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                        } else {
-                                            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                                        }
-                                        bridge.setScreenOrientation(currentOrientation)
-                                    }
-                            ) {
-                                Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                    CineRotateIcon(tint = Color.White)
-                                }
-                            }
-
-                            // Mute Pill
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color.Black.copy(alpha = 0.6f),
-                                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        isMuted = !isMuted
-                                        player.volume = if (isMuted) 0f else 1f
-                                    }
-                            ) {
-                                Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                    CineVolumeIcon(isMuted = isMuted, tint = Color.White)
-                                }
-                            }
-
-                            // Audio-Only Background Headset Mode
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color.Black.copy(alpha = 0.6f),
-                                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        bridge.startMediaPlayback(video.name, "Omni Background Player", true) { playState ->
-                                            if (playState) player.play() else player.pause()
-                                        }
-                                        bridge.showToast("Background audio mode armed")
-                                    }
-                            ) {
-                                Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                    CineHeadphonesIcon(tint = Color.White)
-                                }
-                            }
-
-                            // Speed Selector Pill
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color.Black.copy(alpha = 0.6f),
-                                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        currentSpeed = when (currentSpeed) {
-                                            1.0f -> 1.25f
-                                            1.25f -> 1.5f
-                                            1.5f -> 2.0f
-                                            2.0f -> 0.5f
-                                            else -> 1.0f
-                                        }
-                                        player.playbackParameters = PlaybackParameters(currentSpeed)
-                                    }
-                            ) {
-                                Text(
-                                    text = "${currentSpeed}X",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
                             }
                         }
                     }
 
-                    // --- BOTTOM BAR CONTROLS ---
-                    Column(
+                    // --- BOTTOM BAR WITH CINEMA GRADIENT SCRIM ---
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 6.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.55f),
+                                        Color.Black.copy(alpha = 0.90f)
+                                    )
+                                )
+                            )
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
                     ) {
-                        // Electric Neon Scrubber
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = VideoRepository.formatDuration(currentPos),
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Slider(
-                                value = currentPos.toFloat(),
-                                onValueChange = { targetPos ->
-                                    currentPos = targetPos.toLong()
-                                    player.seekTo(currentPos)
-                                },
-                                valueRange = 0f..totalDuration.toFloat(),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color.White,
-                                    activeTrackColor = Color(0xFF00E676),
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 10.dp)
-                            )
-
-                            Text(
-                                text = VideoRepository.formatDuration(totalDuration),
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Spacer(Modifier.height(4.dp))
-
-                        // Lower Action Bar
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Left Lock
-                            IconButton(onClick = { isLocked = true }) {
-                                CineLockIcon(isLocked = false, tint = Color.White)
-                            }
-
-                            // -10s Rewind Arc
-                            IconButton(onClick = {
-                                player.seekTo((player.currentPosition - 10000).coerceAtLeast(0))
-                            }) {
-                                CineSeekArcIcon(isForward = false, seconds = 10, tint = Color.White)
-                            }
-
-                            // Previous Track
-                            IconButton(onClick = {
-                                val curIdx = queue.indexOfFirst { it.id == video.id }
-                                if (curIdx > 0) onSelectVideo(queue[curIdx - 1])
-                            }) {
-                                CineSkipIcon(isNext = false, tint = Color.White)
-                            }
-
-                            // Central Play / Pause Disc
-                            Surface(
-                                shape = CircleShape,
-                                color = Color.White.copy(alpha = 0.15f),
-                                border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.45f)),
-                                modifier = Modifier
-                                    .size(54.dp)
-                                    .clip(CircleShape)
-                                    .clickable {
-                                        if (player.isPlaying) player.pause() else player.play()
-                                    }
+                        Column {
+                            // Electric Green Razor Scrubber
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    CinePlayPauseIcon(isPlaying = isPlaying, tint = Color.White)
+                                Text(
+                                    text = VideoRepository.formatDuration(currentPos),
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Slider(
+                                    value = currentPos.toFloat(),
+                                    onValueChange = { targetPos ->
+                                        currentPos = targetPos.toLong()
+                                        player.seekTo(currentPos)
+                                    },
+                                    valueRange = 0f..totalDuration.toFloat(),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color.White,
+                                        activeTrackColor = Color(0xFF00E676),
+                                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 10.dp)
+                                )
+
+                                Text(
+                                    text = VideoRepository.formatDuration(totalDuration),
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(Modifier.height(4.dp))
+
+                            // Controls Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(onClick = { isLocked = true }) {
+                                    CineLockIcon(isLocked = false, tint = Color.White)
                                 }
-                            }
 
-                            // Next Track
-                            IconButton(onClick = {
-                                val curIdx = queue.indexOfFirst { it.id == video.id }
-                                if (curIdx >= 0 && curIdx < queue.lastIndex) onSelectVideo(queue[curIdx + 1])
-                            }) {
-                                CineSkipIcon(isNext = true, tint = Color.White)
-                            }
+                                IconButton(onClick = {
+                                    player.seekTo((player.currentPosition - 10000).coerceAtLeast(0))
+                                }) {
+                                    CineSeekArcIcon(isForward = false, seconds = 10, tint = Color.White)
+                                }
 
-                            // +10s Forward Arc
-                            IconButton(onClick = {
-                                player.seekTo((player.currentPosition + 10000).coerceAtMost(totalDuration))
-                            }) {
-                                CineSeekArcIcon(isForward = true, seconds = 10, tint = Color.White)
-                            }
+                                IconButton(onClick = {
+                                    val curIdx = queue.indexOfFirst { it.id == video.id }
+                                    if (curIdx > 0) onSelectVideo(queue[curIdx - 1])
+                                }) {
+                                    CineSkipIcon(isNext = false, tint = Color.White)
+                                }
 
-                            // Speed Label
-                            Text(
-                                text = "Speed",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontStyle = FontStyle.Italic,
-                                modifier = Modifier
-                                    .clickable {
-                                        currentSpeed = if (currentSpeed == 1.0f) 1.5f else 1.0f
-                                        player.playbackParameters = PlaybackParameters(currentSpeed)
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.White.copy(alpha = 0.15f),
+                                    border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.45f)),
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            if (player.isPlaying) player.pause() else player.play()
+                                        }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        CinePlayPauseIcon(isPlaying = isPlaying, tint = Color.White)
                                     }
-                                    .padding(horizontal = 6.dp, vertical = 4.dp)
-                            )
-
-                            // Aspect Ratio Viewfinder Brackets
-                            IconButton(onClick = {
-                                currentResizeMode = when (currentResizeMode) {
-                                    AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                                    else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                                 }
-                            }) {
-                                CineAspectIcon(tint = Color.White)
+
+                                IconButton(onClick = {
+                                    val curIdx = queue.indexOfFirst { it.id == video.id }
+                                    if (curIdx >= 0 && curIdx < queue.lastIndex) onSelectVideo(queue[curIdx + 1])
+                                }) {
+                                    CineSkipIcon(isNext = true, tint = Color.White)
+                                }
+
+                                IconButton(onClick = {
+                                    player.seekTo((player.currentPosition + 10000).coerceAtMost(totalDuration))
+                                }) {
+                                    CineSeekArcIcon(isForward = true, seconds = 10, tint = Color.White)
+                                }
+
+                                Text(
+                                    text = "Speed",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontStyle = FontStyle.Italic,
+                                    modifier = Modifier
+                                        .clickable {
+                                            currentSpeed = if (currentSpeed == 1.0f) 1.5f else 1.0f
+                                            player.playbackParameters = PlaybackParameters(currentSpeed)
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                )
+
+                                IconButton(onClick = {
+                                    currentResizeMode = when (currentResizeMode) {
+                                        AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                                        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    }
+                                }) {
+                                    CineAspectIcon(tint = Color.White)
+                                }
                             }
                         }
                     }
