@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omni Book Processing Factory</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0D1117; color: #E8EAED; font-family: ui-sans-serif, system-ui, sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0D1117; }
+        ::-webkit-scrollbar-thumb { background: #30363D; border-radius: 3px; }
+    </style>
+</head>
+<body class="p-4 max-w-4xl mx-auto space-y-6 pb-28">
+
+    <!-- Header & Status -->
+    <div class="flex flex-wrap items-center justify-between border-b border-gray-800 pb-4 gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-sky-400 flex items-center gap-2">
+                <span>📚</span> Multi-Profile Book Factory
+            </h1>
+            <p class="text-xs text-gray-400">Sequential Chapter Queue • Native Document Chips • Per-Turn Scraping</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="factory-badge" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-800 text-gray-300 border border-gray-700">
+                Factory Idle
+            </span>
+            <button id="btn-abort" class="hidden bg-rose-600 hover:bg-rose-500 text-white px-3 py-1 text-xs font-bold rounded-lg shadow">
+                🛑 Emergency Stop
+            </button>
+        </div>
+    </div>
+
+    <!-- Section 1: Storage Paths & Scanning -->
+    <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+        <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">1. Directory & Chapter Scanner</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+                <label class="text-xs text-gray-400">Parent Chapters Folder</label>
+                <input id="input-parent-dir" type="text" 
+                       value="/storage/emulated/0/Download/Chapters/PSYC_1011" 
+                       class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs font-mono text-gray-200 outline-none focus:border-sky-500" />
+            </div>
+            <div>
+                <label class="text-xs text-gray-400">Output Results Folder</label>
+                <input id="input-output-dir" type="text" 
+                       value="/storage/emulated/0/Download/Chapters/PSYC_1011_Results" 
+                       class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs font-mono text-gray-200 outline-none focus:border-sky-500" />
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3 pt-1">
+            <button id="btn-scan-chapters" class="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition">
+                <span>🔍</span> Scan Directory
+            </button>
+            <span id="scan-status" class="text-xs text-gray-400">Click scan to detect chapters</span>
+        </div>
+
+        <!-- Chapter Quantity Controller -->
+        <div id="chapter-ctrl-box" class="hidden pt-3 border-t border-gray-800 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+                <span class="text-gray-300 font-semibold">Chapters to Process:</span>
+                <span id="chapter-count-label" class="text-sky-400 font-bold">11 of 11 chapters</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <input id="chapter-count-input" type="number" min="1" max="11" value="11" 
+                       class="w-16 bg-[#0D1117] border border-gray-700 rounded-lg p-1.5 text-xs text-sky-400 font-bold text-center outline-none focus:border-sky-500" />
+                <input id="chapter-range" type="range" min="1" max="11" value="11" 
+                       class="flex-1 accent-sky-500 cursor-pointer" />
+            </div>
+            <div id="chapter-list-preview" class="flex flex-wrap gap-1.5 pt-1 max-h-28 overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <!-- Section 2: AI Studio Configuration -->
+    <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+        <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">2. AI Studio Model & Thinking Parameters</h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+                <label class="text-xs text-gray-400">Model</label>
+                <input id="input-model" type="text" value="Gemini 3.8 Flash" 
+                       class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500" />
+            </div>
+            <div>
+                <label class="text-xs text-gray-400">Thinking Level</label>
+                <select id="select-thinking" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">
+                    <option value="High" selected>High</option>
+                    <option value="Default">Default</option>
+                    <option value="Low">Low</option>
+                    <option value="Minimal">Minimal</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-xs text-gray-400">Temporary Chat</label>
+                <select id="select-temp-chat" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">
+                    <option value="false" selected>Disabled (Persistent)</option>
+                    <option value="true">Enabled (Incognito)</option>
+                </select>
+            </div>
+        </div>
+
+        <div>
+            <label class="text-xs text-gray-400">System Instruction</label>
+            <textarea id="input-sys-prompt" rows="2" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-sky-500"
+                      placeholder="You are an expert academic tutor. Deeply examine the attached textbook chapter and ground all answers on its specific contents."></textarea>
+        </div>
+    </div>
+
+    <!-- Section 3: Profile Distribution Matrix -->
+    <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+        <div class="flex items-center justify-between">
+            <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">3. Parallel Profile Workers</h2>
+            <span class="text-[11px] text-gray-400">Toggled profiles pool together to process chapters</span>
+        </div>
+        <div id="profiles-container" class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+            <span class="text-xs text-gray-500">Loading device profiles...</span>
+        </div>
+    </div>
+
+    <!-- Section 4: Multi-Turn Prompt Chain Builder -->
+    <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">4. Sequential Prompt Chain</h2>
+                <p class="text-[11px] text-gray-400">Configure what to ask on each turn and which responses to scrape & save</p>
+            </div>
+            <button id="btn-add-prompt" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sky-400 text-xs font-bold px-3 py-1.5 rounded-lg">
+                + Add Turn
+            </button>
+        </div>
+
+        <div id="prompt-chain-list" class="space-y-3">
+            <!-- Initial Prompt Step (Turn 1) -->
+            <div class="prompt-step-card bg-[#0D1117] border border-gray-800 rounded-lg p-3 space-y-2" data-step="1">
+                <div class="flex flex-wrap items-center justify-between text-xs gap-2">
+                    <span class="font-bold text-sky-400">Turn 1 (Initial Chapter Dispatch)</span>
+                    <div class="flex items-center gap-4">
+                        <label class="flex items-center gap-1.5 cursor-pointer text-gray-300">
+                            <input type="checkbox" class="step-attach-toggle accent-sky-500" checked />
+                            <span>📎 Attach Chapter File</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer text-gray-300">
+                            <input type="checkbox" class="step-scrape-toggle accent-sky-500" checked />
+                            <span>💾 Scrape & Save Response</span>
+                        </label>
+                    </div>
+                </div>
+                <textarea rows="3" class="step-prompt-text w-full bg-[#161B22] border border-gray-700 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-sky-500"
+                          placeholder="Carefully review the attached chapter. Please provide a comprehensive summary and extract all core concepts, definitions, and theories.">Carefully review the attached chapter. Please provide a comprehensive summary and extract all core concepts, definitions, and theories.</textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 5: Launch & Mission Control -->
+    <div class="space-y-3">
+        <button id="btn-launch-factory" class="w-full bg-gradient-to-r from-sky-600 to-cyan-500 hover:from-sky-500 hover:to-cyan-400 text-white font-extrabold text-sm py-3.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+            <span>🚀</span> Launch Simultaneous Factory
+        </button>
+
+        <!-- Profile Worker Cards Display -->
+        <div id="worker-cards-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3"></div>
+
+        <!-- Terminal Console -->
+        <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-gray-400 uppercase tracking-wider">Mission Control Terminal</span>
+                <button id="btn-clear-logs" class="text-gray-500 hover:text-gray-300">Clear Logs</button>
+            </div>
+            <pre id="terminal" class="w-full h-72 bg-black/80 border border-gray-800 rounded-xl p-3 text-xs font-mono text-green-400 overflow-y-auto whitespace-pre-wrap leading-relaxed">System ready. Click 'Scan Directory' to detect chapter files.</pre>
+        </div>
+    </div>
+
+    <!-- Playbook Logic -->
+    <script>
+        const terminalEl = document.getElementById('terminal');
+        const badgeEl = document.getElementById('factory-badge');
+        const btnAbort = document.getElementById('btn-abort');
+        let isAborted = false;
+        let detectedChapters = [];
+
+        function log(worker, msg, color) {
+            color = color || 'text-green-400';
+            const time = new Date().toLocaleTimeString();
+            const prefix = worker ? '[' + worker + '] ' : '';
+            terminalEl.innerHTML += '<div class="' + color + '">[' + time + '] ' + prefix + msg + '</div>';
+            terminalEl.scrollTop = terminalEl.scrollHeight;
+        }
+
+        function setFactoryStatus(text, color) {
+            color = color || 'bg-sky-900 text-sky-300 border-sky-700';
+            badgeEl.className = 'px-3 py-1 text-xs font-semibold rounded-full border ' + color;
+            badgeEl.innerText = text;
+        }
+
+        document.getElementById('btn-clear-logs').onclick = function() { terminalEl.innerHTML = ''; };
+
+        // 1. Auto-Populate Device Profiles from Vault
+        async function loadDeviceProfiles() {
+            const container = document.getElementById('profiles-container');
+            container.innerHTML = '';
+            let profileList = ['default', 'Account 2', 'Account 3'];
+
+            try {
+                const raw = await Omni.fs.read('config/profiles.json');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        profileList = parsed.map(function(p) { return p.name || p.id; });
+                    }
+                }
+            } catch(e) {}
+
+            profileList.forEach(function(pName) {
+                const wrapper = document.createElement('label');
+                wrapper.className = 'flex items-center gap-2 bg-[#0D1117] border border-gray-800 hover:border-gray-700 p-2.5 rounded-lg cursor-pointer text-xs';
+                wrapper.innerHTML = '<input type="checkbox" class="profile-worker-checkbox accent-sky-500" value="' + pName.replace(/"/g, '&quot;') + '" checked />' +
+                                    '<span class="font-semibold text-gray-200 truncate">' + pName + '</span>';
+                container.appendChild(wrapper);
+            });
+        }
+        loadDeviceProfiles();
+
+        // 2. Scan Directory & Natural Sort Leading Digits (01_, 02_, 10_)
+        document.getElementById('btn-scan-chapters').onclick = async function() {
+            const parentDir = document.getElementById('input-parent-dir').value.trim();
+            const scanStatus = document.getElementById('scan-status');
+            scanStatus.innerText = 'Scanning storage...';
+
+            try {
+                const files = await Omni.fs.list(parentDir);
+                if (!files || files.length === 0) {
+                    scanStatus.innerText = 'No files found in directory.';
+                    return;
+                }
+
+                detectedChapters = [];
+                files.forEach(function(filename) {
+                    const m = filename.match(/^(\d+)_(.+)\.(md|txt)$/i);
+                    if (m) {
+                        detectedChapters.push({
+                            number: parseInt(m[1], 10),
+                            title: m[2].replace(/_/g, ' '),
+                            filename: filename,
+                            fullPath: parentDir.replace(/\/+$/, '') + '/' + filename
+                        });
+                    }
+                });
+
+                detectedChapters.sort(function(a, b) { return a.number - b.number; });
+
+                if (detectedChapters.length === 0) {
+                    scanStatus.innerText = 'Found ' + files.length + ' files, but none with leading numbers (e.g. 01_...).';
+                    return;
+                }
+
+                scanStatus.innerText = 'Found ' + detectedChapters.length + ' sequential chapters!';
+                log(null, '✅ Discovered ' + detectedChapters.length + ' chapters in ' + parentDir, 'text-emerald-400');
+
+                // Reveal & Auto-Pin Quantity Controller to Total Found
+                const ctrlBox = document.getElementById('chapter-ctrl-box');
+                const rangeInput = document.getElementById('chapter-range');
+                const numInput = document.getElementById('chapter-count-input');
+                const countLabel = document.getElementById('chapter-count-label');
+                const previewEl = document.getElementById('chapter-list-preview');
+
+                ctrlBox.classList.remove('hidden');
+                rangeInput.min = 1;
+                rangeInput.max = detectedChapters.length;
+                rangeInput.value = detectedChapters.length;
+
+                numInput.min = 1;
+                numInput.max = detectedChapters.length;
+                numInput.value = detectedChapters.length;
+
+                function updateChapterSelection(val) {
+                    let parsed = parseInt(val, 10);
+                    if (isNaN(parsed) || parsed < 1) parsed = 1;
+                    if (parsed > detectedChapters.length) parsed = detectedChapters.length;
+
+                    rangeInput.value = parsed;
+                    numInput.value = parsed;
+                    countLabel.innerText = parsed + ' of ' + detectedChapters.length + ' chapters';
+                    
+                    previewEl.innerHTML = '';
+                    detectedChapters.slice(0, parsed).forEach(function(ch) {
+                        const chip = document.createElement('span');
+                        chip.className = 'px-2 py-0.5 bg-[#21262D] border border-gray-700 text-[10px] rounded text-gray-300';
+                        chip.innerText = 'Ch ' + ch.number + ': ' + ch.title.slice(0, 18);
+                        previewEl.appendChild(chip);
+                    });
+                }
+
+                rangeInput.oninput = function() { updateChapterSelection(this.value); };
+                numInput.oninput = function() { updateChapterSelection(this.value); };
+                updateChapterSelection(detectedChapters.length);
+
+            } catch(e) {
+                scanStatus.innerText = 'Scan error: ' + e.message;
+                log(null, '❌ Scan Error: ' + e.message, 'text-rose-400');
+            }
+        };
+
+        // 3. Dynamic Prompt Chain Step Addition with Attachment & Scrape Toggles
+        let stepCounter = 1;
+        document.getElementById('btn-add-prompt').onclick = function() {
+            stepCounter++;
+            const list = document.getElementById('prompt-chain-list');
+            const card = document.createElement('div');
+            card.className = 'prompt-step-card bg-[#0D1117] border border-gray-800 rounded-lg p-3 space-y-2';
+            card.setAttribute('data-step', stepCounter);
+            card.innerHTML = '<div class="flex flex-wrap items-center justify-between text-xs gap-2">' +
+                                '<span class="font-bold text-sky-400">Turn ' + stepCounter + ' (Follow-up)</span>' +
+                                '<div class="flex items-center gap-4">' +
+                                    '<label class="flex items-center gap-1.5 cursor-pointer text-gray-300">' +
+                                        '<input type="checkbox" class="step-attach-toggle accent-sky-500" />' +
+                                        '<span>📎 Attach Chapter File</span>' +
+                                    '</label>' +
+                                    '<label class="flex items-center gap-1.5 cursor-pointer text-gray-300">' +
+                                        '<input type="checkbox" class="step-scrape-toggle accent-sky-500" checked />' +
+                                        '<span>💾 Scrape & Save Response</span>' +
+                                    '</label>' +
+                                    '<button onclick="this.closest(\'.prompt-step-card\').remove()" class="text-rose-400 hover:text-rose-300 font-semibold">Remove</button>' +
+                                '</div>' +
+                             '</div>' +
+                             '<textarea rows="3" class="step-prompt-text w-full bg-[#161B22] border border-gray-700 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-sky-500" placeholder="Based on the chapter above, now generate 10 difficult exam MCQs with detailed explanations for correct and incorrect options.">Based on the chapter above, now generate 10 difficult exam MCQs with detailed explanations for correct and incorrect options.</textarea>';
+            list.appendChild(card);
+        };
+
+        // 4. Mission Control Launch Engine
+        document.getElementById('btn-launch-factory').onclick = async function() {
+            if (detectedChapters.length === 0) {
+                Omni.toast('Scan chapters directory first!');
+                return;
+            }
+
+            const limit = parseInt(document.getElementById('chapter-count-input').value, 10) || detectedChapters.length;
+            const activeQueue = detectedChapters.slice(0, limit).map(function(c) { return Object.assign({}, c); });
+
+            const enabledProfiles = Array.from(document.querySelectorAll('.profile-worker-checkbox:checked')).map(function(cb) {
+                return cb.value;
+            });
+
+            if (enabledProfiles.length === 0) {
+                Omni.toast('Enable at least one profile worker!');
+                return;
+            }
+
+            // SMART WORKER CLAMPING: Only wake up as many workers as there are chapters!
+            const maxWorkersNeeded = Math.min(enabledProfiles.length, activeQueue.length);
+            const activeWorkers = enabledProfiles.slice(0, maxWorkersNeeded);
+
+            // Extract Prompt Chain Configuration (Text, Attach Toggle, Scrape Toggle)
+            const promptSteps = Array.from(document.querySelectorAll('.prompt-step-card')).map(function(card, idx) {
+                const attachBox = card.querySelector('.step-attach-toggle');
+                const scrapeBox = card.querySelector('.step-scrape-toggle');
+                const textArea = card.querySelector('.step-prompt-text');
+                return {
+                    stepNum: idx + 1,
+                    attachFile: attachBox ? attachBox.checked : false,
+                    scrape: scrapeBox ? scrapeBox.checked : false,
+                    template: textArea ? textArea.value.trim() : ''
+                };
+            }).filter(function(s) { return s.template.length > 0; });
+
+            if (promptSteps.length === 0) {
+                Omni.toast('Configure at least one prompt step!');
+                return;
+            }
+
+            const model = document.getElementById('input-model').value.trim();
+            const thinkingLevel = document.getElementById('select-thinking').value;
+            const tempChat = document.getElementById('select-temp-chat').value === 'true';
+            const sysPrompt = document.getElementById('input-sys-prompt').value.trim();
+            const outputDir = document.getElementById('input-output-dir').value.trim().replace(/\/+$/, '');
+
+            // Ensure output directory exists
+            try {
+                await Omni.fs.write(outputDir + '/.factory_manifest', 'Initialized at ' + new Date().toISOString());
+            } catch(_) {}
+
+            isAborted = false;
+            btnAbort.classList.remove('hidden');
+            setFactoryStatus('Running (' + activeWorkers.length + ' workers)', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+            
+            const idleCount = enabledProfiles.length - activeWorkers.length;
+            const idleMsg = idleCount > 0 ? ' (' + idleCount + ' idle profiles saved)' : '';
+            log(null, '🚀 Factory Armed! Processing ' + activeQueue.length + ' chapter(s) across ' + activeWorkers.length + ' active worker(s)' + idleMsg + '...', 'text-sky-300');
+
+            // Render Worker Mission Cards (Immune to parentheses / special characters in names)
+            const cardsGrid = document.getElementById('worker-cards-grid');
+            cardsGrid.innerHTML = '';
+            const workerUI = {};
+
+            activeWorkers.forEach(function(pName) {
+                const card = document.createElement('div');
+                card.className = 'bg-[#161B22] border border-gray-800 rounded-xl p-3 space-y-1.5';
+                
+                // Safe DOM building with textContent to avoid querySelector selector errors
+                card.innerHTML = '<div class="flex items-center justify-between text-xs">' +
+                                    '<span class="font-bold text-white flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span class="worker-name-label"></span></span>' +
+                                    '<span class="worker-badge text-[10px] text-gray-400">Idle</span>' +
+                                 '</div>' +
+                                 '<div class="worker-task text-[11px] text-sky-400 font-semibold truncate">Waiting for assignment...</div>' +
+                                 '<div class="worker-prog text-[10px] text-gray-500 truncate">No active turn</div>';
+                
+                card.querySelector('.worker-name-label').textContent = pName;
+                cardsGrid.appendChild(card);
+
+                // Store references directly in memory without fragile querySelector IDs!
+                workerUI[pName] = {
+                    badge: card.querySelector('.worker-badge'),
+                    task: card.querySelector('.worker-task'),
+                    prog: card.querySelector('.worker-prog')
+                };
+            });
+
+            // 5. Worker Factory Thread Function
+            async function runProfileWorker(profileName) {
+                const ui = workerUI[profileName];
+                log(profileName, 'Spawning isolated puppet session (Model: ' + model + ')...');
+                if (ui) { ui.badge.innerText = 'Connecting...'; }
+
+                let session = null;
+                try {
+                    session = await Omni.studio.createSession({ profile: profileName, model: model });
+                    await session.configure({
+                        thinkingLevel: thinkingLevel,
+                        temporaryChat: tempChat,
+                        sysTitle: 'Book Factory Tutor',
+                        sysPrompt: sysPrompt,
+                        model: model
+                    });
+                    log(profileName, 'Session configured & armed! Entering work-stealing queue...', 'text-emerald-400');
+                } catch(err) {
+                    log(profileName, '❌ Session Initialization Failed: ' + err.message, 'text-rose-400');
+                    if (ui) { ui.badge.innerText = 'Failed'; ui.task.innerText = err.message; }
+                    return;
+                }
+
+                // Work-Stealing Loop: Pops unique chapters atomically!
+                while (activeQueue.length > 0 && !isAborted) {
+                    const chapter = activeQueue.shift(); // Atomic pop: no two workers can claim the same chapter!
+                    log(profileName, '📥 Claimed Chapter ' + chapter.number + ': "' + chapter.title + '"', 'text-cyan-300');
+                    if (ui) {
+                        ui.badge.innerText = 'Active';
+                        ui.task.innerText = 'Ch ' + chapter.number + ': ' + chapter.title.slice(0, 22);
+                    }
+
+                    let cachedChapterText = null;
+
+                    // Execute Sequential Multi-Turn Prompt Chain
+                    for (let stepIdx = 0; stepIdx < promptSteps.length; stepIdx++) {
+                        if (isAborted) break;
+                        const step = promptSteps[stepIdx];
+                        const stepLabel = 'Ch ' + chapter.number + ' Turn ' + step.stepNum;
+                        
+                        if (ui) { 
+                            ui.prog.innerText = 'Executing Turn ' + step.stepNum + '/' + promptSteps.length + (step.attachFile ? ' (Attaching chip...)' : '...'); 
+                        }
+
+                        // Pass the markdown file path to attach as an uploaded document chip!
+                        const turnAttachments = step.attachFile ? [chapter.fullPath] : [];
+
+                        // Build prompt text (supports optional {{title}} or {{content}} tags)
+                        let promptPayload = step.template;
+                        if (promptPayload.includes('{{content}}')) {
+                            if (!cachedChapterText) {
+                                try { cachedChapterText = await Omni.fs.read(chapter.fullPath); } catch(_) { cachedChapterText = ''; }
+                            }
+                            promptPayload = promptPayload.replace(/\{\{content\}\}/gi, cachedChapterText);
+                        }
+                        promptPayload = promptPayload
+                            .replace(/\{\{title\}\}/gi, chapter.title)
+                            .replace(/\{\{chapter_num\}\}/gi, chapter.number);
+
+                        const attachNotice = step.attachFile ? ' (📎 Attached ' + chapter.filename + ')' : '';
+                        log(profileName, '⚡ Dispatching Turn ' + step.stepNum + '/' + promptSteps.length + ' for Ch ' + chapter.number + attachNotice + '...');
+                        
+                        try {
+                            const result = await session.send({
+                                prompt: promptPayload,
+                                attachments: turnAttachments,
+                                label: stepLabel
+                            }, function(progress) {
+                                if (progress && progress.thoughts && ui) {
+                                    ui.prog.innerText = 'Thinking: ' + progress.thoughts.slice(-45);
+                                }
+                            });
+
+                            log(profileName, '✅ Turn ' + step.stepNum + ' response received (' + result.output.length + ' chars).', 'text-emerald-300');
+
+                            // Scrape & Save to Device Storage if toggled
+                            if (step.scrape && result.output.length > 0) {
+                                const saveName = 'Ch_' + (chapter.number < 10 ? '0' + chapter.number : chapter.number) + '_Turn_' + step.stepNum + '.md';
+                                const savePath = outputDir + '/' + saveName;
+                                await Omni.fs.write(savePath, result.output);
+                                log(profileName, '💾 Saved output -> ' + saveName, 'text-yellow-300');
+                            }
+
+                        } catch(turnErr) {
+                            log(profileName, '💥 Error on Turn ' + step.stepNum + ': ' + turnErr.message, 'text-rose-400');
+                        }
+                    }
+
+                    log(profileName, '🏁 Completed Chapter ' + chapter.number + '!', 'text-emerald-400');
+                }
+
+                if (session) {
+                    await session.close();
+                }
+                log(profileName, 'Session closed gracefully. Worker finished.', 'text-gray-400');
+                if (ui) { ui.badge.innerText = 'Done'; ui.task.innerText = 'All tasks completed'; ui.prog.innerText = 'Idle'; }
+            }
+
+            // Launch Active Workers Simultaneously!
+            try {
+                await Promise.all(activeWorkers.map(function(pName) {
+                    return runProfileWorker(pName);
+                }));
+
+                setFactoryStatus('Factory Complete', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+                log(null, '🎉 All chapters across all workers successfully processed and saved!', 'text-emerald-400');
+                Omni.toast('Factory Pipeline Finished!');
+            } catch(allErr) {
+                log(null, 'Factory exception: ' + allErr.message, 'text-rose-400');
+            } finally {
+                btnAbort.classList.add('hidden');
+            }
+        };
+
+        btnAbort.onclick = function() {
+            isAborted = true;
+            log(null, '🛑 User triggered Emergency Stop! Halting workers...', 'text-rose-400');
+            setFactoryStatus('Aborted', 'bg-rose-900 text-rose-300 border-rose-700');
+        };
+    </script>
+</body>
+</html>
