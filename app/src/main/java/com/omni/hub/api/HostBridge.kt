@@ -68,6 +68,8 @@ interface HostBridge {
     fun setScreenBrightness(percentage: Int)
     fun setVolume(stream: String, level: Int)
     fun getRingerMode(): Int
+    fun setScreenOrientation(orientation: Int)
+    fun setImmersiveMode(enabled: Boolean)
 
     // --- Connectivity & Network ---
     fun isNetworkAvailable(): Boolean
@@ -850,6 +852,42 @@ class HostBridgeImpl(
         map["free_internal"] = String.format("%.2f GB", freeBytes / (1024.0 * 1024.0 * 1024.0))
         map["plugin_storage_path"] = pluginDir.absolutePath
         return map
+    }
+
+    override fun setScreenOrientation(orientation: Int) {
+        Handler(Looper.getMainLooper()).post {
+            (context as? android.app.Activity)?.requestedOrientation = orientation
+        }
+    }
+
+    override fun setImmersiveMode(enabled: Boolean) {
+        Handler(Looper.getMainLooper()).post {
+            val activity = context as? android.app.Activity ?: return@post
+            val window = activity.window ?: return@post
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val controller = window.insetsController ?: return@post
+                if (enabled) {
+                    controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+                    controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                } else {
+                    controller.show(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                if (enabled) {
+                    window.decorView.systemUiVisibility = (
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        or View.SYSTEM_UI_FLAG_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    )
+                } else {
+                    window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+                }
+            }
+        }
     }
 
     override fun setScreenBrightness(percentage: Int) {
