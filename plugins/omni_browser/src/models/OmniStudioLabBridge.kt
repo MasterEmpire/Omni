@@ -30,6 +30,15 @@ class OmniStudioLabBridge(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    private fun resolveProfileId(input: String): String {
+        val trimmed = input.trim()
+        if (trimmed.isEmpty() || trimmed.equals("default", ignoreCase = true)) return "default"
+        val profiles = com.omni.plugin.browser.storage.VaultManager(context, bridge).loadProfiles() ?: emptyList()
+        val matched = profiles.find { it.id.equals(trimmed, ignoreCase = true) }
+            ?: profiles.find { it.name.trim().equals(trimmed, ignoreCase = true) }
+        return matched?.id ?: trimmed
+    }
+
     private fun resolve(callId: String, data: Any?) {
         val json = when (data) {
             is String -> JSONObject.quote(data)
@@ -97,7 +106,8 @@ class OmniStudioLabBridge(
     @JavascriptInterface
     fun studioCreateSession(callId: String, profileId: String, model: String) {
         mainHandler.post {
-            automator.createSession(profileId.ifEmpty { "default" }, model) { sessionId, err ->
+            val resolvedId = resolveProfileId(profileId)
+            automator.createSession(resolvedId, model) { sessionId, err ->
                 if (sessionId != null) {
                     val res = JSONObject().apply { put("sessionId", sessionId) }
                     resolve(callId, res)
@@ -180,8 +190,14 @@ class OmniStudioLabBridge(
     // --- Backward-Compatible Default Session Wrappers ---
     @JavascriptInterface
     fun studioInit(callId: String, profileId: String) {
+        studioInit(callId, profileId, "")
+    }
+
+    @JavascriptInterface
+    fun studioInit(callId: String, profileId: String, model: String) {
         mainHandler.post {
-            automator.prepareSession(profileId.ifEmpty { "default" }) { success, err ->
+            val resolvedId = resolveProfileId(profileId)
+            automator.prepareSession(resolvedId, model) { success, err ->
                 if (success) resolve(callId, "Ready")
                 else reject(callId, err ?: "Failed initializing AI Studio session")
             }
