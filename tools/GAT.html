@@ -12,179 +12,287 @@
         ::-webkit-scrollbar-thumb { background: #30363D; border-radius: 3px; }
     </style>
 </head>
-<body class="p-4 max-w-4xl mx-auto space-y-6 pb-28">
+<body class="p-3 sm:p-5 max-w-5xl mx-auto space-y-4 pb-28 text-gray-200">
 
-    <!-- Header & Status -->
-    <div class="flex flex-wrap items-center justify-between border-b border-gray-800 pb-4 gap-3">
-        <div>
-            <h1 class="text-2xl font-bold text-sky-400 flex items-center gap-2">
-                <span>📚</span> Multi-Profile Book Factory
-            </h1>
-            <p class="text-xs text-gray-400">Sequential Chapter Queue • Native Document Chips • Per-Turn Scraping</p>
+    <!-- Top Master Control Header -->
+    <div class="flex flex-wrap items-center justify-between border-b border-gray-800 pb-3 gap-3">
+        <div class="flex items-center gap-2.5">
+            <span class="text-2xl">🏭</span>
+            <div>
+                <h1 class="text-xl font-black text-sky-400 flex items-center gap-2">
+                    Omni Autonomous Book Factory
+                </h1>
+                <p class="text-[11px] text-gray-400">Night-Shift Pipeline • Concurrency Throttling • Round-Robin Balancer</p>
+            </div>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2.5">
             <span id="factory-badge" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-800 text-gray-300 border border-gray-700">
                 Factory Idle
             </span>
-            <button id="btn-abort" class="hidden bg-rose-600 hover:bg-rose-500 text-white px-3 py-1 text-xs font-bold rounded-lg shadow">
+            <button id="btn-emergency-abort" class="hidden bg-rose-600 hover:bg-rose-500 text-white px-3 py-1 text-xs font-bold rounded-lg shadow transition">
                 🛑 Emergency Stop
             </button>
         </div>
     </div>
 
-    <!-- Section 1: Storage Paths & Scanning -->
-    <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
-        <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">1. Directory & Chapter Scanner</h2>
-        
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-                <label class="text-xs text-gray-400">Parent Chapters Folder</label>
-                <input id="input-parent-dir" type="text" 
-                       value="/storage/emulated/0/Download/Chapters/PSYC_1011" 
-                       class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs font-mono text-gray-200 outline-none focus:border-sky-500" />
-            </div>
-            <div>
-                <label class="text-xs text-gray-400">Output Results Folder</label>
-                <input id="input-output-dir" type="text" 
-                       value="/storage/emulated/0/Download/Chapters/PSYC_1011_Results" 
-                       class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs font-mono text-gray-200 outline-none focus:border-sky-500" />
-            </div>
-        </div>
-
-        <div class="flex items-center gap-3 pt-1">
-            <button id="btn-scan-chapters" class="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition">
-                <span>🔍</span> Scan Directory
-            </button>
-            <span id="scan-status" class="text-xs text-gray-400">Click scan to detect chapters</span>
-        </div>
-
-        <!-- Chapter Quantity Controller -->
-        <div id="chapter-ctrl-box" class="hidden pt-3 border-t border-gray-800 space-y-2">
-            <div class="flex items-center justify-between text-xs">
-                <span class="text-gray-300 font-semibold">Chapters to Process:</span>
-                <span id="chapter-count-label" class="text-sky-400 font-bold">11 of 11 chapters</span>
-            </div>
-            <div class="flex items-center gap-3">
-                <input id="chapter-count-input" type="number" min="1" max="11" value="11" 
-                       class="w-16 bg-[#0D1117] border border-gray-700 rounded-lg p-1.5 text-xs text-sky-400 font-bold text-center outline-none focus:border-sky-500" />
-                <input id="chapter-range" type="range" min="1" max="11" value="11" 
-                       class="flex-1 accent-sky-500 cursor-pointer" />
-            </div>
-            <div id="chapter-list-preview" class="flex flex-wrap gap-1.5 pt-1 max-h-28 overflow-y-auto"></div>
-        </div>
-    </div>
-
-    <!-- Section 2: AI Studio Configuration -->
-    <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
-        <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">2. AI Studio Model & Thinking Parameters</h2>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-                <label class="text-xs text-gray-400">Model</label>
-                <input id="input-model" type="text" value="Gemini 3.8 Flash" 
-                       class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500" />
-            </div>
-            <div>
-                <label class="text-xs text-gray-400">Thinking Level</label>
-                <select id="select-thinking" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">
-                    <option value="High" selected>High</option>
-                    <option value="Default">Default</option>
-                    <option value="Low">Low</option>
-                    <option value="Minimal">Minimal</option>
-                </select>
-            </div>
-            <div>
-                <label class="text-xs text-gray-400">Temporary Chat</label>
-                <select id="select-temp-chat" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">
-                    <option value="false" selected>Disabled (Persistent - Saved to Account)</option>
-                    <option value="true">Enabled (Incognito - Never Saved)</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="flex items-center justify-between text-xs pt-1 border-t border-gray-800">
-            <label class="flex items-center gap-2 cursor-pointer text-gray-300">
-                <input type="checkbox" id="check-preserve-session" class="accent-sky-500" />
-                <span class="font-semibold text-sky-400">Preserve Headless Sessions</span>
-            </label>
-            <span class="text-[11px] text-gray-500">Keep WebViews active after chapters complete to prevent sync loss</span>
-        </div>
-
-        <div>
-            <label class="text-xs text-gray-400">System Instruction</label>
-            <textarea id="input-sys-prompt" rows="2" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-sky-500"
-                      placeholder="You are an expert academic tutor. Deeply examine the attached textbook chapter and ground all answers on its specific contents."></textarea>
-        </div>
-    </div>
-
-    <!-- Section 3: Profile Distribution Matrix -->
-    <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
-        <div class="flex items-center justify-between">
-            <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">3. Parallel Profile Workers</h2>
-            <span class="text-[11px] text-gray-400">Toggled profiles pool together to process chapters</span>
-        </div>
-        <div id="profiles-container" class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-            <span class="text-xs text-gray-500">Loading device profiles...</span>
-        </div>
-    </div>
-
-    <!-- Section 4: Multi-Turn Prompt Chain Builder -->
-    <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
-        <div class="flex items-center justify-between">
-            <div>
-                <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">4. Sequential Prompt Chain</h2>
-                <p class="text-[11px] text-gray-400">Configure what to ask on each turn and which responses to scrape & save</p>
-            </div>
-            <button id="btn-add-prompt" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sky-400 text-xs font-bold px-3 py-1.5 rounded-lg">
-                + Add Turn
-            </button>
-        </div>
-
-        <div id="prompt-chain-list" class="space-y-3">
-            <!-- Initial Prompt Step (Turn 1) -->
-            <div class="prompt-step-card bg-[#0D1117] border border-gray-800 rounded-lg p-3 space-y-2" data-step="1">
-                <div class="flex flex-wrap items-center justify-between text-xs gap-2">
-                    <span class="font-bold text-sky-400">Turn 1 (Initial Chapter Dispatch)</span>
-                    <div class="flex items-center gap-4">
-                        <label class="flex items-center gap-1.5 cursor-pointer text-gray-300">
-                            <input type="checkbox" class="step-attach-toggle accent-sky-500" checked />
-                            <span>📎 Attach Chapter File</span>
-                        </label>
-                        <label class="flex items-center gap-1.5 cursor-pointer text-gray-300">
-                            <input type="checkbox" class="step-scrape-toggle accent-sky-500" checked />
-                            <span>💾 Scrape & Save Response</span>
-                        </label>
-                    </div>
-                </div>
-                <textarea rows="3" class="step-prompt-text w-full bg-[#161B22] border border-gray-700 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-sky-500"
-                          placeholder="Carefully review the attached chapter. Please provide a comprehensive summary and extract all core concepts, definitions, and theories.">Carefully review the attached chapter. Please provide a comprehensive summary and extract all core concepts, definitions, and theories.</textarea>
-            </div>
-        </div>
-    </div>
-
-    <!-- Section 5: Launch & Mission Control -->
-    <div class="space-y-3">
-        <button id="btn-launch-factory" class="w-full bg-gradient-to-r from-sky-600 to-cyan-500 hover:from-sky-500 hover:to-cyan-400 text-white font-extrabold text-sm py-3.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
-            <span>🚀</span> Launch Simultaneous Factory
+    <!-- 4-Deck Command Navigation Tabs -->
+    <div class="flex items-center bg-[#161B22] border border-gray-800 rounded-xl p-1 gap-1 text-xs font-bold overflow-x-auto">
+        <button id="tab-btn-mission" class="deck-tab-btn flex-1 py-2 px-3 rounded-lg text-sky-400 bg-[#21262D] border border-sky-500/30 flex items-center justify-center gap-1.5 transition">
+            <span>🚀</span> Mission Control
         </button>
+        <button id="tab-btn-pipeline" class="deck-tab-btn flex-1 py-2 px-3 rounded-lg text-gray-400 hover:text-white flex items-center justify-center gap-1.5 transition">
+            <span>📚</span> Course & Chapters
+        </button>
+        <button id="tab-btn-prompts" class="deck-tab-btn flex-1 py-2 px-3 rounded-lg text-gray-400 hover:text-white flex items-center justify-center gap-1.5 transition">
+            <span>🧠</span> Prompt Architect
+        </button>
+        <button id="tab-btn-hardware" class="deck-tab-btn flex-1 py-2 px-3 rounded-lg text-gray-400 hover:text-white flex items-center justify-center gap-1.5 transition">
+            <span>⚙️</span> Fleet & Hardware
+        </button>
+    </div>
 
-        <!-- Profile Worker Cards Display -->
-        <div id="worker-cards-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3"></div>
+    <!-- ========================================================================= -->
+    <!-- DECK 1: MISSION CONTROL                                                   -->
+    <!-- ========================================================================= -->
+    <div id="deck-mission" class="deck-pane space-y-4">
+        <!-- Big Launch Card & Master Stats -->
+        <div class="bg-gradient-to-br from-[#161B22] to-[#0D1117] border border-gray-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-base font-bold text-white flex items-center gap-2">
+                        <span>⚡</span> Pipeline Execution Deck
+                    </h2>
+                    <p id="deck-mission-sub" class="text-xs text-gray-400">Configure parameters in other tabs or click launch to start execution</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="stat-kb-saved" class="px-2.5 py-1 text-xs font-mono font-bold rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-800">0.0 KB Saved</span>
+                    <span id="stat-active-workers" class="px-2.5 py-1 text-xs font-mono font-bold rounded-lg bg-sky-950 text-sky-300 border border-sky-800">0 Active</span>
+                </div>
+            </div>
+
+            <!-- Master Dual Progress Bars -->
+            <div class="space-y-2 bg-[#0D1117] p-3 rounded-xl border border-gray-800/80">
+                <div class="flex justify-between text-xs text-gray-300">
+                    <span id="label-course-prog">Course: None</span>
+                    <span id="label-chapter-prog" class="text-sky-400 font-bold">0 of 0 Chapters</span>
+                </div>
+                <div class="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+                    <div id="bar-chapter-prog" class="bg-gradient-to-r from-sky-500 to-cyan-400 h-full w-0 transition-all duration-300"></div>
+                </div>
+            </div>
+
+            <!-- Big Action Button -->
+            <button id="btn-master-launch" class="w-full bg-gradient-to-r from-sky-600 to-cyan-500 hover:from-sky-500 hover:to-cyan-400 text-white font-black text-sm py-3.5 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+                <span>🚀</span> Launch Night-Shift Factory
+            </button>
+        </div>
+
+        <!-- Live Worker Fleet Cards -->
+        <div class="space-y-2">
+            <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-sky-400 uppercase tracking-wider">Active Concurrency Fleet (Tap Card to Stream Live)</span>
+                <span id="fleet-concurrency-note" class="text-gray-400">Max Concurrency: 3</span>
+            </div>
+            <div id="worker-cards-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                <div class="p-4 bg-[#161B22] border border-gray-800 rounded-xl text-xs text-gray-500 text-center">
+                    Workers will appear when factory is launched
+                </div>
+            </div>
+        </div>
 
         <!-- Terminal Console -->
         <div class="space-y-1.5">
             <div class="flex items-center justify-between text-xs">
                 <span class="font-bold text-gray-400 uppercase tracking-wider">Mission Control Terminal</span>
-                <button id="btn-clear-logs" class="text-gray-500 hover:text-gray-300">Clear Logs</button>
+                <div class="flex items-center gap-3">
+                    <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
+                        <input type="checkbox" id="check-auto-scroll-terminal" class="accent-sky-500" checked />
+                        <span>Auto-scroll</span>
+                    </label>
+                    <button id="btn-clear-terminal" class="text-gray-500 hover:text-gray-300">Clear</button>
+                </div>
             </div>
-            <pre id="terminal" class="w-full h-72 bg-black/80 border border-gray-800 rounded-xl p-3 text-xs font-mono text-green-400 overflow-y-auto whitespace-pre-wrap leading-relaxed">System ready. Click 'Scan Directory' to detect chapter files.</pre>
+            <pre id="terminal" class="w-full h-64 bg-black/85 border border-gray-800 rounded-xl p-3 text-xs font-mono text-green-400 overflow-y-auto whitespace-pre-wrap leading-relaxed">System ready. Configure courses in Tab 2 or click launch.</pre>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- DECK 2: COURSE & CHAPTER QUEUE                                            -->
+    <!-- ========================================================================= -->
+    <div id="deck-pipeline" class="deck-pane hidden space-y-4">
+        <!-- Multi-Course Pipeline Manager -->
+        <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">Course Queue (Night-Shift Chaining)</h2>
+                    <p class="text-[11px] text-gray-400">Add course subfolders. When one course finishes all uncrossed chapters, it moves to the next.</p>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer bg-[#0D1117] border border-gray-800 px-3 py-1.5 rounded-lg text-xs">
+                    <input type="checkbox" id="check-chaining-enabled" class="accent-sky-500" checked />
+                    <span class="font-semibold text-gray-200">Auto-Advance to Next Course</span>
+                </label>
+            </div>
+
+            <!-- Add Course Input -->
+            <div class="flex items-center gap-2">
+                <input id="input-new-course" type="text" placeholder="Course Code (e.g. BIOL_1012 or multiple separated by comma)" 
+                       class="flex-1 bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs font-mono text-gray-200 outline-none focus:border-sky-500" />
+                <button id="btn-add-course" class="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition">
+                    + Add Course
+                </button>
+            </div>
+
+            <!-- Courses List -->
+            <div id="course-queue-container" class="space-y-2 pt-1"></div>
+        </div>
+
+        <!-- Selected Course Chapter Matrix -->
+        <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
+                <div>
+                    <h2 id="active-course-heading" class="text-sm font-bold text-sky-400 uppercase tracking-wider">
+                        Active Course Chapters
+                    </h2>
+                    <p id="active-course-path-label" class="text-[11px] text-gray-400 font-mono">/storage/emulated/0/Download/Chapters/...</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-scan-course" class="bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                        <span>🔍</span> Scan & Check Disk
+                    </button>
+                    <button id="btn-select-all-chapters" class="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-700">
+                        Enable All
+                    </button>
+                    <button id="btn-uncross-all-chapters" class="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-700">
+                        Cross All
+                    </button>
+                </div>
+            </div>
+
+            <!-- Chapter Cross-Off Matrix -->
+            <div id="chapter-matrix-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-96 overflow-y-auto pt-1">
+                <span class="text-xs text-gray-500">Scan or select a course above to load chapters</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- DECK 3: PROMPT ARCHITECT                                                  -->
+    <!-- ========================================================================= -->
+    <div id="deck-prompts" class="deck-pane hidden space-y-4">
+        <!-- AI Studio Model Parameters -->
+        <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+            <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">AI Studio Model & Thinking Parameters</h2>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <label class="text-xs text-gray-400">Model</label>
+                    <input id="input-model" type="text" value="Gemini 3.8 Flash" 
+                           class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500" />
+                </div>
+                <div>
+                    <label class="text-xs text-gray-400">Thinking Level</label>
+                    <select id="select-thinking" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">
+                        <option value="High" selected>High</option>
+                        <option value="Default">Default</option>
+                        <option value="Low">Low</option>
+                        <option value="Minimal">Minimal</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-400">Temporary Chat</label>
+                    <select id="select-temp-chat" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">
+                        <option value="false" selected>Disabled (Persistent - Saved to Account)</option>
+                        <option value="true">Enabled (Incognito - Never Saved)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between text-xs pt-1 border-t border-gray-800">
+                <label class="flex items-center gap-2 cursor-pointer text-gray-300">
+                    <input type="checkbox" id="check-preserve-session" class="accent-sky-500" />
+                    <span class="font-semibold text-sky-400">Preserve Headless Sessions</span>
+                </label>
+                <span class="text-[11px] text-gray-500">Keep WebViews active after chapters complete to avoid losing chats</span>
+            </div>
+
+            <div>
+                <label class="text-xs text-gray-400">System Instruction</label>
+                <textarea id="input-sys-prompt" rows="2" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-sky-500"
+                          placeholder="You are an expert academic tutor. Deeply examine the attached textbook chapter and ground all answers on its specific contents."></textarea>
+            </div>
+        </div>
+
+        <!-- Multi-Turn Prompt Sequence Builder -->
+        <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">Sequential Multi-Turn Prompt Chain</h2>
+                    <p class="text-[11px] text-gray-400">Variables supported: {{title}}, {{chapter_num}}, {{content}}</p>
+                </div>
+                <button id="btn-add-prompt-step" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sky-400 text-xs font-bold px-3 py-1.5 rounded-lg">
+                    + Add Next Turn
+                </button>
+            </div>
+
+            <div id="prompt-chain-list" class="space-y-3"></div>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- DECK 4: FLEET & HARDWARE GUARD                                            -->
+    <!-- ========================================================================= -->
+    <div id="deck-hardware" class="deck-pane hidden space-y-4">
+        <!-- Concurrency & Throttle Control -->
+        <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+            <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">Concurrency & Throttle Control</h2>
+            
+            <div class="flex flex-wrap items-center justify-between gap-3 p-3 bg-[#0D1117] rounded-xl border border-gray-800">
+                <div>
+                    <div class="text-xs font-bold text-white">Simultaneous Active Workers</div>
+                    <div class="text-[11px] text-gray-400">Default: 3. Set higher for multi-core rigs, or lower (1–2) for cool charging.</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-concurrency-minus" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-sky-400 font-bold flex items-center justify-center border border-gray-700">
+                        -
+                    </button>
+                    <input id="input-concurrency" type="number" min="1" value="3" 
+                           class="w-16 bg-[#161B22] border border-gray-700 rounded-lg p-1.5 text-center text-sm font-bold text-sky-400 outline-none focus:border-sky-500" />
+                    <button id="btn-concurrency-plus" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-sky-400 font-bold flex items-center justify-center border border-gray-700">
+                        +
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Profile Balancer Pool -->
+        <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">Round-Robin Profile Fleet</h2>
+                    <p class="text-[11px] text-gray-400">Chapters rotate across enabled profiles in round-robin sequence to distribute quota</p>
+                </div>
+                <span class="text-[10px] text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">Load Balancer Active</span>
+            </div>
+            <div id="profiles-container" class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                <span class="text-xs text-gray-500">Loading device profiles...</span>
+            </div>
+        </div>
+
+        <!-- Root Path Configuration -->
+        <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
+            <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">Base Storage Configuration</h2>
+            <div>
+                <label class="text-xs text-gray-400">Root Chapters Directory</label>
+                <input id="input-base-root" type="text" value="/storage/emulated/0/Download/Chapters" 
+                       class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2.5 text-xs font-mono text-gray-200 outline-none focus:border-sky-500" />
+                <p class="text-[11px] text-gray-500 mt-1">Course subfolders and results will resolve relative to this directory.</p>
+            </div>
         </div>
     </div>
 
     <!-- Live Stream Modal -->
     <div id="modal-worker-stream" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
         <div class="bg-[#161B22] border border-gray-700 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            <!-- Modal Header -->
             <div class="p-4 border-b border-gray-800 flex items-center justify-between bg-[#0D1117]">
                 <div class="flex items-center gap-2.5">
                     <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -205,7 +313,6 @@
                 </div>
             </div>
 
-            <!-- Metrics Ticker Bar -->
             <div class="px-4 py-2 bg-[#12161C] border-b border-gray-800 flex flex-wrap items-center justify-between text-xs text-gray-400 gap-2">
                 <div class="flex items-center gap-3">
                     <span>Length: <strong id="modal-char-count" class="text-emerald-400 font-mono">0 chars</strong></span>
@@ -218,9 +325,7 @@
                 </label>
             </div>
 
-            <!-- Modal Body (Thoughts + Code View) -->
             <div class="p-4 overflow-y-auto space-y-3 flex-1 font-mono text-xs">
-                <!-- Thoughts Section -->
                 <div id="modal-thoughts-box" class="hidden bg-[#0D1117] border border-gray-800 rounded-xl p-3 space-y-1.5">
                     <div class="flex items-center justify-between text-[11px] text-gray-400">
                         <span class="font-bold text-amber-400 flex items-center gap-1"><span>🧠</span> Model Reasoning / Thoughts</span>
@@ -229,7 +334,6 @@
                     <pre id="modal-thoughts-content" class="text-gray-400 whitespace-pre-wrap max-h-36 overflow-y-auto text-[11px]"></pre>
                 </div>
 
-                <!-- Code / Response Stream -->
                 <div class="space-y-1">
                     <div class="text-[11px] text-gray-400 font-bold uppercase tracking-wider">Live Response Stream</div>
                     <pre id="modal-stream-content" class="w-full min-h-[300px] bg-black/70 border border-gray-800 rounded-xl p-3 text-gray-200 overflow-y-auto whitespace-pre-wrap leading-relaxed select-text"></pre>
@@ -238,20 +342,99 @@
         </div>
     </div>
 
-    <!-- Playbook Logic -->
+    <!-- Playbook Autonomous Controller Script -->
     <script>
         const terminalEl = document.getElementById('terminal');
         const badgeEl = document.getElementById('factory-badge');
-        const btnAbort = document.getElementById('btn-abort');
+        const btnEmergencyAbort = document.getElementById('btn-emergency-abort');
+        const btnMasterLaunch = document.getElementById('btn-master-launch');
+
         let isAborted = false;
-        let detectedChapters = [];
+        let isFactoryRunning = false;
+        let profileRotationIdx = 0;
+        let scannedCourseChapters = {};
+
+        // 1. Dual-Layer State Persistence Engine
+        const STORAGE_KEY = 'omni_gat_persistent_state_v3';
+        let state = {
+            baseRoot: '/storage/emulated/0/Download/Chapters',
+            concurrencyLimit: 3,
+            multiCourseEnabled: true,
+            preserveSession: false,
+            model: 'Gemini 3.8 Flash',
+            thinkingLevel: 'High',
+            tempChat: false,
+            sysPrompt: 'You are an expert academic tutor. Deeply examine the attached textbook chapter and ground all answers on its specific contents.',
+            courses: [
+                { code: 'BIOL_1012', enabled: true, completed: false },
+                { code: 'MGMT_1012', enabled: true, completed: false },
+                { code: 'PHYS_1011', enabled: true, completed: false },
+                { code: 'LOCT_1011', enabled: true, completed: false }
+            ],
+            selectedCourseCode: 'BIOL_1012',
+            promptSteps: [
+                {
+                    stepNum: 1,
+                    attachFile: true,
+                    scrape: true,
+                    template: 'Carefully review the attached chapter. Please provide a comprehensive summary and extract all core concepts, definitions, and theories.'
+                }
+            ],
+            enabledProfileIds: ['default'],
+            chapterCrossOffs: {} // { "BIOL_1012": { "01_intro.md": true } }
+        };
+
+        function saveState() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                // Cold disk backup (non-blocking)
+                const diskPath = state.baseRoot.replace(/\/+$/, '') + '/.factory_state.json';
+                Omni.fs.write(diskPath, JSON.stringify(state, null, 2)).catch(function(){});
+            } catch(_) {}
+        }
+
+        async function loadState() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    Object.assign(state, parsed);
+                } else {
+                    const diskPath = state.baseRoot.replace(/\/+$/, '') + '/.factory_state.json';
+                    const diskRaw = await Omni.fs.read(diskPath);
+                    if (diskRaw) {
+                        const parsedDisk = JSON.parse(diskRaw);
+                        Object.assign(state, parsedDisk);
+                    }
+                }
+            } catch(_) {}
+            applyStateToUI();
+        }
+
+        function applyStateToUI() {
+            document.getElementById('input-base-root').value = state.baseRoot || '/storage/emulated/0/Download/Chapters';
+            document.getElementById('input-concurrency').value = state.concurrencyLimit || 3;
+            document.getElementById('fleet-concurrency-note').innerText = 'Max Concurrency: ' + (state.concurrencyLimit || 3);
+            document.getElementById('check-chaining-enabled').checked = state.multiCourseEnabled !== false;
+            document.getElementById('check-preserve-session').checked = !!state.preserveSession;
+            document.getElementById('input-model').value = state.model || 'Gemini 3.8 Flash';
+            document.getElementById('select-thinking').value = state.thinkingLevel || 'High';
+            document.getElementById('select-temp-chat').value = String(state.tempChat === true);
+            document.getElementById('input-sys-prompt').value = state.sysPrompt || '';
+
+            renderCourseQueue();
+            renderPromptSteps();
+            updateSelectedCourseView();
+        }
 
         function log(worker, msg, color) {
             color = color || 'text-green-400';
             const time = new Date().toLocaleTimeString();
             const prefix = worker ? '[' + worker + '] ' : '';
             terminalEl.innerHTML += '<div class="' + color + '">[' + time + '] ' + prefix + msg + '</div>';
-            terminalEl.scrollTop = terminalEl.scrollHeight;
+            if (document.getElementById('check-auto-scroll-terminal')?.checked !== false) {
+                terminalEl.scrollTop = terminalEl.scrollHeight;
+            }
         }
 
         function setFactoryStatus(text, color) {
@@ -260,27 +443,89 @@
             badgeEl.innerText = text;
         }
 
-        document.getElementById('btn-clear-logs').onclick = function() { terminalEl.innerHTML = ''; };
+        document.getElementById('btn-clear-terminal').onclick = function() { terminalEl.innerHTML = ''; };
 
-        // 1. Auto-Populate Device Profiles from Vault (Binds Physical ID to Cookie Store)
+        // 2. Tab Navigation Deck Routing
+        const tabBtns = {
+            mission: document.getElementById('tab-btn-mission'),
+            pipeline: document.getElementById('tab-btn-pipeline'),
+            prompts: document.getElementById('tab-btn-prompts'),
+            hardware: document.getElementById('tab-btn-hardware')
+        };
+        const deckPanes = {
+            mission: document.getElementById('deck-mission'),
+            pipeline: document.getElementById('deck-pipeline'),
+            prompts: document.getElementById('deck-prompts'),
+            hardware: document.getElementById('deck-hardware')
+        };
+
+        function switchDeck(deckName) {
+            Object.keys(deckPanes).forEach(function(k) {
+                deckPanes[k].classList.add('hidden');
+                tabBtns[k].className = 'deck-tab-btn flex-1 py-2 px-3 rounded-lg text-gray-400 hover:text-white flex items-center justify-center gap-1.5 transition';
+            });
+            deckPanes[deckName].classList.remove('hidden');
+            tabBtns[deckName].className = 'deck-tab-btn flex-1 py-2 px-3 rounded-lg text-sky-400 bg-[#21262D] border border-sky-500/30 flex items-center justify-center gap-1.5 transition font-bold';
+        }
+
+        tabBtns.mission.onclick = function() { switchDeck('mission'); };
+        tabBtns.pipeline.onclick = function() { switchDeck('pipeline'); };
+        tabBtns.prompts.onclick = function() { switchDeck('prompts'); };
+        tabBtns.hardware.onclick = function() { switchDeck('hardware'); };
+
+        // 3. Concurrency Stepper Controls
+        const inputConcurrency = document.getElementById('input-concurrency');
+        document.getElementById('btn-concurrency-minus').onclick = function() {
+            let v = parseInt(inputConcurrency.value, 10) || 3;
+            if (v > 1) v--;
+            inputConcurrency.value = v;
+            state.concurrencyLimit = v;
+            document.getElementById('fleet-concurrency-note').innerText = 'Max Concurrency: ' + v;
+            saveState();
+        };
+        document.getElementById('btn-concurrency-plus').onclick = function() {
+            let v = parseInt(inputConcurrency.value, 10) || 3;
+            v++;
+            inputConcurrency.value = v;
+            state.concurrencyLimit = v;
+            document.getElementById('fleet-concurrency-note').innerText = 'Max Concurrency: ' + v;
+            saveState();
+        };
+        inputConcurrency.onchange = function() {
+            let v = parseInt(this.value, 10) || 3;
+            if (v < 1) v = 1;
+            this.value = v;
+            state.concurrencyLimit = v;
+            document.getElementById('fleet-concurrency-note').innerText = 'Max Concurrency: ' + v;
+            saveState();
+        };
+
+        // 4. Input Change Listeners for Instant Auto-Save
+        document.getElementById('input-base-root').onchange = function() { state.baseRoot = this.value.trim(); saveState(); updateSelectedCourseView(); };
+        document.getElementById('check-chaining-enabled').onchange = function() { state.multiCourseEnabled = this.checked; saveState(); };
+        document.getElementById('check-preserve-session').onchange = function() { state.preserveSession = this.checked; saveState(); };
+        document.getElementById('input-model').onchange = function() { state.model = this.value.trim(); saveState(); };
+        document.getElementById('select-thinking').onchange = function() { state.thinkingLevel = this.value; saveState(); };
+        document.getElementById('select-temp-chat').onchange = function() { state.tempChat = (this.value === 'true'); saveState(); };
+        document.getElementById('input-sys-prompt').oninput = function() { state.sysPrompt = this.value; saveState(); };
+
+        // 5. Profiles Fleet Loading & Round-Robin Load Balancer
+        let deviceProfiles = [{ id: 'default', name: 'Default' }];
         async function loadDeviceProfiles() {
             const container = document.getElementById('profiles-container');
             container.innerHTML = '';
-            let profileList = [{ id: 'default', name: 'Default' }];
 
             try {
                 const raw = await Omni.fs.read('config/profiles.json');
                 if (raw) {
                     const parsed = JSON.parse(raw);
                     if (Array.isArray(parsed) && parsed.length > 0) {
-                        profileList = parsed.map(function(p) {
-                            return { id: p.id, name: p.name || p.id };
-                        });
+                        deviceProfiles = parsed.map(p => ({ id: p.id, name: p.name || p.id }));
                     }
                 }
             } catch(e) {}
 
-            profileList.forEach(function(p) {
+            deviceProfiles.forEach(function(p) {
                 const wrapper = document.createElement('label');
                 wrapper.className = 'flex items-center gap-2 bg-[#0D1117] border border-gray-800 hover:border-gray-700 p-2.5 rounded-lg cursor-pointer text-xs';
                 
@@ -288,8 +533,11 @@
                 cb.type = 'checkbox';
                 cb.className = 'profile-worker-checkbox accent-sky-500';
                 cb.value = p.id;
-                cb.setAttribute('data-name', p.name);
-                cb.checked = true;
+                cb.checked = !state.enabledProfileIds || state.enabledProfileIds.includes(p.id);
+                cb.onchange = function() {
+                    state.enabledProfileIds = Array.from(document.querySelectorAll('.profile-worker-checkbox:checked')).map(c => c.value);
+                    saveState();
+                };
 
                 const span = document.createElement('span');
                 span.className = 'font-semibold text-gray-200 truncate';
@@ -300,546 +548,736 @@
                 container.appendChild(wrapper);
             });
         }
-        loadDeviceProfiles();
 
-        // 2. Scan Directory & Natural Sort Leading Digits (01_, 02_, 10_)
-        document.getElementById('btn-scan-chapters').onclick = async function() {
-            const parentDir = document.getElementById('input-parent-dir').value.trim();
-            const scanStatus = document.getElementById('scan-status');
-            scanStatus.innerText = 'Scanning storage...';
+        function getEnabledProfiles() {
+            const checked = Array.from(document.querySelectorAll('.profile-worker-checkbox:checked')).map(cb => {
+                const found = deviceProfiles.find(p => p.id === cb.value);
+                return found || { id: cb.value, name: cb.value };
+            });
+            return checked.length > 0 ? checked : deviceProfiles;
+        }
 
-            try {
-                const files = await Omni.fs.list(parentDir);
-                if (!files || files.length === 0) {
-                    scanStatus.innerText = 'No files found in directory.';
-                    return;
-                }
+        function getNextRotatedProfile() {
+            const pool = getEnabledProfiles();
+            const prof = pool[profileRotationIdx % pool.length];
+            profileRotationIdx++;
+            return prof;
+        }
 
-                detectedChapters = [];
-                files.forEach(function(filename) {
-                    const m = filename.match(/^(\d+)_(.+)\.(md|txt)$/i);
-                    if (m) {
-                        detectedChapters.push({
-                            number: parseInt(m[1], 10),
-                            title: m[2].replace(/_/g, ' '),
-                            filename: filename,
-                            fullPath: parentDir.replace(/\/+$/, '') + '/' + filename
-                        });
+        // 6. Course Queue Manager
+        function renderCourseQueue() {
+            const container = document.getElementById('course-queue-container');
+            container.innerHTML = '';
+
+            if (!state.courses || state.courses.length === 0) {
+                container.innerHTML = '<div class="text-xs text-gray-500 p-2">No courses added. Add one above.</div>';
+                return;
+            }
+
+            state.courses.forEach(function(course, idx) {
+                const card = document.createElement('div');
+                const isSelected = course.code === state.selectedCourseCode;
+                card.className = 'flex flex-wrap items-center justify-between p-2.5 rounded-xl border transition text-xs ' + 
+                    (isSelected ? 'bg-[#1C2330] border-sky-500/80 shadow-md' : 'bg-[#0D1117] border-gray-800 hover:border-gray-700');
+
+                const left = document.createElement('div');
+                left.className = 'flex items-center gap-2.5 cursor-pointer';
+                left.onclick = function() {
+                    state.selectedCourseCode = course.code;
+                    saveState();
+                    renderCourseQueue();
+                    updateSelectedCourseView();
+                };
+
+                const numBadge = document.createElement('span');
+                numBadge.className = 'w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] ' + 
+                    (course.completed ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-gray-800 text-gray-300');
+                numBadge.innerText = course.completed ? '✓' : (idx + 1);
+
+                const codeSpan = document.createElement('span');
+                codeSpan.className = 'font-bold font-mono ' + (course.enabled ? 'text-white' : 'text-gray-500 line-through');
+                codeSpan.textContent = course.code;
+
+                const statusTag = document.createElement('span');
+                statusTag.className = 'text-[10px] px-2 py-0.5 rounded ' + (course.completed ? 'bg-emerald-950 text-emerald-400' : 'bg-gray-800 text-gray-400');
+                statusTag.innerText = course.completed ? 'Completed' : (course.enabled ? 'Queued' : 'Disabled');
+
+                left.appendChild(numBadge);
+                left.appendChild(codeSpan);
+                left.appendChild(statusTag);
+
+                const right = document.createElement('div');
+                right.className = 'flex items-center gap-2';
+
+                const toggleLabel = document.createElement('label');
+                toggleLabel.className = 'flex items-center gap-1.5 cursor-pointer text-gray-300 text-[11px]';
+                const toggle = document.createElement('input');
+                toggle.type = 'checkbox';
+                toggle.className = 'accent-sky-500';
+                toggle.checked = course.enabled !== false;
+                toggle.onchange = function(e) {
+                    e.stopPropagation();
+                    course.enabled = this.checked;
+                    saveState();
+                    renderCourseQueue();
+                };
+                toggleLabel.appendChild(toggle);
+                toggleLabel.appendChild(document.createTextNode('Active'));
+
+                const btnView = document.createElement('button');
+                btnView.className = 'px-2 py-1 bg-gray-800 hover:bg-gray-700 text-sky-400 rounded text-[11px] font-semibold';
+                btnView.innerText = 'View Chapters';
+                btnView.onclick = function(e) {
+                    e.stopPropagation();
+                    state.selectedCourseCode = course.code;
+                    saveState();
+                    renderCourseQueue();
+                    updateSelectedCourseView();
+                };
+
+                const btnDel = document.createElement('button');
+                btnDel.className = 'text-rose-400 hover:text-rose-300 px-1 text-sm font-bold';
+                btnDel.innerText = '✕';
+                btnDel.onclick = function(e) {
+                    e.stopPropagation();
+                    state.courses.splice(idx, 1);
+                    if (state.selectedCourseCode === course.code) {
+                        state.selectedCourseCode = state.courses[0] ? state.courses[0].code : '';
                     }
-                });
+                    saveState();
+                    renderCourseQueue();
+                    updateSelectedCourseView();
+                };
 
-                detectedChapters.sort(function(a, b) { return a.number - b.number; });
+                right.appendChild(toggleLabel);
+                right.appendChild(btnView);
+                right.appendChild(btnDel);
 
-                if (detectedChapters.length === 0) {
-                    scanStatus.innerText = 'Found ' + files.length + ' files, but none with leading numbers (e.g. 01_...).';
-                    return;
+                card.appendChild(left);
+                card.appendChild(right);
+                container.appendChild(card);
+            });
+        }
+
+        document.getElementById('btn-add-course').onclick = function() {
+            const raw = document.getElementById('input-new-course').value.trim();
+            if (!raw) return;
+            const codes = raw.split(/[\s,]+/).filter(Boolean);
+            codes.forEach(function(c) {
+                const clean = c.trim().toUpperCase();
+                if (!state.courses.some(item => item.code === clean)) {
+                    state.courses.push({ code: clean, enabled: true, completed: false });
                 }
+            });
+            document.getElementById('input-new-course').value = '';
+            if (!state.selectedCourseCode && state.courses.length > 0) {
+                state.selectedCourseCode = state.courses[0].code;
+            }
+            saveState();
+            renderCourseQueue();
+            updateSelectedCourseView();
+        };
 
-                scanStatus.innerText = 'Found ' + detectedChapters.length + ' sequential chapters!';
-                log(null, '✅ Discovered ' + detectedChapters.length + ' chapters in ' + parentDir, 'text-emerald-400');
+        // 7. Chapter Matrix & Cross-Off System
+        function updateSelectedCourseView() {
+            const code = state.selectedCourseCode || (state.courses[0] ? state.courses[0].code : '');
+            const heading = document.getElementById('active-course-heading');
+            const pathLabel = document.getElementById('active-course-path-label');
+            const root = state.baseRoot.replace(/\/+$/, '');
 
-                // Reveal & Auto-Pin Quantity Controller to Total Found
-                const ctrlBox = document.getElementById('chapter-ctrl-box');
-                const rangeInput = document.getElementById('chapter-range');
-                const numInput = document.getElementById('chapter-count-input');
-                const countLabel = document.getElementById('chapter-count-label');
-                const previewEl = document.getElementById('chapter-list-preview');
+            if (!code) {
+                heading.innerText = 'No Course Selected';
+                pathLabel.innerText = root;
+                document.getElementById('chapter-matrix-container').innerHTML = '<span class="text-xs text-gray-500">Add a course in the queue above</span>';
+                return;
+            }
 
-                ctrlBox.classList.remove('hidden');
-                rangeInput.min = 1;
-                rangeInput.max = detectedChapters.length;
-                rangeInput.value = detectedChapters.length;
+            heading.innerText = 'Chapters for: ' + code;
+            pathLabel.innerText = root + '/' + code;
+            renderChapterMatrix(code);
+        }
 
-                numInput.min = 1;
-                numInput.max = detectedChapters.length;
-                numInput.value = detectedChapters.length;
+        async function scanCourseChapters(courseCode) {
+            if (!courseCode) return [];
+            const root = state.baseRoot.replace(/\/+$/, '');
+            const courseDir = root + '/' + courseCode;
+            const outputDir = root + '/' + courseCode + '_Results';
 
-                function updateChapterSelection(val) {
-                    let parsed = parseInt(val, 10);
-                    if (isNaN(parsed) || parsed < 1) parsed = 1;
-                    if (parsed > detectedChapters.length) parsed = detectedChapters.length;
+            log(null, '🔍 Scanning ' + courseDir + '...', 'text-cyan-300');
+            let files = [];
+            try {
+                files = await Omni.fs.list(courseDir);
+            } catch(e) {
+                log(null, '❌ Failed listing ' + courseDir + ': ' + e.message, 'text-rose-400');
+                return [];
+            }
 
-                    rangeInput.value = parsed;
-                    numInput.value = parsed;
-                    countLabel.innerText = parsed + ' of ' + detectedChapters.length + ' chapters';
-                    
-                    previewEl.innerHTML = '';
-                    detectedChapters.slice(0, parsed).forEach(function(ch) {
-                        const chip = document.createElement('span');
-                        chip.className = 'px-2 py-0.5 bg-[#21262D] border border-gray-700 text-[10px] rounded text-gray-300';
-                        chip.innerText = 'Ch ' + ch.number + ': ' + ch.title.slice(0, 18);
-                        previewEl.appendChild(chip);
+            const chapters = [];
+            files.forEach(function(filename) {
+                const m = filename.match(/^(\d+)_(.+)\.(md|txt)$/i);
+                if (m) {
+                    chapters.push({
+                        number: parseInt(m[1], 10),
+                        title: m[2].replace(/_/g, ' '),
+                        filename: filename,
+                        fullPath: courseDir + '/' + filename
                     });
                 }
-
-                rangeInput.oninput = function() { updateChapterSelection(this.value); };
-                numInput.oninput = function() { updateChapterSelection(this.value); };
-                updateChapterSelection(detectedChapters.length);
-
-            } catch(e) {
-                scanStatus.innerText = 'Scan error: ' + e.message;
-                log(null, '❌ Scan Error: ' + e.message, 'text-rose-400');
-            }
-        };
-
-        // 3. Dynamic Prompt Chain Step Addition with Attachment & Scrape Toggles
-        let stepCounter = 1;
-        document.getElementById('btn-add-prompt').onclick = function() {
-            stepCounter++;
-            const list = document.getElementById('prompt-chain-list');
-            const card = document.createElement('div');
-            card.className = 'prompt-step-card bg-[#0D1117] border border-gray-800 rounded-lg p-3 space-y-2';
-            card.setAttribute('data-step', stepCounter);
-            card.innerHTML = '<div class="flex flex-wrap items-center justify-between text-xs gap-2">' +
-                                '<span class="font-bold text-sky-400">Turn ' + stepCounter + ' (Follow-up)</span>' +
-                                '<div class="flex items-center gap-4">' +
-                                    '<label class="flex items-center gap-1.5 cursor-pointer text-gray-300">' +
-                                        '<input type="checkbox" class="step-attach-toggle accent-sky-500" />' +
-                                        '<span>📎 Attach Chapter File</span>' +
-                                    '</label>' +
-                                    '<label class="flex items-center gap-1.5 cursor-pointer text-gray-300">' +
-                                        '<input type="checkbox" class="step-scrape-toggle accent-sky-500" checked />' +
-                                        '<span>💾 Scrape & Save Response</span>' +
-                                    '</label>' +
-                                    '<button onclick="this.closest(\'.prompt-step-card\').remove()" class="text-rose-400 hover:text-rose-300 font-semibold">Remove</button>' +
-                                '</div>' +
-                             '</div>' +
-                             '<textarea rows="3" class="step-prompt-text w-full bg-[#161B22] border border-gray-700 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-sky-500" placeholder="Based on the chapter above, now generate 10 difficult exam MCQs with detailed explanations for correct and incorrect options.">Based on the chapter above, now generate 10 difficult exam MCQs with detailed explanations for correct and incorrect options.</textarea>';
-            list.appendChild(card);
-        };
-
-        // 4. Mission Control Launch Engine
-        document.getElementById('btn-launch-factory').onclick = async function() {
-            if (detectedChapters.length === 0) {
-                Omni.toast('Scan chapters directory first!');
-                return;
-            }
-
-            const limit = parseInt(document.getElementById('chapter-count-input').value, 10) || detectedChapters.length;
-            const activeQueue = detectedChapters.slice(0, limit).map(function(c) { return Object.assign({}, c); });
-
-            const enabledProfiles = Array.from(document.querySelectorAll('.profile-worker-checkbox:checked')).map(function(cb) {
-                return {
-                    id: cb.value,
-                    name: cb.getAttribute('data-name') || cb.value
-                };
             });
 
-            if (enabledProfiles.length === 0) {
-                Omni.toast('Enable at least one profile worker!');
-                return;
-            }
+            chapters.sort((a, b) => a.number - b.number);
+            scannedCourseChapters[courseCode] = chapters;
 
-            // SMART WORKER CLAMPING: Only wake up as many workers as there are chapters!
-            const maxWorkersNeeded = Math.min(enabledProfiles.length, activeQueue.length);
-            const activeWorkers = enabledProfiles.slice(0, maxWorkersNeeded);
-
-            // Extract Prompt Chain Configuration (Text, Attach Toggle, Scrape Toggle)
-            const promptSteps = Array.from(document.querySelectorAll('.prompt-step-card')).map(function(card, idx) {
-                const attachBox = card.querySelector('.step-attach-toggle');
-                const scrapeBox = card.querySelector('.step-scrape-toggle');
-                const textArea = card.querySelector('.step-prompt-text');
-                return {
-                    stepNum: idx + 1,
-                    attachFile: attachBox ? attachBox.checked : false,
-                    scrape: scrapeBox ? scrapeBox.checked : false,
-                    template: textArea ? textArea.value.trim() : ''
-                };
-            }).filter(function(s) { return s.template.length > 0; });
-
-            if (promptSteps.length === 0) {
-                Omni.toast('Configure at least one prompt step!');
-                return;
-            }
-
-            const model = document.getElementById('input-model').value.trim();
-            const thinkingLevel = document.getElementById('select-thinking').value;
-            const tempChat = document.getElementById('select-temp-chat').value === 'true';
-            const sysPrompt = document.getElementById('input-sys-prompt').value.trim();
-            const outputDir = document.getElementById('input-output-dir').value.trim().replace(/\/+$/, '');
-
-            // Ensure output directory exists
+            // Probe output folder for disk detection
+            let outputFiles = [];
             try {
-                await Omni.fs.write(outputDir + '/.factory_manifest', 'Initialized at ' + new Date().toISOString());
+                outputFiles = await Omni.fs.list(outputDir);
             } catch(_) {}
 
-            isAborted = false;
-            btnAbort.classList.remove('hidden');
-            setFactoryStatus('Running (' + activeWorkers.length + ' workers)', 'bg-emerald-900 text-emerald-300 border-emerald-700');
-            
-            const idleCount = enabledProfiles.length - activeWorkers.length;
-            const idleMsg = idleCount > 0 ? ' (' + idleCount + ' idle profiles saved)' : '';
-            log(null, '🚀 Factory Armed! Processing ' + activeQueue.length + ' chapter(s) across ' + activeWorkers.length + ' active worker(s)' + idleMsg + '...', 'text-sky-300');
-
-            // Render Worker Mission Cards & Tracking Registry
-            const cardsGrid = document.getElementById('worker-cards-grid');
-            cardsGrid.innerHTML = '';
-            const workerUI = {};
-            const completedChapters = [];
-            const failedChapters = [];
-
-            const workerStreams = {};
-            let activeModalWorkerId = null;
-
-            const modalEl = document.getElementById('modal-worker-stream');
-            const modalTitleEl = document.getElementById('modal-worker-title');
-            const modalSubEl = document.getElementById('modal-worker-sub');
-            const modalCharCountEl = document.getElementById('modal-char-count');
-            const modalKbSizeEl = document.getElementById('modal-kb-size');
-            const modalStateLabelEl = document.getElementById('modal-state-label');
-            const modalThoughtsBox = document.getElementById('modal-thoughts-box');
-            const modalThoughtsContent = document.getElementById('modal-thoughts-content');
-            const modalThoughtsCount = document.getElementById('modal-thoughts-count');
-            const modalStreamContent = document.getElementById('modal-stream-content');
-            const modalAutoScroll = document.getElementById('modal-autoscroll');
-
-            function updateModalContent(workerId) {
-                const s = workerStreams[workerId];
-                if (!s) return;
-                modalTitleEl.innerHTML = '<span>Worker Stream: ' + s.workerName + '</span>';
-                modalSubEl.innerText = s.chapterTitle + ' • ' + s.turnLabel;
-                modalCharCountEl.innerText = s.charCount.toLocaleString() + ' chars';
-                modalKbSizeEl.innerText = s.kbSize + ' KB';
-                modalStateLabelEl.innerText = s.state;
-
-                if (s.thoughts && s.thoughts.trim().length > 0) {
-                    modalThoughtsBox.classList.remove('hidden');
-                    modalThoughtsContent.innerText = s.thoughts;
-                    modalThoughtsCount.innerText = s.thoughts.length.toLocaleString() + ' chars';
-                } else {
-                    modalThoughtsBox.classList.add('hidden');
-                }
-
-                modalStreamContent.innerText = s.output || '(Waiting for tokens from AI Studio...)';
-                if (modalAutoScroll.checked) {
-                    modalStreamContent.scrollTop = modalStreamContent.scrollHeight;
-                }
+            if (!state.chapterCrossOffs[courseCode]) {
+                state.chapterCrossOffs[courseCode] = {};
             }
 
-            function openWorkerStreamModal(workerId) {
-                activeModalWorkerId = workerId;
-                updateModalContent(workerId);
-                modalEl.classList.remove('hidden');
+            // Auto-cross if output file already found on disk
+            chapters.forEach(function(ch) {
+                const chPrefix = 'Ch_' + (ch.number < 10 ? '0' + ch.number : ch.number) + '_';
+                const hasExisting = outputFiles.some(f => f.startsWith(chPrefix));
+                if (hasExisting && state.chapterCrossOffs[courseCode][ch.filename] === undefined) {
+                    state.chapterCrossOffs[courseCode][ch.filename] = true;
+                }
+            });
+
+            saveState();
+            return chapters;
+        }
+
+        async function renderChapterMatrix(courseCode) {
+            const container = document.getElementById('chapter-matrix-container');
+            container.innerHTML = '<span class="text-xs text-gray-500">Scanning chapter directory...</span>';
+
+            const chapters = scannedCourseChapters[courseCode] || await scanCourseChapters(courseCode);
+            container.innerHTML = '';
+
+            if (chapters.length === 0) {
+                container.innerHTML = '<span class="text-xs text-gray-500">No chapters found (e.g. 01_intro.md) in this directory.</span>';
+                return;
             }
 
-            document.getElementById('btn-modal-close').onclick = function() {
-                modalEl.classList.add('hidden');
-                activeModalWorkerId = null;
-            };
+            const crossMap = state.chapterCrossOffs[courseCode] || {};
 
-            document.getElementById('btn-modal-copy').onclick = function() {
-                if (activeModalWorkerId && workerStreams[activeModalWorkerId]) {
-                    const text = workerStreams[activeModalWorkerId].output || '';
-                    if (text.length > 0) {
-                        Omni.copy(text);
-                        Omni.toast('Copied ' + (text.length / 1024).toFixed(1) + ' KB to clipboard!');
-                    } else {
-                        Omni.toast('No output to copy yet');
+            chapters.forEach(function(ch) {
+                const isCrossed = crossMap[ch.filename] === true;
+                const card = document.createElement('div');
+                card.className = 'flex items-center justify-between p-2.5 rounded-xl border cursor-pointer select-none transition text-xs ' +
+                    (isCrossed ? 'bg-[#0D1117] border-gray-800/80 opacity-50' : 'bg-[#161B22] border-sky-500/30 hover:border-sky-500');
+
+                const left = document.createElement('div');
+                left.className = 'flex items-center gap-2 overflow-hidden';
+
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'chapter-cross-checkbox accent-emerald-500';
+                cb.checked = isCrossed;
+                cb.onclick = function(e) { e.stopPropagation(); };
+                cb.onchange = function() {
+                    toggleChapterCross(courseCode, ch.filename, this.checked);
+                };
+
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'font-semibold truncate ' + (isCrossed ? 'line-through text-gray-500' : 'text-gray-200');
+                titleSpan.innerText = 'Ch ' + ch.number + ': ' + ch.title;
+
+                left.appendChild(cb);
+                left.appendChild(titleSpan);
+
+                const badge = document.createElement('span');
+                badge.className = 'text-[10px] px-2 py-0.5 rounded font-mono font-bold ' + 
+                    (isCrossed ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-sky-950 text-sky-400 border border-sky-800');
+                badge.innerText = isCrossed ? 'Skipped' : 'Queued';
+
+                card.appendChild(left);
+                card.appendChild(badge);
+
+                card.onclick = function() {
+                    const nextVal = !isCrossed;
+                    cb.checked = nextVal;
+                    toggleChapterCross(courseCode, ch.filename, nextVal);
+                };
+
+                container.appendChild(card);
+            });
+        }
+
+        function toggleChapterCross(courseCode, filename, isCrossed) {
+            if (!state.chapterCrossOffs[courseCode]) state.chapterCrossOffs[courseCode] = {};
+            state.chapterCrossOffs[courseCode][filename] = isCrossed;
+            saveState();
+            renderChapterMatrix(courseCode);
+        }
+
+        document.getElementById('btn-scan-course').onclick = async function() {
+            if (!state.selectedCourseCode) return;
+            await scanCourseChapters(state.selectedCourseCode);
+            renderChapterMatrix(state.selectedCourseCode);
+            Omni.toast('Scanned ' + state.selectedCourseCode);
+        };
+
+        document.getElementById('btn-select-all-chapters').onclick = function() {
+            const code = state.selectedCourseCode;
+            if (!code || !scannedCourseChapters[code]) return;
+            state.chapterCrossOffs[code] = {};
+            scannedCourseChapters[code].forEach(ch => { state.chapterCrossOffs[code][ch.filename] = false; });
+            saveState();
+            renderChapterMatrix(code);
+        };
+
+        document.getElementById('btn-uncross-all-chapters').onclick = function() {
+            const code = state.selectedCourseCode;
+            if (!code || !scannedCourseChapters[code]) return;
+            state.chapterCrossOffs[code] = {};
+            scannedCourseChapters[code].forEach(ch => { state.chapterCrossOffs[code][ch.filename] = true; });
+            saveState();
+            renderChapterMatrix(code);
+        };
+
+        // 8. Multi-Turn Prompt Builder
+        function renderPromptSteps() {
+            const list = document.getElementById('prompt-chain-list');
+            list.innerHTML = '';
+
+            state.promptSteps.forEach(function(step, idx) {
+                const card = document.createElement('div');
+                card.className = 'prompt-step-card bg-[#0D1117] border border-gray-800 rounded-lg p-3 space-y-2';
+
+                card.innerHTML = '<div class="flex flex-wrap items-center justify-between text-xs gap-2">' +
+                                    '<span class="font-bold text-sky-400">Turn ' + (idx + 1) + '</span>' +
+                                    '<div class="flex items-center gap-3">' +
+                                        '<label class="flex items-center gap-1.5 cursor-pointer text-gray-300">' +
+                                            '<input type="checkbox" class="step-attach-toggle accent-sky-500" ' + (step.attachFile ? 'checked' : '') + ' />' +
+                                            '<span>📎 Attach File</span>' +
+                                        '</label>' +
+                                        '<label class="flex items-center gap-1.5 cursor-pointer text-gray-300">' +
+                                            '<input type="checkbox" class="step-scrape-toggle accent-sky-500" ' + (step.scrape ? 'checked' : '') + ' />' +
+                                            '<span>💾 Scrape & Save</span>' +
+                                        '</label>' +
+                                        (idx > 0 ? '<button class="btn-del-step text-rose-400 font-bold px-1">✕</button>' : '') +
+                                    '</div>' +
+                                 '</div>' +
+                                 '<textarea rows="3" class="step-prompt-text w-full bg-[#161B22] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">' +
+                                 (step.template || '') + '</textarea>';
+
+                card.querySelector('.step-attach-toggle').onchange = function() { step.attachFile = this.checked; saveState(); };
+                card.querySelector('.step-scrape-toggle').onchange = function() { step.scrape = this.checked; saveState(); };
+                card.querySelector('.step-prompt-text').oninput = function() { step.template = this.value; saveState(); };
+
+                const delBtn = card.querySelector('.btn-del-step');
+                if (delBtn) {
+                    delBtn.onclick = function() {
+                        state.promptSteps.splice(idx, 1);
+                        saveState();
+                        renderPromptSteps();
+                    };
+                }
+
+                list.appendChild(card);
+            });
+        }
+
+        document.getElementById('btn-add-prompt-step').onclick = function() {
+            state.promptSteps.push({
+                stepNum: state.promptSteps.length + 1,
+                attachFile: false,
+                scrape: true,
+                template: 'Based on the chapter above, now generate 10 difficult exam MCQs with detailed explanations for correct and incorrect options.'
+            });
+            saveState();
+            renderPromptSteps();
+        };
+
+        // 9. Live Stream Inspection Modal
+        const workerStreams = {};
+        let activeModalWorkerId = null;
+
+        const modalEl = document.getElementById('modal-worker-stream');
+        const modalTitleEl = document.getElementById('modal-worker-title');
+        const modalSubEl = document.getElementById('modal-worker-sub');
+        const modalCharCountEl = document.getElementById('modal-char-count');
+        const modalKbSizeEl = document.getElementById('modal-kb-size');
+        const modalStateLabelEl = document.getElementById('modal-state-label');
+        const modalThoughtsBox = document.getElementById('modal-thoughts-box');
+        const modalThoughtsContent = document.getElementById('modal-thoughts-content');
+        const modalThoughtsCount = document.getElementById('modal-thoughts-count');
+        const modalStreamContent = document.getElementById('modal-stream-content');
+        const modalAutoScroll = document.getElementById('modal-autoscroll');
+
+        function updateModalContent(workerId) {
+            const s = workerStreams[workerId];
+            if (!s) return;
+            modalTitleEl.innerHTML = '<span>Worker Stream: ' + s.workerName + '</span>';
+            modalSubEl.innerText = s.courseCode + ' • ' + s.chapterTitle + ' • ' + s.turnLabel;
+            modalCharCountEl.innerText = s.charCount.toLocaleString() + ' chars';
+            modalKbSizeEl.innerText = s.kbSize + ' KB';
+            modalStateLabelEl.innerText = s.state;
+
+            if (s.thoughts && s.thoughts.trim().length > 0) {
+                modalThoughtsBox.classList.remove('hidden');
+                modalThoughtsContent.innerText = s.thoughts;
+                modalThoughtsCount.innerText = s.thoughts.length.toLocaleString() + ' chars';
+            } else {
+                modalThoughtsBox.classList.add('hidden');
+            }
+
+            modalStreamContent.innerText = s.output || '(Waiting for tokens from AI Studio...)';
+            if (modalAutoScroll.checked) {
+                modalStreamContent.scrollTop = modalStreamContent.scrollHeight;
+            }
+        }
+
+        function openWorkerStreamModal(workerId) {
+            activeModalWorkerId = workerId;
+            updateModalContent(workerId);
+            modalEl.classList.remove('hidden');
+        }
+
+        document.getElementById('btn-modal-close').onclick = function() {
+            modalEl.classList.add('hidden');
+            activeModalWorkerId = null;
+        };
+
+        document.getElementById('btn-modal-copy').onclick = function() {
+            if (activeModalWorkerId && workerStreams[activeModalWorkerId]) {
+                const text = workerStreams[activeModalWorkerId].output || '';
+                if (text.length > 0) {
+                    Omni.copy(text);
+                    Omni.toast('Copied ' + (text.length / 1024).toFixed(1) + ' KB to clipboard!');
+                }
+            }
+        };
+
+        // 10. Master Night-Shift Autonomous Runner
+        let totalKbAccumulator = 0;
+
+        async function executeSingleChapter(courseCode, chapter, workerProfile, slotIdx, workerUI) {
+            const profileId = workerProfile.id;
+            const profileName = workerProfile.name;
+            const root = state.baseRoot.replace(/\/+$/, '');
+            const outputDir = root + '/' + courseCode + '_Results';
+
+            log(profileName, '🚀 [Slot ' + (slotIdx + 1) + '] Claimed ' + courseCode + ' Ch ' + chapter.number + ': "' + chapter.title + '"', 'text-cyan-300');
+
+            if (workerUI) {
+                workerUI.task.innerText = courseCode + ' Ch ' + chapter.number + ': ' + chapter.title.slice(0, 18);
+                workerUI.badge.innerText = 'Slot ' + (slotIdx + 1) + ' (' + profileName + ')';
+                workerUI.prog.innerText = 'Spawning clean session...';
+            }
+
+            let session = null;
+            try {
+                session = await Omni.studio.createSession({ profile: profileId, model: state.model });
+                await session.configure({
+                    thinkingLevel: state.thinkingLevel,
+                    temporaryChat: state.tempChat,
+                    sysTitle: 'Book Factory: ' + courseCode,
+                    sysPrompt: state.sysPrompt,
+                    model: state.model
+                });
+            } catch(initErr) {
+                log(profileName, '❌ Session spawn failed: ' + initErr.message, 'text-rose-400');
+                if (session) { try { await session.close(); } catch(_) {} }
+                return false;
+            }
+
+            let cachedChapterContent = null;
+            let chapterSuccess = true;
+
+            for (let sIdx = 0; sIdx < state.promptSteps.length; sIdx++) {
+                if (isAborted) { chapterSuccess = false; break; }
+                const step = state.promptSteps[sIdx];
+                const stepLabel = courseCode + ' Ch ' + chapter.number + ' Turn ' + (sIdx + 1);
+
+                if (workerUI) {
+                    workerUI.prog.innerText = 'Turn ' + (sIdx + 1) + '/' + state.promptSteps.length + (step.attachFile ? ' (Attaching chip...)' : '...');
+                }
+
+                const attachments = step.attachFile ? [chapter.fullPath] : [];
+                let payload = step.template;
+
+                if (payload.includes('{{content}}')) {
+                    if (!cachedChapterContent) {
+                        try { cachedChapterContent = await Omni.fs.read(chapter.fullPath); } catch(_) { cachedChapterContent = ''; }
+                    }
+                    payload = payload.replace(/\{\{content\}\}/gi, cachedChapterContent);
+                }
+                payload = payload
+                    .replace(/\{\{title\}\}/gi, chapter.title)
+                    .replace(/\{\{chapter_num\}\}/gi, chapter.number);
+
+                let turnSuccess = false;
+                let retries = 0;
+
+                while (!turnSuccess && retries <= 1 && !isAborted) {
+                    try {
+                        const result = await session.send({
+                            prompt: payload,
+                            attachments: attachments,
+                            label: stepLabel
+                        }, function(prog) {
+                            if (!prog) return;
+                            const thoughts = prog.thoughts || '';
+                            const output = prog.output || '';
+                            const chars = output.length;
+                            const kb = (chars / 1024).toFixed(1);
+
+                            workerStreams[slotIdx] = {
+                                workerName: profileName + ' (Slot ' + (slotIdx + 1) + ')',
+                                courseCode: courseCode,
+                                chapterTitle: 'Ch ' + chapter.number + ': ' + chapter.title,
+                                turnLabel: 'Turn ' + (sIdx + 1) + '/' + state.promptSteps.length,
+                                thoughts: thoughts,
+                                output: output,
+                                charCount: chars,
+                                kbSize: kb,
+                                state: chars > 0 ? 'Streaming (' + kb + ' KB)' : (thoughts ? 'Thinking...' : 'Starting...')
+                            };
+
+                            if (workerUI) {
+                                workerUI.prog.innerText = chars > 0 
+                                    ? '⚡ ' + chars.toLocaleString() + ' chars (' + kb + ' KB)'
+                                    : (thoughts ? '🧠 Thinking: ' + thoughts.slice(-35) : 'Waiting for tokens...');
+                            }
+
+                            if (activeModalWorkerId === slotIdx) {
+                                updateModalContent(slotIdx);
+                            }
+                        });
+
+                        if (!result || !result.output || result.output.trim().length === 0) {
+                            throw new Error('Empty response received from AI Studio');
+                        }
+
+                        log(profileName, '✅ ' + stepLabel + ' completed (' + result.output.length.toLocaleString() + ' chars)', 'text-emerald-300');
+
+                        if (step.scrape) {
+                            const saveName = 'Ch_' + (chapter.number < 10 ? '0' + chapter.number : chapter.number) + '_Turn_' + (sIdx + 1) + '.md';
+                            const savePath = outputDir + '/' + saveName;
+                            await Omni.fs.write(savePath, result.output);
+                            const kbNum = parseFloat((result.output.length / 1024).toFixed(1));
+                            totalKbAccumulator += kbNum;
+                            document.getElementById('stat-kb-saved').innerText = totalKbAccumulator.toFixed(1) + ' KB Saved';
+                            log(profileName, '💾 Saved -> ' + saveName + ' (' + kbNum + ' KB)', 'text-yellow-300');
+                        }
+
+                        turnSuccess = true;
+                    } catch(turnErr) {
+                        retries++;
+                        log(profileName, '⚠️ Error on ' + stepLabel + ': ' + turnErr.message, 'text-rose-400');
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                 }
-            };
 
-            activeWorkers.forEach(function(worker) {
+                if (!turnSuccess) {
+                    chapterSuccess = false;
+                    break;
+                }
+            }
+
+            // Cloud Save Grace Period before tearing down session
+            log(profileName, '☁️ Allowing 5s cloud auto-save sync window...', 'text-sky-300');
+            await new Promise(r => setTimeout(r, 5000));
+
+            if (session && !state.preserveSession) {
+                try { await session.close(); } catch(_) {}
+            }
+
+            return chapterSuccess;
+        }
+
+        async function processCourseChapters(courseCode) {
+            const root = state.baseRoot.replace(/\/+$/, '');
+            const outputDir = root + '/' + courseCode + '_Results';
+
+            // Ensure output folder exists
+            try { await Omni.fs.write(outputDir + '/.manifest', 'Course: ' + courseCode); } catch(_) {}
+
+            const chapters = scannedCourseChapters[courseCode] || await scanCourseChapters(courseCode);
+            const crossMap = state.chapterCrossOffs[courseCode] || {};
+
+            // Work-stealing queue of uncrossed chapters only
+            const queue = chapters.filter(ch => crossMap[ch.filename] !== true);
+            const totalToProcess = queue.length;
+            let completedCount = 0;
+
+            log(null, '📚 [' + courseCode + '] Starting ' + totalToProcess + ' uncrossed chapters (' + (chapters.length - totalToProcess) + ' skipped)', 'text-sky-400');
+
+            document.getElementById('label-course-prog').innerText = 'Course: ' + courseCode;
+            document.getElementById('label-chapter-prog').innerText = '0 of ' + totalToProcess + ' Chapters';
+            document.getElementById('bar-chapter-prog').style.width = '0%';
+
+            if (totalToProcess === 0) {
+                log(null, '✅ All chapters for ' + courseCode + ' already completed/crossed off.', 'text-emerald-400');
+                return true;
+            }
+
+            const limit = Math.max(1, state.concurrencyLimit || 3);
+            const concurrencySlots = Math.min(limit, totalToProcess);
+
+            // Setup Concurrency Cards UI
+            const cardsGrid = document.getElementById('worker-cards-grid');
+            cardsGrid.innerHTML = '';
+            const slotUIs = [];
+
+            for (let i = 0; i < concurrencySlots; i++) {
                 const card = document.createElement('div');
                 card.className = 'bg-[#161B22] border border-gray-800 hover:border-sky-500/70 rounded-xl p-3 space-y-1.5 cursor-pointer transition shadow hover:shadow-sky-500/10';
-                card.title = 'Click to inspect live response stream for ' + worker.name;
-
                 card.innerHTML = '<div class="flex items-center justify-between text-xs">' +
-                                    '<span class="font-bold text-white flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span class="worker-name-label"></span></span>' +
-                                    '<span class="worker-badge text-[10px] text-gray-400">Idle</span>' +
+                                    '<span class="font-bold text-white flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>Slot ' + (i + 1) + '</span>' +
+                                    '<span class="slot-badge text-[10px] text-gray-400">Idle</span>' +
                                  '</div>' +
-                                 '<div class="worker-task text-[11px] text-sky-400 font-semibold truncate">Waiting for assignment...</div>' +
-                                 '<div class="worker-prog text-[10px] text-gray-400 truncate">Tap card to view live stream</div>';
-                
-                card.querySelector('.worker-name-label').textContent = worker.name;
-                card.onclick = function() {
-                    openWorkerStreamModal(worker.id);
-                };
+                                 '<div class="slot-task text-[11px] text-sky-400 font-semibold truncate">Waiting for assignment...</div>' +
+                                 '<div class="slot-prog text-[10px] text-gray-400 truncate">Tap to stream live</div>';
+
+                card.onclick = function() { openWorkerStreamModal(i); };
                 cardsGrid.appendChild(card);
 
-                workerUI[worker.id] = {
-                    badge: card.querySelector('.worker-badge'),
-                    task: card.querySelector('.worker-task'),
-                    prog: card.querySelector('.worker-prog')
-                };
+                slotUIs.push({
+                    badge: card.querySelector('.slot-badge'),
+                    task: card.querySelector('.slot-task'),
+                    prog: card.querySelector('.slot-prog')
+                });
 
-                workerStreams[worker.id] = {
-                    workerName: worker.name,
-                    chapterTitle: 'No Chapter Assigned',
-                    turnLabel: 'Idle',
+                workerStreams[i] = {
+                    workerName: 'Slot ' + (i + 1),
+                    courseCode: courseCode,
+                    chapterTitle: 'Idle',
+                    turnLabel: '',
                     thoughts: '',
                     output: '',
                     charCount: 0,
                     kbSize: '0.0',
                     state: 'Idle'
                 };
-            });
+            }
 
-            // 5. Self-Healing Worker Factory Thread Function
-            async function runProfileWorker(worker) {
-                const profileId = worker.id;
-                const profileName = worker.name;
-                const ui = workerUI[profileId];
-                log(profileName, 'Spawning isolated puppet session (Model: ' + model + ')...');
-                if (ui) { ui.badge.innerText = 'Connecting...'; }
+            document.getElementById('stat-active-workers').innerText = concurrencySlots + ' Active';
 
-                let session = null;
-                async function createAndConfigureSession() {
-                    if (session) {
-                        try { await session.close(); } catch(_) {}
-                    }
-                    session = await Omni.studio.createSession({ profile: profileId, model: model });
-                    await session.configure({
-                        thinkingLevel: thinkingLevel,
-                        temporaryChat: tempChat,
-                        sysTitle: 'Book Factory Tutor',
-                        sysPrompt: sysPrompt,
-                        model: model
-                    });
-                    return session;
-                }
+            // Work-stealing concurrency runner
+            async function workerSlotLoop(slotIdx) {
+                while (queue.length > 0 && !isAborted) {
+                    const ch = queue.shift();
+                    const workerProfile = getNextRotatedProfile();
 
-                log(profileName, 'Worker armed and ready. Entering work-stealing queue...', 'text-emerald-400');
+                    const success = await executeSingleChapter(courseCode, ch, workerProfile, slotIdx, slotUIs[slotIdx]);
 
-                // Work-Stealing Loop
-                while (activeQueue.length > 0 && !isAborted) {
-                    const chapter = activeQueue.shift();
-                    log(profileName, '📥 Claimed Chapter ' + chapter.number + ': "' + chapter.title + '"', 'text-cyan-300');
-                    if (ui) {
-                        ui.badge.innerText = 'Active';
-                        ui.task.innerText = 'Ch ' + chapter.number + ': ' + chapter.title.slice(0, 22);
-                        ui.prog.innerText = 'Spawning clean session...';
-                    }
+                    if (success) {
+                        completedCount++;
+                        // Auto-cross completed chapter immediately
+                        if (!state.chapterCrossOffs[courseCode]) state.chapterCrossOffs[courseCode] = {};
+                        state.chapterCrossOffs[courseCode][ch.filename] = true;
+                        saveState();
 
-                    // Fresh session per chapter to guarantee zero context contamination or file chip limits
-                    try {
-                        await createAndConfigureSession();
-                    } catch(initErr) {
-                        const errMsg = initErr.message || String(initErr);
-                        if (/429|quota|resource.*exhausted|rate.*limit/i.test(errMsg)) {
-                            log(profileName, '🛑 Quota Limit (429) on session boot! Retiring worker. Re-queuing Chapter ' + chapter.number + '...', 'text-rose-400');
-                            activeQueue.unshift(chapter);
-                            if (ui) {
-                                ui.badge.innerText = 'Exhausted (429)';
-                                ui.badge.className = 'worker-badge text-[10px] text-rose-400 font-bold';
-                                ui.task.innerText = 'Quota Limit Hit';
-                                ui.prog.innerText = 'Profile sleeping';
-                            }
-                            return;
-                        }
-                        log(profileName, '❌ Session spawn failed: ' + errMsg, 'text-rose-400');
-                        activeQueue.unshift(chapter);
-                        if (ui) { ui.badge.innerText = 'Failed'; ui.task.innerText = 'Spawn error'; }
-                        return;
-                    }
-
-                    let cachedChapterText = null;
-                    let chapterSuccess = true;
-                    let chapterFailureReason = null;
-
-                    // Execute Sequential Multi-Turn Prompt Chain
-                    for (let stepIdx = 0; stepIdx < promptSteps.length; stepIdx++) {
-                        if (isAborted) { chapterSuccess = false; break; }
-                        const step = promptSteps[stepIdx];
-                        const stepLabel = 'Ch ' + chapter.number + ' Turn ' + step.stepNum;
-                        
-                        if (ui) { 
-                            ui.prog.innerText = 'Executing Turn ' + step.stepNum + '/' + promptSteps.length + (step.attachFile ? ' (Attaching chip...)' : '...'); 
+                        if (state.selectedCourseCode === courseCode) {
+                            renderChapterMatrix(courseCode);
                         }
 
-                        const turnAttachments = step.attachFile ? [chapter.fullPath] : [];
-                        let promptPayload = step.template;
-                        if (promptPayload.includes('{{content}}')) {
-                            if (!cachedChapterText) {
-                                try { cachedChapterText = await Omni.fs.read(chapter.fullPath); } catch(_) { cachedChapterText = ''; }
-                            }
-                            promptPayload = promptPayload.replace(/\{\{content\}\}/gi, cachedChapterText);
-                        }
-                        promptPayload = promptPayload
-                            .replace(/\{\{title\}\}/gi, chapter.title)
-                            .replace(/\{\{chapter_num\}\}/gi, chapter.number);
-
-                        const attachNotice = step.attachFile ? ' (📎 Attached ' + chapter.filename + ')' : '';
-                        log(profileName, '⚡ Dispatching Turn ' + step.stepNum + '/' + promptSteps.length + ' for Ch ' + chapter.number + attachNotice + '...');
-
-                        let turnSucceeded = false;
-                        let retrySessionAttempt = 0;
-
-                        while (!turnSucceeded && retrySessionAttempt <= 1 && !isAborted) {
-                            try {
-                                const result = await session.send({
-                                    prompt: promptPayload,
-                                    attachments: turnAttachments,
-                                    label: stepLabel
-                                }, function(progress) {
-                                    if (!progress) return;
-                                    const thoughts = progress.thoughts || '';
-                                    const output = progress.output || '';
-                                    const chars = output.length;
-                                    const kb = (chars / 1024).toFixed(1);
-
-                                    workerStreams[profileId] = {
-                                        workerName: profileName,
-                                        chapterTitle: 'Ch ' + chapter.number + ': ' + chapter.title,
-                                        turnLabel: 'Turn ' + step.stepNum + '/' + promptSteps.length,
-                                        thoughts: thoughts,
-                                        output: output,
-                                        charCount: chars,
-                                        kbSize: kb,
-                                        state: chars > 0 ? 'Streaming Code (' + kb + ' KB)' : (thoughts ? 'Thinking...' : 'Initializing...')
-                                    };
-
-                                    if (ui) {
-                                        ui.badge.innerText = kb + ' KB';
-                                        ui.prog.innerText = chars > 0 
-                                            ? '⚡ ' + chars.toLocaleString() + ' chars (' + kb + ' KB)'
-                                            : (thoughts ? '🧠 Thinking: ' + thoughts.slice(-40) : 'Waiting for tokens...');
-                                    }
-
-                                    if (activeModalWorkerId === profileId) {
-                                        updateModalContent(profileId);
-                                    }
-                                });
-
-                                // Anti-False-Positive Guard: Empty response is an explicit failure
-                                if (!result || !result.output || result.output.trim().length === 0) {
-                                    throw new Error('Empty response received from AI Studio');
-                                }
-
-                                log(profileName, '🏁 Turn ' + step.stepNum + ' response finalized! Total output size: ' + result.output.length.toLocaleString() + ' chars (' + (result.output.length / 1024).toFixed(1) + ' KB).', 'text-emerald-400');
-                                log(profileName, '🔍 DECISION REASON: Backend stream stopped AND client-side DOM rendering remained completely static for 8.4s with zero token growth.', 'text-cyan-300');
-
-                                // Scrape & Save to Device Storage
-                                if (step.scrape) {
-                                    const saveName = 'Ch_' + (chapter.number < 10 ? '0' + chapter.number : chapter.number) + '_Turn_' + step.stepNum + '.md';
-                                    const savePath = outputDir + '/' + saveName;
-                                    log(profileName, '💾 Saving ' + (result.output.length / 1024).toFixed(1) + ' KB to ' + saveName + '...', 'text-yellow-300');
-                                    await Omni.fs.write(savePath, result.output);
-                                    log(profileName, '✅ Saved successfully to ' + savePath, 'text-emerald-300');
-                                }
-
-                                turnSucceeded = true;
-
-                            } catch(turnErr) {
-                                const errMsg = turnErr.message || String(turnErr);
-
-                                // 1. Quota 429 Detection -> Worker Sleep & Chapter Re-queue
-                                const isQuota = /429|quota|resource.*exhausted|rate.*limit/i.test(errMsg);
-                                if (isQuota) {
-                                    log(profileName, '🛑 Quota Limit (429) hit! Retiring worker to sleep. Re-queuing Chapter ' + chapter.number + '...', 'text-rose-400');
-                                    activeQueue.unshift(chapter);
-                                    if (ui) {
-                                        ui.badge.innerText = 'Exhausted (429)';
-                                        ui.badge.className = 'worker-badge text-[10px] text-rose-400 font-bold';
-                                        ui.task.innerText = 'Quota Limit Hit';
-                                        ui.prog.innerText = 'Profile sleeping';
-                                    }
-                                    try { await session.close(); } catch(_) {}
-                                    return; // Retire worker from active pool
-                                }
-
-                                // 2. Permission Denied -> Session Recycling & Healing
-                                const isPermDenied = /permission.*denied/i.test(errMsg);
-                                if (isPermDenied && retrySessionAttempt === 0) {
-                                    retrySessionAttempt++;
-                                    log(profileName, '⚠️ Permission Denied detected. Recycling headless session and retrying Turn ' + step.stepNum + '...', 'text-amber-300');
-                                    if (ui) { ui.prog.innerText = 'Recycling session...'; }
-                                    try {
-                                        await createAndConfigureSession();
-                                        continue; // Re-attempt turn with fresh session
-                                    } catch(createErr) {
-                                        log(profileName, '❌ Session recreation failed: ' + createErr.message, 'text-rose-400');
-                                    }
-                                }
-
-                                chapterSuccess = false;
-                                chapterFailureReason = errMsg;
-                                log(profileName, '💥 Error on Turn ' + step.stepNum + ': ' + errMsg, 'text-rose-400');
-                                break;
-                            }
-                        }
-
-                        if (!chapterSuccess) break;
-                    }
-
-                    // Strict Chapter Validation: Only marked complete when all steps succeed
-                    if (chapterSuccess) {
-                        completedChapters.push(chapter);
-                        log(profileName, '🏁 Successfully Completed Chapter ' + chapter.number + ' (Verified)!', 'text-emerald-400');
+                        const pct = Math.round((completedCount / totalToProcess) * 100);
+                        document.getElementById('label-chapter-prog').innerText = completedCount + ' of ' + totalToProcess + ' (' + pct + '%)';
+                        document.getElementById('bar-chapter-prog').style.width = pct + '%';
+                        log(workerProfile.name, '🏁 Finished ' + courseCode + ' Ch ' + ch.number + ' and auto-crossed off.', 'text-emerald-400');
                     } else if (!isAborted) {
-                        chapter.failures = (chapter.failures || 0) + 1;
-                        if (chapter.failures < 3) {
-                            log(profileName, '🔄 Chapter ' + chapter.number + ' failed (attempt ' + chapter.failures + '/3). Returning to queue for another worker...', 'text-amber-300');
-                            activeQueue.push(chapter);
-                        } else {
-                            log(null, '❌ Chapter ' + chapter.number + ' exceeded 3 retry attempts. Dropping to prevent deadlock: ' + (chapterFailureReason || 'Unknown error'), 'text-rose-500');
-                            failedChapters.push({ chapter: chapter, error: chapterFailureReason });
-                        }
-                    }
-
-                    // Cloud Save Grace Period before teardown
-                    log(profileName, '☁️ Waiting 5s grace period for Google AI Studio cloud auto-save to commit to Google Drive...', 'text-sky-300');
-                    await new Promise(r => setTimeout(r, 5000));
-                    log(profileName, '✅ Google AI Studio cloud auto-save window complete.', 'text-emerald-400');
-
-                    // Cleanly teardown session unless user requested to preserve it
-                    const preserveSession = document.getElementById('check-preserve-session')?.checked === true;
-                    if (session && !preserveSession) {
-                        try { await session.close(); } catch(_) {}
-                        session = null;
-                    } else if (session) {
-                        log(profileName, '🛡️ Preserving active session for account review.', 'text-cyan-300');
+                        log(workerProfile.name, '❌ Failed Ch ' + ch.number + '. Re-queueing for another worker...', 'text-amber-400');
+                        queue.push(ch);
                     }
                 }
 
-                log(profileName, 'Work complete. Worker finished cleanly.', 'text-gray-400');
-                if (ui && !ui.badge.innerText.includes('Exhausted')) {
-                    ui.badge.innerText = 'Done';
-                    ui.task.innerText = 'All tasks completed';
-                    ui.prog.innerText = 'Idle';
+                if (slotUIs[slotIdx]) {
+                    slotUIs[slotIdx].badge.innerText = 'Done';
+                    slotUIs[slotIdx].task.innerText = 'Completed all queued work';
+                    slotUIs[slotIdx].prog.innerText = 'Idle';
                 }
             }
 
-            // Launch Active Workers Simultaneously & Validate Outcomes
-            try {
-                await Promise.all(activeWorkers.map(function(worker) {
-                    return runProfileWorker(worker);
-                }));
+            const runners = [];
+            for (let s = 0; s < concurrencySlots; s++) {
+                runners.push(workerSlotLoop(s));
+            }
+            await Promise.all(runners);
 
-                const totalRequested = limit;
-                const totalCompleted = completedChapters.length;
-                const totalFailed = failedChapters.length;
-                const totalUnprocessed = activeQueue.length;
+            return completedCount >= totalToProcess;
+        }
+
+        async function launchNightShiftFactory() {
+            if (isFactoryRunning) return;
+
+            const enabledCourses = state.courses.filter(c => c.enabled !== false && !c.completed);
+            const targetCourses = state.multiCourseEnabled
+                ? (enabledCourses.length > 0 ? enabledCourses : state.courses.filter(c => c.enabled !== false))
+                : state.courses.filter(c => c.code === state.selectedCourseCode);
+
+            if (targetCourses.length === 0) {
+                Omni.toast('No active courses in queue! Add or enable courses in Tab 2.');
+                return;
+            }
+
+            isFactoryRunning = true;
+            isAborted = false;
+            switchDeck('mission');
+
+            btnMasterLaunch.classList.add('hidden');
+            btnEmergencyAbort.classList.remove('hidden');
+            setFactoryStatus('Night Shift Running', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+            log(null, '🚀 NIGHT SHIFT FACTORY ARMED! Processing ' + targetCourses.length + ' course(s)...', 'text-sky-300');
+
+            try {
+                for (let cIdx = 0; cIdx < targetCourses.length; cIdx++) {
+                    if (isAborted) break;
+                    const course = targetCourses[cIdx];
+                    state.selectedCourseCode = course.code;
+                    saveState();
+                    renderCourseQueue();
+
+                    log(null, '══════════════════════════════════════════════════════', 'text-gray-600');
+                    log(null, '📦 MOUNTING COURSE (' + (cIdx + 1) + '/' + targetCourses.length + '): ' + course.code, 'text-cyan-400 font-bold');
+
+                    const finished = await processCourseChapters(course.code);
+
+                    if (finished && !isAborted) {
+                        course.completed = true;
+                        saveState();
+                        renderCourseQueue();
+                        log(null, '🎉 100% COMPLETE: Course ' + course.code + ' finished and verified!', 'text-emerald-400 font-bold');
+                    }
+                }
 
                 if (isAborted) {
                     setFactoryStatus('Aborted', 'bg-rose-900 text-rose-300 border-rose-700');
-                    log(null, '🛑 Factory aborted by user. Completed: ' + totalCompleted + '/' + totalRequested, 'text-rose-400');
-                } else if (totalUnprocessed > 0) {
-                    setFactoryStatus('All Profiles Exhausted', 'bg-rose-900 text-rose-300 border-rose-700');
-                    log(null, '🛑 All profile workers are asleep or exhausted! ' + totalUnprocessed + ' chapter(s) remaining.', 'text-rose-400');
-                    Omni.toast('All profiles hit quota! Add more profiles.');
-                } else if (totalFailed > 0) {
-                    setFactoryStatus('Completed with ' + totalFailed + ' Errors', 'bg-amber-900 text-amber-300 border-amber-700');
-                    log(null, '⚠️ Factory finished with issues: ' + totalCompleted + ' succeeded, ' + totalFailed + ' failed.', 'text-amber-400');
-                    Omni.toast('Finished with ' + totalFailed + ' failed chapters');
+                    log(null, '🛑 Night-shift pipeline halted by user.', 'text-rose-400');
                 } else {
-                    setFactoryStatus('Factory Complete (' + totalCompleted + '/' + totalRequested + ')', 'bg-emerald-900 text-emerald-300 border-emerald-700');
-                    log(null, '🎉 100% Verified Success! All ' + totalCompleted + ' chapters processed with zero false positives.', 'text-emerald-400');
-                    Omni.toast('Factory Pipeline 100% Completed!');
+                    setFactoryStatus('All Courses Complete', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+                    log(null, '🏆 NIGHT SHIFT VICTORY! All courses and chapters processed successfully.', 'text-emerald-300 font-extrabold');
+                    Omni.toast('🎉 Night Shift 100% Complete!');
+                    Omni.vibrate(300);
                 }
-            } catch(allErr) {
-                log(null, 'Factory exception: ' + allErr.message, 'text-rose-400');
+            } catch(e) {
+                log(null, '💥 Pipeline Error: ' + e.message, 'text-rose-400');
             } finally {
-                btnAbort.classList.add('hidden');
+                isFactoryRunning = false;
+                btnMasterLaunch.classList.remove('hidden');
+                btnEmergencyAbort.classList.add('hidden');
+                document.getElementById('stat-active-workers').innerText = '0 Active';
             }
-        };
+        }
 
-        btnAbort.onclick = function() {
+        btnMasterLaunch.onclick = launchNightShiftFactory;
+        btnEmergencyAbort.onclick = function() {
             isAborted = true;
             try { Omni.studio.abort(); } catch(_) {}
-            log(null, '🛑 User triggered Emergency Stop! Halting all active workers...', 'text-rose-400');
-            setFactoryStatus('Aborted', 'bg-rose-900 text-rose-300 border-rose-700');
+            log(null, '🛑 Emergency Stop Triggered! Halting workers...', 'text-rose-400');
+            setFactoryStatus('Aborting...', 'bg-rose-900 text-rose-300 border-rose-700');
         };
+
+        // Initialize state & load device profiles
+        loadState();
+        loadDeviceProfiles();
     </script>
 </body>
 </html>
