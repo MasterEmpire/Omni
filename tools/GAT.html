@@ -364,6 +364,137 @@
 
     <!-- Playbook Autonomous Controller Script -->
     <script>
+        // 0. Synchronous In-Page Omni Client SDK (Zero Race Conditions)
+        (function() {
+            if (window.Omni) return;
+            const callbacks = new Map();
+
+            window.__omniRpcResolve = function(id, data) {
+                const cb = callbacks.get(id);
+                if (cb) {
+                    callbacks.delete(id);
+                    cb.resolve(data);
+                }
+            };
+
+            window.__omniRpcReject = function(id, errorMsg) {
+                const cb = callbacks.get(id);
+                if (cb) {
+                    callbacks.delete(id);
+                    cb.reject(new Error(errorMsg));
+                }
+            };
+
+            window.__omniRpcProgress = function(id, data) {
+                const cb = callbacks.get(id);
+                if (cb && typeof cb.onProgress === 'function') {
+                    cb.onProgress(data);
+                }
+            };
+
+            function rpcCall(method, args, onProgress) {
+                return new Promise((resolve, reject) => {
+                    if (!window.__OmniStudioLabBridge) {
+                        return reject(new Error("OmniStudioLabBridge is not attached to this tab"));
+                    }
+                    const id = 'call_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+                    callbacks.set(id, { resolve, reject, onProgress });
+                    try {
+                        window.__OmniStudioLabBridge[method](id, ...(args || []));
+                    } catch(e) {
+                        callbacks.delete(id);
+                        reject(e);
+                    }
+                });
+            }
+
+            window.Omni = {
+                studio: {
+                    createSession: function(opts) {
+                        opts = opts || {};
+                        var profile = opts.profile || opts.profileId || 'default';
+                        var model = opts.model || '';
+                        return rpcCall('studioCreateSession', [profile, model]).then(function(res) {
+                            var sId = res.sessionId;
+                            return {
+                                id: sId,
+                                profile: profile,
+                                configure: function(configOpts) {
+                                    return rpcCall('studioConfigureSession', [sId, JSON.stringify(configOpts || {})]);
+                                },
+                                send: function(turnOpts, onProgress) {
+                                    return rpcCall('studioSendSessionTurn', [sId, JSON.stringify(turnOpts || {})], onProgress);
+                                },
+                                close: function() {
+                                    return rpcCall('studioCloseSession', [sId]);
+                                }
+                            };
+                        });
+                    },
+                    init: function(profileId, model) {
+                        return rpcCall('studioInit', [profileId || 'default', model || '']);
+                    },
+                    configure: function(opts) {
+                        return rpcCall('studioConfigure', [JSON.stringify(opts || {})]);
+                    },
+                    send: function(opts, onProgress) {
+                        return rpcCall('studioSendTurn', [JSON.stringify(opts || {})], onProgress);
+                    },
+                    abort: function() {
+                        if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.studioAbort();
+                    },
+                    close: function() {
+                        if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.studioClose();
+                    }
+                },
+                python: {
+                    run: function(code, onProgress) {
+                        return rpcCall('pythonRun', [code], onProgress);
+                    }
+                },
+                ide: {
+                    pullFiles: function(project, files) {
+                        return rpcCall('idePullFiles', [project, JSON.stringify(files || [])]);
+                    },
+                    commitCxp: function(xml) {
+                        return rpcCall('ideCommitCxp', [xml]);
+                    }
+                },
+                fs: {
+                    read: function(path) {
+                        return rpcCall('fsRead', [path]);
+                    },
+                    write: function(path, content) {
+                        return rpcCall('fsWrite', [path, content]);
+                    },
+                    list: function(path) {
+                        return rpcCall('fsList', [path]);
+                    }
+                },
+                wakeLock: {
+                    acquire: function(tag) {
+                        return rpcCall('wakeLockAcquire', [tag || 'StudioLab']);
+                    },
+                    release: function() {
+                        return rpcCall('wakeLockRelease', []);
+                    }
+                },
+                toast: function(msg) {
+                    if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.toast(String(msg));
+                },
+                vibrate: function(ms) {
+                    if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.vibrate(Number(ms) || 50);
+                },
+                copy: function(text) {
+                    if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.copyToClipboard(String(text));
+                },
+                getClipboard: function() {
+                    if (window.__OmniStudioLabBridge) return window.__OmniStudioLabBridge.getClipboardText();
+                    return "";
+                }
+            };
+        })();
+
         const terminalEl = document.getElementById('terminal');
         const badgeEl = document.getElementById('factory-badge');
         const btnEmergencyAbort = document.getElementById('btn-emergency-abort');
@@ -778,6 +909,11 @@
             const root = state.baseRoot.replace(/\/+$/, '');
             const courseDir = root + '/' + courseCode;
             const outputDir = root + '/' + courseCode + '_Results';
+
+            if (!window.Omni || !window.Omni.fs) {
+                log(null, '⏳ Waiting for Omni host bridge before scanning...', 'text-amber-400');
+                return [];
+            }
 
             log(null, '🔍 Scanning ' + courseDir + '...', 'text-cyan-300');
             let files = [];
@@ -1414,9 +1550,17 @@
             setFactoryStatus('Aborting...', 'bg-rose-900 text-rose-300 border-rose-700');
         };
 
-        // Initialize state & load device profiles
-        loadState();
-        loadDeviceProfiles();
+        // Ensure native Android Binder is mounted before firing state restoration and initial scan
+        async function init() {
+            let attempts = 0;
+            while (!window.__OmniStudioLabBridge && attempts < 30) {
+                await new Promise(r => setTimeout(r, 40));
+                attempts++;
+            }
+            await loadState();
+            await loadDeviceProfiles();
+        }
+        init();
     </script>
 </body>
 </html>
