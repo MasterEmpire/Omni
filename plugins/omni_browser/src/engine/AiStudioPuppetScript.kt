@@ -666,11 +666,19 @@ fun buildAiStudioPuppetScript(): String {
 
                         if (errTxt && !errTxt.toLowerCase().includes('saved')) {
                             const lowerErr = errTxt.toLowerCase();
+                            const isQuota = lowerErr.includes('quota') || lowerErr.includes('resource exhausted') || lowerErr.includes('resource_exhausted') || lowerErr.includes('rate limit') || lowerErr.includes('429');
+                            if (isQuota) {
+                                hostLog('STUDIO_ERROR', 'Quota exhausted (429): ' + errTxt);
+                                this.isBusy = false;
+                                if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                    window.OmniAutomator.onPuppetTurnError('Quota Exhausted (429): ' + errTxt);
+                                }
+                                return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + errTxt };
+                            }
+
                             const isRetryable = lowerErr.includes('internal error') ||
                                                 lowerErr.includes('permission denied') ||
                                                 lowerErr.includes('overloaded') ||
-                                                lowerErr.includes('resource exhausted') ||
-                                                lowerErr.includes('quota') ||
                                                 lowerErr.includes('try again') ||
                                                 lowerErr.includes('server error');
 
@@ -795,6 +803,13 @@ fun buildAiStudioPuppetScript(): String {
                     }
 
                     this.isBusy = false;
+                    if (currentTurnOutput.trim().length === 0) {
+                        const emptyErr = 'AI Studio generation ended with empty output';
+                        if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                            window.OmniAutomator.onPuppetTurnError(emptyErr);
+                        }
+                        return { thoughts: latestTurnThoughts, output: '', error: emptyErr };
+                    }
                     if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnComplete) {
                         window.OmniAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
                     }
