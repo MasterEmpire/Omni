@@ -1339,6 +1339,13 @@
             log(null, '🚀 NIGHT SHIFT FACTORY ARMED! Processing ' + targetCourses.length + ' course(s)...', 'text-sky-300');
 
             try {
+                if (window.Omni && window.Omni.wakeLock) {
+                    await Omni.wakeLock.acquire("GAT_NightShift");
+                    log(null, '🛡️ Master Pipeline WakeLock engaged. Screen can be turned off safely!', 'text-emerald-400 font-semibold');
+                }
+            } catch(_) {}
+
+            try {
                 for (let cIdx = 0; cIdx < targetCourses.length; cIdx++) {
                     if (isAborted) break;
                     const course = targetCourses[cIdx];
@@ -1371,6 +1378,12 @@
             } catch(e) {
                 log(null, '💥 Pipeline Error: ' + e.message, 'text-rose-400');
             } finally {
+                try {
+                    if (window.Omni && window.Omni.wakeLock) {
+                        await Omni.wakeLock.release();
+                        log(null, '🛡️ Master Pipeline WakeLock released.', 'text-gray-400');
+                    }
+                } catch(_) {}
                 isFactoryRunning = false;
                 btnMasterLaunch.classList.remove('hidden');
                 btnEmergencyAbort.classList.add('hidden');
@@ -1382,6 +1395,7 @@
         btnEmergencyAbort.onclick = function() {
             isAborted = true;
             try { Omni.studio.abort(); } catch(_) {}
+            try { if (window.Omni && window.Omni.wakeLock) Omni.wakeLock.release(); } catch(_) {}
             log(null, '🛑 Emergency Stop Triggered! Halting workers...', 'text-rose-400');
             setFactoryStatus('Aborting...', 'bg-rose-900 text-rose-300 border-rose-700');
         };
