@@ -375,7 +375,7 @@
         let scannedCourseChapters = {};
 
         // 1. Dual-Layer State Persistence Engine
-        const STORAGE_KEY = 'omni_gat_persistent_state_v3';
+        const STORAGE_KEY = 'omni_gat_persistent_state_v4';
         let state = {
             baseRoot: '/storage/emulated/0/Download/Chapters',
             concurrencyLimit: 3,
@@ -386,12 +386,26 @@
             tempChat: false,
             sysPrompt: 'You are an expert academic tutor. Deeply examine the attached textbook chapter and ground all answers on its specific contents.',
             courses: [
-                { code: 'BIOL_1012', enabled: true, completed: false },
+                { code: 'ANTH_1012', enabled: true, completed: false },
+                { code: 'PSYC_1011', enabled: true, completed: false },
                 { code: 'MGMT_1012', enabled: true, completed: false },
-                { code: 'PHYS_1011', enabled: true, completed: false },
-                { code: 'LOCT_1011', enabled: true, completed: false }
+                { code: 'MCIE_1012', enabled: true, completed: false },
+                { code: 'INCL_1012', enabled: true, completed: false },
+                { code: 'HIST_1012', enabled: true, completed: false },
+                { code: 'GLTR_2012', enabled: true, completed: false },
+                { code: 'GEES_1011', enabled: true, completed: false },
+                { code: 'EMTE_1012', enabled: true, completed: false },
+                { code: 'ECON_1011', enabled: true, completed: false },
+                { code: 'FLEN_1012', enabled: true, completed: false },
+                { code: 'FLEN_1011', enabled: true, completed: false },
+                { code: 'CHEM_1012', enabled: true, completed: false },
+                { code: 'BIOL_1012', enabled: true, completed: false },
+                { code: 'LOCT_1011', enabled: true, completed: false },
+                { code: 'MATH_1012', enabled: true, completed: false },
+                { code: 'MATH_1011', enabled: true, completed: false },
+                { code: 'SPSC_1011', enabled: true, completed: false }
             ],
-            selectedCourseCode: 'BIOL_1012',
+            selectedCourseCode: 'ANTH_1012',
             promptSteps: [
                 {
                     stepNum: 1,
