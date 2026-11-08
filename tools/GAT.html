@@ -96,10 +96,18 @@
             <div>
                 <label class="text-xs text-gray-400">Temporary Chat</label>
                 <select id="select-temp-chat" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">
-                    <option value="false" selected>Disabled (Persistent)</option>
-                    <option value="true">Enabled (Incognito)</option>
+                    <option value="false" selected>Disabled (Persistent - Saved to Account)</option>
+                    <option value="true">Enabled (Incognito - Never Saved)</option>
                 </select>
             </div>
+        </div>
+
+        <div class="flex items-center justify-between text-xs pt-1 border-t border-gray-800">
+            <label class="flex items-center gap-2 cursor-pointer text-gray-300">
+                <input type="checkbox" id="check-preserve-session" class="accent-sky-500" />
+                <span class="font-semibold text-sky-400">Preserve Headless Sessions</span>
+            </label>
+            <span class="text-[11px] text-gray-500">Keep WebViews active after chapters complete to prevent sync loss</span>
         </div>
 
         <div>
@@ -170,6 +178,63 @@
                 <button id="btn-clear-logs" class="text-gray-500 hover:text-gray-300">Clear Logs</button>
             </div>
             <pre id="terminal" class="w-full h-72 bg-black/80 border border-gray-800 rounded-xl p-3 text-xs font-mono text-green-400 overflow-y-auto whitespace-pre-wrap leading-relaxed">System ready. Click 'Scan Directory' to detect chapter files.</pre>
+        </div>
+    </div>
+
+    <!-- Live Stream Modal -->
+    <div id="modal-worker-stream" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+        <div class="bg-[#161B22] border border-gray-700 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <!-- Modal Header -->
+            <div class="p-4 border-b border-gray-800 flex items-center justify-between bg-[#0D1117]">
+                <div class="flex items-center gap-2.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <div>
+                        <h3 id="modal-worker-title" class="text-sm font-bold text-white flex items-center gap-2">
+                            <span>Worker Stream</span>
+                        </h3>
+                        <p id="modal-worker-sub" class="text-xs text-sky-400">Loading stream...</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button id="btn-modal-copy" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sky-400 text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                        📋 Copy Code
+                    </button>
+                    <button id="btn-modal-close" class="text-gray-400 hover:text-white p-1 text-lg">
+                        ✕
+                    </button>
+                </div>
+            </div>
+
+            <!-- Metrics Ticker Bar -->
+            <div class="px-4 py-2 bg-[#12161C] border-b border-gray-800 flex flex-wrap items-center justify-between text-xs text-gray-400 gap-2">
+                <div class="flex items-center gap-3">
+                    <span>Length: <strong id="modal-char-count" class="text-emerald-400 font-mono">0 chars</strong></span>
+                    <span>Size: <strong id="modal-kb-size" class="text-sky-400 font-mono">0.0 KB</strong></span>
+                    <span>State: <strong id="modal-state-label" class="text-amber-400 font-mono">Idle</strong></span>
+                </div>
+                <label class="flex items-center gap-1.5 cursor-pointer text-gray-300">
+                    <input type="checkbox" id="modal-autoscroll" class="accent-sky-500" checked />
+                    <span>Auto-scroll</span>
+                </label>
+            </div>
+
+            <!-- Modal Body (Thoughts + Code View) -->
+            <div class="p-4 overflow-y-auto space-y-3 flex-1 font-mono text-xs">
+                <!-- Thoughts Section -->
+                <div id="modal-thoughts-box" class="hidden bg-[#0D1117] border border-gray-800 rounded-xl p-3 space-y-1.5">
+                    <div class="flex items-center justify-between text-[11px] text-gray-400">
+                        <span class="font-bold text-amber-400 flex items-center gap-1"><span>🧠</span> Model Reasoning / Thoughts</span>
+                        <span id="modal-thoughts-count" class="text-gray-500">0 chars</span>
+                    </div>
+                    <pre id="modal-thoughts-content" class="text-gray-400 whitespace-pre-wrap max-h-36 overflow-y-auto text-[11px]"></pre>
+                </div>
+
+                <!-- Code / Response Stream -->
+                <div class="space-y-1">
+                    <div class="text-[11px] text-gray-400 font-bold uppercase tracking-wider">Live Response Stream</div>
+                    <pre id="modal-stream-content" class="w-full min-h-[300px] bg-black/70 border border-gray-800 rounded-xl p-3 text-gray-200 overflow-y-auto whitespace-pre-wrap leading-relaxed select-text"></pre>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -413,24 +478,100 @@
             const completedChapters = [];
             const failedChapters = [];
 
+            const workerStreams = {};
+            let activeModalWorkerId = null;
+
+            const modalEl = document.getElementById('modal-worker-stream');
+            const modalTitleEl = document.getElementById('modal-worker-title');
+            const modalSubEl = document.getElementById('modal-worker-sub');
+            const modalCharCountEl = document.getElementById('modal-char-count');
+            const modalKbSizeEl = document.getElementById('modal-kb-size');
+            const modalStateLabelEl = document.getElementById('modal-state-label');
+            const modalThoughtsBox = document.getElementById('modal-thoughts-box');
+            const modalThoughtsContent = document.getElementById('modal-thoughts-content');
+            const modalThoughtsCount = document.getElementById('modal-thoughts-count');
+            const modalStreamContent = document.getElementById('modal-stream-content');
+            const modalAutoScroll = document.getElementById('modal-autoscroll');
+
+            function updateModalContent(workerId) {
+                const s = workerStreams[workerId];
+                if (!s) return;
+                modalTitleEl.innerHTML = '<span>Worker Stream: ' + s.workerName + '</span>';
+                modalSubEl.innerText = s.chapterTitle + ' • ' + s.turnLabel;
+                modalCharCountEl.innerText = s.charCount.toLocaleString() + ' chars';
+                modalKbSizeEl.innerText = s.kbSize + ' KB';
+                modalStateLabelEl.innerText = s.state;
+
+                if (s.thoughts && s.thoughts.trim().length > 0) {
+                    modalThoughtsBox.classList.remove('hidden');
+                    modalThoughtsContent.innerText = s.thoughts;
+                    modalThoughtsCount.innerText = s.thoughts.length.toLocaleString() + ' chars';
+                } else {
+                    modalThoughtsBox.classList.add('hidden');
+                }
+
+                modalStreamContent.innerText = s.output || '(Waiting for tokens from AI Studio...)';
+                if (modalAutoScroll.checked) {
+                    modalStreamContent.scrollTop = modalStreamContent.scrollHeight;
+                }
+            }
+
+            function openWorkerStreamModal(workerId) {
+                activeModalWorkerId = workerId;
+                updateModalContent(workerId);
+                modalEl.classList.remove('hidden');
+            }
+
+            document.getElementById('btn-modal-close').onclick = function() {
+                modalEl.classList.add('hidden');
+                activeModalWorkerId = null;
+            };
+
+            document.getElementById('btn-modal-copy').onclick = function() {
+                if (activeModalWorkerId && workerStreams[activeModalWorkerId]) {
+                    const text = workerStreams[activeModalWorkerId].output || '';
+                    if (text.length > 0) {
+                        Omni.copy(text);
+                        Omni.toast('Copied ' + (text.length / 1024).toFixed(1) + ' KB to clipboard!');
+                    } else {
+                        Omni.toast('No output to copy yet');
+                    }
+                }
+            };
+
             activeWorkers.forEach(function(worker) {
                 const card = document.createElement('div');
-                card.className = 'bg-[#161B22] border border-gray-800 rounded-xl p-3 space-y-1.5';
-                
+                card.className = 'bg-[#161B22] border border-gray-800 hover:border-sky-500/70 rounded-xl p-3 space-y-1.5 cursor-pointer transition shadow hover:shadow-sky-500/10';
+                card.title = 'Click to inspect live response stream for ' + worker.name;
+
                 card.innerHTML = '<div class="flex items-center justify-between text-xs">' +
                                     '<span class="font-bold text-white flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span class="worker-name-label"></span></span>' +
                                     '<span class="worker-badge text-[10px] text-gray-400">Idle</span>' +
                                  '</div>' +
                                  '<div class="worker-task text-[11px] text-sky-400 font-semibold truncate">Waiting for assignment...</div>' +
-                                 '<div class="worker-prog text-[10px] text-gray-500 truncate">No active turn</div>';
+                                 '<div class="worker-prog text-[10px] text-gray-400 truncate">Tap card to view live stream</div>';
                 
                 card.querySelector('.worker-name-label').textContent = worker.name;
+                card.onclick = function() {
+                    openWorkerStreamModal(worker.id);
+                };
                 cardsGrid.appendChild(card);
 
                 workerUI[worker.id] = {
                     badge: card.querySelector('.worker-badge'),
                     task: card.querySelector('.worker-task'),
                     prog: card.querySelector('.worker-prog')
+                };
+
+                workerStreams[worker.id] = {
+                    workerName: worker.name,
+                    chapterTitle: 'No Chapter Assigned',
+                    turnLabel: 'Idle',
+                    thoughts: '',
+                    output: '',
+                    charCount: 0,
+                    kbSize: '0.0',
+                    state: 'Idle'
                 };
             });
 
@@ -531,8 +672,32 @@
                                     attachments: turnAttachments,
                                     label: stepLabel
                                 }, function(progress) {
-                                    if (progress && progress.thoughts && ui) {
-                                        ui.prog.innerText = 'Thinking: ' + progress.thoughts.slice(-45);
+                                    if (!progress) return;
+                                    const thoughts = progress.thoughts || '';
+                                    const output = progress.output || '';
+                                    const chars = output.length;
+                                    const kb = (chars / 1024).toFixed(1);
+
+                                    workerStreams[profileId] = {
+                                        workerName: profileName,
+                                        chapterTitle: 'Ch ' + chapter.number + ': ' + chapter.title,
+                                        turnLabel: 'Turn ' + step.stepNum + '/' + promptSteps.length,
+                                        thoughts: thoughts,
+                                        output: output,
+                                        charCount: chars,
+                                        kbSize: kb,
+                                        state: chars > 0 ? 'Streaming Code (' + kb + ' KB)' : (thoughts ? 'Thinking...' : 'Initializing...')
+                                    };
+
+                                    if (ui) {
+                                        ui.badge.innerText = kb + ' KB';
+                                        ui.prog.innerText = chars > 0 
+                                            ? '⚡ ' + chars.toLocaleString() + ' chars (' + kb + ' KB)'
+                                            : (thoughts ? '🧠 Thinking: ' + thoughts.slice(-40) : 'Waiting for tokens...');
+                                    }
+
+                                    if (activeModalWorkerId === profileId) {
+                                        updateModalContent(profileId);
                                     }
                                 });
 
@@ -541,14 +706,16 @@
                                     throw new Error('Empty response received from AI Studio');
                                 }
 
-                                log(profileName, '✅ Turn ' + step.stepNum + ' response verified (' + result.output.length + ' chars).', 'text-emerald-300');
+                                log(profileName, '🏁 Turn ' + step.stepNum + ' response finalized! Total output size: ' + result.output.length.toLocaleString() + ' chars (' + (result.output.length / 1024).toFixed(1) + ' KB).', 'text-emerald-400');
+                                log(profileName, '🔍 DECISION REASON: Backend stream stopped AND client-side DOM rendering remained completely static for 8.4s with zero token growth.', 'text-cyan-300');
 
                                 // Scrape & Save to Device Storage
                                 if (step.scrape) {
                                     const saveName = 'Ch_' + (chapter.number < 10 ? '0' + chapter.number : chapter.number) + '_Turn_' + step.stepNum + '.md';
                                     const savePath = outputDir + '/' + saveName;
+                                    log(profileName, '💾 Saving ' + (result.output.length / 1024).toFixed(1) + ' KB to ' + saveName + '...', 'text-yellow-300');
                                     await Omni.fs.write(savePath, result.output);
-                                    log(profileName, '💾 Verified & Saved -> ' + saveName, 'text-yellow-300');
+                                    log(profileName, '✅ Saved successfully to ' + savePath, 'text-emerald-300');
                                 }
 
                                 turnSucceeded = true;
@@ -610,10 +777,18 @@
                         }
                     }
 
-                    // Cleanly teardown session after each chapter to purge RAM and prevent file chip accumulation
-                    if (session) {
+                    // Cloud Save Grace Period before teardown
+                    log(profileName, '☁️ Waiting 5s grace period for Google AI Studio cloud auto-save to commit to Google Drive...', 'text-sky-300');
+                    await new Promise(r => setTimeout(r, 5000));
+                    log(profileName, '✅ Google AI Studio cloud auto-save window complete.', 'text-emerald-400');
+
+                    // Cleanly teardown session unless user requested to preserve it
+                    const preserveSession = document.getElementById('check-preserve-session')?.checked === true;
+                    if (session && !preserveSession) {
                         try { await session.close(); } catch(_) {}
                         session = null;
+                    } else if (session) {
+                        log(profileName, '🛡️ Preserving active session for account review.', 'text-cyan-300');
                     }
                 }
 
