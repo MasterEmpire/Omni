@@ -400,4 +400,30 @@ class OmniStudioLabBridge(
 
     @JavascriptInterface
     fun getClipboardText(): String { return bridge.getClipboardText() ?: "" }
+
+    // --- 6. Hardware & WakeLock Management ---
+    @JavascriptInterface
+    fun wakeLockAcquire(callId: String, tag: String) {
+        mainHandler.post {
+            try {
+                bridge.acquireWakeLock(tag.ifEmpty { "StudioLab" })
+                bridge.startForegroundTask("Omni Factory", "Running background pipeline ($tag)")
+                resolve(callId, "Acquired")
+            } catch (e: Exception) {
+                reject(callId, e.message ?: "Failed acquiring WakeLock")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun wakeLockRelease(callId: String) {
+        mainHandler.post {
+            try {
+                bridge.releaseWakeLock()
+                resolve(callId, "Released")
+            } catch (e: Exception) {
+                reject(callId, e.message ?: "Failed releasing WakeLock")
+            }
+        }
+    }
 }
