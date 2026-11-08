@@ -394,16 +394,17 @@
             const idleMsg = idleCount > 0 ? ' (' + idleCount + ' idle profiles saved)' : '';
             log(null, '🚀 Factory Armed! Processing ' + activeQueue.length + ' chapter(s) across ' + activeWorkers.length + ' active worker(s)' + idleMsg + '...', 'text-sky-300');
 
-            // Render Worker Mission Cards (Immune to parentheses / special characters in names)
+            // Render Worker Mission Cards & Tracking Registry
             const cardsGrid = document.getElementById('worker-cards-grid');
             cardsGrid.innerHTML = '';
             const workerUI = {};
+            const completedChapters = [];
+            const failedChapters = [];
 
             activeWorkers.forEach(function(worker) {
                 const card = document.createElement('div');
                 card.className = 'bg-[#161B22] border border-gray-800 rounded-xl p-3 space-y-1.5';
                 
-                // Safe DOM building with textContent to avoid querySelector selector errors
                 card.innerHTML = '<div class="flex items-center justify-between text-xs">' +
                                     '<span class="font-bold text-white flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span class="worker-name-label"></span></span>' +
                                     '<span class="worker-badge text-[10px] text-gray-400">Idle</span>' +
@@ -414,7 +415,6 @@
                 card.querySelector('.worker-name-label').textContent = worker.name;
                 cardsGrid.appendChild(card);
 
-                // Store references directly in memory keyed by physical profile ID!
                 workerUI[worker.id] = {
                     badge: card.querySelector('.worker-badge'),
                     task: card.querySelector('.worker-task'),
@@ -422,7 +422,7 @@
                 };
             });
 
-            // 5. Worker Factory Thread Function
+            // 5. Self-Healing Worker Factory Thread Function
             async function runProfileWorker(worker) {
                 const profileId = worker.id;
                 const profileName = worker.name;
@@ -431,7 +431,10 @@
                 if (ui) { ui.badge.innerText = 'Connecting...'; }
 
                 let session = null;
-                try {
+                async function createAndConfigureSession() {
+                    if (session) {
+                        try { await session.close(); } catch(_) {}
+                    }
                     session = await Omni.studio.createSession({ profile: profileId, model: model });
                     await session.configure({
                         thinkingLevel: thinkingLevel,
@@ -440,6 +443,11 @@
                         sysPrompt: sysPrompt,
                         model: model
                     });
+                    return session;
+                }
+
+                try {
+                    await createAndConfigureSession();
                     log(profileName, 'Session configured & armed! Entering work-stealing queue...', 'text-emerald-400');
                 } catch(err) {
                     log(profileName, '❌ Session Initialization Failed: ' + err.message, 'text-rose-400');
@@ -447,9 +455,9 @@
                     return;
                 }
 
-                // Work-Stealing Loop: Pops unique chapters atomically!
+                // Work-Stealing Loop
                 while (activeQueue.length > 0 && !isAborted) {
-                    const chapter = activeQueue.shift(); // Atomic pop: no two workers can claim the same chapter!
+                    const chapter = activeQueue.shift();
                     log(profileName, '📥 Claimed Chapter ' + chapter.number + ': "' + chapter.title + '"', 'text-cyan-300');
                     if (ui) {
                         ui.badge.innerText = 'Active';
@@ -457,10 +465,12 @@
                     }
 
                     let cachedChapterText = null;
+                    let chapterSuccess = true;
+                    let chapterFailureReason = null;
 
                     // Execute Sequential Multi-Turn Prompt Chain
                     for (let stepIdx = 0; stepIdx < promptSteps.length; stepIdx++) {
-                        if (isAborted) break;
+                        if (isAborted) { chapterSuccess = false; break; }
                         const step = promptSteps[stepIdx];
                         const stepLabel = 'Ch ' + chapter.number + ' Turn ' + step.stepNum;
                         
@@ -468,10 +478,7 @@
                             ui.prog.innerText = 'Executing Turn ' + step.stepNum + '/' + promptSteps.length + (step.attachFile ? ' (Attaching chip...)' : '...'); 
                         }
 
-                        // Pass the markdown file path to attach as an uploaded document chip!
                         const turnAttachments = step.attachFile ? [chapter.fullPath] : [];
-
-                        // Build prompt text (supports optional {{title}} or {{content}} tags)
                         let promptPayload = step.template;
                         if (promptPayload.includes('{{content}}')) {
                             if (!cachedChapterText) {
@@ -485,52 +492,135 @@
 
                         const attachNotice = step.attachFile ? ' (📎 Attached ' + chapter.filename + ')' : '';
                         log(profileName, '⚡ Dispatching Turn ' + step.stepNum + '/' + promptSteps.length + ' for Ch ' + chapter.number + attachNotice + '...');
-                        
-                        try {
-                            const result = await session.send({
-                                prompt: promptPayload,
-                                attachments: turnAttachments,
-                                label: stepLabel
-                            }, function(progress) {
-                                if (progress && progress.thoughts && ui) {
-                                    ui.prog.innerText = 'Thinking: ' + progress.thoughts.slice(-45);
+
+                        let turnSucceeded = false;
+                        let retrySessionAttempt = 0;
+
+                        while (!turnSucceeded && retrySessionAttempt <= 1 && !isAborted) {
+                            try {
+                                const result = await session.send({
+                                    prompt: promptPayload,
+                                    attachments: turnAttachments,
+                                    label: stepLabel
+                                }, function(progress) {
+                                    if (progress && progress.thoughts && ui) {
+                                        ui.prog.innerText = 'Thinking: ' + progress.thoughts.slice(-45);
+                                    }
+                                });
+
+                                // Anti-False-Positive Guard: Empty response is an explicit failure
+                                if (!result || !result.output || result.output.trim().length === 0) {
+                                    throw new Error('Empty response received from AI Studio');
                                 }
-                            });
 
-                            log(profileName, '✅ Turn ' + step.stepNum + ' response received (' + result.output.length + ' chars).', 'text-emerald-300');
+                                log(profileName, '✅ Turn ' + step.stepNum + ' response verified (' + result.output.length + ' chars).', 'text-emerald-300');
 
-                            // Scrape & Save to Device Storage if toggled
-                            if (step.scrape && result.output.length > 0) {
-                                const saveName = 'Ch_' + (chapter.number < 10 ? '0' + chapter.number : chapter.number) + '_Turn_' + step.stepNum + '.md';
-                                const savePath = outputDir + '/' + saveName;
-                                await Omni.fs.write(savePath, result.output);
-                                log(profileName, '💾 Saved output -> ' + saveName, 'text-yellow-300');
+                                // Scrape & Save to Device Storage
+                                if (step.scrape) {
+                                    const saveName = 'Ch_' + (chapter.number < 10 ? '0' + chapter.number : chapter.number) + '_Turn_' + step.stepNum + '.md';
+                                    const savePath = outputDir + '/' + saveName;
+                                    await Omni.fs.write(savePath, result.output);
+                                    log(profileName, '💾 Verified & Saved -> ' + saveName, 'text-yellow-300');
+                                }
+
+                                turnSucceeded = true;
+
+                            } catch(turnErr) {
+                                const errMsg = turnErr.message || String(turnErr);
+
+                                // 1. Quota 429 Detection -> Worker Sleep & Chapter Re-queue
+                                const isQuota = /429|quota|resource.*exhausted|rate.*limit/i.test(errMsg);
+                                if (isQuota) {
+                                    log(profileName, '🛑 Quota Limit (429) hit! Retiring worker to sleep. Re-queuing Chapter ' + chapter.number + '...', 'text-rose-400');
+                                    activeQueue.unshift(chapter);
+                                    if (ui) {
+                                        ui.badge.innerText = 'Exhausted (429)';
+                                        ui.badge.className = 'worker-badge text-[10px] text-rose-400 font-bold';
+                                        ui.task.innerText = 'Quota Limit Hit';
+                                        ui.prog.innerText = 'Profile sleeping';
+                                    }
+                                    try { await session.close(); } catch(_) {}
+                                    return; // Retire worker from active pool
+                                }
+
+                                // 2. Permission Denied -> Session Recycling & Healing
+                                const isPermDenied = /permission.*denied/i.test(errMsg);
+                                if (isPermDenied && retrySessionAttempt === 0) {
+                                    retrySessionAttempt++;
+                                    log(profileName, '⚠️ Permission Denied detected. Recycling headless session and retrying Turn ' + step.stepNum + '...', 'text-amber-300');
+                                    if (ui) { ui.prog.innerText = 'Recycling session...'; }
+                                    try {
+                                        await createAndConfigureSession();
+                                        continue; // Re-attempt turn with fresh session
+                                    } catch(createErr) {
+                                        log(profileName, '❌ Session recreation failed: ' + createErr.message, 'text-rose-400');
+                                    }
+                                }
+
+                                chapterSuccess = false;
+                                chapterFailureReason = errMsg;
+                                log(profileName, '💥 Error on Turn ' + step.stepNum + ': ' + errMsg, 'text-rose-400');
+                                break;
                             }
-
-                        } catch(turnErr) {
-                            log(profileName, '💥 Error on Turn ' + step.stepNum + ': ' + turnErr.message, 'text-rose-400');
                         }
+
+                        if (!chapterSuccess) break;
                     }
 
-                    log(profileName, '🏁 Completed Chapter ' + chapter.number + '!', 'text-emerald-400');
+                    // Strict Chapter Validation: Only marked complete when all steps succeed
+                    if (chapterSuccess) {
+                        completedChapters.push(chapter);
+                        log(profileName, '🏁 Successfully Completed Chapter ' + chapter.number + ' (Verified)!', 'text-emerald-400');
+                    } else if (!isAborted) {
+                        chapter.failures = (chapter.failures || 0) + 1;
+                        if (chapter.failures < 3) {
+                            log(profileName, '🔄 Chapter ' + chapter.number + ' failed (attempt ' + chapter.failures + '/3). Returning to queue for another worker...', 'text-amber-300');
+                            activeQueue.push(chapter);
+                        } else {
+                            log(null, '❌ Chapter ' + chapter.number + ' exceeded 3 retry attempts. Dropping to prevent deadlock: ' + (chapterFailureReason || 'Unknown error'), 'text-rose-500');
+                            failedChapters.push({ chapter: chapter, error: chapterFailureReason });
+                        }
+                    }
                 }
 
                 if (session) {
-                    await session.close();
+                    try { await session.close(); } catch(_) {}
                 }
                 log(profileName, 'Session closed gracefully. Worker finished.', 'text-gray-400');
-                if (ui) { ui.badge.innerText = 'Done'; ui.task.innerText = 'All tasks completed'; ui.prog.innerText = 'Idle'; }
+                if (ui && !ui.badge.innerText.includes('Exhausted')) {
+                    ui.badge.innerText = 'Done';
+                    ui.task.innerText = 'All tasks completed';
+                    ui.prog.innerText = 'Idle';
+                }
             }
 
-            // Launch Active Workers Simultaneously!
+            // Launch Active Workers Simultaneously & Validate Outcomes
             try {
                 await Promise.all(activeWorkers.map(function(worker) {
                     return runProfileWorker(worker);
                 }));
 
-                setFactoryStatus('Factory Complete', 'bg-emerald-900 text-emerald-300 border-emerald-700');
-                log(null, '🎉 All chapters across all workers successfully processed and saved!', 'text-emerald-400');
-                Omni.toast('Factory Pipeline Finished!');
+                const totalRequested = limit;
+                const totalCompleted = completedChapters.length;
+                const totalFailed = failedChapters.length;
+                const totalUnprocessed = activeQueue.length;
+
+                if (isAborted) {
+                    setFactoryStatus('Aborted', 'bg-rose-900 text-rose-300 border-rose-700');
+                    log(null, '🛑 Factory aborted by user. Completed: ' + totalCompleted + '/' + totalRequested, 'text-rose-400');
+                } else if (totalUnprocessed > 0) {
+                    setFactoryStatus('All Profiles Exhausted', 'bg-rose-900 text-rose-300 border-rose-700');
+                    log(null, '🛑 All profile workers are asleep or exhausted! ' + totalUnprocessed + ' chapter(s) remaining.', 'text-rose-400');
+                    Omni.toast('All profiles hit quota! Add more profiles.');
+                } else if (totalFailed > 0) {
+                    setFactoryStatus('Completed with ' + totalFailed + ' Errors', 'bg-amber-900 text-amber-300 border-amber-700');
+                    log(null, '⚠️ Factory finished with issues: ' + totalCompleted + ' succeeded, ' + totalFailed + ' failed.', 'text-amber-400');
+                    Omni.toast('Finished with ' + totalFailed + ' failed chapters');
+                } else {
+                    setFactoryStatus('Factory Complete (' + totalCompleted + '/' + totalRequested + ')', 'bg-emerald-900 text-emerald-300 border-emerald-700');
+                    log(null, '🎉 100% Verified Success! All ' + totalCompleted + ' chapters processed with zero false positives.', 'text-emerald-400');
+                    Omni.toast('Factory Pipeline 100% Completed!');
+                }
             } catch(allErr) {
                 log(null, 'Factory exception: ' + allErr.message, 'text-rose-400');
             } finally {
