@@ -380,10 +380,11 @@ class AiStudioAutomator(
     // --- Backward-Compatible Default Session Wrappers ---
     fun prepareSession(
         profileId: String,
+        model: String = "",
         onReady: (Boolean, String?) -> Unit
     ) {
         defaultSessionId?.let { closeSession(it) }
-        createSession(profileId) { sId, err ->
+        createSession(profileId, model) { sId, err ->
             if (sId != null) {
                 defaultSessionId = sId
                 onReady(true, null)
