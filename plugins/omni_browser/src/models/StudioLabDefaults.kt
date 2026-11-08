@@ -111,6 +111,14 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                 return rpcCall('fsList', [path]);
             }
         },
+        wakeLock: {
+            acquire: function(tag) {
+                return rpcCall('wakeLockAcquire', [tag || 'StudioLab']);
+            },
+            release: function() {
+                return rpcCall('wakeLockRelease', []);
+            }
+        },
         toast: function(msg) {
             if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.toast(String(msg));
         },
