@@ -482,7 +482,12 @@ fun CineSunIcon(tint: Color = Color.White, modifier: Modifier = Modifier.size(18
         val c = Offset(w * 0.5f, h * 0.5f)
         val strokeW = 1.8.dp.toPx()
 
-        drawCircle(tint, w * 0.22f, c, Stroke(width = strokeW))
+        drawCircle(
+            color = tint,
+            radius = w * 0.22f,
+            center = c,
+            style = Stroke(width = strokeW)
+        )
 
         val rayLen = w * 0.14f
         val gap = w * 0.28f
