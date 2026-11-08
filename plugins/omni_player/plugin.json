@@ -1,0 +1,13 @@
+{
+  "id": "omni_player",
+  "name": "Omni Player",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.player.OmniPlayerPlugin",
+  "description": "Cinema Video Player with folder browser, gestures, background audio, and X-Player UI",
+  "icon": "🎬",
+  "permissions": [
+    "android.permission.READ_MEDIA_VIDEO",
+    "android.permission.READ_EXTERNAL_STORAGE",
+    "android.permission.WAKE_LOCK"
+  ]
+}
