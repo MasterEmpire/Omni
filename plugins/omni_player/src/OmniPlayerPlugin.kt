@@ -1135,7 +1135,7 @@ class OmniPlayerPlugin : PluginEntry() {
                         val density = this.density
                         val touchSlopPx = 18f * density
 
-                        while (isActive) {
+                        while (true) {
                             val downEvent = awaitPointerEvent()
                             if (downEvent.type != PointerEventType.Press) continue
                             val downChange = downEvent.changes.firstOrNull() ?: continue
