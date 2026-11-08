@@ -197,27 +197,29 @@
 
         document.getElementById('btn-clear-logs').onclick = function() { terminalEl.innerHTML = ''; };
 
-        // 1. Auto-Populate Device Profiles from Vault
+        // 1. Auto-Populate Device Profiles from Vault (Binds Physical ID to Cookie Store)
         async function loadDeviceProfiles() {
             const container = document.getElementById('profiles-container');
             container.innerHTML = '';
-            let profileList = ['default', 'Account 2', 'Account 3'];
+            let profileList = [{ id: 'default', name: 'Default' }];
 
             try {
                 const raw = await Omni.fs.read('config/profiles.json');
                 if (raw) {
                     const parsed = JSON.parse(raw);
                     if (Array.isArray(parsed) && parsed.length > 0) {
-                        profileList = parsed.map(function(p) { return p.name || p.id; });
+                        profileList = parsed.map(function(p) {
+                            return { id: p.id, name: p.name || p.id };
+                        });
                     }
                 }
             } catch(e) {}
 
-            profileList.forEach(function(pName) {
+            profileList.forEach(function(p) {
                 const wrapper = document.createElement('label');
                 wrapper.className = 'flex items-center gap-2 bg-[#0D1117] border border-gray-800 hover:border-gray-700 p-2.5 rounded-lg cursor-pointer text-xs';
-                wrapper.innerHTML = '<input type="checkbox" class="profile-worker-checkbox accent-sky-500" value="' + pName.replace(/"/g, '&quot;') + '" checked />' +
-                                    '<span class="font-semibold text-gray-200 truncate">' + pName + '</span>';
+                wrapper.innerHTML = '<input type="checkbox" class="profile-worker-checkbox accent-sky-500" value="' + p.id.replace(/"/g, '"') + '" data-name="' + p.name.replace(/"/g, '"') + '" checked />' +
+                                    '<span class="font-semibold text-gray-200 truncate">' + p.name + '</span>';
                 container.appendChild(wrapper);
             });
         }
@@ -340,7 +342,10 @@
             const activeQueue = detectedChapters.slice(0, limit).map(function(c) { return Object.assign({}, c); });
 
             const enabledProfiles = Array.from(document.querySelectorAll('.profile-worker-checkbox:checked')).map(function(cb) {
-                return cb.value;
+                return {
+                    id: cb.value,
+                    name: cb.getAttribute('data-name') || cb.value
+                };
             });
 
             if (enabledProfiles.length === 0) {
@@ -394,7 +399,7 @@
             cardsGrid.innerHTML = '';
             const workerUI = {};
 
-            activeWorkers.forEach(function(pName) {
+            activeWorkers.forEach(function(worker) {
                 const card = document.createElement('div');
                 card.className = 'bg-[#161B22] border border-gray-800 rounded-xl p-3 space-y-1.5';
                 
@@ -406,11 +411,11 @@
                                  '<div class="worker-task text-[11px] text-sky-400 font-semibold truncate">Waiting for assignment...</div>' +
                                  '<div class="worker-prog text-[10px] text-gray-500 truncate">No active turn</div>';
                 
-                card.querySelector('.worker-name-label').textContent = pName;
+                card.querySelector('.worker-name-label').textContent = worker.name;
                 cardsGrid.appendChild(card);
 
-                // Store references directly in memory without fragile querySelector IDs!
-                workerUI[pName] = {
+                // Store references directly in memory keyed by physical profile ID!
+                workerUI[worker.id] = {
                     badge: card.querySelector('.worker-badge'),
                     task: card.querySelector('.worker-task'),
                     prog: card.querySelector('.worker-prog')
@@ -418,14 +423,16 @@
             });
 
             // 5. Worker Factory Thread Function
-            async function runProfileWorker(profileName) {
-                const ui = workerUI[profileName];
+            async function runProfileWorker(worker) {
+                const profileId = worker.id;
+                const profileName = worker.name;
+                const ui = workerUI[profileId];
                 log(profileName, 'Spawning isolated puppet session (Model: ' + model + ')...');
                 if (ui) { ui.badge.innerText = 'Connecting...'; }
 
                 let session = null;
                 try {
-                    session = await Omni.studio.createSession({ profile: profileName, model: model });
+                    session = await Omni.studio.createSession({ profile: profileId, model: model });
                     await session.configure({
                         thinkingLevel: thinkingLevel,
                         temporaryChat: tempChat,
@@ -517,8 +524,8 @@
 
             // Launch Active Workers Simultaneously!
             try {
-                await Promise.all(activeWorkers.map(function(pName) {
-                    return runProfileWorker(pName);
+                await Promise.all(activeWorkers.map(function(worker) {
+                    return runProfileWorker(worker);
                 }));
 
                 setFactoryStatus('Factory Complete', 'bg-emerald-900 text-emerald-300 border-emerald-700');
