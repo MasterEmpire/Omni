@@ -641,8 +641,8 @@ fun buildAiStudioPuppetScript(): String {
                     let contentStaticTicks = 0;
                     let totalTurnTicks = 0;
                     let idleTicks = 0;
-                    const MAX_IDLE_TICKS = 100;
-                    const MAX_TOTAL_TICKS = 300;
+                    const MAX_IDLE_TICKS = 120; // 72s of silence before thinking/stream retry
+                    const MAX_TOTAL_TICKS = 3600; // 36 minutes ceiling to support massive 90KB code generators
                     let turnRetryCount = 0;
                     const MAX_RETRIES = 2;
                     let currentTurnOutput = '';
@@ -744,21 +744,35 @@ fun buildAiStudioPuppetScript(): String {
                             }
                         }
 
+                        const isBackendGenerating = checkUiGenerating();
                         const hasContent = currentTurnOutput.length > 0;
                         const textGrew = currentTurnOutput.length > lastOutputText.length;
                         const thoughtsChanged = latestTurnThoughts !== lastThoughtsText;
 
                         if (textGrew) {
+                            const diff = currentTurnOutput.length - lastOutputText.length;
+                            hostLog('WATCHDOG_GROWTH', '📈 Growth: ' + lastOutputText.length + ' -> ' + currentTurnOutput.length + ' chars (+' + diff + ' chars). Backend active: ' + isBackendGenerating);
                             idleTicks = 0;
                             contentStaticTicks = 0;
                             lastOutputText = currentTurnOutput;
                             lastThoughtsText = latestTurnThoughts;
                         } else if (thoughtsChanged) {
+                            hostLog('WATCHDOG_THOUGHTS', '🧠 Thoughts updated (' + latestTurnThoughts.length + ' chars). Resetting stillness.');
                             idleTicks = 0;
                             contentStaticTicks = 0;
                             lastThoughtsText = latestTurnThoughts;
                         } else if (hasContent) {
-                            contentStaticTicks++;
+                            // CRITICAL RULE: If Google backend is still streaming tokens (spinner/stop active),
+                            // generation is NOT done, even if DOM output is momentarily paused. Keep stillness at 0!
+                            if (isBackendGenerating) {
+                                contentStaticTicks = 0;
+                            } else {
+                                // Backend stream ended! Client-side Angular/DOM rendering is flushing chunks.
+                                contentStaticTicks++;
+                                if (contentStaticTicks % 3 === 0 || contentStaticTicks >= 10) {
+                                    hostLog('WATCHDOG_STILL', '⏳ Post-backend DOM rendering stillness: tick ' + contentStaticTicks + ' (' + (contentStaticTicks * 0.6).toFixed(1) + 's steady, ' + currentTurnOutput.length + ' chars in DOM).');
+                                }
+                            }
                         }
 
                         if (!hasContent && idleTicks >= MAX_IDLE_TICKS) {
@@ -791,13 +805,18 @@ fun buildAiStudioPuppetScript(): String {
                             window.OmniAutomator.onPuppetTurnProgress(latestTurnThoughts, currentTurnOutput);
                         }
 
+                        // CRITICAL ARCHITECTURE RULE:
+                        // The spinner stopping only means the Google backend finished streaming tokens.
+                        // The client-side Angular app continues rendering and highlighting markdown/code blocks.
+                        // We must NEVER stop while isBackendGenerating is true, and we enforce a strict 14-tick
+                        // (8.4s) stillness window after the spinner stops to guarantee all code is rendered into the DOM.
                         const trimmedOutput = currentTurnOutput.trim();
                         const looksLikeJson = trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[') || trimmedOutput.includes('"solutions"');
                         const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
-                        const targetTicks = balanced ? 5 : 25;
+                        const targetTicks = balanced ? 8 : 14;
 
-                        if (hasContent && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
-                            hostLog('DECISION_STOP', 'Turn completed. Output length: ' + currentTurnOutput.length);
+                        if (hasContent && !isBackendGenerating && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
+                            hostLog('DECISION_STOP', '🛑 DECISION: Turn completed! Reason: Backend stream ended AND client-side DOM rendering remained steady for ' + (contentStaticTicks * 0.6).toFixed(1) + 's (' + contentStaticTicks + '/' + targetTicks + ' ticks). Final size: ' + currentTurnOutput.length + ' chars (' + (currentTurnOutput.length / 1024).toFixed(1) + ' KB).');
                             break;
                         }
                     }
@@ -810,6 +829,22 @@ fun buildAiStudioPuppetScript(): String {
                         }
                         return { thoughts: latestTurnThoughts, output: '', error: emptyErr };
                     }
+
+                    // Cloud Sync Grace Period: Wait for Google AI Studio Drive Auto-Save to commit to cloud backend
+                    updateStatus((stepLabel + ': Committing cloud auto-save...').trim());
+                    hostLog('DRIVE_SYNC', 'Waiting for Google AI Studio cloud auto-save to commit before finishing turn...');
+                    let syncWaitTicks = 0;
+                    while (syncWaitTicks < 14 && !this.aborted) {
+                        const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status, [aria-label*="Saved"], [data-test-save-status]');
+                        if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) {
+                            hostLog('DRIVE_SYNC', '✅ Google AI Studio marked chat as Saved.');
+                            break;
+                        }
+                        await delay(500);
+                        syncWaitTicks++;
+                    }
+                    await delay(1800);
+
                     if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnComplete) {
                         window.OmniAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
                     }
