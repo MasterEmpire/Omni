@@ -62,6 +62,7 @@ import java.net.URLEncoder
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -154,8 +155,8 @@ fun CineCameraIcon(tint: Color = Color.White, modifier: Modifier = Modifier.size
             style = Stroke(width = strokeW)
         )
 
-        drawCircle(tint, w * 0.17f, Offset(w * 0.5f, h * 0.55f), Stroke(strokeW))
-        drawCircle(tint, strokeW * 0.8f, Offset(w * 0.5f, h * 0.55f))
+        drawCircle(color = tint, radius = w * 0.17f, center = Offset(w * 0.5f, h * 0.55f), style = Stroke(strokeW))
+        drawCircle(color = tint, radius = strokeW * 0.8f, center = Offset(w * 0.5f, h * 0.55f))
     }
 }
 
@@ -1078,8 +1079,11 @@ class OmniPlayerPlugin : PluginEntry() {
 
         // Subtitle Suite State
         val subtitleState = remember { SubtitleState() }
-        var activeSubtitleModal by remember { mutableStateOf<String?>(null) } // "HUB", "STYLE", "DOWNLOAD"
+        var activeSubtitleModal by remember { mutableStateOf<String?>(null) } // "HUB", "STYLE", "DOWNLOAD", "AI_INSPECT", "GROQ_KEY"
         var isDelayWidgetVisible by remember { mutableStateOf(false) }
+
+        var inspectingCueText by remember { mutableStateOf("") }
+        var inspectingContextText by remember { mutableStateOf("") }
 
         val scope = rememberCoroutineScope()
 
