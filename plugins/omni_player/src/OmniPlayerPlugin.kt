@@ -1540,21 +1540,6 @@ class OmniPlayerPlugin : PluginEntry() {
 
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
-                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.8f)),
-                                        color = Color.Transparent
-                                    ) {
-                                        Text(
-                                            text = "HD",
-                                            color = Color.White,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.5.sp,
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                        )
-                                    }
-
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
                                         border = BorderStroke(
                                             1.dp,
                                             if (subtitleState.currentSubtitleName != null && subtitleState.isEnabled) Color(0xFF00E676) else Color.White.copy(alpha = 0.8f)
@@ -1572,10 +1557,6 @@ class OmniPlayerPlugin : PluginEntry() {
                                             letterSpacing = 0.5.sp,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
-                                    }
-
-                                    IconButton(onClick = { bridge.showToast("Queue: ${queue.size} videos") }) {
-                                        CinePlaylistIcon(tint = Color.White)
                                     }
 
                                     IconButton(onClick = { bridge.showToast("Aspect / Audio Settings") }) {
@@ -1897,26 +1878,16 @@ class OmniPlayerPlugin : PluginEntry() {
         onClose: () -> Unit
     ) {
         var queryText by remember { mutableStateOf(OpenSubtitlesService.cleanTitle(videoName)) }
-        var selectedLang by remember { mutableStateOf("en") }
         var isSearching by remember { mutableStateOf(false) }
         var isDownloadingId by remember { mutableStateOf<Long?>(null) }
         var results by remember { mutableStateOf<List<SubtitleResult>>(emptyList()) }
         val scope = rememberCoroutineScope()
 
-        val languages = listOf(
-            "en" to "English",
-            "am" to "Amharic",
-            "ar" to "Arabic",
-            "es" to "Spanish",
-            "fr" to "French",
-            "all" to "All"
-        )
-
         fun triggerSearch() {
             if (queryText.isBlank()) return
             scope.launch {
                 isSearching = true
-                results = OpenSubtitlesService.search(queryText.trim(), selectedLang)
+                results = OpenSubtitlesService.search(queryText.trim(), "en")
                 isSearching = false
             }
         }
@@ -1972,29 +1943,7 @@ class OmniPlayerPlugin : PluginEntry() {
                         }
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        languages.forEach { (code, label) ->
-                            val isSelected = selectedLang == code
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (isSelected) Color(0xFF00E676) else Color(0xFF181F2A),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        selectedLang = code
-                                        triggerSearch()
-                                    }
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = if (isSelected) Color.Black else Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                    }
+
 
                     Box(
                         modifier = Modifier
