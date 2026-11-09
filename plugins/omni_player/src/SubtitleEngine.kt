@@ -29,6 +29,15 @@ data class SubtitlePreset(
     val hasOutline: Boolean
 )
 
+data class SubtitleResult(
+    val fileId: Long,
+    val releaseName: String,
+    val language: String,
+    val downloadCount: Int,
+    val rating: Double,
+    val fileName: String
+)
+
 val SUBTITLE_PRESETS = listOf(
     SubtitlePreset(0, "Default Box", Color.White, Color(0xCC000000), false),
     SubtitlePreset(1, "Solid Black", Color.White, Color.Black, false),
