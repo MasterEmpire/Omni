@@ -61,8 +61,10 @@ val SUBTITLE_PALETTE = listOf(
 class SubtitleState {
     var isEnabled by mutableStateOf(true)
     var currentSubtitleName by mutableStateOf<String?>(null)
+    var rawSrtContent by mutableStateOf<String?>(null)
     var cues by mutableStateOf<List<SubtitleCue>>(emptyList())
-    var delaySec by mutableFloatStateOf(0.0f) // Subtitle offset in seconds (e.g. -83.8)
+    var delaySec by mutableFloatStateOf(0.0f)
+    var yFraction by mutableFloatStateOf(0.08f) // Vertical offset from bottom (0.04 to 0.85)
 
     // Styling State (Screenshot 1)
     var selectedPresetId by mutableIntStateOf(0)
@@ -80,7 +82,7 @@ class SubtitleState {
 
     fun selectColor(color: Color) {
         fontColor = color
-        selectedPresetId = -1 // custom
+        selectedPresetId = -1
     }
 
     fun resetSize() {
@@ -88,22 +90,100 @@ class SubtitleState {
     }
 
     fun loadSrtText(text: String, name: String) {
+        rawSrtContent = text
         cues = SrtParser.parse(text)
         currentSubtitleName = name
         isEnabled = true
-        delaySec = 0.0f
     }
 
     fun clearSubtitle() {
         cues = emptyList()
         currentSubtitleName = null
+        rawSrtContent = null
         delaySec = 0.0f
+        yFraction = 0.08f
     }
 
     fun getCurrentCue(currentPositionMs: Long): String? {
         if (!isEnabled || cues.isEmpty()) return null
         val effectivePosition = currentPositionMs + (delaySec * 1000f).toLong()
         return cues.firstOrNull { effectivePosition in it.startMs..it.endMs }?.text
+    }
+}
+
+object PlaybackHistoryManager {
+    private const val HISTORY_FILE_NAME = "omni_player_history.json"
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, JSONObject>()
+    private var isLoaded = false
+
+    private fun ensureLoaded(context: Context) {
+        if (isLoaded) return
+        try {
+            val file = File(context.filesDir, HISTORY_FILE_NAME)
+            if (file.exists()) {
+                val json = JSONObject(file.readText(Charsets.UTF_8))
+                json.keys().forEach { key ->
+                    cache[key] = json.getJSONObject(key)
+                }
+            }
+            isLoaded = true
+        } catch (_: Exception) {}
+    }
+
+    fun saveVideoState(
+        context: Context,
+        videoId: String,
+        positionMs: Long,
+        subtitleName: String?,
+        rawSrtText: String?,
+        delaySec: Float,
+        yFraction: Float,
+        isEnabled: Boolean
+    ) {
+        ensureLoaded(context)
+        try {
+            var localSrtPath: String? = null
+            if (!rawSrtText.isNullOrBlank()) {
+                val subDir = File(context.filesDir, "saved_subtitles")
+                if (!subDir.exists()) subDir.mkdirs()
+                val subFile = File(subDir, "sub_${videoId}.srt")
+                subFile.writeText(rawSrtText, Charsets.UTF_8)
+                localSrtPath = subFile.absolutePath
+            }
+
+            val obj = JSONObject().apply {
+                put("positionMs", positionMs)
+                put("subtitleName", subtitleName ?: "")
+                put("localSrtPath", localSrtPath ?: "")
+                put("delaySec", delaySec.toDouble())
+                put("yFraction", yFraction.toDouble())
+                put("isEnabled", isEnabled)
+                put("updatedAt", System.currentTimeMillis())
+            }
+            cache[videoId] = obj
+
+            val root = JSONObject()
+            cache.forEach { (k, v) -> root.put(k, v) }
+            File(context.filesDir, HISTORY_FILE_NAME).writeText(root.toString(2), Charsets.UTF_8)
+        } catch (_: Exception) {}
+    }
+
+    fun getSavedState(context: Context, videoId: String): JSONObject? {
+        ensureLoaded(context)
+        return cache[videoId]
+    }
+
+    fun getSavedSubtitle(context: Context, videoId: String): Pair<String, String>? {
+        val state = getSavedState(context, videoId) ?: return null
+        val path = state.optString("localSrtPath", "")
+        val name = state.optString("subtitleName", "")
+        if (path.isNotEmpty()) {
+            val file = File(path)
+            if (file.exists() && file.length() > 0) {
+                return Pair(name.ifEmpty { file.name }, file.readText(Charsets.UTF_8))
+            }
+        }
+        return null
     }
 }
 
