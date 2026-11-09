@@ -535,122 +535,6 @@ data class VideoItem(
     val folderName: String
 )
 
-data class SubtitleResult(
-    val fileId: Long,
-    val releaseName: String,
-    val language: String,
-    val downloadCount: Int,
-    val rating: Double,
-    val fileName: String
-)
-
-object OpenSubtitlesManager {
-    private const val API_KEY = "VuCEklcyZnuRhoVIdcIsosQJgrehqeE2"
-    private const val USER_AGENT = "Getye v1.0"
-    private const val BASE_URL = "https://api.opensubtitles.com/api/v1"
-
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
-        .build()
-
-    fun cleanTitle(rawName: String): String {
-        var name = rawName.substringBeforeLast(".")
-        val junk = Regex("(?i)\\b(720p|1080p|2160p|4k|bluray|blu-ray|web-dl|webrip|hdrip|hdtv|x264|x265|hevc|aac|dts|ac3|10bit|remux)\\b")
-        name = junk.replace(name, " ")
-        name = name.replace(Regex("[._\\-]+"), " ")
-        return name.replace(Regex("\\s+"), " ").trim()
-    }
-
-    suspend fun search(query: String, langCode: String): List<SubtitleResult> = withContext(Dispatchers.IO) {
-        val list = mutableListOf<SubtitleResult>()
-        try {
-            val encodedQ = URLEncoder.encode(query, "UTF-8")
-            val langParam = if (langCode == "all") "" else "&languages=$langCode"
-            val url = "$BASE_URL/subtitles?query=$encodedQ$langParam"
-
-            val req = Request.Builder()
-                .url(url)
-                .addHeader("Api-Key", API_KEY)
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Accept", "application/json")
-                .build()
-
-            val resp = httpClient.newCall(req).execute()
-            if (resp.isSuccessful) {
-                val json = JSONObject(resp.body?.string() ?: "{}")
-                val arr = json.optJSONArray("data")
-                if (arr != null) {
-                    for (i in 0 until arr.length()) {
-                        val item = arr.getJSONObject(i)
-                        val attr = item.optJSONObject("attributes") ?: continue
-                        val filesArr = attr.optJSONArray("files")
-                        val firstFile = filesArr?.optJSONObject(0)
-                        val fileId = firstFile?.optLong("file_id") ?: continue
-                        val fileName = firstFile.optString("file_name", "sub.srt")
-                        val release = attr.optString("release", attr.optString("feature_details_title", fileName))
-                        val lang = attr.optString("language", "en")
-                        val dlCount = attr.optInt("download_count", 0)
-                        val rating = attr.optDouble("ratings", 0.0)
-
-                        list.add(
-                            SubtitleResult(
-                                fileId = fileId,
-                                releaseName = release,
-                                language = lang,
-                                downloadCount = dlCount,
-                                rating = rating,
-                                fileName = fileName
-                            )
-                        )
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        list
-    }
-
-    suspend fun downloadSubtitle(context: Context, fileId: Long, fileName: String): File? = withContext(Dispatchers.IO) {
-        try {
-            val subDir = File(context.cacheDir, "omni_subtitles")
-            if (!subDir.exists()) subDir.mkdirs()
-            val targetFile = File(subDir, "sub_${fileId}.srt")
-            if (targetFile.exists() && targetFile.length() > 0) return@withContext targetFile
-
-            val jsonReq = JSONObject().apply { put("file_id", fileId) }
-            val mediaType = "application/json; charset=utf-8".toMediaType()
-            val body = jsonReq.toString().toRequestBody(mediaType)
-
-            val req = Request.Builder()
-                .url("$BASE_URL/download")
-                .addHeader("Api-Key", API_KEY)
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Accept", "application/json")
-                .post(body)
-                .build()
-
-            val resp = httpClient.newCall(req).execute()
-            if (!resp.isSuccessful) return@withContext null
-            val respJson = JSONObject(resp.body?.string() ?: "{}")
-            val downloadLink = respJson.optString("link", "")
-            if (downloadLink.isEmpty()) return@withContext null
-
-            val fileReq = Request.Builder().url(downloadLink).build()
-            val fileResp = httpClient.newCall(fileReq).execute()
-            if (!fileResp.isSuccessful) return@withContext null
-
-            fileResp.body?.byteStream()?.use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            if (targetFile.exists() && targetFile.length() > 0) targetFile else null
-        } catch (_: Exception) {
-            null
-        }
-    }
-}
-
 object VideoRepository {
     private val thumbnailCache = ConcurrentHashMap<Long, Bitmap>()
 
@@ -1193,9 +1077,10 @@ class OmniPlayerPlugin : PluginEntry() {
         var lastTapTime by remember { mutableLongStateOf(0L) }
         var lastTapPos by remember { mutableStateOf(Offset.Zero) }
 
-        // Subtitles State
-        var showSubtitleSheet by remember { mutableStateOf(false) }
-        var activeSubtitleLabel by remember { mutableStateOf<String?>(null) }
+        // Subtitle Suite State
+        val subtitleState = remember { SubtitleState() }
+        var activeSubtitleModal by remember { mutableStateOf<String?>(null) } // "HUB", "STYLE", "DOWNLOAD"
+        var isDelayWidgetVisible by remember { mutableStateOf(false) }
 
         val scope = rememberCoroutineScope()
 
@@ -1672,16 +1557,16 @@ class OmniPlayerPlugin : PluginEntry() {
                                         shape = RoundedCornerShape(4.dp),
                                         border = BorderStroke(
                                             1.dp,
-                                            if (activeSubtitleLabel != null) Color(0xFF00E676) else Color.White.copy(alpha = 0.8f)
+                                            if (subtitleState.currentSubtitleName != null && subtitleState.isEnabled) Color(0xFF00E676) else Color.White.copy(alpha = 0.8f)
                                         ),
-                                        color = if (activeSubtitleLabel != null) Color(0xFF00E676).copy(alpha = 0.25f) else Color.Transparent,
+                                        color = if (subtitleState.currentSubtitleName != null && subtitleState.isEnabled) Color(0xFF00E676).copy(alpha = 0.25f) else Color.Transparent,
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
-                                            .clickable { showSubtitleSheet = true }
+                                            .clickable { activeSubtitleModal = "HUB" }
                                     ) {
                                         Text(
                                             text = "CC",
-                                            color = if (activeSubtitleLabel != null) Color(0xFF00E676) else Color.White,
+                                            color = if (subtitleState.currentSubtitleName != null && subtitleState.isEnabled) Color(0xFF00E676) else Color.White,
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
                                             letterSpacing = 0.5.sp,
@@ -1926,71 +1811,92 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // --- OPENSUBTITLES IN-APP DOWNLOADER MODAL ---
-            if (showSubtitleSheet) {
-                SubtitleModalDialog(
-                    context = context,
-                    videoName = video.name,
-                    activeLabel = activeSubtitleLabel,
-                    onSelectSubtitle = { subFile, label ->
-                        try {
-                            val subConfig = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(subFile))
-                                .setMimeType(MimeTypes.APPLICATION_SUBRIP)
-                                .setLanguage("en")
-                                .setLabel(label)
-                                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                                .build()
+            // --- LIVE ON-VIDEO SUBTITLE CUE OVERLAY ---
+            val activeCueText = remember(currentPos, subtitleState.delaySec, subtitleState.cues.size, subtitleState.isEnabled) {
+                subtitleState.getCurrentCue(currentPos)
+            }
+            SubtitleOnVideoOverlay(
+                cueText = activeCueText,
+                subtitleState = subtitleState,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
 
-                            val currentPosition = player.currentPosition
-                            val isPlayingNow = player.isPlaying
-                            val updatedMediaItem = player.currentMediaItem?.buildUpon()
-                                ?.setSubtitleConfigurations(listOf(subConfig))
-                                ?.build()
+            // --- FLOATING SUBTITLE DELAY ADJUSTER (Screenshot 2) ---
+            if (isDelayWidgetVisible) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 16.dp)
+                ) {
+                    SubtitleDelayWidget(
+                        subtitleState = subtitleState,
+                        onClose = { isDelayWidgetVisible = false }
+                    )
+                }
+            }
 
-                            if (updatedMediaItem != null) {
-                                player.setMediaItem(updatedMediaItem, currentPosition)
-                                player.prepare()
-                                if (isPlayingNow) player.play()
-                                activeSubtitleLabel = label
-                                bridge.showToast("Subtitles loaded: $label")
+            // --- SUBTITLE SUITE MODALS ---
+            when (activeSubtitleModal) {
+                "HUB" -> {
+                    SubtitleHubSheet(
+                        subtitleState = subtitleState,
+                        onOpenFile = {
+                            activeSubtitleModal = null
+                            bridge.pickFiles("*/*", false) { uris ->
+                                val pickedUri = uris.firstOrNull() ?: return@pickFiles
+                                try {
+                                    context.contentResolver.openInputStream(pickedUri)?.bufferedReader()?.use { reader ->
+                                        val content = reader.readText()
+                                        val fileName = pickedUri.lastPathSegment ?: "Local Subtitle.srt"
+                                        subtitleState.loadSrtText(content, fileName)
+                                        bridge.showToast("Loaded: $fileName")
+                                    }
+                                } catch (e: Exception) {
+                                    bridge.showToast("Error reading file: ${e.message}")
+                                }
                             }
-                        } catch (e: Exception) {
-                            bridge.showToast("Failed loading subtitle: ${e.message}")
-                        }
-                        showSubtitleSheet = false
-                    },
-                    onDisableSubtitles = {
-                        val currentPosition = player.currentPosition
-                        val isPlayingNow = player.isPlaying
-                        val updatedMediaItem = player.currentMediaItem?.buildUpon()
-                            ?.setSubtitleConfigurations(emptyList())
-                            ?.build()
-
-                        if (updatedMediaItem != null) {
-                            player.setMediaItem(updatedMediaItem, currentPosition)
-                            player.prepare()
-                            if (isPlayingNow) player.play()
-                            activeSubtitleLabel = null
-                            bridge.showToast("Subtitles turned off")
-                        }
-                        showSubtitleSheet = false
-                    },
-                    onDismiss = { showSubtitleSheet = false }
-                )
+                        },
+                        onOpenDownload = {
+                            activeSubtitleModal = "DOWNLOAD"
+                        },
+                        onOpenStyle = {
+                            activeSubtitleModal = "STYLE"
+                        },
+                        onOpenDelay = {
+                            activeSubtitleModal = null
+                            isDelayWidgetVisible = true
+                        },
+                        onClose = { activeSubtitleModal = null }
+                    )
+                }
+                "STYLE" -> {
+                    SubtitleStyleSheet(
+                        subtitleState = subtitleState,
+                        onBack = { activeSubtitleModal = "HUB" }
+                    )
+                }
+                "DOWNLOAD" -> {
+                    OnlineSubtitleSearchModal(
+                        videoName = video.name,
+                        onSelectSubtitle = { srtText, label ->
+                            subtitleState.loadSrtText(srtText, label)
+                            bridge.showToast("Subtitles loaded: $label")
+                            activeSubtitleModal = null
+                        },
+                        onClose = { activeSubtitleModal = "HUB" }
+                    )
+                }
             }
         }
     }
 
     @Composable
-    fun SubtitleModalDialog(
-        context: Context,
+    fun OnlineSubtitleSearchModal(
         videoName: String,
-        activeLabel: String?,
-        onSelectSubtitle: (File, String) -> Unit,
-        onDisableSubtitles: () -> Unit,
-        onDismiss: () -> Unit
+        onSelectSubtitle: (String, String) -> Unit,
+        onClose: () -> Unit
     ) {
-        var queryText by remember { mutableStateOf(OpenSubtitlesManager.cleanTitle(videoName)) }
+        var queryText by remember { mutableStateOf(OpenSubtitlesService.cleanTitle(videoName)) }
         var selectedLang by remember { mutableStateOf("en") }
         var isSearching by remember { mutableStateOf(false) }
         var isDownloadingId by remember { mutableStateOf<Long?>(null) }
@@ -2010,7 +1916,7 @@ class OmniPlayerPlugin : PluginEntry() {
             if (queryText.isBlank()) return
             scope.launch {
                 isSearching = true
-                results = OpenSubtitlesManager.search(queryText.trim(), selectedLang)
+                results = OpenSubtitlesService.search(queryText.trim(), selectedLang)
                 isSearching = false
             }
         }
@@ -2020,7 +1926,7 @@ class OmniPlayerPlugin : PluginEntry() {
         }
 
         AlertDialog(
-            onDismissRequest = onDismiss,
+            onDismissRequest = onClose,
             containerColor = Color(0xFF11151D),
             shape = RoundedCornerShape(16.dp),
             title = {
@@ -2030,53 +1936,16 @@ class OmniPlayerPlugin : PluginEntry() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(
-                            text = "Subtitles",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-                        Text(
-                            text = "Powered by OpenSubtitles.com",
-                            color = Color(0xFF00E676),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Text("Online Subtitles", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("OpenSubtitles Database", color = Color(0xFF00E676), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                     }
-
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8B949E))
                     }
                 }
             },
             text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Turn Off Subtitles Action
-                    if (activeLabel != null) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFF85149).copy(alpha = 0.15f),
-                            border = BorderStroke(1.dp, Color(0xFFF85149).copy(alpha = 0.4f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onDisableSubtitles() }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Turn Off Active Subtitles", color = Color(0xFFF85149), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                Text(activeLabel, color = Color.White, fontSize = 11.sp, maxLines = 1)
-                            }
-                        }
-                    }
-
-                    // Search Query Input
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2086,7 +1955,6 @@ class OmniPlayerPlugin : PluginEntry() {
                             value = queryText,
                             onValueChange = { queryText = it },
                             singleLine = true,
-                            placeholder = { Text("Search movie or episode...", fontSize = 12.sp) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
@@ -2095,28 +1963,21 @@ class OmniPlayerPlugin : PluginEntry() {
                             ),
                             modifier = Modifier.weight(1f)
                         )
-
                         Button(
                             onClick = { triggerSearch() },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                            shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("Find", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
 
-                    // Language Filter Chips
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         languages.forEach { (code, label) ->
                             val isSelected = selectedLang == code
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
                                 color = if (isSelected) Color(0xFF00E676) else Color(0xFF181F2A),
-                                border = BorderStroke(0.8.dp, if (isSelected) Color(0xFF00E676) else Color.White.copy(alpha = 0.1f)),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .clickable {
@@ -2135,7 +1996,6 @@ class OmniPlayerPlugin : PluginEntry() {
                         }
                     }
 
-                    // Results List
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2149,93 +2009,42 @@ class OmniPlayerPlugin : PluginEntry() {
                             }
                         } else if (results.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("No subtitles found for '$queryText'", color = Color(0xFF8B949E), fontSize = 12.sp)
+                                Text("No subtitles found", color = Color(0xFF8B949E), fontSize = 12.sp)
                             }
                         } else {
-                            LazyColumn(
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.fillMaxSize()
-                            ) {
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 items(results, key = { it.fileId }) { item ->
                                     val isDownloading = isDownloadingId == item.fileId
-
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
                                         color = Color(0xFF161B22),
-                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(8.dp))
                                             .clickable(enabled = !isDownloading) {
                                                 isDownloadingId = item.fileId
                                                 scope.launch {
-                                                    val file = OpenSubtitlesManager.downloadSubtitle(context, item.fileId, item.fileName)
+                                                    val srtText = OpenSubtitlesService.downloadSubtitleText(item.fileId)
                                                     isDownloadingId = null
-                                                    if (file != null) {
-                                                        onSelectSubtitle(file, "${item.language.uppercase()} - ${item.releaseName.take(30)}")
+                                                    if (srtText != null) {
+                                                        onSelectSubtitle(srtText, "${item.language.uppercase()} - ${item.releaseName.take(30)}")
                                                     }
                                                 }
                                             }
                                     ) {
                                         Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(10.dp),
+                                            modifier = Modifier.padding(10.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = item.releaseName,
-                                                    color = Color.White,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(Modifier.height(2.dp))
-                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                    Text(
-                                                        text = item.language.uppercase(),
-                                                        color = Color(0xFF00E676),
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Text(
-                                                        text = "↓ ${item.downloadCount}",
-                                                        color = Color(0xFF8B949E),
-                                                        fontSize = 10.sp
-                                                    )
-                                                    if (item.rating > 0.0) {
-                                                        Text(
-                                                            text = "★ ${item.rating}",
-                                                            color = Color(0xFFD29922),
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                    }
-                                                }
+                                                Text(item.releaseName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text("${item.language.uppercase()} • ↓ ${item.downloadCount}", color = Color(0xFF8B949E), fontSize = 10.sp)
                                             }
-
                                             if (isDownloading) {
-                                                CircularProgressIndicator(
-                                                    color = Color(0xFF00E676),
-                                                    strokeWidth = 2.dp,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
+                                                CircularProgressIndicator(color = Color(0xFF00E676), strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                                             } else {
-                                                Surface(
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    color = Color(0xFF21262D)
-                                                ) {
-                                                    Text(
-                                                        text = "Get",
-                                                        color = Color(0xFF58A6FF),
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                    )
-                                                }
+                                                Text("Get", color = Color(0xFF00E676), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
