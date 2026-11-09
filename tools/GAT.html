@@ -102,17 +102,22 @@
 
         <!-- Terminal Console -->
         <div class="space-y-1.5">
-            <div class="flex items-center justify-between text-xs">
-                <span class="font-bold text-gray-400 uppercase tracking-wider">Mission Control Terminal</span>
-                <div class="flex items-center gap-3">
-                    <label class="flex items-center gap-1.5 cursor-pointer text-gray-400">
+            <div class="flex flex-wrap items-center justify-between text-xs gap-2">
+                <span class="font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span>📋</span> Persistent Audit Terminal
+                </span>
+                <div class="flex items-center gap-2">
+                    <button id="btn-copy-all-logs" class="bg-gray-800 hover:bg-gray-700 text-sky-400 border border-gray-700 px-2.5 py-1 rounded text-[11px] font-semibold transition">
+                        📋 Copy Logs
+                    </button>
+                    <label class="flex items-center gap-1.5 cursor-pointer text-gray-400 text-[11px]">
                         <input type="checkbox" id="check-auto-scroll-terminal" class="accent-sky-500" checked />
                         <span>Auto-scroll</span>
                     </label>
-                    <button id="btn-clear-terminal" class="text-gray-500 hover:text-gray-300">Clear</button>
+                    <button id="btn-clear-terminal" class="text-gray-500 hover:text-gray-300 text-[11px]">Clear</button>
                 </div>
             </div>
-            <pre id="terminal" class="w-full h-64 bg-black/85 border border-gray-800 rounded-xl p-3 text-xs font-mono text-green-400 overflow-y-auto whitespace-pre-wrap leading-relaxed">System ready. Configure courses in Tab 2 or click launch.</pre>
+            <pre id="terminal" class="w-full h-64 bg-black/85 border border-gray-800 rounded-xl p-3 text-xs font-mono text-green-400 overflow-y-auto whitespace-pre-wrap leading-relaxed select-text">System ready. Configure courses in Tab 2 or click launch.</pre>
         </div>
     </div>
 
@@ -203,7 +208,7 @@
         <div class="bg-[#161B22] border border-gray-800 rounded-xl p-4 space-y-3">
             <h2 class="text-sm font-bold text-sky-400 uppercase tracking-wider">AI Studio Model & Thinking Parameters</h2>
 
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
                     <label class="text-xs text-gray-400">Model</label>
                     <input id="input-model" type="text" value="Gemini 3.8 Flash" 
@@ -221,9 +226,20 @@
                 <div>
                     <label class="text-xs text-gray-400">Temporary Chat</label>
                     <select id="select-temp-chat" class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500">
-                        <option value="false" selected>Disabled (Persistent - Saved to Account)</option>
-                        <option value="true">Enabled (Incognito - Never Saved)</option>
+                        <option value="false" selected>Disabled (Persistent)</option>
+                        <option value="true">Enabled (Incognito)</option>
                     </select>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-400 flex items-center justify-between">
+                        <span>Min Threshold</span>
+                        <span class="text-sky-400 font-bold text-[10px]">Gatekeeper</span>
+                    </label>
+                    <div class="flex items-center gap-1">
+                        <input id="input-min-output-kb" type="number" min="0" value="30" placeholder="KB"
+                               class="w-full bg-[#0D1117] border border-gray-700 rounded-lg p-2 text-xs text-gray-200 outline-none focus:border-sky-500 font-bold font-mono" />
+                        <span class="text-xs text-gray-500 font-mono">KB</span>
+                    </div>
                 </div>
             </div>
 
@@ -512,6 +528,7 @@
             concurrencyLimit: 3,
             multiCourseEnabled: true,
             preserveSession: false,
+            minOutputKb: 30,
             model: 'Gemini 3.8 Flash',
             thinkingLevel: 'High',
             tempChat: false,
@@ -582,6 +599,7 @@
             document.getElementById('fleet-concurrency-note').innerText = 'Max Concurrency: ' + (state.concurrencyLimit || 3);
             document.getElementById('check-chaining-enabled').checked = state.multiCourseEnabled !== false;
             document.getElementById('check-preserve-session').checked = !!state.preserveSession;
+            document.getElementById('input-min-output-kb').value = state.minOutputKb !== undefined ? state.minOutputKb : 30;
             document.getElementById('input-model').value = state.model || 'Gemini 3.8 Flash';
             document.getElementById('select-thinking').value = state.thinkingLevel || 'High';
             document.getElementById('select-temp-chat').value = String(state.tempChat === true);
@@ -592,11 +610,64 @@
             updateSelectedCourseView();
         }
 
+        // Dual-Layer Persistent Audit Logging Engine
+        const LOGS_STORAGE_KEY = 'omni_gat_persistent_terminal_logs_v1';
+        let persistentLogLines = [];
+        let diskLogFlushTimeout = null;
+        let pendingDiskLogs = [];
+
+        function flushDiskLogs() {
+            if (pendingDiskLogs.length === 0 || !window.Omni || !Omni.fs) return;
+            const toWrite = pendingDiskLogs.join('\n') + '\n';
+            pendingDiskLogs = [];
+            const diskPath = state.baseRoot.replace(/\/+$/, '') + '/factory_audit.log';
+            Omni.fs.read(diskPath).then(function(existing) {
+                const combined = (existing ? existing + '\n' : '') + toWrite;
+                return Omni.fs.write(diskPath, combined);
+            }).catch(function() {
+                Omni.fs.write(diskPath, toWrite).catch(function(){});
+            });
+        }
+
+        function restoreTerminalLogs() {
+            try {
+                const raw = localStorage.getItem(LOGS_STORAGE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        persistentLogLines = parsed;
+                        terminalEl.innerHTML = '<div class="text-gray-500 font-bold border-b border-gray-800 pb-1 mb-2">--- [PREVIOUS SESSION AUDIT TRAIL RESTORED (' + parsed.length + ' entries)] ---</div>';
+                        parsed.forEach(function(item) {
+                            terminalEl.innerHTML += item.html || ('<div class="text-gray-400">' + item.plain + '</div>');
+                        });
+                        terminalEl.innerHTML += '<div class="text-emerald-400 font-bold border-t border-gray-800 pt-1 mt-2">=== [CURRENT SESSION ACTIVE] ===</div>';
+                        terminalEl.scrollTop = terminalEl.scrollHeight;
+                    }
+                }
+            } catch(_) {}
+        }
+
         function log(worker, msg, color) {
             color = color || 'text-green-400';
-            const time = new Date().toLocaleTimeString();
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            const dateStr = now.toISOString().slice(0, 10);
             const prefix = worker ? '[' + worker + '] ' : '';
-            terminalEl.innerHTML += '<div class="' + color + '">[' + time + '] ' + prefix + msg + '</div>';
+            const htmlLine = '<div class="' + color + '">[' + timeStr + '] ' + prefix + msg + '</div>';
+            terminalEl.innerHTML += htmlLine;
+
+            const plainLine = '[' + dateStr + ' ' + timeStr + '] ' + prefix + msg.replace(/<[^>]+>/g, '');
+            persistentLogLines.push({ html: htmlLine, plain: plainLine });
+            if (persistentLogLines.length > 400) persistentLogLines.shift();
+
+            try {
+                localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(persistentLogLines.slice(-250)));
+            } catch(_) {}
+
+            pendingDiskLogs.push(plainLine);
+            if (diskLogFlushTimeout) clearTimeout(diskLogFlushTimeout);
+            diskLogFlushTimeout = setTimeout(flushDiskLogs, 2500);
+
             if (document.getElementById('check-auto-scroll-terminal')?.checked !== false) {
                 terminalEl.scrollTop = terminalEl.scrollHeight;
             }
@@ -608,7 +679,28 @@
             badgeEl.innerText = text;
         }
 
-        document.getElementById('btn-clear-terminal').onclick = function() { terminalEl.innerHTML = ''; };
+        document.getElementById('btn-clear-terminal').onclick = function() {
+            terminalEl.innerHTML = '<div class="text-gray-500 font-bold">Terminal logs cleared.</div>';
+            persistentLogLines = [];
+            try { localStorage.removeItem(LOGS_STORAGE_KEY); } catch(_) {}
+        };
+
+        document.getElementById('btn-copy-all-logs').onclick = function() {
+            if (persistentLogLines.length === 0) {
+                Omni.toast('No logs recorded yet');
+                return;
+            }
+            const fullText = persistentLogLines.map(l => l.plain).join('\n');
+            Omni.copy(fullText);
+            Omni.toast('Copied ' + persistentLogLines.length + ' log entries to clipboard!');
+        };
+
+        document.getElementById('input-min-output-kb').oninput = function() {
+            let v = parseInt(this.value, 10);
+            if (isNaN(v) || v < 0) v = 0;
+            state.minOutputKb = v;
+            saveState();
+        };
 
         // 2. Tab Navigation Deck Routing
         const tabBtns = {
@@ -1311,7 +1403,18 @@
                             throw new Error('Empty response received from AI Studio');
                         }
 
-                        log(profileName, '✅ ' + stepLabel + ' completed (' + result.output.length.toLocaleString() + ' chars)', 'text-emerald-300');
+                        const outputBytes = result.output.length;
+                        const gotKb = (outputBytes / 1024).toFixed(1);
+                        const minKb = parseInt(state.minOutputKb, 10) || 0;
+
+                        // Validation Gatekeeper: Reject undersized payloads
+                        if (minKb > 0 && outputBytes < (minKb * 1024)) {
+                            const sizeErrMsg = 'Undersized output rejected: ' + gotKb + ' KB (Below minimum required threshold of ' + minKb + ' KB)';
+                            log(profileName, '❌ GATEKEEPER REJECTION: ' + sizeErrMsg, 'text-rose-400 font-bold');
+                            throw new Error(sizeErrMsg);
+                        }
+
+                        log(profileName, '✅ ' + stepLabel + ' completed & verified (' + result.output.length.toLocaleString() + ' chars, ' + gotKb + ' KB >= ' + minKb + ' KB threshold)', 'text-emerald-300 font-semibold');
 
                         if (step.scrape) {
                             const saveName = 'Ch_' + (chapter.number < 10 ? '0' + chapter.number : chapter.number) + '_Turn_' + (sIdx + 1) + '.md';
@@ -1558,6 +1661,7 @@
                 attempts++;
             }
             await loadState();
+            restoreTerminalLogs();
             await loadDeviceProfiles();
         }
         init();
