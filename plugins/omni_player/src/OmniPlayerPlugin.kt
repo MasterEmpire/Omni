@@ -89,15 +89,15 @@ import java.util.concurrent.ConcurrentHashMap
 
 @Composable
 fun CineLockIcon(isLocked: Boolean, tint: Color = Color.White, modifier: Modifier = Modifier.size(20.dp)) {
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.aspectRatio(1f)) {
         val w = size.width
         val h = size.height
-        val strokeW = 1.8.dp.toPx()
+        val strokeW = 1.6.dp.toPx()
 
-        val bodyW = w * 0.72f
-        val bodyH = h * 0.52f
+        val bodyW = w * 0.68f
+        val bodyH = h * 0.48f
         val bodyX = (w - bodyW) / 2f
-        val bodyY = h * 0.42f
+        val bodyY = h * 0.44f
 
         drawRoundRect(
             color = tint,
@@ -107,16 +107,13 @@ fun CineLockIcon(isLocked: Boolean, tint: Color = Color.White, modifier: Modifie
             style = Stroke(width = strokeW)
         )
 
-        drawCircle(
-            color = tint,
-            radius = strokeW * 0.9f,
-            center = Offset(w * 0.5f, bodyY + bodyH * 0.42f)
-        )
+        drawCircle(tint, strokeW * 1.1f, Offset(w * 0.5f, bodyY + bodyH * 0.38f))
+        drawLine(tint, Offset(w * 0.5f, bodyY + bodyH * 0.38f), Offset(w * 0.5f, bodyY + bodyH * 0.72f), strokeW * 1.2f, StrokeCap.Round)
 
-        val shackleW = w * 0.42f
-        val shackleH = h * 0.34f
+        val shackleW = w * 0.38f
+        val shackleH = h * 0.30f
         val shackleX = (w - shackleW) / 2f
-        val shackleY = if (isLocked) h * 0.12f else h * 0.04f
+        val shackleY = if (isLocked) h * 0.14f else h * 0.06f
 
         drawArc(
             color = tint,
@@ -127,121 +124,130 @@ fun CineLockIcon(isLocked: Boolean, tint: Color = Color.White, modifier: Modifie
             size = androidx.compose.ui.geometry.Size(shackleW, shackleH * 2f),
             style = Stroke(width = strokeW, cap = StrokeCap.Round)
         )
+        if (!isLocked) {
+            drawLine(tint, Offset(shackleX, shackleY + shackleH), Offset(shackleX, bodyY), strokeW, StrokeCap.Round)
+        }
     }
 }
 
 @Composable
 fun CineCameraIcon(tint: Color = Color.White, modifier: Modifier = Modifier.size(20.dp)) {
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.aspectRatio(1f)) {
         val w = size.width
         val h = size.height
-        val strokeW = 1.8.dp.toPx()
+        val strokeW = 1.6.dp.toPx()
+
+        val prism = Path().apply {
+            moveTo(w * 0.34f, h * 0.28f)
+            lineTo(w * 0.40f, h * 0.16f)
+            lineTo(w * 0.60f, h * 0.16f)
+            lineTo(w * 0.66f, h * 0.28f)
+        }
+        drawPath(prism, tint, style = Stroke(strokeW, join = StrokeJoin.Round))
+        drawLine(tint, Offset(w * 0.20f, h * 0.22f), Offset(w * 0.28f, h * 0.22f), strokeW, StrokeCap.Round)
 
         drawRoundRect(
             color = tint,
             topLeft = Offset(w * 0.12f, h * 0.28f),
-            size = androidx.compose.ui.geometry.Size(w * 0.76f, h * 0.56f),
+            size = androidx.compose.ui.geometry.Size(w * 0.76f, h * 0.54f),
             cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
             style = Stroke(width = strokeW)
         )
 
-        val bumpPath = Path().apply {
-            moveTo(w * 0.32f, h * 0.28f)
-            lineTo(w * 0.38f, h * 0.16f)
-            lineTo(w * 0.62f, h * 0.16f)
-            lineTo(w * 0.68f, h * 0.28f)
-            close()
-        }
-        drawPath(bumpPath, color = tint, style = Stroke(width = strokeW, join = StrokeJoin.Round))
-
-        drawCircle(
-            color = tint,
-            radius = w * 0.18f,
-            center = Offset(w * 0.5f, h * 0.56f),
-            style = Stroke(width = strokeW)
-        )
+        drawCircle(tint, w * 0.17f, Offset(w * 0.5f, h * 0.55f), Stroke(strokeW))
+        drawCircle(tint, strokeW * 0.8f, Offset(w * 0.5f, h * 0.55f))
     }
 }
 
 @Composable
 fun CinePipIcon(tint: Color = Color.White, modifier: Modifier = Modifier.size(20.dp)) {
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.aspectRatio(1f)) {
         val w = size.width
         val h = size.height
-        val strokeW = 1.8.dp.toPx()
+        val strokeW = 1.6.dp.toPx()
 
         drawRoundRect(
-            color = tint.copy(alpha = 0.5f),
-            topLeft = Offset(w * 0.1f, h * 0.15f),
-            size = androidx.compose.ui.geometry.Size(w * 0.78f, h * 0.68f),
+            color = tint.copy(alpha = 0.45f),
+            topLeft = Offset(w * 0.10f, h * 0.18f),
+            size = androidx.compose.ui.geometry.Size(w * 0.80f, h * 0.64f),
             cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
             style = Stroke(width = strokeW)
         )
 
         drawRoundRect(
             color = tint,
-            topLeft = Offset(w * 0.44f, h * 0.42f),
-            size = androidx.compose.ui.geometry.Size(w * 0.46f, h * 0.42f),
+            topLeft = Offset(w * 0.46f, h * 0.44f),
+            size = androidx.compose.ui.geometry.Size(w * 0.44f, h * 0.38f),
             cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
-            style = Stroke(width = strokeW * 1.1f)
+            style = Stroke(width = strokeW * 1.2f)
         )
+
+        drawLine(tint, Offset(w * 0.68f, h * 0.63f), Offset(w * 0.56f, h * 0.51f), strokeW, StrokeCap.Round)
     }
 }
 
 @Composable
 fun CineRotateIcon(tint: Color = Color.White, modifier: Modifier = Modifier.size(18.dp)) {
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.aspectRatio(1f)) {
         val w = size.width
         val h = size.height
-        val strokeW = 1.8.dp.toPx()
+        val strokeW = 1.5.dp.toPx()
+
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.28f, h * 0.18f),
+            size = androidx.compose.ui.geometry.Size(w * 0.44f, h * 0.64f),
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Stroke(width = strokeW)
+        )
+        drawLine(tint, Offset(w * 0.42f, h * 0.74f), Offset(w * 0.58f, h * 0.74f), strokeW, StrokeCap.Round)
 
         drawArc(
             color = tint,
-            startAngle = 40f,
-            sweepAngle = 260f,
+            startAngle = -40f,
+            sweepAngle = 100f,
             useCenter = false,
-            topLeft = Offset(w * 0.15f, h * 0.15f),
-            size = androidx.compose.ui.geometry.Size(w * 0.7f, h * 0.7f),
+            topLeft = Offset(w * 0.08f, h * 0.08f),
+            size = androidx.compose.ui.geometry.Size(w * 0.84f, h * 0.84f),
             style = Stroke(width = strokeW, cap = StrokeCap.Round)
         )
-
-        val tipPath = Path().apply {
-            moveTo(w * 0.72f, h * 0.12f)
-            lineTo(w * 0.88f, h * 0.28f)
-            lineTo(w * 0.68f, h * 0.36f)
+        val tip = Path().apply {
+            moveTo(w * 0.82f, h * 0.20f)
+            lineTo(w * 0.94f, h * 0.36f)
+            lineTo(w * 0.74f, h * 0.38f)
         }
-        drawPath(tipPath, color = tint, style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(tip, color = tint, style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 
 @Composable
 fun CineHeadphonesIcon(tint: Color = Color.White, modifier: Modifier = Modifier.size(18.dp)) {
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.aspectRatio(1f)) {
         val w = size.width
         val h = size.height
-        val strokeW = 1.8.dp.toPx()
+        val strokeW = 1.6.dp.toPx()
 
         drawArc(
             color = tint,
             startAngle = 180f,
             sweepAngle = 180f,
             useCenter = false,
-            topLeft = Offset(w * 0.16f, h * 0.12f),
+            topLeft = Offset(w * 0.16f, h * 0.14f),
             size = androidx.compose.ui.geometry.Size(w * 0.68f, h * 0.68f),
             style = Stroke(width = strokeW, cap = StrokeCap.Round)
         )
 
         drawRoundRect(
             color = tint,
-            topLeft = Offset(w * 0.1f, h * 0.46f),
-            size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.38f),
+            topLeft = Offset(w * 0.12f, h * 0.48f),
+            size = androidx.compose.ui.geometry.Size(w * 0.16f, h * 0.36f),
             cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx())
         )
 
         drawRoundRect(
             color = tint,
-            topLeft = Offset(w * 0.72f, h * 0.46f),
-            size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.38f),
+            topLeft = Offset(w * 0.72f, h * 0.48f),
+            size = androidx.compose.ui.geometry.Size(w * 0.16f, h * 0.36f),
             cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx())
         )
     }
@@ -249,10 +255,10 @@ fun CineHeadphonesIcon(tint: Color = Color.White, modifier: Modifier = Modifier.
 
 @Composable
 fun CineVolumeIcon(isMuted: Boolean, tint: Color = Color.White, modifier: Modifier = Modifier.size(18.dp)) {
-    Canvas(modifier = modifier) {
+    Canvas(modifier = modifier.aspectRatio(1f)) {
         val w = size.width
         val h = size.height
-        val strokeW = 1.8.dp.toPx()
+        val strokeW = 1.6.dp.toPx()
 
         val speakerPath = Path().apply {
             moveTo(w * 0.14f, h * 0.38f)
@@ -286,17 +292,8 @@ fun CineVolumeIcon(isMuted: Boolean, tint: Color = Color.White, modifier: Modifi
                 startAngle = -45f,
                 sweepAngle = 90f,
                 useCenter = false,
-                topLeft = Offset(w * 0.42f, h * 0.28f),
-                size = androidx.compose.ui.geometry.Size(w * 0.42f, h * 0.44f),
-                style = Stroke(width = strokeW, cap = StrokeCap.Round)
-            )
-            drawArc(
-                color = tint.copy(alpha = 0.7f),
-                startAngle = -45f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset(w * 0.52f, h * 0.16f),
-                size = androidx.compose.ui.geometry.Size(w * 0.52f, h * 0.68f),
+                topLeft = Offset(w * 0.44f, h * 0.28f),
+                size = androidx.compose.ui.geometry.Size(w * 0.40f, h * 0.44f),
                 style = Stroke(width = strokeW, cap = StrokeCap.Round)
             )
         }
@@ -304,14 +301,15 @@ fun CineVolumeIcon(isMuted: Boolean, tint: Color = Color.White, modifier: Modifi
 }
 
 @Composable
-fun CineSeekArcIcon(isForward: Boolean, seconds: Int = 10, tint: Color = Color.White, modifier: Modifier = Modifier.size(34.dp)) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+fun CineSeekArcIcon(isForward: Boolean, seconds: Int = 10, tint: Color = Color.White, modifier: Modifier = Modifier.size(28.dp)) {
+    Box(
+        modifier = modifier.aspectRatio(1f),
+        contentAlignment = Alignment.Center
+    ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width
-            val h = size.height
-            val strokeW = 1.8.dp.toPx()
-
-            val startA = if (isForward) 290f else 70f
+            val strokeW = 1.6.dp.toPx()
+            val startA = if (isForward) 300f else 60f
             val sweepA = if (isForward) 280f else -280f
 
             drawArc(
@@ -319,23 +317,23 @@ fun CineSeekArcIcon(isForward: Boolean, seconds: Int = 10, tint: Color = Color.W
                 startAngle = startA,
                 sweepAngle = sweepA,
                 useCenter = false,
-                topLeft = Offset(w * 0.12f, h * 0.12f),
-                size = androidx.compose.ui.geometry.Size(w * 0.76f, h * 0.76f),
+                topLeft = Offset(w * 0.12f, w * 0.12f),
+                size = androidx.compose.ui.geometry.Size(w * 0.76f, w * 0.76f),
                 style = Stroke(width = strokeW, cap = StrokeCap.Round)
             )
 
-            val arrowPath = Path().apply {
+            val arrow = Path().apply {
                 if (isForward) {
-                    moveTo(w * 0.66f, h * 0.04f)
-                    lineTo(w * 0.88f, h * 0.18f)
-                    lineTo(w * 0.72f, h * 0.32f)
+                    moveTo(w * 0.64f, w * 0.02f)
+                    lineTo(w * 0.88f, w * 0.16f)
+                    lineTo(w * 0.72f, w * 0.30f)
                 } else {
-                    moveTo(w * 0.34f, h * 0.04f)
-                    lineTo(w * 0.12f, h * 0.18f)
-                    lineTo(w * 0.28f, h * 0.32f)
+                    moveTo(w * 0.36f, w * 0.02f)
+                    lineTo(w * 0.12f, w * 0.16f)
+                    lineTo(w * 0.28f, w * 0.30f)
                 }
             }
-            drawPath(arrowPath, color = tint, style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(arrow, color = tint, style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
 
         Text(
@@ -344,7 +342,8 @@ fun CineSeekArcIcon(isForward: Boolean, seconds: Int = 10, tint: Color = Color.W
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
-            letterSpacing = (-0.5).sp
+            textAlign = TextAlign.Center,
+            lineHeight = 9.sp
         )
     }
 }
@@ -1092,11 +1091,23 @@ class OmniPlayerPlugin : PluginEntry() {
             }
         }
 
-        // Initialize Player with Video
+        // Initialize Player with Video and Restore Memory Vault State
         LaunchedEffect(video.uri) {
             bridge.setImmersiveMode(true)
+            val savedState = PlaybackHistoryManager.getSavedState(context, video.id.toString())
+            if (savedState != null) {
+                subtitleState.delaySec = savedState.optDouble("delaySec", 0.0).toFloat()
+                subtitleState.yFraction = savedState.optDouble("yFraction", 0.08).toFloat()
+                subtitleState.isEnabled = savedState.optBoolean("isEnabled", true)
+            }
+            val cachedSub = PlaybackHistoryManager.getSavedSubtitle(context, video.id.toString())
+            if (cachedSub != null) {
+                subtitleState.loadSrtText(cachedSub.second, cachedSub.first)
+            }
+
             val mediaItem = MediaItem.fromUri(video.uri)
-            player.setMediaItem(mediaItem)
+            val resumeMs = savedState?.optLong("positionMs", 0L) ?: 0L
+            player.setMediaItem(mediaItem, resumeMs)
             player.prepare()
             player.play()
             isPlaying = true
@@ -1125,6 +1136,18 @@ class OmniPlayerPlugin : PluginEntry() {
             val listener = object : Player.Listener {
                 override fun onIsPlayingChanged(playing: Boolean) {
                     isPlaying = playing
+                    if (!playing) {
+                        PlaybackHistoryManager.saveVideoState(
+                            context = context,
+                            videoId = video.id.toString(),
+                            positionMs = player.currentPosition,
+                            subtitleName = subtitleState.currentSubtitleName,
+                            rawSrtText = subtitleState.rawSrtContent,
+                            delaySec = subtitleState.delaySec,
+                            yFraction = subtitleState.yFraction,
+                            isEnabled = subtitleState.isEnabled
+                        )
+                    }
                 }
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
@@ -1134,6 +1157,16 @@ class OmniPlayerPlugin : PluginEntry() {
             }
             player.addListener(listener)
             onDispose {
+                PlaybackHistoryManager.saveVideoState(
+                    context = context,
+                    videoId = video.id.toString(),
+                    positionMs = player.currentPosition,
+                    subtitleName = subtitleState.currentSubtitleName,
+                    rawSrtText = subtitleState.rawSrtContent,
+                    delaySec = subtitleState.delaySec,
+                    yFraction = subtitleState.yFraction,
+                    isEnabled = subtitleState.isEnabled
+                )
                 bridge.setImmersiveMode(false)
                 bridge.setScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
                 player.removeListener(listener)
@@ -1792,14 +1825,27 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // --- LIVE ON-VIDEO SUBTITLE CUE OVERLAY ---
+            // --- LIVE ON-VIDEO SUBTITLE CUE OVERLAY (HOLD & DRAG REPOSITIONING) ---
             val activeCueText = remember(currentPos, subtitleState.delaySec, subtitleState.cues.size, subtitleState.isEnabled) {
                 subtitleState.getCurrentCue(currentPos)
             }
             SubtitleOnVideoOverlay(
                 cueText = activeCueText,
                 subtitleState = subtitleState,
-                modifier = Modifier.align(Alignment.BottomCenter)
+                onPositionChanged = { newFraction ->
+                    bridge.vibrate(30L)
+                    PlaybackHistoryManager.saveVideoState(
+                        context = context,
+                        videoId = video.id.toString(),
+                        positionMs = player.currentPosition,
+                        subtitleName = subtitleState.currentSubtitleName,
+                        rawSrtText = subtitleState.rawSrtContent,
+                        delaySec = subtitleState.delaySec,
+                        yFraction = newFraction,
+                        isEnabled = subtitleState.isEnabled
+                    )
+                },
+                modifier = Modifier.fillMaxSize()
             )
 
             // --- FLOATING SUBTITLE DELAY ADJUSTER (Screenshot 2) ---
