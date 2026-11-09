@@ -1825,7 +1825,7 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // --- LIVE ON-VIDEO SUBTITLE CUE OVERLAY (HOLD & DRAG REPOSITIONING) ---
+            // --- LIVE ON-VIDEO SUBTITLE CUE OVERLAY (TAP TO AI-INSPECT, HOLD & DRAG TO MOVE) ---
             val activeCueText = remember(currentPos, subtitleState.delaySec, subtitleState.cues.size, subtitleState.isEnabled) {
                 subtitleState.getCurrentCue(currentPos)
             }
@@ -1844,6 +1844,19 @@ class OmniPlayerPlugin : PluginEntry() {
                         yFraction = newFraction,
                         isEnabled = subtitleState.isEnabled
                     )
+                },
+                onTapSubtitle = {
+                    if (!activeCueText.isNullOrBlank()) {
+                        player.pause()
+                        bridge.vibrate(35L)
+                        inspectingCueText = activeCueText
+                        inspectingContextText = subtitleState.getSurroundingContext(currentPos, radius = 2)
+                        if (!GroqAiService.isKeyConfigured(context)) {
+                            activeSubtitleModal = "GROQ_KEY"
+                        } else {
+                            activeSubtitleModal = "AI_INSPECT"
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -1911,6 +1924,33 @@ class OmniPlayerPlugin : PluginEntry() {
                             activeSubtitleModal = null
                         },
                         onClose = { activeSubtitleModal = "HUB" }
+                    )
+                }
+                "AI_INSPECT" -> {
+                    AiDialogueInspectorSheet(
+                        context = context,
+                        currentCue = inspectingCueText,
+                        surroundingContext = inspectingContextText,
+                        onConfigureKey = { activeSubtitleModal = "GROQ_KEY" },
+                        onResumeMovie = {
+                            activeSubtitleModal = null
+                            player.play()
+                        },
+                        onClose = { activeSubtitleModal = null }
+                    )
+                }
+                "GROQ_KEY" -> {
+                    GroqKeyConfigDialog(
+                        context = context,
+                        onKeySaved = {
+                            bridge.showToast("Groq API Key Saved!")
+                            if (inspectingCueText.isNotBlank()) {
+                                activeSubtitleModal = "AI_INSPECT"
+                            } else {
+                                activeSubtitleModal = null
+                            }
+                        },
+                        onDismiss = { activeSubtitleModal = null }
                     )
                 }
             }
