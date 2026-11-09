@@ -6,7 +6,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -482,30 +485,73 @@ fun SubtitleDelayWidget(
 fun SubtitleOnVideoOverlay(
     cueText: String?,
     subtitleState: SubtitleState,
+    onPositionChanged: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (cueText.isNullOrBlank() || !subtitleState.isEnabled) return
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 28.dp),
-        contentAlignment = Alignment.BottomCenter
-    ) {
-        Surface(
-            color = subtitleState.boxColor,
-            shape = RoundedCornerShape(4.dp),
-            modifier = Modifier.padding(horizontal = 8.dp)
+    var isDragging by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val boxHeightPx = constraints.maxHeight.toFloat()
+        val verticalBias = (1f - 2f * subtitleState.yFraction).coerceIn(-0.90f, 0.92f)
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(BiasAlignment(0f, verticalBias))
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = cueText,
-                color = subtitleState.fontColor,
-                fontSize = subtitleState.fontSizeSp.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-                lineHeight = (subtitleState.fontSizeSp * 1.25f).sp,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-            )
+            Surface(
+                color = subtitleState.boxColor,
+                shape = RoundedCornerShape(4.dp),
+                border = if (isDragging) BorderStroke(1.5.dp, Color(0xFF00E676)) else null,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .pointerInput(Unit) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                isDragging = true
+                            },
+                            onDragEnd = {
+                                isDragging = false
+                                onPositionChanged(subtitleState.yFraction)
+                            },
+                            onDragCancel = {
+                                isDragging = false
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val deltaFraction = -dragAmount.y / boxHeightPx
+                                val newFraction = (subtitleState.yFraction + deltaFraction).coerceIn(0.04f, 0.85f)
+                                subtitleState.yFraction = newFraction
+                            }
+                        )
+                    }
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (isDragging) {
+                        Text(
+                            text = "DRAG TO REPOSITION",
+                            color = Color(0xFF00E676),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    Text(
+                        text = cueText,
+                        color = subtitleState.fontColor,
+                        fontSize = subtitleState.fontSizeSp.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        lineHeight = (subtitleState.fontSizeSp * 1.25f).sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
         }
     }
 }
