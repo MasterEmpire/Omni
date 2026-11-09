@@ -487,6 +487,7 @@ fun SubtitleOnVideoOverlay(
     cueText: String?,
     subtitleState: SubtitleState,
     onPositionChanged: (Float) -> Unit,
+    onTapSubtitle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (cueText.isNullOrBlank() || !subtitleState.isEnabled) return
@@ -510,7 +511,7 @@ fun SubtitleOnVideoOverlay(
                 border = if (isDragging) BorderStroke(1.5.dp, Color(0xFF00E676)) else null,
                 modifier = Modifier
                     .clip(RoundedCornerShape(4.dp))
-                    .pointerInput(Unit) {
+                    .pointerInput(cueText) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = {
                                 isDragging = true
@@ -529,6 +530,11 @@ fun SubtitleOnVideoOverlay(
                                 subtitleState.yFraction = newFraction
                             }
                         )
+                    }
+                    .clickable {
+                        if (!isDragging) {
+                            onTapSubtitle()
+                        }
                     }
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -555,4 +561,328 @@ fun SubtitleOnVideoOverlay(
             }
         }
     }
+}
+
+// ========================================================
+// 5. AI DIALOGUE INSPECTOR (GROQ QWEN 3.8 27B)
+// ========================================================
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AiDialogueInspectorSheet(
+    context: Context,
+    currentCue: String,
+    surroundingContext: String,
+    onConfigureKey: () -> Unit,
+    onResumeMovie: () -> Unit,
+    onClose: () -> Unit
+) {
+    var selectedWord by remember { mutableStateOf<String?>(null) }
+    var explanationText by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    val rawTokens = remember(currentCue) {
+        currentCue.split(Regex("\\s+")).filter { it.isNotBlank() }
+    }
+
+    fun sanitizeWord(token: String): String {
+        return token.replace(Regex("^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$"), "")
+    }
+
+    fun requestExplanation(word: String?) {
+        scope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                explanationText = if (word != null) {
+                    GroqAiService.explainWord(context, word, currentCue, surroundingContext)
+                } else {
+                    GroqAiService.explainDialogue(context, currentCue, surroundingContext)
+                }
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Failed to generate explanation"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(currentCue) {
+        requestExplanation(null)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable(onClick = onClose)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .background(Color(0xFF0D1117), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                .clickable(enabled = false) {}
+                .padding(16.dp)
+        ) {
+            // Header: Title, Model Badge, Key Settings, Close
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "AI Scene Explainer",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFF00E676).copy(alpha = 0.15f),
+                        border = BorderStroke(0.8.dp, Color(0xFF00E676).copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = "qwen3.8-27b",
+                            color = Color(0xFF00E676),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onConfigureKey, modifier = Modifier.size(32.dp)) {
+                        CineLockIcon(isLocked = false, tint = Color(0xFF58A6FF), modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8B949E))
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Subtitle Tokenizer: Interactive Tappable Word Chips
+            Text(
+                text = "Tap any word for dictionary + scene nuance:",
+                color = Color(0xFF8B949E),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // "Full Line" Chip
+                val isFullSelected = selectedWord == null
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isFullSelected) Color(0xFF00E676) else Color(0xFF161B22),
+                    border = BorderStroke(0.8.dp, if (isFullSelected) Color(0xFF00E676) else Color.White.copy(alpha = 0.15f)),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            if (selectedWord != null) {
+                                selectedWord = null
+                                requestExplanation(null)
+                            }
+                        }
+                ) {
+                    Text(
+                        text = "Full Line",
+                        color = if (isFullSelected) Color.Black else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+
+                // Individual Word Chips
+                rawTokens.forEach { token ->
+                    val clean = sanitizeWord(token)
+                    val isThisSelected = selectedWord.equals(clean, ignoreCase = true)
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isThisSelected) Color(0xFF00E676) else Color(0xFF161B22),
+                        border = BorderStroke(0.8.dp, if (isThisSelected) Color(0xFF00E676) else Color.White.copy(alpha = 0.15f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                if (clean.isNotEmpty() && !isThisSelected) {
+                                    selectedWord = clean
+                                    requestExplanation(clean)
+                                }
+                            }
+                    ) {
+                        Text(
+                            text = token,
+                            color = if (isThisSelected) Color.Black else Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = if (isThisSelected) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // AI Explanation Box
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF161B22),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 100.dp, max = 220.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    contentAlignment = if (isLoading) Alignment.Center else Alignment.TopStart
+                ) {
+                    if (isLoading) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(color = Color(0xFF00E676), strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                            Text(
+                                text = "Groq LPU thinking...",
+                                color = Color(0xFF8B949E),
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    } else if (errorMessage != null) {
+                        Column {
+                            Text("Explanation Error:", color = Color(0xFFF85149), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(4.dp))
+                            Text(errorMessage!!, color = Color(0xFFC9D1D9), fontSize = 12.sp)
+                            Spacer(Modifier.height(8.dp))
+                            TextButton(onClick = { requestExplanation(selectedWord) }) {
+                                Text("Retry", color = Color(0xFF00E676), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                            item {
+                                if (selectedWord != null) {
+                                    Text(
+                                        text = "Target: \"$selectedWord\"",
+                                        color = Color(0xFF00E676),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                                Text(
+                                    text = explanationText ?: "No explanation available.",
+                                    color = Color(0xFFE6EDF3),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // Bottom Actions: Resume Movie Button
+            Button(
+                onClick = onResumeMovie,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().height(44.dp)
+            ) {
+                Text(
+                    text = "▶  Resume Movie",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
+        }
+    }
+}
+
+// ========================================================
+// 6. GROQ API KEY CONFIGURATION MODAL
+// ========================================================
+
+@Composable
+fun GroqKeyConfigDialog(
+    context: Context,
+    onKeySaved: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var keyInput by remember { mutableStateOf(GroqAiService.getApiKey(context) ?: "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF161B22),
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Column {
+                Text("Groq API Key", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Spacer(Modifier.height(2.dp))
+                Text("Powers instant Qwen 3.8 27B scene explanations", color = Color(0xFF00E676), fontSize = 11.sp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Paste your Groq API key (starts with gsk_...). It will be stored securely on your device.",
+                    color = Color(0xFF8B949E),
+                    fontSize = 12.sp
+                )
+                OutlinedTextField(
+                    value = keyInput,
+                    onValueChange = { keyInput = it },
+                    singleLine = true,
+                    placeholder = { Text("gsk_...", fontSize = 12.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF00E676),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (keyInput.isNotBlank()) {
+                        GroqAiService.saveApiKey(context, keyInput.trim())
+                        onKeySaved(keyInput.trim())
+                    }
+                },
+                enabled = keyInput.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+            ) {
+                Text("Save Key", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color(0xFF8B949E))
+            }
+        }
+    )
 }
