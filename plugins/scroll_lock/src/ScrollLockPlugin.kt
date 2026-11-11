@@ -44,6 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.graphics.Rect
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.net.Uri
@@ -541,11 +544,7 @@ class ScrollLockPlugin : PluginEntry() {
         }
     }
 
-    private fun handleAccessibilityEvent(event: AccessibilityEvent, service: AccessibilityService) {
-        if (!youtubeSafeBypass) return
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg != "com.google.android.youtube") return
-
+    private fun handleYouTubeShortsDeflect(service: AccessibilityService) {
         val now = System.currentTimeMillis()
         if (now - lastDeflectMs < 1200L) return
 
@@ -588,6 +587,312 @@ class ScrollLockPlugin : PluginEntry() {
             }
         } catch (e: Exception) {
             activeBridge?.log("SCROLL_LOCK_ERR", "Error in shorts deflector: ${e.message}")
+        }
+    }
+
+    private fun handleAccessibilityEvent(event: AccessibilityEvent, service: AccessibilityService) {
+        val context = activeContext ?: service
+        val bridge = activeBridge
+
+        val pkg = event.packageName?.toString() ?: return
+        if (pkg.isEmpty() ||
+            pkg == context.packageName ||
+            pkg == "com.omni.hub" ||
+            pkg.contains("inputmethod") ||
+            event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
+            event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
+            return
+        }
+
+        // 1. YouTube Shorts Safe Bypass
+        if (youtubeSafeBypass && pkg == "com.google.android.youtube") {
+            handleYouTubeShortsDeflect(service)
+            return
+        }
+
+        // 2. Target Doomscroll Package Filter
+        val targetsSnapshot = targetPackages.toList()
+        if (!targetsSnapshot.contains(pkg)) return
+
+        // 3. Check Lock Conditions (Penalty Box, Manual Lock, Bedtime Curfew)
+        val now = System.currentTimeMillis()
+        val inPenalty = now < penaltyUntilMs
+        val inManualLock = now < manualLockUntilMs
+        val isCurfew = isNightCurfew()
+        val isLocked = inPenalty || inManualLock || isCurfew
+        if (!isLocked) return
+
+        // 4. Window Geometry Inspection for Pop-up (Freeform) View
+        val windows = try {
+            service.windows
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+        data class TargetWindowEntry(val root: AccessibilityNodeInfo, val bounds: Rect, val pkg: String)
+        val targetWindows = mutableListOf<TargetWindowEntry>()
+
+        if (windows.isNotEmpty()) {
+            for (w in windows) {
+                val root = try { w.root } catch (_: Exception) { null } ?: continue
+                val wPkg = root.packageName?.toString() ?: continue
+                if (targetsSnapshot.contains(wPkg)) {
+                    val rect = Rect()
+                    w.getBoundsInScreen(rect)
+                    targetWindows.add(TargetWindowEntry(root, rect, wPkg))
+                }
+            }
+        }
+
+        if (targetWindows.isEmpty()) {
+            val activeRoot = try { service.rootInActiveWindow } catch (_: Exception) { null }
+            if (activeRoot != null) {
+                val rootPkg = activeRoot.packageName?.toString() ?: ""
+                if (targetsSnapshot.contains(rootPkg)) {
+                    val rect = Rect()
+                    activeRoot.getBoundsInScreen(rect)
+                    targetWindows.add(TargetWindowEntry(activeRoot, rect, rootPkg))
+                }
+            }
+        }
+
+        if (targetWindows.isEmpty()) return
+
+        val dm = context.resources.displayMetrics
+        val screenWidth = dm.widthPixels
+        val screenHeight = dm.heightPixels
+
+        val primaryWindow = targetWindows.maxByOrNull { it.bounds.width() * it.bounds.height() } ?: targetWindows.first()
+        val bounds = primaryWindow.bounds
+        val targetPkg = primaryWindow.pkg
+        val appName = appDisplayNames[targetPkg] ?: targetPkg
+
+        val isPopup = bounds.width() < (screenWidth * 0.96f) ||
+                      bounds.height() < (screenHeight * 0.92f) ||
+                      bounds.top > 80 || bounds.left > 10
+
+        if (isPopup) {
+            // Ruthless Pop-up Sniper Neutralization
+            if (bridge != null) {
+                val killed = huntAndKillMultiWindow(service, targetWindows, bridge, appName)
+                if (killed) {
+                    bridge.log("SCROLL_LOCK_POPUP", "🎯 Pop-up sniper neutralized freeform window for $appName")
+                    return
+                }
+            }
+        } else {
+            // Full-screen Eviction via Direct Home Intent
+            if (now - lastEvictionDeflectTimeMs >= 600L) {
+                lastEvictionDeflectTimeMs = now
+                val reason = when {
+                    isCurfew -> "Bedtime Curfew Active (11PM-6AM). Put the phone down!"
+                    inPenalty -> "Penalty active! Locked out of $appName."
+                    inManualLock -> "Self-imposed focus lock active!"
+                    else -> "ScrollLock active!"
+                }
+                if (bridge != null) {
+                    kickToHome(context, bridge, reason)
+                } else {
+                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_HOME)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(homeIntent)
+                }
+            }
+        }
+    }
+
+    private fun huntAndKillMultiWindow(
+        service: AccessibilityService,
+        windows: List<Any>,
+        bridge: HostBridge,
+        appLabel: String
+    ): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastTapAttemptTimeMs < 400L) return false
+
+        // STAGE 1: Direct Headshot on android:id/close_window
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val closeNodes = root.findAccessibilityNodeInfosByViewId("android:id/close_window")
+            if (closeNodes.isNotEmpty()) {
+                val closeBtn = closeNodes[0]
+                if (closeBtn.isClickable) {
+                    lastTapAttemptTimeMs = now
+                    if (closeBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        engageKillSuccess(bridge)
+                        return true
+                    }
+                } else {
+                    closeBtn.parent?.let { parent ->
+                        if (parent.isClickable) {
+                            lastTapAttemptTimeMs = now
+                            if (parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                                engageKillSuccess(bridge)
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // STAGE 2: Direct Target on Samsung 'Quick options' Pill Handle
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val quickPill = findNodeByDescOrText(root, "Quick options")
+            if (quickPill != null) {
+                val qBounds = Rect()
+                quickPill.getBoundsInScreen(qBounds)
+                lastTapAttemptTimeMs = now
+                var expanded = false
+                if (quickPill.isClickable) {
+                    expanded = quickPill.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                }
+                if (!expanded && quickPill.parent?.isClickable == true) {
+                    expanded = quickPill.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                }
+                if (!expanded && qBounds.width() > 0 && qBounds.height() > 0) {
+                    expanded = dispatchTapGesture(service, qBounds.centerX().toFloat(), qBounds.centerY().toFloat(), bridge)
+                }
+                if (expanded) return false
+            }
+        }
+
+        // STAGE 3: Secondary Handle on android:id/caption
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val captionNodes = root.findAccessibilityNodeInfosByViewId("android:id/caption")
+            if (captionNodes.isNotEmpty()) {
+                val caption = captionNodes[0]
+                val capBounds = Rect()
+                caption.getBoundsInScreen(capBounds)
+                var expanded = false
+                if (caption.isClickable) {
+                    expanded = caption.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                }
+                if (!expanded) {
+                    for (i in 0 until caption.childCount) {
+                        val child = caption.getChild(i) ?: continue
+                        if (child.isClickable) {
+                            expanded = child.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            if (expanded) break
+                        }
+                    }
+                }
+                if (!expanded && capBounds.width() > 0 && capBounds.height() > 0) {
+                    expanded = dispatchTapGesture(service, capBounds.centerX().toFloat(), capBounds.centerY().toFloat(), bridge)
+                }
+                lastTapAttemptTimeMs = now
+            }
+        }
+
+        // STAGE 4: Minimize candidate fallback
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val minNodes = root.findAccessibilityNodeInfosByViewId("android:id/minimize_window")
+            if (minNodes.isNotEmpty()) {
+                val minBtn = minNodes[0]
+                if (minBtn.isClickable) {
+                    lastTapAttemptTimeMs = now
+                    if (minBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        engageKillSuccess(bridge)
+                        return true
+                    }
+                }
+            }
+        }
+
+        // STAGE 5: Generic Close Candidate Search
+        for (w in windows) {
+            val root = getWindowRoot(w) ?: continue
+            val candidates = mutableListOf<AccessibilityNodeInfo>()
+            findCloseCandidates(root, candidates)
+            for (cand in candidates) {
+                if (cand.viewIdResourceName == "android:id/close_window") continue
+                if (cand.isClickable) {
+                    lastTapAttemptTimeMs = now
+                    if (cand.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        engageKillSuccess(bridge)
+                        return true
+                    }
+                }
+            }
+        }
+
+        return false
+    }
+
+    private fun getWindowRoot(entry: Any): AccessibilityNodeInfo? {
+        return try {
+            val field = entry.javaClass.getDeclaredField("root")
+            field.isAccessible = true
+            field.get(entry) as? AccessibilityNodeInfo
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun engageKillSuccess(bridge: HostBridge) {
+        bridge.vibrate(200L)
+        bridge.showToast("⛔ ScrollLock: Floating pop-up window closed!")
+    }
+
+    private fun dispatchTapGesture(service: AccessibilityService, x: Float, y: Float, bridge: HostBridge): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return try {
+                val path = Path().apply { moveTo(x, y) }
+                val stroke = GestureDescription.StrokeDescription(path, 0, 50)
+                val gesture = GestureDescription.Builder().addStroke(stroke).build()
+                service.dispatchGesture(gesture, null, null)
+            } catch (e: Exception) {
+                bridge.log("SCROLL_LOCK_TAP_ERR", "Physical gesture error: ${e.message}")
+                false
+            }
+        }
+        return false
+    }
+
+    private fun findNodeByDescOrText(node: AccessibilityNodeInfo?, target: String): AccessibilityNodeInfo? {
+        if (node == null) return null
+        val lowerTarget = target.lowercase(Locale.US)
+        val desc = node.contentDescription?.toString()?.lowercase(Locale.US) ?: ""
+        val text = node.text?.toString()?.lowercase(Locale.US) ?: ""
+
+        if (desc.contains(lowerTarget) || text.contains(lowerTarget)) {
+            if (node.isClickable) return node
+            if (node.parent?.isClickable == true) return node.parent
+            return node
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            val found = findNodeByDescOrText(child, target)
+            if (found != null) return found
+        }
+        return null
+    }
+
+    private fun findCloseCandidates(node: AccessibilityNodeInfo?, results: MutableList<AccessibilityNodeInfo>) {
+        if (node == null) return
+        val id = node.viewIdResourceName?.lowercase(Locale.US) ?: ""
+        val desc = node.contentDescription?.toString()?.lowercase(Locale.US) ?: ""
+        val text = node.text?.toString()?.lowercase(Locale.US) ?: ""
+
+        val isCloseId = id.contains("close") || id.contains("dismiss") || id.contains("cancel") || id.contains("exit")
+        val isCloseDesc = desc.contains("close") || desc.contains("dismiss") || desc.contains("exit") || desc == "x"
+        val isCloseText = text == "close" || text == "x" || text == "✕" || text == "✖"
+
+        if (isCloseId || isCloseDesc || isCloseText) {
+            results.add(node)
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                findCloseCandidates(child, results)
+            }
         }
     }
 
@@ -1308,6 +1613,8 @@ class ScrollLockPlugin : PluginEntry() {
         @Volatile var screenReceiver: BroadcastReceiver? = null
         @Volatile var lastKnownForegroundApp: String? = null
         @Volatile var lastEventQueryTimeMs = 0L
+        @Volatile var lastTapAttemptTimeMs = 0L
+        @Volatile var lastEvictionDeflectTimeMs = 0L
 
         val globalTargetPackages = mutableStateListOf(
             "com.zhiliaoapp.musically",      // TikTok Global
