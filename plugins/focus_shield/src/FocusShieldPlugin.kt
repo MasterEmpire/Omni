@@ -198,6 +198,15 @@ class FocusShieldPlugin : PluginEntry() {
         // UI dismissed: Keep background monitor and accessibility active
     }
 
+    private fun isSettingsPackage(pkg: String): Boolean {
+        if (pkg.isEmpty()) return false
+        val lower = pkg.lowercase(Locale.US)
+        return lower == "com.android.settings" ||
+               lower.startsWith("com.android.settings.") ||
+               lower == "com.samsung.accessibility" ||
+               lower.startsWith("com.samsung.accessibility.")
+    }
+
     private fun handleAccessibilityEvent(event: AccessibilityEvent, service: AccessibilityService) {
         val bridge = activeBridge ?: return
         val context = activeContext ?: service
@@ -226,15 +235,18 @@ class FocusShieldPlugin : PluginEntry() {
             return
         }
 
-        // 1b. Anti-Tamper Deflection for Android Settings & Telegram during active lock
-        if (eventPkg == "com.android.settings" || eventPkg.startsWith("com.android.settings.") ||
-            TelegramDetector.isTelegram(context, eventPkg)) {
-            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_HOME)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        // 1b. Anti-Tamper Deflection for Android Settings, Samsung Accessibility & Telegram during active lock
+        if (isSettingsPackage(eventPkg) || TelegramDetector.isTelegram(context, eventPkg)) {
+            val now = System.currentTimeMillis()
+            if (now - lastFullDeflectTimeMs >= 600L) {
+                lastFullDeflectTimeMs = now
+                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                context.startActivity(homeIntent)
+                bridge.vibrate(200L)
             }
-            context.startActivity(homeIntent)
-            bridge.vibrate(200L)
             return
         }
 
@@ -263,7 +275,7 @@ class FocusShieldPlugin : PluginEntry() {
                 val pkg = root.packageName?.toString() ?: continue
                 if (pkg != context.packageName && pkg != "com.omni.hub" &&
                     (KNOWN_BROWSER_PACKAGES.contains(pkg) || customPkgs.contains(pkg) ||
-                     pkg == "com.android.settings" || pkg.startsWith("com.android.settings.") ||
+                     isSettingsPackage(pkg) ||
                      TelegramDetector.isTelegram(context, pkg))) {
                     val rect = Rect()
                     w.getBoundsInScreen(rect)
@@ -292,7 +304,7 @@ class FocusShieldPlugin : PluginEntry() {
                     rootPkg != "com.sec.android.app.launcher" && rootPkg != "com.android.systemui" &&
                     !rootPkg.contains("inputmethod") &&
                     (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg) ||
-                     rootPkg == "com.android.settings" || rootPkg.startsWith("com.android.settings.") ||
+                     isSettingsPackage(rootPkg) ||
                      TelegramDetector.isTelegram(context, rootPkg))) {
                     val rect = Rect()
                     activeRoot.getBoundsInScreen(rect)
@@ -361,6 +373,24 @@ class FocusShieldPlugin : PluginEntry() {
         } else {
             targetFirstSeenTimeMs = 0L
             dismissPopupOverlay(bridge)
+            if (now - lastFullDeflectTimeMs >= 600L) {
+                lastFullDeflectTimeMs = now
+                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                context.startActivity(homeIntent)
+                bridge.vibrate(200L)
+                val reason = when {
+                    isSettingsPackage(pkg) -> "Settings & Accessibility are locked to prevent tampering."
+                    TelegramDetector.isTelegram(context, pkg) -> "Telegram is locked."
+                    isPanicActive -> "Focus Lock active! Browsers and blacklist trapped."
+                    isNightActive -> "Night Guard active (10:00 PM – 6:00 AM). Sleep mode engaged."
+                    else -> "App is blacklisted."
+                }
+                bridge.showToast("Focus Shield: $appLabel is locked. $reason")
+                bridge.log("FOCUS_SHIELD", "Deflected full-screen blocked app [$appLabel] ($pkg) to Home via Accessibility!")
+            }
         }
     }
 
@@ -778,7 +808,7 @@ class FocusShieldPlugin : PluginEntry() {
         val customPkgs = customLockedApps.map { it.packageName }.toSet()
         val isBrowser = KNOWN_BROWSER_PACKAGES.contains(fgPkg)
         val isCustomBlocked = customPkgs.contains(fgPkg)
-        val isSettings = fgPkg == "com.android.settings" || fgPkg.startsWith("com.android.settings.")
+        val isSettings = isSettingsPackage(fgPkg)
         val isTelegram = TelegramDetector.isTelegram(context, fgPkg)
 
         val isTargetBlocked = isBrowser || isCustomBlocked || isSettings || isTelegram
@@ -792,7 +822,7 @@ class FocusShieldPlugin : PluginEntry() {
             }
 
             val reason = when {
-                isSettings -> "Settings is locked to prevent tampering."
+                isSettings -> "Settings & Accessibility are locked to prevent tampering."
                 isTelegram -> "Telegram is locked."
                 isPanicActive -> "Focus Lock active! Browsers and blacklist trapped."
                 isNightSchedule -> "Night Guard active (10:00 PM – 6:00 AM). Sleep mode engaged."
@@ -1484,6 +1514,7 @@ class FocusShieldPlugin : PluginEntry() {
         @Volatile var lastTargetSeenTimeMs = 0L
         @Volatile var lastSubtreeDumpTimeMs = 0L
         @Volatile var lastTapAttemptTimeMs = 0L
+        @Volatile var lastFullDeflectTimeMs = 0L
 
         val KNOWN_BROWSER_PACKAGES = setOf(
             "com.sec.android.app.sbrowser",        // Samsung Internet
