@@ -222,7 +222,15 @@ class FocusShieldPlugin : PluginEntry() {
             return
         }
 
-        val accurateTime = NetworkClockGuard.getAccurateTimeMs()
+        var accurateTime = NetworkClockGuard.getAccurateTimeMs()
+        if (manualLockUntilMs <= accurateTime) {
+            val now = System.currentTimeMillis()
+            if (now - lastAccessibilityDiskSyncMs >= 500L) {
+                lastAccessibilityDiskSyncMs = now
+                syncDiskState(context, bridge)
+                accurateTime = NetworkClockGuard.getAccurateTimeMs()
+            }
+        }
         val isPanicActive = manualLockUntilMs > accurateTime
         val cal = Calendar.getInstance().apply { timeInMillis = accurateTime }
         val hour = cal.get(Calendar.HOUR_OF_DAY)
@@ -843,6 +851,7 @@ class FocusShieldPlugin : PluginEntry() {
 
     private fun checkImmediateEviction(context: Context, bridge: HostBridge) {
         try {
+            syncDiskState(context, bridge)
             val accurateTime = NetworkClockGuard.getAccurateTimeMs()
             val isPanic = manualLockUntilMs > accurateTime
             val cal = Calendar.getInstance().apply { timeInMillis = accurateTime }
@@ -897,6 +906,7 @@ class FocusShieldPlugin : PluginEntry() {
             globalMonitorJob = CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
                 NetworkClockGuard.syncNetworkTime(bridge)
                 var lastClockSyncTime = 0L
+                var lastDiskSyncTimeMs = 0L
 
                 while (isActive) {
                     try {
@@ -926,6 +936,12 @@ class FocusShieldPlugin : PluginEntry() {
                             NetworkClockGuard.syncNetworkTime(bridge)
                         }
 
+                        val nowMs = System.currentTimeMillis()
+                        if (nowMs - lastDiskSyncTimeMs >= 1500L) {
+                            lastDiskSyncTimeMs = nowMs
+                            syncDiskState(context, bridge)
+                        }
+
                         val accurateTime = NetworkClockGuard.getAccurateTimeMs()
                         val isPanicActive = manualLockUntilMs > accurateTime
 
@@ -947,6 +963,36 @@ class FocusShieldPlugin : PluginEntry() {
                 }
             }
         }
+    }
+
+    private fun syncDiskState(context: Context, bridge: HostBridge?) {
+        try {
+            var maxDiskLock = 0L
+
+            if (bridge != null) {
+                val bytes = bridge.readFile("config/focus_shield_state.json")
+                if (bytes != null && bytes.isNotEmpty()) {
+                    val json = JSONObject(String(bytes, Charsets.UTF_8))
+                    maxDiskLock = maxOf(maxDiskLock, json.optLong("manual_lock_until_ms", 0L))
+                }
+            }
+
+            val candidateFiles = listOf(
+                java.io.File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (f in candidateFiles) {
+                if (f.exists()) {
+                    val diskLock = JSONObject(f.readText(Charsets.UTF_8)).optLong("manual_lock_until_ms", 0L)
+                    maxDiskLock = maxOf(maxDiskLock, diskLock)
+                }
+            }
+
+            if (maxDiskLock > manualLockUntilMs) {
+                manualLockUntilMs = maxDiskLock
+                bridge?.log("FOCUS_SHIELD", "🔄 Synced manualLockUntilMs from disk: $manualLockUntilMs")
+            }
+        } catch (_: Exception) {}
     }
 
     private fun loadPersistedState(bridge: HostBridge) {
@@ -1515,6 +1561,7 @@ class FocusShieldPlugin : PluginEntry() {
         @Volatile var lastSubtreeDumpTimeMs = 0L
         @Volatile var lastTapAttemptTimeMs = 0L
         @Volatile var lastFullDeflectTimeMs = 0L
+        @Volatile var lastAccessibilityDiskSyncMs = 0L
 
         val KNOWN_BROWSER_PACKAGES = setOf(
             "com.sec.android.app.sbrowser",        // Samsung Internet
