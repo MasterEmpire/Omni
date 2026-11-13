@@ -653,6 +653,9 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 },
+                onCaptureFullSource = {
+                    state.captureFullWebSource()
+                },
                 isLiveAutoPilotEnabled = state.isLiveAutoPilotEnabled,
                 onToggleLiveAutoPilot = { state.toggleLiveAutoPilot() },
                 isAutoPilotConfirmEnabled = state.isAutoPilotConfirmEnabled,
