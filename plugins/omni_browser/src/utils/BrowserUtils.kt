@@ -442,6 +442,36 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     var streamsByTurn = {};
     var latestStreamId = 0;
 
+    function wireLog(tag, msg) {
+        try {
+            if (window.OmniAutomator && window.OmniAutomator.onLog) {
+                window.OmniAutomator.onLog(tag, String(msg));
+            } else if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                window.OmniIdeBridge.log(tag, String(msg));
+            }
+        } catch(_) {}
+    }
+
+    function isInterestingTraffic(url) {
+        if (!url || typeof url !== 'string') return false;
+        if (url.indexOf('google-analytics.com') !== -1 ||
+            url.indexOf('googletagmanager.com') !== -1 ||
+            url.indexOf('doubleclick.net') !== -1 ||
+            url.indexOf('play.google.com/log') !== -1 ||
+            url.indexOf('gstatic.com/_/mss') !== -1) {
+            return false;
+        }
+        return url.indexOf('clients6.google.com') !== -1 ||
+               url.indexOf('googleapis.com') !== -1 ||
+               url.indexOf('webchannel') !== -1 ||
+               url.indexOf('/$rpc/') !== -1 ||
+               url.indexOf('Generate') !== -1 ||
+               url.indexOf('Stream') !== -1 ||
+               url.indexOf('Interaction') !== -1;
+    }
+
+    wireLog('WIRE_INIT', 'Wire hook armed on ' + (window.location ? window.location.href : 'unknown') + ' (fetch=' + typeof window.fetch + ', xhr=' + typeof XMLHttpRequest + ')');
+
     function isGenerationStreamUrl(url) {
         if (!url || typeof url !== 'string') return false;
         return url.indexOf('/MakerSuiteService/GenerateContent') !== -1 ||
@@ -573,8 +603,13 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                     rec.rawSample = jsonStr.slice(0, 400);
                 }
                 extractChunkPayload(rec, parsed);
+                if (rec.chunkCount === 1 || rec.chunkCount % 25 === 0) {
+                    wireLog('WIRE_CHUNK', 'Stream #' + rec.id + ' chunk #' + rec.chunkCount + ' | out=' + rec.output.length + 'c, thoughts=' + rec.thoughts.length + 'c | sample=' + jsonStr.slice(0, 180));
+                }
                 emitUpdate(rec);
-            } catch(_) {}
+            } catch(err) {
+                wireLog('WIRE_PARSE_ERR', 'JSON.parse failed on elem: ' + (err ? err.message : 'unknown') + ' | head=' + jsonStr.slice(0, 180));
+            }
         }
 
         function handleStatusTuple(jsonStr) {
@@ -595,9 +630,14 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
             } catch(_) {}
         }
 
+        var loggedRawHead = false;
         return {
             feed: function(text) {
                 if (!text || phase >= 5) return;
+                if (!loggedRawHead) {
+                    loggedRawHead = true;
+                    wireLog('WIRE_RAW_HEAD', 'Stream #' + rec.id + ' (' + rec.transport + ') head: ' + text.slice(0, 250).replace(/\n/g, '\\n'));
+                }
                 // Strip Google XSSI prefix if present at start
                 if (phase === 0 && acc.length === 0 && text.indexOf(")]}'") === 0) {
                     var nl = text.indexOf('\n');
@@ -709,6 +749,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
         } else if (rec.httpStatus >= 400 && !rec.error) {
             rec.error = 'HTTP Error ' + rec.httpStatus;
         }
+        wireLog('WIRE_STREAM_END', 'Stream #' + rec.id + ' (' + rec.transport + ') ended | http=' + rec.httpStatus + ' statusCode=' + rec.statusCode + ' chunks=' + rec.chunkCount + ' out=' + rec.output.length + 'c thoughts=' + rec.thoughts.length + 'c err=' + rec.error + ' | ms=' + (rec.endedAt - rec.startedAt));
         emitUpdate(rec);
     }
 
@@ -721,11 +762,16 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                 url = (typeof input === 'string') ? input : (input && input.url ? input.url : String(input || ''));
             } catch(_) {}
 
+            if (isInterestingTraffic(url)) {
+                wireLog('WIRE_TRAFFIC', '[FETCH] ' + url);
+            }
+
             if (!isGenerationStreamUrl(url)) {
                 return origFetch.apply(this, arguments);
             }
 
             var rec = createStreamRecord(url, 'fetch');
+            wireLog('WIRE_STREAM_START', 'Stream #' + rec.id + ' [FETCH] turn=' + rec.turnToken + ' url=' + url);
             var parser = createStreamParser(rec);
 
             return origFetch.apply(this, arguments).then(function(res) {
@@ -783,9 +829,13 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
 
         XMLHttpRequest.prototype.send = function() {
             var url = this.__omniWireUrl || '';
+            if (isInterestingTraffic(url)) {
+                wireLog('WIRE_TRAFFIC', '[XHR] ' + url);
+            }
             if (isGenerationStreamUrl(url)) {
                 var xhr = this;
                 var rec = createStreamRecord(url, 'xhr');
+                wireLog('WIRE_STREAM_START', 'Stream #' + rec.id + ' [XHR] turn=' + rec.turnToken + ' url=' + url);
                 var parser = createStreamParser(rec);
                 var prevLen = 0;
 
