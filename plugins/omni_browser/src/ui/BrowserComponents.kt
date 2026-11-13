@@ -614,6 +614,7 @@ fun BrowserMenuOverlay(
     onNewTab: () -> Unit,
     onCopyCleanUrl: () -> Unit,
     onCaptureDomSnapshot: () -> Unit,
+    onCaptureFullSource: () -> Unit = {},
     onOpenLocalIde: () -> Unit,
     onOpenAutomation: () -> Unit,
     onOpenSmartNotes: () -> Unit,
@@ -788,6 +789,7 @@ fun BrowserMenuOverlay(
                         }
                         "copy_url" -> InLayoutMenuItem("Copy Clean URL") { onCopyCleanUrl() }
                         "dom_snapshot" -> InLayoutMenuItem("Capture DOM Snapshot") { onCaptureDomSnapshot() }
+                        "full_source" -> InLayoutMenuItem("📦 Export Full Web Source (ZIP)", color = Color(0xFF81C995), isBold = true) { onCaptureFullSource() }
                         "local_ide" -> InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) { onOpenLocalIde() }
                         "autopilot" -> {
                             InLayoutMenuItem(
