@@ -427,6 +427,413 @@ fun isMeteredOrMobileConnection(context: android.content.Context): Boolean {
     }
 }
 
+val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
+(function() {
+    if (window.__omniWireHooked) return;
+    try {
+        var host = (window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : '';
+        if (host && host.indexOf('aistudio.google.com') === -1) return;
+    } catch(_) {}
+    window.__omniWireHooked = true;
+
+    var turnCounter = 0;
+    var activeTurnToken = 0;
+    var streamsById = {};
+    var streamsByTurn = {};
+    var latestStreamId = 0;
+
+    function isGenerationStreamUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        return url.indexOf('/MakerSuiteService/GenerateContent') !== -1 ||
+               url.indexOf('/MakerSuiteService/CreateInteractionStream') !== -1 ||
+               url.indexOf('/MakerSuiteService/ProxyStreamedCall') !== -1;
+    }
+
+    // Mirrors Closure JSPB _.cc(a, b) exact indexing + sparse overflow object lookup
+    function jspbGet(arr, field) {
+        if (!Array.isArray(arr) || field <= 0) return undefined;
+        var idx = field - 1;
+        var lastIdx = arr.length - 1;
+        if (lastIdx < 0) return undefined;
+        var last = arr[lastIdx];
+        var hasExt = last !== null && typeof last === 'object' && !Array.isArray(last);
+        if (idx >= lastIdx) {
+            if (hasExt) return last[field];
+            if (idx === lastIdx) return last;
+            return undefined;
+        }
+        return arr[idx];
+    }
+
+    function createStreamRecord(url, transport) {
+        var id = ++latestStreamId;
+        var turnTok = activeTurnToken;
+        var rec = {
+            id: id,
+            turnToken: turnTok,
+            url: url,
+            transport: transport,
+            active: true,
+            done: false,
+            error: null,
+            httpStatus: 0,
+            statusCode: 0,
+            statusDetails: '',
+            finishReason: 0,
+            chunkCount: 0,
+            thoughts: '',
+            output: '',
+            rawSample: '',
+            startedAt: Date.now(),
+            endedAt: 0
+        };
+        streamsById[id] = rec;
+        if (turnTok > 0) {
+            streamsByTurn[turnTok] = rec;
+        }
+        return rec;
+    }
+
+    function emitUpdate(rec) {
+        try {
+            window.dispatchEvent(new CustomEvent('__omniWireUpdate', { detail: rec }));
+        } catch(_) {}
+    }
+
+    function extractChunkPayload(rec, chunk) {
+        if (!Array.isArray(chunk)) return;
+
+        // Check PromptFeedback / block reason (field 2 -> field 3)
+        var feedback = jspbGet(chunk, 2);
+        if (Array.isArray(feedback)) {
+            var blockMsg = jspbGet(feedback, 3);
+            if (typeof blockMsg === 'string' && blockMsg.length > 0) {
+                rec.statusDetails = blockMsg;
+            }
+        }
+
+        // _.Bx field 1 -> candidates[] (_.b7a)
+        var candidates = jspbGet(chunk, 1);
+        if (!Array.isArray(candidates)) return;
+
+        for (var i = 0; i < candidates.length; i++) {
+            var cand = candidates[i];
+            if (!Array.isArray(cand)) continue;
+
+            var fReason = jspbGet(cand, 2);
+            if (typeof fReason === 'number' && fReason > 0) {
+                rec.finishReason = fReason;
+            }
+            var fMsg = jspbGet(cand, 4);
+            if (typeof fMsg === 'string' && fMsg.length > 0 && !rec.statusDetails) {
+                rec.statusDetails = fMsg;
+            }
+
+            // _.b7a field 1 -> _.Hu (content) -> field 1 -> _.Du[] (parts)
+            var content = jspbGet(cand, 1);
+            if (!Array.isArray(content)) continue;
+            var parts = jspbGet(content, 1);
+            if (!Array.isArray(parts)) continue;
+
+            for (var p = 0; p < parts.length; p++) {
+                var part = parts[p];
+                if (!Array.isArray(part)) continue;
+                var txt = jspbGet(part, 2);
+                if (typeof txt === 'string' && txt.length > 0) {
+                    var isThought = !!jspbGet(part, 13);
+                    if (isThought) {
+                        rec.thoughts += txt;
+                    } else {
+                        rec.output += txt;
+                    }
+                }
+            }
+        }
+    }
+
+    // Incremental O(N) streaming JSON-array parser mirroring Google's m__b.js state machine (case 0..5)
+    function createStreamParser(rec) {
+        var phase = 0;
+        var acc = '';
+        var scanIdx = 0;
+        var elemStart = -1;
+        var elemDepth = 0;
+        var inString = false;
+        var escaped = false;
+
+        function isWs(ch) {
+            return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+        }
+
+        function handleDataElem(jsonStr) {
+            try {
+                var parsed = JSON.parse(jsonStr);
+                rec.chunkCount++;
+                if (rec.chunkCount === 1) {
+                    rec.rawSample = jsonStr.slice(0, 400);
+                }
+                extractChunkPayload(rec, parsed);
+                emitUpdate(rec);
+            } catch(_) {}
+        }
+
+        function handleStatusTuple(jsonStr) {
+            try {
+                var st = JSON.parse(jsonStr);
+                if (Array.isArray(st) && st.length > 0) {
+                    var code = Number(st[0]);
+                    if (!isNaN(code)) {
+                        rec.statusCode = code;
+                    }
+                    if (typeof st[1] === 'string' && st[1].length > 0) {
+                        rec.statusDetails = st[1];
+                    }
+                    if (rec.statusCode !== 0 && !rec.error) {
+                        rec.error = rec.statusDetails || ('RPC status error: ' + rec.statusCode);
+                    }
+                }
+            } catch(_) {}
+        }
+
+        return {
+            feed: function(text) {
+                if (!text || phase >= 5) return;
+                // Strip Google XSSI prefix if present at start
+                if (phase === 0 && acc.length === 0 && text.indexOf(")]}'") === 0) {
+                    var nl = text.indexOf('\n');
+                    text = nl >= 0 ? text.slice(nl + 1) : text.slice(4);
+                }
+                acc += text;
+
+                while (scanIdx < acc.length && phase < 5) {
+                    var ch = acc[scanIdx];
+
+                    if (phase === 0) {
+                        if (isWs(ch)) { scanIdx++; continue; }
+                        if (ch === '[') { phase = 1; scanIdx++; continue; }
+                        phase = 6; break;
+                    }
+
+                    if (phase === 1) {
+                        if (isWs(ch)) { scanIdx++; continue; }
+                        if (ch === '[') { phase = 2; elemDepth = 0; elemStart = -1; scanIdx++; continue; }
+                        if (ch === ',') { phase = 3; scanIdx++; continue; }
+                        if (acc.slice(scanIdx, scanIdx + 5) === 'null,') { phase = 3; scanIdx += 4; continue; }
+                        if (ch === ']') { phase = 5; scanIdx++; continue; }
+                        phase = 6; break;
+                    }
+
+                    if (phase === 2 || phase === 4) {
+                        if (elemDepth === 0) {
+                            if (isWs(ch) || ch === ',') { scanIdx++; continue; }
+                            if (ch === ']') {
+                                phase = (phase === 2) ? 3 : 5;
+                                scanIdx++;
+                                continue;
+                            }
+                            if (ch === '[' || ch === '{') {
+                                elemStart = scanIdx;
+                                elemDepth = 1;
+                                inString = false;
+                                escaped = false;
+                                scanIdx++;
+                                continue;
+                            }
+                            // Primitive (e.g. null) inside array
+                            scanIdx++;
+                            continue;
+                        } else {
+                            if (inString) {
+                                if (escaped) {
+                                    escaped = false;
+                                } else if (ch === '\\') {
+                                    escaped = true;
+                                } else if (ch === '"') {
+                                    inString = false;
+                                }
+                            } else {
+                                if (ch === '"') {
+                                    inString = true;
+                                } else if (ch === '[' || ch === '{') {
+                                    elemDepth++;
+                                } else if (ch === ']' || ch === '}') {
+                                    elemDepth--;
+                                    if (elemDepth === 0) {
+                                        var slice = acc.slice(elemStart, scanIdx + 1);
+                                        if (phase === 2) {
+                                            handleDataElem(slice);
+                                        } else {
+                                            handleStatusTuple(slice);
+                                        }
+                                        elemStart = -1;
+                                    }
+                                }
+                            }
+                            scanIdx++;
+                            continue;
+                        }
+                    }
+
+                    if (phase === 3) {
+                        if (isWs(ch)) { scanIdx++; continue; }
+                        if (ch === ',') { phase = 4; elemDepth = 0; elemStart = -1; scanIdx++; continue; }
+                        if (acc.slice(scanIdx, scanIdx + 5) === 'null,') { phase = 4; elemDepth = 0; elemStart = -1; scanIdx += 5; continue; }
+                        if (ch === ']') { phase = 5; scanIdx++; continue; }
+                        scanIdx++;
+                        continue;
+                    }
+                }
+
+                // Compact already-consumed prefix to keep memory flat on huge 100KB+ responses
+                if (elemDepth === 0 && scanIdx > 0) {
+                    acc = acc.slice(scanIdx);
+                    scanIdx = 0;
+                    elemStart = -1;
+                } else if (elemDepth > 0 && elemStart > 0) {
+                    acc = acc.slice(elemStart);
+                    scanIdx -= elemStart;
+                    elemStart = 0;
+                }
+            }
+        };
+    }
+
+    function finalizeRecord(rec, httpStatus, errMsg) {
+        rec.active = false;
+        rec.done = true;
+        rec.endedAt = Date.now();
+        if (httpStatus) rec.httpStatus = httpStatus;
+        if (errMsg && !rec.error) rec.error = errMsg;
+        if (rec.httpStatus === 429 && !rec.error) {
+            rec.error = 'Quota Exhausted (429)';
+        } else if (rec.httpStatus >= 400 && !rec.error) {
+            rec.error = 'HTTP Error ' + rec.httpStatus;
+        }
+        emitUpdate(rec);
+    }
+
+    // 1. Hook window.fetch (supports both URL string and Google qy's new Request(...) object)
+    if (typeof window.fetch === 'function' && !window.fetch.__omniWireWrapped) {
+        var origFetch = window.fetch;
+        window.fetch = function(input, init) {
+            var url = '';
+            try {
+                url = (typeof input === 'string') ? input : (input && input.url ? input.url : String(input || ''));
+            } catch(_) {}
+
+            if (!isGenerationStreamUrl(url)) {
+                return origFetch.apply(this, arguments);
+            }
+
+            var rec = createStreamRecord(url, 'fetch');
+            var parser = createStreamParser(rec);
+
+            return origFetch.apply(this, arguments).then(function(res) {
+                rec.httpStatus = res.status;
+                try {
+                    var clone = res.clone();
+                    if (clone.body && clone.body.getReader) {
+                        var reader = clone.body.getReader();
+                        var decoder = new TextDecoder('utf-8');
+                        (function pump() {
+                            reader.read().then(function(step) {
+                                if (step.done) {
+                                    var tail = decoder.decode();
+                                    if (tail) parser.feed(tail);
+                                    finalizeRecord(rec, res.status, null);
+                                    return;
+                                }
+                                if (step.value) {
+                                    parser.feed(decoder.decode(step.value, { stream: true }));
+                                }
+                                pump();
+                            }).catch(function(err) {
+                                finalizeRecord(rec, res.status, err ? err.message : 'Stream read error');
+                            });
+                        })();
+                    } else {
+                        clone.text().then(function(txt) {
+                            parser.feed(txt);
+                            finalizeRecord(rec, res.status, null);
+                        }).catch(function(err) {
+                            finalizeRecord(rec, res.status, err ? err.message : 'Response text error');
+                        });
+                    }
+                } catch(e) {
+                    finalizeRecord(rec, res.status, e ? e.message : 'Clone error');
+                }
+                return res;
+            }, function(err) {
+                finalizeRecord(rec, 0, err ? err.message : 'Fetch network error');
+                throw err;
+            });
+        };
+        window.fetch.__omniWireWrapped = true;
+    }
+
+    // 2. Hook XMLHttpRequest (supports Google _.oy fallback when oKe is false)
+    if (typeof XMLHttpRequest !== 'undefined' && !XMLHttpRequest.prototype.__omniWireWrapped) {
+        var origOpen = XMLHttpRequest.prototype.open;
+        var origSend = XMLHttpRequest.prototype.send;
+
+        XMLHttpRequest.prototype.open = function(method, url) {
+            this.__omniWireUrl = String(url || '');
+            return origOpen.apply(this, arguments);
+        };
+
+        XMLHttpRequest.prototype.send = function() {
+            var url = this.__omniWireUrl || '';
+            if (isGenerationStreamUrl(url)) {
+                var xhr = this;
+                var rec = createStreamRecord(url, 'xhr');
+                var parser = createStreamParser(rec);
+                var prevLen = 0;
+
+                function drainXhr() {
+                    try {
+                        var txt = xhr.responseText || '';
+                        if (txt.length > prevLen) {
+                            parser.feed(txt.slice(prevLen));
+                            prevLen = txt.length;
+                        }
+                    } catch(_) {}
+                }
+
+                xhr.addEventListener('progress', drainXhr);
+                xhr.addEventListener('readystatechange', function() {
+                    if (xhr.readyState >= 3) drainXhr();
+                });
+                xhr.addEventListener('loadend', function() {
+                    drainXhr();
+                    var err = (xhr.status === 0 && !rec.output) ? 'XHR aborted or network error' : null;
+                    finalizeRecord(rec, xhr.status, err);
+                });
+                xhr.addEventListener('error', function() {
+                    finalizeRecord(rec, xhr.status, 'XHR network error');
+                });
+            }
+            return origSend.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.__omniWireWrapped = true;
+    }
+
+    window.__omniWire = {
+        hasHooked: true,
+        beginTurn: function() {
+            activeTurnToken = ++turnCounter;
+            streamsByTurn[activeTurnToken] = null;
+            return activeTurnToken;
+        },
+        getTurn: function(token) {
+            return token ? (streamsByTurn[token] || null) : null;
+        },
+        getLatest: function() {
+            return latestStreamId > 0 ? (streamsById[latestStreamId] || null) : null;
+        }
+    };
+})();
+""".trimIndent()
+
 val DOM_SNAPSHOT_SCRIPT = """
 (function() {
     try {
