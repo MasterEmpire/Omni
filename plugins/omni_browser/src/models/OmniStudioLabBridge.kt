@@ -69,6 +69,16 @@ class OmniStudioLabBridge(
         }
     }
 
+    private fun progressDelta(callId: String, thoughtsDelta: String, outputDelta: String, isFirst: Boolean) {
+        val deltaObj = JSONObject().apply {
+            put("__isDelta", true)
+            put("dt", thoughtsDelta)
+            put("do", outputDelta)
+            put("isFirst", isFirst)
+        }
+        progress(callId, deltaObj)
+    }
+
     private fun parseAttachmentsFromJson(arr: JSONArray?): List<AutomationAttachment> {
         val attachments = mutableListOf<AutomationAttachment>()
         if (arr == null) return attachments
@@ -130,7 +140,8 @@ class OmniStudioLabBridge(
                     thinkingLevel = json.optString("thinkingLevel", "Default"),
                     model = json.optString("model", ""),
                     fallbackEnabled = json.optBoolean("fallbackEnabled", true),
-                    temporaryChat = json.optBoolean("temporaryChat", false)
+                    temporaryChat = json.optBoolean("temporaryChat", false),
+                    headlessTurbo = json.optBoolean("headlessTurbo", true)
                 ) { success, err ->
                     if (success) resolve(callId, "Configured")
                     else reject(callId, err ?: "Configuration error")
@@ -161,6 +172,9 @@ class OmniStudioLabBridge(
                             put("output", output)
                         }
                         progress(callId, progObj)
+                    },
+                    onDelta = { thoughtsDelta, outputDelta, isFirst ->
+                        progressDelta(callId, thoughtsDelta, outputDelta, isFirst)
                     },
                     onComplete = { thoughts, output ->
                         val resObj = JSONObject().apply {
