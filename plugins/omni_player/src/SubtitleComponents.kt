@@ -94,6 +94,7 @@ fun SubtitleHubSheet(
     onOpenDownload: () -> Unit,
     onOpenStyle: () -> Unit,
     onOpenDelay: () -> Unit,
+    onStateChanged: () -> Unit = {},
     onClose: () -> Unit
 ) {
     Box(
@@ -132,7 +133,10 @@ fun SubtitleHubSheet(
 
                 Switch(
                     checked = subtitleState.isEnabled,
-                    onCheckedChange = { subtitleState.isEnabled = it },
+                    onCheckedChange = {
+                        subtitleState.isEnabled = it
+                        onStateChanged()
+                    },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
                         checkedTrackColor = Color(0xFF00E676),
@@ -152,6 +156,7 @@ fun SubtitleHubSheet(
                     .clickable {
                         if (subtitleState.currentSubtitleName != null) {
                             subtitleState.clearSubtitle()
+                            onStateChanged()
                         }
                     }
                     .padding(vertical = 10.dp, horizontal = 4.dp),
@@ -245,6 +250,7 @@ fun SubtitleHubSheet(
 @Composable
 fun SubtitleStyleSheet(
     subtitleState: SubtitleState,
+    onStyleChanged: () -> Unit = {},
     onBack: () -> Unit
 ) {
     Box(
@@ -335,7 +341,10 @@ fun SubtitleStyleSheet(
                             .weight(1f)
                             .height(42.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable { subtitleState.applyPreset(preset) }
+                            .clickable {
+                                subtitleState.applyPreset(preset)
+                                onStyleChanged()
+                            }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Surface(
@@ -383,7 +392,10 @@ fun SubtitleStyleSheet(
                                 color = if (isSelected) Color(0xFF00E676) else Color.White.copy(alpha = 0.3f),
                                 shape = RoundedCornerShape(4.dp)
                             )
-                            .clickable { subtitleState.selectColor(color) }
+                            .clickable {
+                                subtitleState.selectColor(color)
+                                onStyleChanged()
+                            }
                     )
                 }
             }
@@ -405,7 +417,10 @@ fun SubtitleStyleSheet(
             ) {
                 Slider(
                     value = subtitleState.fontSizeSp,
-                    onValueChange = { subtitleState.fontSizeSp = it },
+                    onValueChange = {
+                        subtitleState.fontSizeSp = it
+                        onStyleChanged()
+                    },
                     valueRange = 14f..36f,
                     colors = SliderDefaults.colors(
                         thumbColor = Color.White,
@@ -426,7 +441,10 @@ fun SubtitleStyleSheet(
                     modifier = Modifier.width(28.dp)
                 )
 
-                IconButton(onClick = { subtitleState.resetSize() }, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = {
+                    subtitleState.resetSize()
+                    onStyleChanged()
+                }, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Refresh, contentDescription = "Reset Size", tint = Color.White)
                 }
             }
@@ -441,6 +459,7 @@ fun SubtitleStyleSheet(
 @Composable
 fun SubtitleDelayWidget(
     subtitleState: SubtitleState,
+    onDelayChanged: () -> Unit = {},
     onClose: () -> Unit
 ) {
     Surface(
@@ -475,6 +494,7 @@ fun SubtitleDelayWidget(
                     .clickable {
                         val rounded = (subtitleState.delaySec - 0.1f)
                         subtitleState.delaySec = String.format(Locale.US, "%.1f", rounded).toFloat()
+                        onDelayChanged()
                     }
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -515,6 +535,7 @@ fun SubtitleDelayWidget(
                     .clickable {
                         val rounded = (subtitleState.delaySec + 0.1f)
                         subtitleState.delaySec = String.format(Locale.US, "%.1f", rounded).toFloat()
+                        onDelayChanged()
                     }
             ) {
                 Box(contentAlignment = Alignment.Center) {
