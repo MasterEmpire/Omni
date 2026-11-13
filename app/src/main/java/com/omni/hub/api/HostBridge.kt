@@ -891,12 +891,32 @@ class HostBridgeImpl(
     }
 
     override fun setScreenBrightness(percentage: Int) {
+        val clamped = percentage.coerceIn(0, 100)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.System.canWrite(context)) {
             try {
-                val value = ((percentage.coerceIn(0, 100) / 100f) * 255).toInt()
+                val value = ((clamped / 100f) * 255).toInt()
                 Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
                 Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, value)
             } catch (_: Exception) {}
+        } else {
+            val applyWindow: () -> Unit = {
+                var ctx: Context? = context
+                while (ctx is android.content.ContextWrapper) {
+                    if (ctx is android.app.Activity) break
+                    ctx = ctx.baseContext
+                }
+                val window = (ctx as? android.app.Activity)?.window
+                if (window != null) {
+                    val lp = window.attributes
+                    lp.screenBrightness = if (clamped == 0) 0.01f else clamped / 100f
+                    window.attributes = lp
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                applyWindow()
+            } else {
+                Handler(Looper.getMainLooper()).post(applyWindow)
+            }
         }
     }
 
