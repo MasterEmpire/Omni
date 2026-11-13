@@ -12,6 +12,7 @@ import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.omni.hub.api.HostBridge
+import com.omni.plugin.browser.utils.AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT
 import com.omni.plugin.browser.utils.BOT_BYPASS_POLYFILL
 import com.omni.plugin.browser.utils.DOM_SNAPSHOT_SCRIPT
 import com.omni.plugin.browser.engine.buildAiStudioPuppetScript
@@ -113,6 +114,12 @@ class AiStudioAutomator(
                 android.view.View.MeasureSpec.makeMeasureSpec(viewHeight, android.view.View.MeasureSpec.EXACTLY)
             )
             layout(0, 0, viewWidth, viewHeight)
+
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                try {
+                    WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT, setOf("*"))
+                } catch (_: Exception) {}
+            }
 
             settings.apply {
                 javaScriptEnabled = true
