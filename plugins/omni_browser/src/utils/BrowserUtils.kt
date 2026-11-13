@@ -441,6 +441,9 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     var streamsById = {};
     var streamsByTurn = {};
     var latestStreamId = 0;
+    var pendingBootRpcs = 0;
+    var hasAccessToken = false;
+    var hasListModels = false;
 
     function wireLog(tag, msg) {
         try {
@@ -471,6 +474,15 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     }
 
     wireLog('WIRE_INIT', 'Wire hook armed on ' + (window.location ? window.location.href : 'unknown') + ' (fetch=' + typeof window.fetch + ', xhr=' + typeof XMLHttpRequest + ')');
+
+    function isBootRpcUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        return url.indexOf('GenerateAccessToken') !== -1 ||
+               url.indexOf('Waa/Create') !== -1 ||
+               url.indexOf('ListModels') !== -1 ||
+               url.indexOf('GetAiStudioBenefitTier') !== -1 ||
+               url.indexOf('GetUserPreferences') !== -1;
+    }
 
     function isGenerationStreamUrl(url) {
         if (!url || typeof url !== 'string') return false;
@@ -844,6 +856,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
 
         XMLHttpRequest.prototype.abort = function() {
             try {
+                if (this.__omniBootDone) this.__omniBootDone(this.status);
                 if (this.__omniWireDrain) this.__omniWireDrain();
                 var rec = this.__omniWireRec;
                 if (rec && !rec.done) {
@@ -859,6 +872,27 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
 
         XMLHttpRequest.prototype.send = function() {
             var url = this.__omniWireUrl || '';
+            if (isBootRpcUrl(url)) {
+                var bootXhr = this;
+                var bootFinished = false;
+                pendingBootRpcs++;
+                var markBootDone = function(status) {
+                    if (bootFinished) return;
+                    bootFinished = true;
+                    if (pendingBootRpcs > 0) pendingBootRpcs--;
+                    var st = status || 0;
+                    if (st === 0 || (st >= 200 && st < 400)) {
+                        if (url.indexOf('GenerateAccessToken') !== -1) hasAccessToken = true;
+                        if (url.indexOf('ListModels') !== -1) hasListModels = true;
+                    }
+                };
+                bootXhr.__omniBootDone = markBootDone;
+                bootXhr.addEventListener('readystatechange', function() {
+                    if (bootXhr.readyState === 4) markBootDone(bootXhr.status);
+                });
+                bootXhr.addEventListener('loadend', function() { markBootDone(bootXhr.status); });
+                bootXhr.addEventListener('error', function() { markBootDone(bootXhr.status || -1); });
+            }
             if (isGenerationStreamUrl(url)) {
                 var xhr = this;
                 var rec = createStreamRecord(url, 'xhr');
@@ -929,6 +963,15 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
 
     window.__omniWire = {
         hasHooked: true,
+        isSessionWarm: function() {
+            return {
+                ready: (document.readyState === 'complete' && pendingBootRpcs === 0 && (hasAccessToken || hasListModels)),
+                readyState: document.readyState,
+                pendingBootRpcs: pendingBootRpcs,
+                hasAccessToken: hasAccessToken,
+                hasListModels: hasListModels
+            };
+        },
         beginTurn: function() {
             activeTurnToken = ++turnCounter;
             streamsByTurn[activeTurnToken] = null;
