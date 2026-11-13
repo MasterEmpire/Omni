@@ -656,11 +656,134 @@ object LiveAutoPilotEngine {
                     }
                 };
 
+                function dispatchActionsFromPayload(rawText, sourceTag, targetDomTurn) {
+                    if (!rawText) return;
+
+                    // 1. Detect & Auto-Bridge CXP Patch Markup to Conduit IDE
+                    if (!targetDomTurn || targetDomTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
+                        const cxpPayload = extractCxpBlock(rawText);
+                        if (cxpPayload) {
+                            if (targetDomTurn) targetDomTurn.setAttribute('data-omni-cxp-executed', 'true');
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                                window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [' + sourceTag + '] Valid CXP burger extracted (' + cxpPayload.length + ' chars). Beaming to Conduit IDE...');
+                            }
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
+                                window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
+                            }
+                        }
+                    }
+
+                    // 2. Detect & Auto-Bridge Python Tool Execution to Nexus
+                    if (!targetDomTurn || targetDomTurn.getAttribute('data-omni-executed') !== 'true') {
+                        const pythonScript = extractPythonBlock(rawText);
+                        if (pythonScript) {
+                            if (targetDomTurn) targetDomTurn.setAttribute('data-omni-executed', 'true');
+                            if (window.OmniPythonBridge && window.OmniPythonBridge.executeFromLivePage) {
+                                window.OmniPythonBridge.log('LIVE_AUTO', '[' + sourceTag + '] Captured Python block (' + pythonScript.length + ' chars). Executing on Nexus...');
+                                window.OmniPythonBridge.executeFromLivePage(pythonScript);
+                            }
+                        }
+                    }
+
+                    // 3. Detect & Auto-Bridge Project File Pulling to Conduit IDE
+                    if (!targetDomTurn || targetDomTurn.getAttribute('data-omni-pull-executed') !== 'true') {
+                        const pullPayload = extractPullFilesBlock(rawText);
+                        if (pullPayload) {
+                            if (targetDomTurn) targetDomTurn.setAttribute('data-omni-pull-executed', 'true');
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.requestFilePull) {
+                                if (window.OmniIdeBridge.log) {
+                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📂 [' + sourceTag + '] Captured pull_files request (' + pullPayload.length + ' chars). Beaming to Conduit IDE...');
+                                }
+                                window.OmniIdeBridge.requestFilePull(pullPayload);
+                            }
+                        }
+                    }
+                }
+
+                function processAutoPilotTick() {
+                    if (!window.__omniLiveAutoPilotActive) return;
+
+                    const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"], [data-turn-role="model" i], ms-chat-turn:not(.user)'));
+                    let latestTurn = null;
+                    for (let i = allModelContainers.length - 1; i >= 0; i--) {
+                        const t = allModelContainers[i];
+                        const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+                            .some(el => !el.closest('ms-thought-chunk'));
+                        if (hasRealAnswer) {
+                            latestTurn = t;
+                            break;
+                        }
+                    }
+                    if (!latestTurn && allModelContainers.length > 0) {
+                        latestTurn = allModelContainers[allModelContainers.length - 1];
+                    }
+
+                    // Priority 1: Wire Interceptor (Instant, zero stillness timer, immune to virtual scroll & Markdown mangling)
+                    const latestWire = (window.__omniWire && window.__omniWire.getLatest) ? window.__omniWire.getLatest() : null;
+                    if (latestWire) {
+                        if (latestWire.error) {
+                            const lowerErr = String(latestWire.error).toLowerCase();
+                            if (latestWire.httpStatus === 429 || latestWire.statusCode === 8 || lowerErr.includes('quota') || lowerErr.includes('resource_exhausted')) {
+                                if (!latestWire.__quotaReported) {
+                                    latestWire.__quotaReported = true;
+                                    if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.reportQuotaHit) {
+                                        window.OmniAnalyticsBridge.reportQuotaHit(window.__omniProfileId || 'default', String(latestWire.error).slice(0, 120));
+                                    }
+                                }
+                            }
+                        }
+                        if (latestWire.done && latestWire.statusCode === 0 && latestWire.output && latestWire.output.trim().length > 0) {
+                            if (latestWire.id !== window.__omniLastDispatchedWireId) {
+                                window.__omniLastDispatchedWireId = latestWire.id;
+                                dispatchActionsFromPayload(latestWire.output, 'WIRE_INTERCEPT', latestTurn);
+                                return;
+                            }
+                            return; // Already handled cleanly via wire
+                        }
+                        if (latestWire.active) {
+                            return; // Actively streaming over wire; wait for exact stream close
+                        }
+                    }
+
+                    // Priority 2: DOM Fallback (covers pre-existing turns loaded before Auto-Pilot was armed)
+                    if (checkUiGenerating() || !latestTurn) return;
+
+                    const screenText = getScreenText(latestTurn);
+                    if (!screenText) return;
+
+                    window.__omniLastText = window.__omniLastText || '';
+                    window.__omniStillTicks = window.__omniStillTicks || 0;
+
+                    if (screenText.length > window.__omniLastText.length) {
+                        window.__omniStillTicks = 0;
+                        window.__omniLastText = screenText;
+                        return;
+                    } else {
+                        window.__omniStillTicks++;
+                        window.__omniLastText = screenText;
+                    }
+
+                    if (window.__omniStillTicks < 4) return;
+                    dispatchActionsFromPayload(screenText, 'DOM_FALLBACK', latestTurn);
+                }
+
+                if (!window.__omniWireListenerAttached) {
+                    window.__omniWireListenerAttached = true;
+                    window.addEventListener('__omniWireUpdate', function(ev) {
+                        var rec = ev && ev.detail;
+                        if (rec && rec.done) {
+                            processAutoPilotTick();
+                        }
+                    });
+                }
+
                 window.__omniSentinelInterval = setInterval(() => {
                     hookPromptSubmission();
                     checkQuotaErrors();
 
-                    const isGen = checkUiGenerating();
+                    const latestWire = (window.__omniWire && window.__omniWire.getLatest) ? window.__omniWire.getLatest() : null;
+                    const isGen = (latestWire && latestWire.active) ? true : checkUiGenerating();
+
                     if (isGen !== window.__omniLastReportedGenState) {
                         window.__omniLastReportedGenState = isGen;
                         if (window.OmniIdeBridge && window.OmniIdeBridge.reportGenerationActive) {
@@ -683,90 +806,12 @@ object LiveAutoPilotEngine {
                     if (window.__omniWasGenerating) {
                         window.__omniWasGenerating = false;
                         if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                            window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '🔍 [STAGE 1: SETTLED] Generation finished. Inspecting DOM for balanced CXP / Python tags...');
+                            window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '🔍 [STAGE 1: SETTLED] Generation finished.');
                         }
                     }
 
-                    const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"], [data-turn-role="model" i], ms-chat-turn:not(.user)'));
-                    if (allModelContainers.length === 0) return;
-
-                    // Battle-tested turn selection from AiStudioAutomator: scan backwards for the turn containing mounted answer nodes
-                    let latestTurn = null;
-                    for (let i = allModelContainers.length - 1; i >= 0; i--) {
-                        const t = allModelContainers[i];
-                        const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
-                            .some(el => !el.closest('ms-thought-chunk'));
-                        if (hasRealAnswer) {
-                            latestTurn = t;
-                            break;
-                        }
-                    }
-                    if (!latestTurn) {
-                        latestTurn = allModelContainers[allModelContainers.length - 1];
-                    }
-
-                    const screenText = getScreenText(latestTurn);
-                    if (!screenText) return;
-
-                    // Stillness Watchdog: Track character growth on active turn
-                    window.__omniLastText = window.__omniLastText || '';
-                    window.__omniStillTicks = window.__omniStillTicks || 0;
-
-                    if (screenText.length > window.__omniLastText.length) {
-                        window.__omniStillTicks = 0;
-                        window.__omniLastText = screenText;
-                        return;
-                    } else {
-                        window.__omniStillTicks++;
-                        window.__omniLastText = screenText;
-                    }
-
-                    // Require at least 4 stillness ticks (2.4s of zero text growth)
-                    if (window.__omniStillTicks < 4) {
-                        return;
-                    }
-
-                    // 1. Detect & Auto-Bridge CXP Patch Markup to Conduit IDE
-                    if (latestTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
-                        const cxpPayload = extractCxpBlock(screenText);
-                        if (cxpPayload) {
-                            latestTurn.setAttribute('data-omni-cxp-executed', 'true');
-                            if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                                window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [STAGE 1: SCRAPED] Valid CXP burger extracted (' + cxpPayload.length + ' chars). Beaming to Conduit IDE...');
-                            }
-                            if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
-                                window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
-                            }
-                        }
-                    }
-
-                    // 2. Detect & Auto-Bridge Python Tool Execution to Nexus
-                    if (latestTurn.getAttribute('data-omni-executed') !== 'true') {
-                        const pythonScript = extractPythonBlock(screenText);
-
-                        if (pythonScript) {
-                            latestTurn.setAttribute('data-omni-executed', 'true');
-                            if (window.OmniPythonBridge && window.OmniPythonBridge.executeFromLivePage) {
-                                window.OmniPythonBridge.log('LIVE_AUTO', 'Captured Python block from chat turn (' + pythonScript.length + ' chars). Executing on Nexus...');
-                                window.OmniPythonBridge.executeFromLivePage(pythonScript);
-                            }
-                        }
-                    }
-
-                    // 3. Detect & Auto-Bridge Project File Pulling to Conduit IDE
-                    if (latestTurn.getAttribute('data-omni-pull-executed') !== 'true') {
-                        const pullPayload = extractPullFilesBlock(screenText);
-                        if (pullPayload) {
-                            latestTurn.setAttribute('data-omni-pull-executed', 'true');
-                            if (window.OmniIdeBridge && window.OmniIdeBridge.requestFilePull) {
-                                if (window.OmniIdeBridge.log) {
-                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📂 [STAGE 1: SCRAPED PULL] Captured pull_files request (' + pullPayload.length + ' chars). Beaming to Conduit IDE...');
-                                }
-                                window.OmniIdeBridge.requestFilePull(pullPayload);
-                            }
-                        }
-                    }
-                }, 600);
+                    processAutoPilotTick();
+                }, 400);
             })();
         """.trimIndent()
     }
