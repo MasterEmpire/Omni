@@ -117,8 +117,13 @@ class AiStudioAutomator(
 
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 try {
-                    WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT, setOf("*"))
-                } catch (_: Exception) {}
+                    WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT, setOf("https://aistudio.google.com"))
+                    bridge.log("WIRE_SETUP", "Registered AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT at document-start for [$sessionId]")
+                } catch (e: Exception) {
+                    bridge.log("WIRE_SETUP_ERR", "addDocumentStartJavaScript failed for [$sessionId]: ${e.message}")
+                }
+            } else {
+                bridge.log("WIRE_SETUP_WARN", "DOCUMENT_START_SCRIPT not supported on this WebView")
             }
 
             settings.apply {
