@@ -4,17 +4,21 @@ import android.app.Activity
 import android.content.ContentUris
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Size
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -983,13 +987,121 @@ class OmniPlayerPlugin : PluginEntry() {
         var lastTapTime by remember { mutableLongStateOf(0L) }
         var lastTapPos by remember { mutableStateOf(Offset.Zero) }
 
+        // Player Preferences & Menu State
+        val playerPrefs = remember(context) {
+            context.getSharedPreferences("omni_player_prefs", Context.MODE_PRIVATE)
+        }
+        var isGestureSeekEnabled by remember {
+            mutableStateOf(playerPrefs.getBoolean("key_gesture_seek_enabled", true))
+        }
+        var showMoreMenu by remember { mutableStateOf(false) }
+
         // Subtitle Suite State
-        var activeSubtitleModal by remember { mutableStateOf<String?>(null) } // "HUB", "STYLE", "DOWNLOAD", "AI_INSPECT", "GROQ_KEY"
+        var activeSubtitleModal by remember { mutableStateOf<String?>(null) } // "HUB", "STYLE", "DOWNLOAD", "AI_INSPECT", "GROQ_KEY", "SETTINGS"
         var isDelayWidgetVisible by remember { mutableStateOf(false) }
 
         var inspectingCueText by remember { mutableStateOf("") }
 
         val scope = rememberCoroutineScope()
+
+        fun persistSubtitleImmediately() {
+            PlaybackHistoryManager.saveVideoState(
+                context = context,
+                videoId = video.id.toString(),
+                positionMs = player.currentPosition,
+                subtitleName = subtitleState.currentSubtitleName,
+                rawSrtText = subtitleState.rawSrtContent,
+                delaySec = subtitleState.delaySec,
+                yFraction = subtitleState.yFraction,
+                isEnabled = subtitleState.isEnabled
+            )
+        }
+
+        fun loadPickedSubtitleUri(pickedUri: Uri) {
+            try {
+                var displayName: String? = null
+                context.contentResolver.query(pickedUri, null, null, null, null)?.use { cursor ->
+                    val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst() && nameIdx >= 0) {
+                        displayName = cursor.getString(nameIdx)
+                    }
+                }
+                val fileName = displayName?.takeIf { it.isNotBlank() }
+                    ?: pickedUri.lastPathSegment?.substringAfterLast("/")
+                    ?: "Local Subtitle.srt"
+
+                context.contentResolver.openInputStream(pickedUri)?.bufferedReader()?.use { reader ->
+                    val content = reader.readText()
+                    subtitleState.loadSrtText(content, fileName)
+                    persistSubtitleImmediately()
+                    bridge.showToast("Loaded: $fileName")
+                }
+            } catch (e: Exception) {
+                bridge.showToast("Error reading file: ${e.message}")
+            }
+        }
+
+        val subtitlePickerLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+                val data = result.data!!
+                val pickedUri = data.data ?: data.clipData?.getItemAt(0)?.uri
+                val parentPath = data.getStringExtra("extra_parent_path")
+                val resolvedParent = if (!parentPath.isNullOrEmpty()) {
+                    parentPath
+                } else {
+                    val p = pickedUri?.path
+                    if (p != null && (p.contains("/storage/") || p.contains("/sdcard/"))) {
+                        val abs = p.substring(p.indexOf("/storage/").coerceAtLeast(p.indexOf("/sdcard/")))
+                        File(abs).parent ?: abs
+                    } else null
+                }
+                if (!resolvedParent.isNullOrEmpty() && File(resolvedParent).exists()) {
+                    playerPrefs.edit().putString("key_last_subtitle_dir", resolvedParent).apply()
+                }
+                if (pickedUri != null) {
+                    loadPickedSubtitleUri(pickedUri)
+                }
+            }
+        }
+
+        fun openSubtitleFilePicker() {
+            val isNexusInstalled = try {
+                context.packageManager.getLaunchIntentForPackage("com.conduit.nexus") != null
+            } catch (_: Exception) { false }
+
+            if (isNexusInstalled) {
+                try {
+                    val rememberedPath = playerPrefs.getString("key_last_subtitle_dir", null)
+                        ?.takeIf { File(it).exists() }
+                    val nexusIntent = Intent("com.conduit.nexus.action.PICK_FILE").apply {
+                        setPackage("com.conduit.nexus")
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+                        putExtra("extra_picker_mode", true)
+                        if (!rememberedPath.isNullOrEmpty()) {
+                            putExtra("extra_initial_path", rememberedPath)
+                        }
+                        type = "*/*"
+                    }
+                    subtitlePickerLauncher.launch(nexusIntent)
+                    return
+                } catch (_: Exception) {}
+            }
+
+            bridge.pickFiles("*/*", false) { uris ->
+                val pickedUri = uris.firstOrNull() ?: return@pickFiles
+                val p = pickedUri.path
+                if (p != null && (p.contains("/storage/") || p.contains("/sdcard/"))) {
+                    val abs = p.substring(p.indexOf("/storage/").coerceAtLeast(p.indexOf("/sdcard/")))
+                    val parent = File(abs).parent
+                    if (!parent.isNullOrEmpty() && File(parent).exists()) {
+                        playerPrefs.edit().putString("key_last_subtitle_dir", parent).apply()
+                    }
+                }
+                loadPickedSubtitleUri(pickedUri)
+            }
+        }
 
         BackHandler {
             if (isLocked) {
@@ -1005,8 +1117,8 @@ class OmniPlayerPlugin : PluginEntry() {
         }
 
         // Auto-Hide Controls Timer (4 seconds)
-        LaunchedEffect(showControls, isPlaying, isLocked) {
-            if (showControls && isPlaying && !isLocked) {
+        LaunchedEffect(showControls, isPlaying, isLocked, showMoreMenu, activeSubtitleModal) {
+            if (showControls && isPlaying && !isLocked && !showMoreMenu && activeSubtitleModal == null) {
                 delay(4000)
                 showControls = false
             }
@@ -1048,7 +1160,7 @@ class OmniPlayerPlugin : PluginEntry() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(isLocked, activeSubtitleModal) {
+                    .pointerInput(isLocked, activeSubtitleModal, isGestureSeekEnabled) {
                         if (activeSubtitleModal != null) return@pointerInput
                         awaitPointerEventScope {
                             val density = this.density
@@ -1085,7 +1197,7 @@ class OmniPlayerPlugin : PluginEntry() {
                                             if (kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx)) {
                                                 gestureMode = if (startX < sWidth * 0.45f) 1 else if (startX > sWidth * 0.55f) 2 else 0
                                             } else {
-                                                gestureMode = 3
+                                                gestureMode = if (isGestureSeekEnabled) 3 else 0
                                             }
                                         }
 
@@ -1140,16 +1252,20 @@ class OmniPlayerPlugin : PluginEntry() {
                                                 if (!isLocked) {
                                                     when {
                                                         startX < sWidth * 0.35f -> {
-                                                            player.seekTo((player.currentPosition - 10000).coerceAtLeast(0))
-                                                            hudType = "DOUBLE_SEEK"
-                                                            hudSeekDelta = -10L
-                                                            scope.launch { delay(700); hudType = null }
+                                                            if (isGestureSeekEnabled) {
+                                                                onSeekTo(player.currentPosition - 10000)
+                                                                hudType = "DOUBLE_SEEK"
+                                                                hudSeekDelta = -10L
+                                                                scope.launch { delay(700); hudType = null }
+                                                            }
                                                         }
                                                         startX > sWidth * 0.65f -> {
-                                                            player.seekTo((player.currentPosition + 10000).coerceAtMost(totalDuration))
-                                                            hudType = "DOUBLE_SEEK"
-                                                            hudSeekDelta = 10L
-                                                            scope.launch { delay(700); hudType = null }
+                                                            if (isGestureSeekEnabled) {
+                                                                onSeekTo(player.currentPosition + 10000)
+                                                                hudType = "DOUBLE_SEEK"
+                                                                hudSeekDelta = 10L
+                                                                scope.launch { delay(700); hudType = null }
+                                                            }
                                                         }
                                                         else -> {
                                                             if (player.isPlaying) player.pause() else player.play()
@@ -1456,8 +1572,44 @@ class OmniPlayerPlugin : PluginEntry() {
                                         )
                                     }
 
-                                    IconButton(onClick = { bridge.showToast("Aspect / Audio Settings") }) {
-                                        CineMoreIcon(tint = Color.White)
+                                    Box {
+                                        IconButton(onClick = { showMoreMenu = true }) {
+                                            CineMoreIcon(tint = Color.White)
+                                        }
+                                        DropdownMenu(
+                                            expanded = showMoreMenu,
+                                            onDismissRequest = { showMoreMenu = false },
+                                            modifier = Modifier.background(Color(0xFF161B22))
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = "Settings",
+                                                        color = Color.White,
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showMoreMenu = false
+                                                    activeSubtitleModal = "SETTINGS"
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = "Show Decks",
+                                                        color = Color(0xFF58A6FF),
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showMoreMenu = false
+                                                    bridge.showRecents()
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1744,19 +1896,7 @@ class OmniPlayerPlugin : PluginEntry() {
                         subtitleState = subtitleState,
                         onOpenFile = {
                             activeSubtitleModal = null
-                            bridge.pickFiles("*/*", false) { uris ->
-                                val pickedUri = uris.firstOrNull() ?: return@pickFiles
-                                try {
-                                    context.contentResolver.openInputStream(pickedUri)?.bufferedReader()?.use { reader ->
-                                        val content = reader.readText()
-                                        val fileName = pickedUri.lastPathSegment ?: "Local Subtitle.srt"
-                                        subtitleState.loadSrtText(content, fileName)
-                                        bridge.showToast("Loaded: $fileName")
-                                    }
-                                } catch (e: Exception) {
-                                    bridge.showToast("Error reading file: ${e.message}")
-                                }
-                            }
+                            openSubtitleFilePicker()
                         },
                         onOpenDownload = {
                             activeSubtitleModal = "DOWNLOAD"
@@ -1782,10 +1922,21 @@ class OmniPlayerPlugin : PluginEntry() {
                         videoName = video.name,
                         onSelectSubtitle = { srtText, label ->
                             subtitleState.loadSrtText(srtText, label)
+                            persistSubtitleImmediately()
                             bridge.showToast("Subtitles loaded: $label")
                             activeSubtitleModal = null
                         },
                         onClose = { activeSubtitleModal = "HUB" }
+                    )
+                }
+                "SETTINGS" -> {
+                    PlayerSettingsDialog(
+                        isGestureSeekEnabled = isGestureSeekEnabled,
+                        onToggleGestureSeek = { enabled ->
+                            isGestureSeekEnabled = enabled
+                            playerPrefs.edit().putBoolean("key_gesture_seek_enabled", enabled).apply()
+                        },
+                        onDismiss = { activeSubtitleModal = null }
                     )
                 }
                 "AI_INSPECT" -> {
@@ -1816,6 +1967,90 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
         }
+    }
+
+    @Composable
+    fun PlayerSettingsDialog(
+        isGestureSeekEnabled: Boolean,
+        onToggleGestureSeek: (Boolean) -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            containerColor = Color(0xFF11151D),
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Player Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("Playback & Gesture Controls", color = Color(0xFF00E676), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8B949E))
+                    }
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF161B22),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onToggleGestureSeek(!isGestureSeekEnabled) }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Gesture Seeking",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = "Swipe horizontally or double-tap edges to seek ±10s",
+                                    color = Color(0xFF8B949E),
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Switch(
+                                checked = isGestureSeekEnabled,
+                                onCheckedChange = onToggleGestureSeek,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF00E676),
+                                    uncheckedThumbColor = Color(0xFF8B949E),
+                                    uncheckedTrackColor = Color(0xFF21262D)
+                                )
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Done", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 
     @Composable
