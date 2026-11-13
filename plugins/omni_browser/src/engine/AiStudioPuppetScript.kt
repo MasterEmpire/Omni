@@ -352,7 +352,19 @@ fun buildAiStudioPuppetScript(): String {
                         return false;
                     }
 
-                    hostLog('PUPPET_INIT', 'Prompt area detected and ready!');
+                    hostLog('PUPPET_INIT', 'Prompt area mounted. Waiting for AI Studio auth/model boot RPCs to settle...');
+                    let warmTicks = 0;
+                    while (warmTicks < 24 && !this.aborted) {
+                        const warm = (window.__omniWire && window.__omniWire.isSessionWarm) ? window.__omniWire.isSessionWarm() : null;
+                        if (warm && warm.ready) {
+                            hostLog('PUPPET_INIT', 'Boot settled cleanly (' + (warmTicks * 250) + 'ms, accessToken=' + warm.hasAccessToken + ', models=' + warm.hasListModels + ').');
+                            break;
+                        }
+                        await delay(250);
+                        warmTicks++;
+                    }
+                    await delay(1000);
+                    hostLog('PUPPET_INIT', 'Session warm and ready!');
                     if (window.OmniAutomator && window.OmniAutomator.onPuppetReady) {
                         window.OmniAutomator.onPuppetReady(true, 'Ready');
                     }
@@ -691,8 +703,10 @@ fun buildAiStudioPuppetScript(): String {
                                     return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + wire.error };
                                 }
 
-                                const isWireRetryable = wire.httpStatus >= 500 || lowerWireErr.includes('internal') ||
-                                    lowerWireErr.includes('overloaded') || lowerWireErr.includes('unavailable') || lowerWireErr.includes('network');
+                                const isWireRetryable = wire.httpStatus >= 500 || wire.httpStatus === 403 || wire.statusCode === 7 ||
+                                    lowerWireErr.includes('caller does not have permission') || lowerWireErr.includes('permission denied') ||
+                                    lowerWireErr.includes('internal') || lowerWireErr.includes('overloaded') ||
+                                    lowerWireErr.includes('unavailable') || lowerWireErr.includes('network');
 
                                 if (isWireRetryable && turnRetryCount < MAX_RETRIES) {
                                     turnRetryCount++;
