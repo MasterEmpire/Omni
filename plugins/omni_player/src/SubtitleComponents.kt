@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,6 +45,48 @@ import java.util.Locale
 // 1. SUBTITLE HUB SCREEN (Screenshot 3)
 // ========================================================
 
+private fun Modifier.consumeAllTouches(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Main)
+            event.changes.forEach { it.consume() }
+        }
+    }
+}
+
+private fun Modifier.scrimDismissTouches(onDismiss: () -> Unit): Modifier = pointerInput(onDismiss) {
+    awaitPointerEventScope {
+        while (true) {
+            val down = awaitPointerEvent(PointerEventPass.Main)
+            if (down.type != PointerEventType.Press) {
+                down.changes.forEach { it.consume() }
+                continue
+            }
+            val first = down.changes.firstOrNull() ?: continue
+            if (first.isConsumed) continue
+            val startPos = first.position
+            first.consume()
+            var moved = false
+            val touchSlop = viewConfiguration.touchSlop
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Main)
+                ev.changes.forEach { it.consume() }
+                val ch = ev.changes.firstOrNull { it.id == first.id } ?: break
+                if (ev.type == PointerEventType.Move) {
+                    if ((ch.position - startPos).getDistance() > touchSlop) {
+                        moved = true
+                    }
+                } else if (ev.type == PointerEventType.Release) {
+                    if (!moved) {
+                        onDismiss()
+                    }
+                    break
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun SubtitleHubSheet(
     subtitleState: SubtitleState,
@@ -56,14 +100,14 @@ fun SubtitleHubSheet(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.85f))
-            .clickable(onClick = onClose)
+            .scrimDismissTouches(onDismiss = onClose)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .background(Color(0xFF0B0E14), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                .clickable(enabled = false) {}
+                .consumeAllTouches()
                 .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             // Header: Back Arrow, Title, Green Toggle Switch
@@ -207,14 +251,14 @@ fun SubtitleStyleSheet(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.85f))
-            .clickable(onClick = onBack)
+            .scrimDismissTouches(onDismiss = onBack)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .background(Color(0xFF0B0E14), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                .clickable(enabled = false) {}
+                .consumeAllTouches()
                 .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             // Header
@@ -406,6 +450,7 @@ fun SubtitleDelayWidget(
         modifier = Modifier
             .width(86.dp)
             .shadow(12.dp, RoundedCornerShape(12.dp))
+            .consumeAllTouches()
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -618,14 +663,14 @@ fun AiDialogueInspectorSheet(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.85f))
-            .clickable(onClick = onClose)
+            .scrimDismissTouches(onDismiss = onClose)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .background(Color(0xFF0D1117), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                .clickable(enabled = false) {}
+                .consumeAllTouches()
                 .padding(16.dp)
         ) {
             // Header: Title, Model Badge, Key Settings, Close
