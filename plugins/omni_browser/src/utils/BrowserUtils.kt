@@ -474,9 +474,9 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
 
     function isGenerationStreamUrl(url) {
         if (!url || typeof url !== 'string') return false;
-        return url.indexOf('/MakerSuiteService/GenerateContent') !== -1 ||
-               url.indexOf('/MakerSuiteService/CreateInteractionStream') !== -1 ||
-               url.indexOf('/MakerSuiteService/ProxyStreamedCall') !== -1;
+        return url.indexOf('MakerSuiteService/GenerateContent') !== -1 ||
+               url.indexOf('MakerSuiteService/CreateInteractionStream') !== -1 ||
+               url.indexOf('MakerSuiteService/ProxyStreamedCall') !== -1;
     }
 
     // Mirrors Closure JSPB _.cc(a, b) exact indexing + sparse overflow object lookup
@@ -839,14 +839,30 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                 var parser = createStreamParser(rec);
                 var prevLen = 0;
 
+                var xhrDecoder = null;
                 function drainXhr() {
                     try {
+                        if (xhr.responseType === 'arraybuffer' && xhr.response) {
+                            if (!xhrDecoder && typeof TextDecoder !== 'undefined') {
+                                xhrDecoder = new TextDecoder('utf-8');
+                            }
+                            if (xhrDecoder) {
+                                var fullTxt = xhrDecoder.decode(new Uint8Array(xhr.response), { stream: xhr.readyState < 4 });
+                                if (fullTxt.length > prevLen) {
+                                    parser.feed(fullTxt.slice(prevLen));
+                                    prevLen = fullTxt.length;
+                                }
+                            }
+                            return;
+                        }
                         var txt = xhr.responseText || '';
                         if (txt.length > prevLen) {
                             parser.feed(txt.slice(prevLen));
                             prevLen = txt.length;
                         }
-                    } catch(_) {}
+                    } catch(err) {
+                        wireLog('WIRE_XHR_ERR', 'drainXhr error (type=' + xhr.responseType + '): ' + (err ? err.message : 'unknown'));
+                    }
                 }
 
                 xhr.addEventListener('progress', drainXhr);
