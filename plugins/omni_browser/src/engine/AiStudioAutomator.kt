@@ -476,7 +476,16 @@ class AiStudioAutomator(
             onDone(false, "No active session.")
             return
         }
-        configureSession(sId, sysTitle, sysPrompt, thinkingLevel, model, fallbackEnabled, temporaryChat, onDone)
+        configureSession(
+            sessionId = sId,
+            sysTitle = sysTitle,
+            sysPrompt = sysPrompt,
+            thinkingLevel = thinkingLevel,
+            model = model,
+            fallbackEnabled = fallbackEnabled,
+            temporaryChat = temporaryChat,
+            onDone = onDone
+        )
     }
 
     fun executeTurn(
