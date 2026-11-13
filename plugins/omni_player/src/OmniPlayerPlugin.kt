@@ -1557,9 +1557,6 @@ class OmniPlayerPlugin : PluginEntry() {
         var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
         var showShutterFlash by remember { mutableStateOf(false) }
         var isSavingSnapshot by remember { mutableStateOf(false) }
-        var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
-        var showShutterFlash by remember { mutableStateOf(false) }
-        var isSavingSnapshot by remember { mutableStateOf(false) }
 
         val hostActivity = remember(context) {
             var ctx: Context? = context
@@ -1796,6 +1793,7 @@ class OmniPlayerPlugin : PluginEntry() {
                         this.player = player
                         useController = false
                         resizeMode = currentResizeMode
+                        playerViewRef = this
                     }
                 },
                 update = { pv ->
