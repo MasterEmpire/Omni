@@ -1,6 +1,8 @@
 package com.omni.plugin.player
 
-import android.app.Activity
+import android.media.AudioManager
+import android.media.MediaMetadataRetriever
+import android.media.MediaScannerConnection
 import android.content.ContentUris
 import android.content.Context
 import android.content.ContextWrapper
@@ -13,6 +15,8 @@ import android.os.Build
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.text.TextPaint
+import android.util.Rational
 import android.util.Size
 import android.view.MotionEvent
 import android.view.View
@@ -286,7 +290,9 @@ class OmniPlayerPlugin : PluginEntry() {
                 repeatMode = Player.REPEAT_MODE_OFF
             }
         }
-        val subtitleState = remember { SubtitleState() }
+        val subtitleState = remember {
+            SubtitleState().apply { loadStylePrefs(context) }
+        }
         var isPlaying by remember { mutableStateOf(false) }
         var currentPos by remember { mutableLongStateOf(0L) }
         var totalDuration by remember { mutableLongStateOf(1L) }
@@ -945,7 +951,11 @@ class OmniPlayerPlugin : PluginEntry() {
         var currentResizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
         var isMuted by remember { mutableStateOf(false) }
         var currentOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_SENSOR) }
-        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val currentConfig = LocalConfiguration.current
+        val isLandscape = currentConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
+        var showShutterFlash by remember { mutableStateOf(false) }
+        var isSavingSnapshot by remember { mutableStateOf(false) }
 
         val hostActivity = remember(context) {
             var ctx: Context? = context
@@ -954,6 +964,20 @@ class OmniPlayerPlugin : PluginEntry() {
                 ctx = ctx.baseContext
             }
             ctx as? Activity
+        }
+        val isInPip = remember(currentConfig, hostActivity) {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && (hostActivity?.isInPictureInPictureMode == true)
+        }
+
+        fun getLiveVolumePct(): Int {
+            return try {
+                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                ((cur.toFloat() / max.toFloat()) * 100f).toInt().coerceIn(0, 100)
+            } catch (_: Exception) {
+                50
+            }
         }
 
         fun applyWindowBrightness(percentage: Int) {
@@ -981,11 +1005,12 @@ class OmniPlayerPlugin : PluginEntry() {
             }
             mutableIntStateOf(initial)
         }
-        var currentVolume by remember { mutableIntStateOf(50) }
-        var hudType by remember { mutableStateOf<String?>(null) } // "BRIGHTNESS", "VOLUME", "SEEK", "DOUBLE_SEEK"
+        var currentVolume by remember { mutableIntStateOf(getLiveVolumePct()) }
+        var hudType by remember { mutableStateOf<String?>(null) } // "BRIGHTNESS", "VOLUME", "SEEK", "DOUBLE_SEEK", "INFO"
         var hudValue by remember { mutableIntStateOf(50) }
         var hudSeekTarget by remember { mutableLongStateOf(0L) }
         var hudSeekDelta by remember { mutableLongStateOf(0L) }
+        var hudInfoText by remember { mutableStateOf("") }
 
         var lastTapTime by remember { mutableLongStateOf(0L) }
         var lastTapPos by remember { mutableStateOf(Offset.Zero) }
@@ -998,6 +1023,7 @@ class OmniPlayerPlugin : PluginEntry() {
             mutableStateOf(playerPrefs.getBoolean("key_gesture_seek_enabled", true))
         }
         var showMoreMenu by remember { mutableStateOf(false) }
+        var showSpeedMenu by remember { mutableStateOf(false) }
 
         // Subtitle Suite State
         var activeSubtitleModal by remember { mutableStateOf<String?>(null) } // "HUB", "STYLE", "DOWNLOAD", "AI_INSPECT", "GROQ_KEY", "SETTINGS"
@@ -1114,14 +1140,26 @@ class OmniPlayerPlugin : PluginEntry() {
             }
         }
 
+        LaunchedEffect(isInPip) {
+            if (isInPip) {
+                showControls = false
+                showMoreMenu = false
+                showSpeedMenu = false
+                activeSubtitleModal = null
+                isDelayWidgetVisible = false
+            }
+        }
+
         // Sync phone system bars (nav + status) with playback controls visibility
-        LaunchedEffect(showControls, isLocked) {
-            bridge.setImmersiveMode(!showControls || isLocked)
+        LaunchedEffect(showControls, isLocked, isInPip) {
+            if (!isInPip) {
+                bridge.setImmersiveMode(!showControls || isLocked)
+            }
         }
 
         // Auto-Hide Controls Timer (4 seconds)
-        LaunchedEffect(showControls, isPlaying, isLocked, showMoreMenu, activeSubtitleModal) {
-            if (showControls && isPlaying && !isLocked && !showMoreMenu && activeSubtitleModal == null) {
+        LaunchedEffect(showControls, isPlaying, isLocked, showMoreMenu, showSpeedMenu, activeSubtitleModal, isInPip) {
+            if (showControls && isPlaying && !isLocked && !showMoreMenu && !showSpeedMenu && activeSubtitleModal == null && !isInPip) {
                 delay(4000)
                 showControls = false
             }
@@ -1163,8 +1201,8 @@ class OmniPlayerPlugin : PluginEntry() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(isLocked, activeSubtitleModal, isGestureSeekEnabled) {
-                        if (activeSubtitleModal != null) return@pointerInput
+                    .pointerInput(isLocked, activeSubtitleModal, isGestureSeekEnabled, isInPip) {
+                        if (activeSubtitleModal != null || isInPip) return@pointerInput
                         awaitPointerEventScope {
                             val density = this.density
                             val touchSlopPx = 18f * density
@@ -1183,7 +1221,7 @@ class OmniPlayerPlugin : PluginEntry() {
                                 var gestureMode = 0 // 1: Brightness, 2: Volume, 3: Seek
 
                                 val initialB = currentBrightness
-                                val initialV = currentVolume
+                                val initialV = getLiveVolumePct().also { currentVolume = it }
 
                                 while (true) {
                                     val event = awaitPointerEvent()
@@ -1296,7 +1334,7 @@ class OmniPlayerPlugin : PluginEntry() {
             )
 
             // 2. Left Edge-Anchored Brightness HUD
-            if (hudType == "BRIGHTNESS") {
+            if (!isInPip && hudType == "BRIGHTNESS") {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = Color.Black.copy(alpha = 0.85f),
@@ -1343,7 +1381,7 @@ class OmniPlayerPlugin : PluginEntry() {
             }
 
             // 3. Right Edge-Anchored Volume HUD
-            if (hudType == "VOLUME") {
+            if (!isInPip && hudType == "VOLUME") {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = Color.Black.copy(alpha = 0.85f),
@@ -1389,8 +1427,26 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // 4. Center Seeking / Fast-Forward HUD
-            if (hudType == "SEEK" || hudType == "DOUBLE_SEEK") {
+            // 4. Center Seeking / Fast-Forward / Info HUD
+            if (!isInPip && hudType == "INFO" && hudInfoText.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Black.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.5f)),
+                    modifier = Modifier.align(Alignment.Center)
+                ) {
+                    Text(
+                        text = hudInfoText,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+            }
+
+            if (!isInPip && (hudType == "SEEK" || hudType == "DOUBLE_SEEK")) {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = Color.Black.copy(alpha = 0.85f),
@@ -1435,7 +1491,7 @@ class OmniPlayerPlugin : PluginEntry() {
 
             // 5. Floating Screen Lock Key (Disappears on its spot)
             AnimatedVisibility(
-                visible = showControls || isLocked,
+                visible = (showControls || isLocked) && !isInPip,
                 enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(200)),
                 exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(250)),
                 modifier = Modifier
@@ -1463,7 +1519,7 @@ class OmniPlayerPlugin : PluginEntry() {
 
             // 6. Floating Camera Shutter (Disappears on its spot)
             AnimatedVisibility(
-                visible = showControls && !isLocked,
+                visible = showControls && !isLocked && !isInPip,
                 enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(200)),
                 exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(250)),
                 modifier = Modifier
@@ -1490,7 +1546,7 @@ class OmniPlayerPlugin : PluginEntry() {
 
             // 7. X-PLAYER CINEMA OVERLAYS (FADES IN-PLACE, NO SLIDING)
             AnimatedVisibility(
-                visible = showControls && !isLocked,
+                visible = showControls && !isLocked && !isInPip,
                 enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(200)),
                 exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(250))
             ) {
@@ -1546,9 +1602,19 @@ class OmniPlayerPlugin : PluginEntry() {
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     IconButton(onClick = {
-                                        val act = context as? android.app.Activity
                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                            act?.enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().build())
+                                            showControls = false
+                                            showMoreMenu = false
+                                            showSpeedMenu = false
+                                            val builder = android.app.PictureInPictureParams.Builder()
+                                            val vs = player.videoSize
+                                            if (vs.width > 0 && vs.height > 0) {
+                                                val ratio = vs.width.toFloat() / vs.height.toFloat()
+                                                if (ratio in 0.45f..2.35f) {
+                                                    builder.setAspectRatio(Rational(vs.width, vs.height))
+                                                }
+                                            }
+                                            hostActivity?.enterPictureInPictureMode(builder.build())
                                         }
                                     }) {
                                         CinePipIcon(tint = Color.White)
@@ -1679,8 +1745,11 @@ class OmniPlayerPlugin : PluginEntry() {
 
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
-                                    color = Color.Black.copy(alpha = 0.6f),
-                                    border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
+                                    color = if (currentSpeed != 1.0f) Color(0xFF00E676).copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(
+                                        0.8.dp,
+                                        if (currentSpeed != 1.0f) Color(0xFF00E676) else Color.White.copy(alpha = 0.2f)
+                                    ),
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable {
@@ -1692,11 +1761,17 @@ class OmniPlayerPlugin : PluginEntry() {
                                                 else -> 1.0f
                                             }
                                             player.playbackParameters = PlaybackParameters(currentSpeed)
+                                            hudInfoText = "Speed: ${currentSpeed}X"
+                                            hudType = "INFO"
+                                            scope.launch {
+                                                delay(800)
+                                                if (hudType == "INFO") hudType = null
+                                            }
                                         }
                                 ) {
                                     Text(
                                         text = "${currentSpeed}X",
-                                        color = Color.White,
+                                        color = if (currentSpeed != 1.0f) Color(0xFF00E676) else Color.White,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
@@ -1764,6 +1839,10 @@ class OmniPlayerPlugin : PluginEntry() {
                             Spacer(Modifier.height(4.dp))
 
                             // Controls Row
+                            val curQueueIdx = queue.indexOfFirst { it.id == video.id }
+                            val hasPrevVideo = curQueueIdx > 0
+                            val hasNextVideo = curQueueIdx >= 0 && curQueueIdx < queue.lastIndex
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1779,11 +1858,16 @@ class OmniPlayerPlugin : PluginEntry() {
                                     CineSeekArcIcon(isForward = false, seconds = 10, tint = Color.White)
                                 }
 
-                                IconButton(onClick = {
-                                    val curIdx = queue.indexOfFirst { it.id == video.id }
-                                    if (curIdx > 0) onSelectVideo(queue[curIdx - 1])
-                                }) {
-                                    CineSkipIcon(isNext = false, tint = Color.White)
+                                IconButton(
+                                    onClick = {
+                                        if (hasPrevVideo) onSelectVideo(queue[curQueueIdx - 1])
+                                    },
+                                    enabled = hasPrevVideo
+                                ) {
+                                    CineSkipIcon(
+                                        isNext = false,
+                                        tint = Color.White.copy(alpha = if (hasPrevVideo) 1f else 0.35f)
+                                    )
                                 }
 
                                 Surface(
@@ -1802,11 +1886,16 @@ class OmniPlayerPlugin : PluginEntry() {
                                     }
                                 }
 
-                                IconButton(onClick = {
-                                    val curIdx = queue.indexOfFirst { it.id == video.id }
-                                    if (curIdx >= 0 && curIdx < queue.lastIndex) onSelectVideo(queue[curIdx + 1])
-                                }) {
-                                    CineSkipIcon(isNext = true, tint = Color.White)
+                                IconButton(
+                                    onClick = {
+                                        if (hasNextVideo) onSelectVideo(queue[curQueueIdx + 1])
+                                    },
+                                    enabled = hasNextVideo
+                                ) {
+                                    CineSkipIcon(
+                                        isNext = true,
+                                        tint = Color.White.copy(alpha = if (hasNextVideo) 1f else 0.35f)
+                                    )
                                 }
 
                                 IconButton(onClick = {
@@ -1815,24 +1904,63 @@ class OmniPlayerPlugin : PluginEntry() {
                                     CineSeekArcIcon(isForward = true, seconds = 10, tint = Color.White)
                                 }
 
-                                Text(
-                                    text = "Speed",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontStyle = FontStyle.Italic,
-                                    modifier = Modifier
-                                        .clickable {
-                                            currentSpeed = if (currentSpeed == 1.0f) 1.5f else 1.0f
-                                            player.playbackParameters = PlaybackParameters(currentSpeed)
+                                Box {
+                                    Text(
+                                        text = if (currentSpeed == 1.0f) "Speed" else "${currentSpeed}X",
+                                        color = if (currentSpeed != 1.0f) Color(0xFF00E676) else Color.White,
+                                        fontSize = 12.sp,
+                                        fontStyle = FontStyle.Italic,
+                                        fontWeight = if (currentSpeed != 1.0f) FontWeight.Bold else FontWeight.Normal,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable { showSpeedMenu = true }
+                                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                                    )
+                                    DropdownMenu(
+                                        expanded = showSpeedMenu,
+                                        onDismissRequest = { showSpeedMenu = false },
+                                        modifier = Modifier.background(Color(0xFF161B22))
+                                    ) {
+                                        listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f).forEach { spd ->
+                                            val isSelected = currentSpeed == spd
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = "${spd}X",
+                                                        color = if (isSelected) Color(0xFF00E676) else Color.White,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontSize = 13.sp
+                                                    )
+                                                },
+                                                onClick = {
+                                                    currentSpeed = spd
+                                                    player.playbackParameters = PlaybackParameters(spd)
+                                                    showSpeedMenu = false
+                                                    hudInfoText = "Speed: ${spd}X"
+                                                    hudType = "INFO"
+                                                    scope.launch {
+                                                        delay(800)
+                                                        if (hudType == "INFO") hudType = null
+                                                    }
+                                                }
+                                            )
                                         }
-                                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                                )
+                                    }
+                                }
 
                                 IconButton(onClick = {
-                                    currentResizeMode = when (currentResizeMode) {
-                                        AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                                        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    val (nextMode, label) = when (currentResizeMode) {
+                                        AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM to "Aspect: Zoom (Crop)"
+                                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL to "Aspect: Stretch"
+                                        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT to "Aspect: Fit"
+                                    }
+                                    currentResizeMode = nextMode
+                                    hudInfoText = label
+                                    hudType = "INFO"
+                                    scope.launch {
+                                        delay(800)
+                                        if (hudType == "INFO") hudType = null
                                     }
                                 }) {
                                     CineAspectIcon(tint = Color.White)
@@ -1879,7 +2007,7 @@ class OmniPlayerPlugin : PluginEntry() {
             )
 
             // --- FLOATING SUBTITLE DELAY ADJUSTER (Screenshot 2) ---
-            if (isDelayWidgetVisible) {
+            if (!isInPip && isDelayWidgetVisible) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
@@ -1887,13 +2015,14 @@ class OmniPlayerPlugin : PluginEntry() {
                 ) {
                     SubtitleDelayWidget(
                         subtitleState = subtitleState,
+                        onDelayChanged = { persistSubtitleImmediately() },
                         onClose = { isDelayWidgetVisible = false }
                     )
                 }
             }
 
             // --- SUBTITLE SUITE MODALS ---
-            when (activeSubtitleModal) {
+            when (if (isInPip) null else activeSubtitleModal) {
                 "HUB" -> {
                     SubtitleHubSheet(
                         subtitleState = subtitleState,
@@ -1911,12 +2040,14 @@ class OmniPlayerPlugin : PluginEntry() {
                             activeSubtitleModal = null
                             isDelayWidgetVisible = true
                         },
+                        onStateChanged = { persistSubtitleImmediately() },
                         onClose = { activeSubtitleModal = null }
                     )
                 }
                 "STYLE" -> {
                     SubtitleStyleSheet(
                         subtitleState = subtitleState,
+                        onStyleChanged = { subtitleState.saveStylePrefs(context) },
                         onBack = { activeSubtitleModal = "HUB" }
                     )
                 }
@@ -2066,13 +2197,17 @@ class OmniPlayerPlugin : PluginEntry() {
         var isSearching by remember { mutableStateOf(false) }
         var isDownloadingId by remember { mutableStateOf<Long?>(null) }
         var results by remember { mutableStateOf<List<SubtitleResult>>(emptyList()) }
+        var errorMessage by remember { mutableStateOf<String?>(null) }
         val scope = rememberCoroutineScope()
 
         fun triggerSearch() {
             if (queryText.isBlank()) return
             scope.launch {
                 isSearching = true
-                results = OpenSubtitlesService.search(queryText.trim(), "en")
+                errorMessage = null
+                val response = OpenSubtitlesService.search(queryText.trim(), "en")
+                results = response.results
+                errorMessage = response.error
                 isSearching = false
             }
         }
@@ -2141,31 +2276,64 @@ class OmniPlayerPlugin : PluginEntry() {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = Color(0xFF00E676), strokeWidth = 2.dp)
                             }
+                        } else if (errorMessage != null && results.isEmpty()) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(12.dp)
+                                ) {
+                                    Text(
+                                        text = errorMessage!!,
+                                        color = Color(0xFFF85149),
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    TextButton(onClick = { triggerSearch() }) {
+                                        Text("Retry", color = Color(0xFF00E676), fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         } else if (results.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("No subtitles found", color = Color(0xFF8B949E), fontSize = 12.sp)
                             }
                         } else {
-                            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                items(results, key = { it.fileId }) { item ->
-                                    val isDownloading = isDownloadingId == item.fileId
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = Color(0xFF161B22),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable(enabled = !isDownloading) {
-                                                isDownloadingId = item.fileId
-                                                scope.launch {
-                                                    val srtText = OpenSubtitlesService.downloadSubtitleText(item.fileId)
-                                                    isDownloadingId = null
-                                                    if (srtText != null) {
-                                                        onSelectSubtitle(srtText, "${item.language.uppercase()} - ${item.releaseName.take(30)}")
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                if (errorMessage != null) {
+                                    Text(
+                                        text = errorMessage!!,
+                                        color = Color(0xFFF85149),
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                                    )
+                                }
+                                LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    items(results, key = { it.fileId }) { item ->
+                                        val isDownloading = isDownloadingId == item.fileId
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFF161B22),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable(enabled = !isDownloading) {
+                                                    isDownloadingId = item.fileId
+                                                    errorMessage = null
+                                                    scope.launch {
+                                                        val (srtText, dlErr) = OpenSubtitlesService.downloadSubtitleWithStatus(item.fileId)
+                                                        isDownloadingId = null
+                                                        if (srtText != null) {
+                                                            onSelectSubtitle(srtText, "${item.language.uppercase()} - ${item.releaseName.take(30)}")
+                                                        } else {
+                                                            errorMessage = dlErr ?: "Failed downloading subtitle"
+                                                        }
                                                     }
                                                 }
-                                            }
-                                    ) {
+                                        ) {
                                         Row(
                                             modifier = Modifier.padding(10.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -2186,6 +2354,7 @@ class OmniPlayerPlugin : PluginEntry() {
                             }
                         }
                     }
+                }
                 }
             },
             confirmButton = {}
