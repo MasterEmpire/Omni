@@ -573,6 +573,7 @@ fun buildAiStudioPuppetScript(): String {
                     this.isBusy = true;
 
                     updateStatus((stepLabel + ': Submitting prompt.').trim());
+                    const wireTurnToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
                     await dismissInterstitials();
 
                     if (attachments && Array.isArray(attachments) && attachments.length > 0) {
@@ -641,24 +642,108 @@ fun buildAiStudioPuppetScript(): String {
                     let contentStaticTicks = 0;
                     let totalTurnTicks = 0;
                     let idleTicks = 0;
-                    const MAX_IDLE_TICKS = 120; // 72s of silence before thinking/stream retry
-                    const MAX_TOTAL_TICKS = 3600; // 36 minutes ceiling to support massive 90KB code generators
+                    const MAX_IDLE_TICKS = 240; // 72s of silence at 300ms tick
+                    const MAX_TOTAL_TICKS = 7200; // 36 minutes ceiling
                     let turnRetryCount = 0;
                     const MAX_RETRIES = 2;
                     let currentTurnOutput = '';
                     let latestTurnThoughts = '';
+                    let activeWireToken = wireTurnToken;
+                    let usedWireStream = false;
 
                     while (totalTurnTicks < MAX_TOTAL_TICKS && !this.aborted) {
-                        await delay(600);
+                        await delay(300);
                         totalTurnTicks++;
                         idleTicks++;
 
-                        try {
-                            const autoscroll = document.querySelector('ms-autoscroll-container, .chat-view-container');
-                            if (autoscroll) autoscroll.scrollTop = autoscroll.scrollHeight;
-                            window.scrollTo(0, document.body.scrollHeight);
-                        } catch(_) {}
+                        const wire = (activeWireToken && window.__omniWire) ? window.__omniWire.getTurn(activeWireToken) : null;
 
+                        if (wire) {
+                            usedWireStream = true;
+                            if (wire.thoughts && wire.thoughts.length > latestTurnThoughts.length) {
+                                latestTurnThoughts = wire.thoughts;
+                                idleTicks = 0;
+                            }
+                            if (wire.output && wire.output.length > currentTurnOutput.length) {
+                                currentTurnOutput = wire.output;
+                                idleTicks = 0;
+                            }
+
+                            if (wire.error) {
+                                const lowerWireErr = String(wire.error).toLowerCase();
+                                const isWireQuota = wire.httpStatus === 429 || wire.statusCode === 8 ||
+                                    lowerWireErr.includes('quota') || lowerWireErr.includes('resource exhausted') ||
+                                    lowerWireErr.includes('resource_exhausted') || lowerWireErr.includes('rate limit') || lowerWireErr.includes('429');
+
+                                if (isWireQuota) {
+                                    hostLog('WIRE_ERROR', 'Quota exhausted on wire (' + wire.httpStatus + '/' + wire.statusCode + '): ' + wire.error);
+                                    this.isBusy = false;
+                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                        window.OmniAutomator.onPuppetTurnError('Quota Exhausted (429): ' + wire.error);
+                                    }
+                                    return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + wire.error };
+                                }
+
+                                const isWireRetryable = wire.httpStatus >= 500 || lowerWireErr.includes('internal') ||
+                                    lowerWireErr.includes('overloaded') || lowerWireErr.includes('unavailable') || lowerWireErr.includes('network');
+
+                                if (isWireRetryable && turnRetryCount < MAX_RETRIES) {
+                                    turnRetryCount++;
+                                    hostLog('WIRE_RETRY', 'Transient wire error: "' + wire.error + '". Retrying ' + turnRetryCount + '/' + MAX_RETRIES + '...');
+                                    updateStatus((stepLabel + ': Retrying turn, attempt ' + turnRetryCount + '.').trim());
+                                    await delay(1800 + (turnRetryCount * 600));
+                                    activeWireToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
+                                    const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
+                                    const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
+                                    const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
+                                    if (rerunBtn && isElementVisible(rerunBtn)) rerunBtn.click();
+                                    else {
+                                        const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
+                                        if (submitBtn) submitBtn.click();
+                                    }
+                                    lastOutputText = '';
+                                    currentTurnOutput = '';
+                                    latestTurnThoughts = '';
+                                    contentStaticTicks = 0;
+                                    idleTicks = 0;
+                                    await delay(1000);
+                                    continue;
+                                } else {
+                                    hostLog('WIRE_ERROR', 'Fatal wire error on ' + stepLabel + ': ' + wire.error);
+                                    this.isBusy = false;
+                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                        window.OmniAutomator.onPuppetTurnError(wire.error);
+                                    }
+                                    return { thoughts: latestTurnThoughts, output: '', error: wire.error };
+                                }
+                            }
+
+                            if (wire.done && wire.statusCode === 0) {
+                                if (currentTurnOutput.trim().length > 0) {
+                                    hostLog('WIRE_STOP', '⚡ DECISION: Wire stream finished cleanly (' + wire.transport + ', chunks=' + wire.chunkCount + ', size=' + currentTurnOutput.length + ' chars / ' + (currentTurnOutput.length / 1024).toFixed(1) + ' KB). Zero stillness wait!');
+                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnProgress) {
+                                        window.OmniAutomator.onPuppetTurnProgress(latestTurnThoughts, currentTurnOutput);
+                                    }
+                                    break;
+                                } else {
+                                    // Unrecognized RPC payload fallback: brief DOM settle check
+                                    hostLog('WIRE_FALLBACK', 'Wire stream closed with 0 parsed chars; falling back to DOM scrape.');
+                                    let fbTicks = 0;
+                                    while (fbTicks < 10 && checkUiGenerating()) {
+                                        await delay(250);
+                                        fbTicks++;
+                                    }
+                                    const fbContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
+                                    if (fbContainers.length > 0) {
+                                        const fbTxt = getScreenText(fbContainers[fbContainers.length - 1]);
+                                        if (fbTxt.length > currentTurnOutput.length) currentTurnOutput = fbTxt;
+                                    }
+                                    if (currentTurnOutput.trim().length > 0) break;
+                                }
+                            }
+                        }
+
+                        // DOM Error Banner Guard (catches pre-flight UI validation errors before a network call starts)
                         const errBanner = document.querySelector('ms-banner .error-banner-message, ms-global-banner');
                         const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error, ms-chat-turn:last-of-type .model-error');
                         const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
@@ -687,6 +772,7 @@ fun buildAiStudioPuppetScript(): String {
                                 hostLog('RETRY', 'Transient error: "' + errTxt + '". Retrying attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
                                 updateStatus((stepLabel + ': Retrying turn, attempt ' + turnRetryCount + '.').trim());
                                 await delay(1800 + (turnRetryCount * 600));
+                                activeWireToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
 
                                 const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
                                 const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
@@ -713,65 +799,62 @@ fun buildAiStudioPuppetScript(): String {
                             }
                         }
 
-                        const thoughtBlocks = Array.from(document.querySelectorAll('ms-thought-chunk'));
-                        if (thoughtBlocks.length > 0) {
-                            latestTurnThoughts = thoughtBlocks
-                                .map(b => (b.innerText || b.textContent || '').trim())
-                                .filter(Boolean)
-                                .join('\n\n')
-                                .trim();
-                        }
+                        // Skip heavy DOM scraping whenever wire hook is actively streaming tokens
+                        if (!wire || (!wire.active && !wire.done)) {
+                            const thoughtBlocks = Array.from(document.querySelectorAll('ms-thought-chunk'));
+                            if (thoughtBlocks.length > 0) {
+                                latestTurnThoughts = thoughtBlocks
+                                    .map(b => (b.innerText || b.textContent || '').trim())
+                                    .filter(Boolean)
+                                    .join('\n\n')
+                                    .trim();
+                            }
 
-                        const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
-                        let activeModelTurn = null;
-                        for (let i = allModelContainers.length - 1; i >= 0; i--) {
-                            const t = allModelContainers[i];
-                            const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
-                                .some(el => !el.closest('ms-thought-chunk'));
-                            if (hasRealAnswer) {
-                                activeModelTurn = t;
-                                break;
+                            const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
+                            let activeModelTurn = null;
+                            for (let i = allModelContainers.length - 1; i >= 0; i--) {
+                                const t = allModelContainers[i];
+                                const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+                                    .some(el => !el.closest('ms-thought-chunk'));
+                                if (hasRealAnswer) {
+                                    activeModelTurn = t;
+                                    break;
+                                }
+                            }
+                            if (!activeModelTurn && allModelContainers.length > 0) {
+                                activeModelTurn = allModelContainers[allModelContainers.length - 1];
+                            }
+
+                            if (activeModelTurn) {
+                                const screenText = getScreenText(activeModelTurn);
+                                if (screenText.length >= currentTurnOutput.length) {
+                                    currentTurnOutput = screenText;
+                                }
                             }
                         }
-                        if (!activeModelTurn && allModelContainers.length > 0) {
-                            activeModelTurn = allModelContainers[allModelContainers.length - 1];
-                        }
 
-                        if (activeModelTurn) {
-                            const screenText = getScreenText(activeModelTurn);
-                            if (screenText.length >= currentTurnOutput.length) {
-                                currentTurnOutput = screenText;
-                            }
-                        }
-
-                        const isBackendGenerating = checkUiGenerating();
+                        const isBackendGenerating = (wire && wire.active) ? true : checkUiGenerating();
                         const hasContent = currentTurnOutput.length > 0;
                         const textGrew = currentTurnOutput.length > lastOutputText.length;
                         const thoughtsChanged = latestTurnThoughts !== lastThoughtsText;
 
                         if (textGrew) {
                             const diff = currentTurnOutput.length - lastOutputText.length;
-                            hostLog('WATCHDOG_GROWTH', '📈 Growth: ' + lastOutputText.length + ' -> ' + currentTurnOutput.length + ' chars (+' + diff + ' chars). Backend active: ' + isBackendGenerating);
+                            hostLog(usedWireStream ? 'WIRE_GROWTH' : 'WATCHDOG_GROWTH', '📈 Growth: ' + lastOutputText.length + ' -> ' + currentTurnOutput.length + ' chars (+' + diff + '). Active: ' + isBackendGenerating);
                             idleTicks = 0;
                             contentStaticTicks = 0;
                             lastOutputText = currentTurnOutput;
                             lastThoughtsText = latestTurnThoughts;
                         } else if (thoughtsChanged) {
-                            hostLog('WATCHDOG_THOUGHTS', '🧠 Thoughts updated (' + latestTurnThoughts.length + ' chars). Resetting stillness.');
+                            hostLog(usedWireStream ? 'WIRE_THOUGHTS' : 'WATCHDOG_THOUGHTS', '🧠 Thoughts updated (' + latestTurnThoughts.length + ' chars).');
                             idleTicks = 0;
                             contentStaticTicks = 0;
                             lastThoughtsText = latestTurnThoughts;
-                        } else if (hasContent) {
-                            // CRITICAL RULE: If Google backend is still streaming tokens (spinner/stop active),
-                            // generation is NOT done, even if DOM output is momentarily paused. Keep stillness at 0!
+                        } else if (hasContent && !usedWireStream) {
                             if (isBackendGenerating) {
                                 contentStaticTicks = 0;
                             } else {
-                                // Backend stream ended! Client-side Angular/DOM rendering is flushing chunks.
                                 contentStaticTicks++;
-                                if (contentStaticTicks % 3 === 0 || contentStaticTicks >= 10) {
-                                    hostLog('WATCHDOG_STILL', '⏳ Post-backend DOM rendering stillness: tick ' + contentStaticTicks + ' (' + (contentStaticTicks * 0.6).toFixed(1) + 's steady, ' + currentTurnOutput.length + ' chars in DOM).');
-                                }
                             }
                         }
 
@@ -781,6 +864,7 @@ fun buildAiStudioPuppetScript(): String {
                                 hostLog('IDLE_RETRY', 'Silence timeout. Auto-rerun ' + turnRetryCount + '/' + MAX_RETRIES);
                                 idleTicks = 0;
                                 contentStaticTicks = 0;
+                                activeWireToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
                                 const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
                                 const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
                                 const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
@@ -805,19 +889,17 @@ fun buildAiStudioPuppetScript(): String {
                             window.OmniAutomator.onPuppetTurnProgress(latestTurnThoughts, currentTurnOutput);
                         }
 
-                        // CRITICAL ARCHITECTURE RULE:
-                        // The spinner stopping only means the Google backend finished streaming tokens.
-                        // The client-side Angular app continues rendering and highlighting markdown/code blocks.
-                        // We must NEVER stop while isBackendGenerating is true, and we enforce a strict 14-tick
-                        // (8.4s) stillness window after the spinner stops to guarantee all code is rendered into the DOM.
-                        const trimmedOutput = currentTurnOutput.trim();
-                        const looksLikeJson = trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[') || trimmedOutput.includes('"solutions"');
-                        const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
-                        const targetTicks = balanced ? 8 : 14;
+                        // Fallback stillness exit (only triggers if wire interceptor wasn't matched)
+                        if (!usedWireStream) {
+                            const trimmedOutput = currentTurnOutput.trim();
+                            const looksLikeJson = trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[') || trimmedOutput.includes('"solutions"');
+                            const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
+                            const targetTicks = balanced ? 16 : 28; // ~4.8s / ~8.4s at 300ms tick
 
-                        if (hasContent && !isBackendGenerating && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
-                            hostLog('DECISION_STOP', '🛑 DECISION: Turn completed! Reason: Backend stream ended AND client-side DOM rendering remained steady for ' + (contentStaticTicks * 0.6).toFixed(1) + 's (' + contentStaticTicks + '/' + targetTicks + ' ticks). Final size: ' + currentTurnOutput.length + ' chars (' + (currentTurnOutput.length / 1024).toFixed(1) + ' KB).');
-                            break;
+                            if (hasContent && !isBackendGenerating && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
+                                hostLog('DECISION_STOP', '🛑 DECISION: Fallback DOM turn completed (' + currentTurnOutput.length + ' chars).');
+                                break;
+                            }
                         }
                     }
 
@@ -830,20 +912,22 @@ fun buildAiStudioPuppetScript(): String {
                         return { thoughts: latestTurnThoughts, output: '', error: emptyErr };
                     }
 
-                    // Cloud Sync Grace Period: Wait for Google AI Studio Drive Auto-Save to commit to cloud backend
-                    updateStatus((stepLabel + ': Committing cloud auto-save...').trim());
-                    hostLog('DRIVE_SYNC', 'Waiting for Google AI Studio cloud auto-save to commit before finishing turn...');
-                    let syncWaitTicks = 0;
-                    while (syncWaitTicks < 14 && !this.aborted) {
-                        const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status, [aria-label*="Saved"], [data-test-save-status]');
-                        if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) {
-                            hostLog('DRIVE_SYNC', '✅ Google AI Studio marked chat as Saved.');
-                            break;
+                    // Cloud Sync Grace Period: Only needed for persistent chats
+                    if (!isTemporaryChatActive()) {
+                        updateStatus((stepLabel + ': Committing cloud auto-save...').trim());
+                        hostLog('DRIVE_SYNC', 'Waiting for Google AI Studio cloud auto-save to commit before finishing turn...');
+                        let syncWaitTicks = 0;
+                        while (syncWaitTicks < 10 && !this.aborted) {
+                            const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status, [aria-label*="Saved"], [data-test-save-status]');
+                            if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) {
+                                hostLog('DRIVE_SYNC', '✅ Google AI Studio marked chat as Saved.');
+                                break;
+                            }
+                            await delay(400);
+                            syncWaitTicks++;
                         }
-                        await delay(500);
-                        syncWaitTicks++;
+                        await delay(800);
                     }
-                    await delay(1800);
 
                     if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnComplete) {
                         window.OmniAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
