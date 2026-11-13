@@ -262,6 +262,7 @@ class WebViewPoolManager(
 
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 try {
+                    WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT, setOf("*"))
                     WebViewCompat.addDocumentStartJavaScript(this, BLOB_INTERCEPTOR_SCRIPT, setOf("*"))
                     WebViewCompat.addDocumentStartJavaScript(this, BACKGROUND_MEDIA_SCRIPT, setOf("*"))
                 } catch (_: Exception) {}
