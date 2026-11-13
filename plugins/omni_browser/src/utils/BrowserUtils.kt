@@ -464,7 +464,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
         return url.indexOf('clients6.google.com') !== -1 ||
                url.indexOf('googleapis.com') !== -1 ||
                url.indexOf('webchannel') !== -1 ||
-               url.indexOf('/$rpc/') !== -1 ||
+               url.indexOf('MakerSuiteService') !== -1 ||
                url.indexOf('Generate') !== -1 ||
                url.indexOf('Stream') !== -1 ||
                url.indexOf('Interaction') !== -1;
