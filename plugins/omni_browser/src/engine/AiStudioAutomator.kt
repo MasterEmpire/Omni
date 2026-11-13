@@ -224,7 +224,12 @@ class AiStudioAutomator(
                 @JavascriptInterface
                 fun onPuppetTurnProgress(thoughts: String, output: String) {
                     mainHandler.post {
-                        sessionInstance.onTurnProgressCallback?.invoke(thoughts, output)
+                        val cb = sessionInstance.onTurnProgressCallback
+                        if (cb != null) {
+                            cb.invoke(thoughts, output)
+                        } else {
+                            legacyBatchCallback?.onProgress(thoughts, output)
+                        }
                     }
                 }
 
