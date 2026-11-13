@@ -3,6 +3,7 @@ package com.omni.plugin.player
 import android.content.Context
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -36,6 +37,11 @@ data class SubtitleResult(
     val downloadCount: Int,
     val rating: Double,
     val fileName: String
+)
+
+data class SubtitleSearchResponse(
+    val results: List<SubtitleResult>,
+    val error: String? = null
 )
 
 val SUBTITLE_PRESETS = listOf(
@@ -87,6 +93,30 @@ class SubtitleState {
 
     fun resetSize() {
         fontSizeSp = 22f
+    }
+
+    fun loadStylePrefs(context: Context) {
+        try {
+            val prefs = context.getSharedPreferences("omni_player_prefs", Context.MODE_PRIVATE)
+            selectedPresetId = prefs.getInt("sub_preset_id", 0)
+            fontColor = Color(prefs.getInt("sub_font_color", Color.White.toArgb()))
+            fontSizeSp = prefs.getFloat("sub_font_size", 22f).coerceIn(14f, 36f)
+            hasOutline = prefs.getBoolean("sub_has_outline", false)
+            boxColor = Color(prefs.getInt("sub_box_color", Color(0xCC000000).toArgb()))
+        } catch (_: Exception) {}
+    }
+
+    fun saveStylePrefs(context: Context) {
+        try {
+            context.getSharedPreferences("omni_player_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putInt("sub_preset_id", selectedPresetId)
+                .putInt("sub_font_color", fontColor.toArgb())
+                .putFloat("sub_font_size", fontSizeSp)
+                .putBoolean("sub_has_outline", hasOutline)
+                .putInt("sub_box_color", boxColor.toArgb())
+                .apply()
+        } catch (_: Exception) {}
     }
 
     fun loadSrtText(text: String, name: String) {
@@ -391,7 +421,7 @@ object OpenSubtitlesService {
         return name.replace(Regex("\\s+"), " ").trim()
     }
 
-    suspend fun search(query: String, langCode: String): List<SubtitleResult> = withContext(Dispatchers.IO) {
+    suspend fun search(query: String, langCode: String): SubtitleSearchResponse = withContext(Dispatchers.IO) {
         val list = mutableListOf<SubtitleResult>()
         try {
             val encodedQ = URLEncoder.encode(query, "UTF-8")
@@ -406,40 +436,53 @@ object OpenSubtitlesService {
                 .build()
 
             val resp = httpClient.newCall(req).execute()
-            if (resp.isSuccessful) {
-                val json = JSONObject(resp.body?.string() ?: "{}")
-                val arr = json.optJSONArray("data")
-                if (arr != null) {
-                    for (i in 0 until arr.length()) {
-                        val item = arr.getJSONObject(i)
-                        val attr = item.optJSONObject("attributes") ?: continue
-                        val filesArr = attr.optJSONArray("files")
-                        val firstFile = filesArr?.optJSONObject(0)
-                        val fileId = firstFile?.optLong("file_id") ?: continue
-                        val fileName = firstFile.optString("file_name", "sub.srt")
-                        val release = attr.optString("release", attr.optString("feature_details_title", fileName))
-                        val lang = attr.optString("language", "en")
-                        val dlCount = attr.optInt("download_count", 0)
-                        val rating = attr.optDouble("ratings", 0.0)
+            val rawBody = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) {
+                val msg = try {
+                    JSONObject(rawBody).optString("message").takeIf { it.isNotBlank() }
+                } catch (_: Exception) { null }
+                val errText = when (resp.code) {
+                    429 -> "Rate limit reached (HTTP 429). Wait a moment and retry."
+                    401, 403 -> "OpenSubtitles auth rejected (HTTP ${resp.code})."
+                    else -> msg ?: "Search failed (HTTP ${resp.code})."
+                }
+                return@withContext SubtitleSearchResponse(emptyList(), errText)
+            }
 
-                        list.add(
-                            SubtitleResult(
-                                fileId = fileId,
-                                releaseName = release,
-                                language = lang,
-                                downloadCount = dlCount,
-                                rating = rating,
-                                fileName = fileName
-                            )
+            val json = JSONObject(if (rawBody.isBlank()) "{}" else rawBody)
+            val arr = json.optJSONArray("data")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val item = arr.getJSONObject(i)
+                    val attr = item.optJSONObject("attributes") ?: continue
+                    val filesArr = attr.optJSONArray("files")
+                    val firstFile = filesArr?.optJSONObject(0)
+                    val fileId = firstFile?.optLong("file_id") ?: continue
+                    val fileName = firstFile.optString("file_name", "sub.srt")
+                    val release = attr.optString("release", attr.optString("feature_details_title", fileName))
+                    val lang = attr.optString("language", "en")
+                    val dlCount = attr.optInt("download_count", 0)
+                    val rating = attr.optDouble("ratings", 0.0)
+
+                    list.add(
+                        SubtitleResult(
+                            fileId = fileId,
+                            releaseName = release,
+                            language = lang,
+                            downloadCount = dlCount,
+                            rating = rating,
+                            fileName = fileName
                         )
-                    }
+                    )
                 }
             }
-        } catch (_: Exception) {}
-        list
+            SubtitleSearchResponse(list, null)
+        } catch (e: Exception) {
+            SubtitleSearchResponse(emptyList(), e.localizedMessage ?: "Network error while searching subtitles")
+        }
     }
 
-    suspend fun downloadSubtitleText(fileId: Long): String? = withContext(Dispatchers.IO) {
+    suspend fun downloadSubtitleWithStatus(fileId: Long): Pair<String?, String?> = withContext(Dispatchers.IO) {
         try {
             val jsonReq = JSONObject().apply { put("file_id", fileId) }
             val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -454,16 +497,25 @@ object OpenSubtitlesService {
                 .build()
 
             val resp = httpClient.newCall(req).execute()
-            if (!resp.isSuccessful) return@withContext null
-            val respJson = JSONObject(resp.body?.string() ?: "{}")
+            val rawBody = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) {
+                val err = when (resp.code) {
+                    429 -> "Download quota/rate limit reached (HTTP 429)"
+                    406 -> "Daily OpenSubtitles download quota reached (HTTP 406)"
+                    else -> "Download request failed (HTTP ${resp.code})"
+                }
+                return@withContext Pair(null, err)
+            }
+            val respJson = JSONObject(if (rawBody.isBlank()) "{}" else rawBody)
             val link = respJson.optString("link", "")
-            if (link.isEmpty()) return@withContext null
+            if (link.isEmpty()) return@withContext Pair(null, "No download link returned")
 
             val fileReq = Request.Builder().url(link).build()
             val fileResp = httpClient.newCall(fileReq).execute()
-            fileResp.body?.string()
-        } catch (_: Exception) {
-            null
+            if (!fileResp.isSuccessful) return@withContext Pair(null, "File fetch failed (HTTP ${fileResp.code})")
+            Pair(fileResp.body?.string(), null)
+        } catch (e: Exception) {
+            Pair(null, e.localizedMessage ?: "Download network error")
         }
     }
 }
