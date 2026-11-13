@@ -1,15 +1,19 @@
 package com.omni.plugin.player
 
+import android.app.Activity
 import android.content.ContentUris
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Size
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -1066,8 +1070,40 @@ class OmniPlayerPlugin : PluginEntry() {
         var isMuted by remember { mutableStateOf(false) }
         var currentOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_SENSOR) }
 
+        val hostActivity = remember(context) {
+            var ctx: Context? = context
+            while (ctx is ContextWrapper) {
+                if (ctx is Activity) break
+                ctx = ctx.baseContext
+            }
+            ctx as? Activity
+        }
+
+        fun applyWindowBrightness(percentage: Int) {
+            val win = hostActivity?.window ?: return
+            val clamped = percentage.coerceIn(0, 100)
+            val lp = win.attributes
+            lp.screenBrightness = if (clamped == 0) 0.01f else clamped / 100f
+            win.attributes = lp
+        }
+
         // Precision Gestures State
-        var currentBrightness by remember { mutableIntStateOf(50) }
+        var currentBrightness by remember {
+            val initial = run {
+                val winB = hostActivity?.window?.attributes?.screenBrightness ?: -1f
+                if (winB >= 0f) {
+                    (winB * 100f).toInt().coerceIn(0, 100)
+                } else {
+                    try {
+                        val sysB = Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
+                        ((sysB / 255f) * 100f).toInt().coerceIn(0, 100)
+                    } catch (_: Exception) {
+                        50
+                    }
+                }
+            }
+            mutableIntStateOf(initial)
+        }
         var currentVolume by remember { mutableIntStateOf(50) }
         var hudType by remember { mutableStateOf<String?>(null) } // "BRIGHTNESS", "VOLUME", "SEEK", "DOUBLE_SEEK"
         var hudValue by remember { mutableIntStateOf(50) }
@@ -1170,6 +1206,11 @@ class OmniPlayerPlugin : PluginEntry() {
                     yFraction = subtitleState.yFraction,
                     isEnabled = subtitleState.isEnabled
                 )
+                hostActivity?.window?.let { win ->
+                    val lp = win.attributes
+                    lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    win.attributes = lp
+                }
                 bridge.setImmersiveMode(false)
                 bridge.setScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
                 player.removeListener(listener)
@@ -1249,7 +1290,7 @@ class OmniPlayerPlugin : PluginEntry() {
                                                     val deltaY = startY - change.position.y
                                                     val newB = (initialB + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
                                                     currentBrightness = newB
-                                                    bridge.setScreenBrightness(newB)
+                                                    applyWindowBrightness(newB)
                                                     hudType = "BRIGHTNESS"
                                                     hudValue = newB
                                                 }
