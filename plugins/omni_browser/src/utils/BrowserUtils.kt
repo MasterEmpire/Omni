@@ -582,7 +582,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     }
 
     // Incremental O(N) streaming JSON-array parser mirroring Google's m__b.js state machine (case 0..5)
-    function createStreamParser(rec) {
+    function createStreamParser(rec, onSyntaxComplete) {
         var phase = 0;
         var acc = '';
         var scanIdx = 0;
@@ -657,9 +657,14 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                     if (phase === 1) {
                         if (isWs(ch)) { scanIdx++; continue; }
                         if (ch === '[') { phase = 2; elemDepth = 0; elemStart = -1; scanIdx++; continue; }
-                        if (ch === ',') { phase = 3; scanIdx++; continue; }
-                        if (acc.slice(scanIdx, scanIdx + 5) === 'null,') { phase = 3; scanIdx += 4; continue; }
-                        if (ch === ']') { phase = 5; scanIdx++; continue; }
+                        if (ch === ',') { phase = 4; elemDepth = 0; elemStart = -1; scanIdx++; continue; }
+                        if (acc.slice(scanIdx, scanIdx + 5) === 'null,') { phase = 4; elemDepth = 0; elemStart = -1; scanIdx += 5; continue; }
+                        if (ch === ']') {
+                            phase = 5;
+                            scanIdx++;
+                            if (typeof onSyntaxComplete === 'function') onSyntaxComplete();
+                            continue;
+                        }
                         phase = 6; break;
                     }
 
@@ -669,6 +674,9 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                             if (ch === ']') {
                                 phase = (phase === 2) ? 3 : 5;
                                 scanIdx++;
+                                if (phase === 5 && typeof onSyntaxComplete === 'function') {
+                                    onSyntaxComplete();
+                                }
                                 continue;
                             }
                             if (ch === '[' || ch === '{') {
@@ -718,7 +726,12 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                         if (isWs(ch)) { scanIdx++; continue; }
                         if (ch === ',') { phase = 4; elemDepth = 0; elemStart = -1; scanIdx++; continue; }
                         if (acc.slice(scanIdx, scanIdx + 5) === 'null,') { phase = 4; elemDepth = 0; elemStart = -1; scanIdx += 5; continue; }
-                        if (ch === ']') { phase = 5; scanIdx++; continue; }
+                        if (ch === ']') {
+                            phase = 5;
+                            scanIdx++;
+                            if (typeof onSyntaxComplete === 'function') onSyntaxComplete();
+                            continue;
+                        }
                         scanIdx++;
                         continue;
                     }
@@ -739,6 +752,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     }
 
     function finalizeRecord(rec, httpStatus, errMsg) {
+        if (!rec || rec.done) return;
         rec.active = false;
         rec.done = true;
         rec.endedAt = Date.now();
@@ -762,17 +776,15 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                 url = (typeof input === 'string') ? input : (input && input.url ? input.url : String(input || ''));
             } catch(_) {}
 
-            if (isInterestingTraffic(url)) {
-                wireLog('WIRE_TRAFFIC', '[FETCH] ' + url);
-            }
-
             if (!isGenerationStreamUrl(url)) {
                 return origFetch.apply(this, arguments);
             }
 
             var rec = createStreamRecord(url, 'fetch');
             wireLog('WIRE_STREAM_START', 'Stream #' + rec.id + ' [FETCH] turn=' + rec.turnToken + ' url=' + url);
-            var parser = createStreamParser(rec);
+            var parser = createStreamParser(rec, function() {
+                finalizeRecord(rec, rec.httpStatus || 200, null);
+            });
 
             return origFetch.apply(this, arguments).then(function(res) {
                 rec.httpStatus = res.status;
@@ -817,31 +829,49 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
         window.fetch.__omniWireWrapped = true;
     }
 
-    // 2. Hook XMLHttpRequest (supports Google _.oy fallback when oKe is false)
+    // 2. Hook XMLHttpRequest (supports Google _.oy when oKe is false)
     if (typeof XMLHttpRequest !== 'undefined' && !XMLHttpRequest.prototype.__omniWireWrapped) {
         var origOpen = XMLHttpRequest.prototype.open;
         var origSend = XMLHttpRequest.prototype.send;
+        var origAbort = XMLHttpRequest.prototype.abort;
 
         XMLHttpRequest.prototype.open = function(method, url) {
             this.__omniWireUrl = String(url || '');
+            this.__omniWireRec = null;
+            this.__omniWireDrain = null;
             return origOpen.apply(this, arguments);
+        };
+
+        XMLHttpRequest.prototype.abort = function() {
+            try {
+                if (this.__omniWireDrain) this.__omniWireDrain();
+                var rec = this.__omniWireRec;
+                if (rec && !rec.done) {
+                    if (rec.chunkCount > 0 || rec.output.length > 0 || rec.thoughts.length > 0 || rec.statusCode !== 0 || rec.error) {
+                        finalizeRecord(rec, this.status || rec.httpStatus || 200, null);
+                    } else {
+                        finalizeRecord(rec, this.status || 0, 'XHR aborted');
+                    }
+                }
+            } catch(_) {}
+            return origAbort.apply(this, arguments);
         };
 
         XMLHttpRequest.prototype.send = function() {
             var url = this.__omniWireUrl || '';
-            if (isInterestingTraffic(url)) {
-                wireLog('WIRE_TRAFFIC', '[XHR] ' + url);
-            }
             if (isGenerationStreamUrl(url)) {
                 var xhr = this;
                 var rec = createStreamRecord(url, 'xhr');
                 wireLog('WIRE_STREAM_START', 'Stream #' + rec.id + ' [XHR] turn=' + rec.turnToken + ' url=' + url);
-                var parser = createStreamParser(rec);
+                var parser = createStreamParser(rec, function() {
+                    finalizeRecord(rec, xhr.status || rec.httpStatus || 200, null);
+                });
                 var prevLen = 0;
 
                 var xhrDecoder = null;
                 function drainXhr() {
                     try {
+                        if (xhr.status && !rec.httpStatus) rec.httpStatus = xhr.status;
                         if (xhr.responseType === 'arraybuffer' && xhr.response) {
                             if (!xhrDecoder && typeof TextDecoder !== 'undefined') {
                                 xhrDecoder = new TextDecoder('utf-8');
@@ -865,17 +895,31 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                     }
                 }
 
+                xhr.__omniWireRec = rec;
+                xhr.__omniWireDrain = drainXhr;
+
                 xhr.addEventListener('progress', drainXhr);
                 xhr.addEventListener('readystatechange', function() {
                     if (xhr.readyState >= 3) drainXhr();
+                    if (xhr.readyState === 4 && !rec.done) {
+                        if (rec.chunkCount > 0 || rec.statusCode !== 0 || xhr.status >= 400) {
+                            finalizeRecord(rec, xhr.status || 200, null);
+                        }
+                    }
+                });
+                xhr.addEventListener('load', function() {
+                    drainXhr();
+                    if (!rec.done) finalizeRecord(rec, xhr.status || 200, null);
                 });
                 xhr.addEventListener('loadend', function() {
                     drainXhr();
-                    var err = (xhr.status === 0 && !rec.output) ? 'XHR aborted or network error' : null;
-                    finalizeRecord(rec, xhr.status, err);
+                    if (!rec.done) {
+                        var err = (xhr.status === 0 && !rec.output && !rec.thoughts) ? 'XHR aborted or network error' : null;
+                        finalizeRecord(rec, xhr.status || 200, err);
+                    }
                 });
                 xhr.addEventListener('error', function() {
-                    finalizeRecord(rec, xhr.status, 'XHR network error');
+                    finalizeRecord(rec, xhr.status || 0, 'XHR network error');
                 });
             }
             return origSend.apply(this, arguments);
