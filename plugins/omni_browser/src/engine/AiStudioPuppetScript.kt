@@ -697,10 +697,10 @@ fun buildAiStudioPuppetScript(): String {
                             const dt = latestTurnThoughts.slice(emittedThoughtsLen);
                             const doStr = currentTurnOutput.slice(emittedOutputLen);
                             if (dt.length > 0 || doStr.length > 0) {
-                                const isFirstOut = emittedOutputLen === 0 && doStr.length > 0;
+                                const isFirstAny = (emittedThoughtsLen === 0 && emittedOutputLen === 0);
                                 emittedThoughtsLen = latestTurnThoughts.length;
                                 emittedOutputLen = currentTurnOutput.length;
-                                window.OmniAutomator.onPuppetTurnDelta(dt, doStr, isFirstOut);
+                                window.OmniAutomator.onPuppetTurnDelta(dt, doStr, isFirstAny);
                             }
                         } else if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnProgress) {
                             if (latestTurnThoughts.length !== emittedThoughtsLen || currentTurnOutput.length !== emittedOutputLen) {
@@ -806,7 +806,8 @@ fun buildAiStudioPuppetScript(): String {
 
                                 if (wire.done && wire.statusCode === 0) {
                                     if (currentTurnOutput.trim().length > 0) {
-                                        const wireTtft = wire.firstOutputAt && wire.startedAt ? (wire.firstOutputAt - wire.startedAt) : 0;
+                                        const firstTokAt = (wire.firstThoughtAt && wire.firstOutputAt) ? Math.min(wire.firstThoughtAt, wire.firstOutputAt) : (wire.firstThoughtAt || wire.firstOutputAt || 0);
+                                        const wireTtft = firstTokAt && wire.startedAt ? (firstTokAt - wire.startedAt) : 0;
                                         hostLog('WIRE_STOP', '⚡ DECISION: Wire stream finished cleanly (' + wire.transport + ', chunks=' + wire.chunkCount + ', wireTTFT=' + wireTtft + 'ms, size=' + currentTurnOutput.length + 'c). Zero stillness wait!');
                                         break;
                                     } else {
