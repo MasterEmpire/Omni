@@ -1181,127 +1181,6 @@ class OmniPlayerPlugin : PluginEntry() {
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                .pointerInput(isLocked) {
-                    awaitPointerEventScope {
-                        val density = this.density
-                        val touchSlopPx = 18f * density
-
-                        while (true) {
-                            val downEvent = awaitPointerEvent()
-                            if (downEvent.type != PointerEventType.Press) continue
-                            val downChange = downEvent.changes.firstOrNull() ?: continue
-                            val startX = downChange.position.x
-                            val startY = downChange.position.y
-                            val sWidth = size.width.toFloat()
-                            val sHeight = size.height.toFloat()
-
-                            var isDragging = false
-                            var gestureMode = 0 // 1: Brightness, 2: Volume, 3: Seek
-
-                            val initialB = currentBrightness
-                            val initialV = currentVolume
-
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == downChange.id } ?: break
-
-                                if (event.type == PointerEventType.Move) {
-                                    val totalDx = change.position.x - startX
-                                    val totalDy = change.position.y - startY
-                                    val dist = kotlin.math.hypot(totalDx, totalDy)
-
-                                    if (!isDragging && dist > touchSlopPx && !isLocked) {
-                                        isDragging = true
-                                        if (kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx)) {
-                                            gestureMode = if (startX < sWidth * 0.45f) 1 else if (startX > sWidth * 0.55f) 2 else 0
-                                        } else {
-                                            gestureMode = 3
-                                        }
-                                    }
-
-                                    if (isDragging) {
-                                        change.consume()
-                                        when (gestureMode) {
-                                            1 -> {
-                                                val deltaY = startY - change.position.y
-                                                val newB = (initialB + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
-                                                currentBrightness = newB
-                                                bridge.setScreenBrightness(newB)
-                                                hudType = "BRIGHTNESS"
-                                                hudValue = newB
-                                            }
-                                            2 -> {
-                                                val deltaY = startY - change.position.y
-                                                val newV = (initialV + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
-                                                currentVolume = newV
-                                                bridge.setVolume("MEDIA", newV)
-                                                hudType = "VOLUME"
-                                                hudValue = newV
-                                            }
-                                            3 -> {
-                                                val deltaX = change.position.x - startX
-                                                val deltaMs = (deltaX * 120f).toLong()
-                                                val targetMs = (player.currentPosition + deltaMs).coerceIn(0L, totalDuration)
-                                                hudType = "SEEK"
-                                                hudSeekTarget = targetMs
-                                                hudSeekDelta = deltaMs / 1000L
-                                            }
-                                        }
-                                    }
-                                } else if (event.type == PointerEventType.Release) {
-                                    if (isDragging) {
-                                        if (gestureMode == 3) {
-                                            player.seekTo(hudSeekTarget)
-                                        }
-                                        scope.launch {
-                                            delay(900)
-                                            hudType = null
-                                        }
-                                    } else {
-                                        // Stationary Tap or Double-tap
-                                        val now = System.currentTimeMillis()
-                                        val isQuickSecondTap = (now - lastTapTime < 320L) && (kotlin.math.abs(startX - lastTapPos.x) < 50f * density)
-
-                                        if (isQuickSecondTap) {
-                                            // Double-Tap Execution
-                                            lastTapTime = 0L
-                                            if (!isLocked) {
-                                                when {
-                                                    startX < sWidth * 0.35f -> {
-                                                        player.seekTo((player.currentPosition - 10000).coerceAtLeast(0))
-                                                        hudType = "DOUBLE_SEEK"
-                                                        hudSeekDelta = -10L
-                                                        scope.launch { delay(700); hudType = null }
-                                                    }
-                                                    startX > sWidth * 0.65f -> {
-                                                        player.seekTo((player.currentPosition + 10000).coerceAtMost(totalDuration))
-                                                        hudType = "DOUBLE_SEEK"
-                                                        hudSeekDelta = 10L
-                                                        scope.launch { delay(700); hudType = null }
-                                                    }
-                                                    else -> {
-                                                        if (player.isPlaying) player.pause() else player.play()
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            // First Tap Registered - Toggle Controls after double-tap window expires
-                                            lastTapTime = now
-                                            lastTapPos = Offset(startX, startY)
-                                            scope.launch {
-                                                delay(320L)
-                                                if (lastTapTime == now) {
-                                                    showControls = !showControls
-                                                }
-                                            }
-                                        }
-                                    }
-                                    break
-                                }
-                            }
-                        }
-                    }
-                }
         ) {
             // 1. AndroidView ExoPlayer Video Surface
             AndroidView(
@@ -1316,6 +1195,138 @@ class OmniPlayerPlugin : PluginEntry() {
                     pv.resizeMode = currentResizeMode
                 },
                 modifier = Modifier.fillMaxSize()
+            )
+
+            // 1b. Dedicated Video Gesture Layer (behind HUD, buttons, subtitles & modals)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(isLocked, activeSubtitleModal) {
+                        if (activeSubtitleModal != null) return@pointerInput
+                        awaitPointerEventScope {
+                            val density = this.density
+                            val touchSlopPx = 18f * density
+
+                            while (true) {
+                                val downEvent = awaitPointerEvent()
+                                if (downEvent.type != PointerEventType.Press) continue
+                                val downChange = downEvent.changes.firstOrNull() ?: continue
+                                if (downChange.isConsumed) continue
+                                val startX = downChange.position.x
+                                val startY = downChange.position.y
+                                val sWidth = size.width.toFloat()
+                                val sHeight = size.height.toFloat()
+
+                                var isDragging = false
+                                var gestureMode = 0 // 1: Brightness, 2: Volume, 3: Seek
+
+                                val initialB = currentBrightness
+                                val initialV = currentVolume
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == downChange.id } ?: break
+
+                                    if (event.type == PointerEventType.Move) {
+                                        if (change.isConsumed) break
+                                        val totalDx = change.position.x - startX
+                                        val totalDy = change.position.y - startY
+                                        val dist = kotlin.math.hypot(totalDx, totalDy)
+
+                                        if (!isDragging && dist > touchSlopPx && !isLocked) {
+                                            isDragging = true
+                                            if (kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx)) {
+                                                gestureMode = if (startX < sWidth * 0.45f) 1 else if (startX > sWidth * 0.55f) 2 else 0
+                                            } else {
+                                                gestureMode = 3
+                                            }
+                                        }
+
+                                        if (isDragging) {
+                                            change.consume()
+                                            when (gestureMode) {
+                                                1 -> {
+                                                    val deltaY = startY - change.position.y
+                                                    val newB = (initialB + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
+                                                    currentBrightness = newB
+                                                    bridge.setScreenBrightness(newB)
+                                                    hudType = "BRIGHTNESS"
+                                                    hudValue = newB
+                                                }
+                                                2 -> {
+                                                    val deltaY = startY - change.position.y
+                                                    val newV = (initialV + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
+                                                    currentVolume = newV
+                                                    bridge.setVolume("MEDIA", newV)
+                                                    hudType = "VOLUME"
+                                                    hudValue = newV
+                                                }
+                                                3 -> {
+                                                    val deltaX = change.position.x - startX
+                                                    val deltaMs = (deltaX * 120f).toLong()
+                                                    val targetMs = (player.currentPosition + deltaMs).coerceIn(0L, totalDuration)
+                                                    hudType = "SEEK"
+                                                    hudSeekTarget = targetMs
+                                                    hudSeekDelta = deltaMs / 1000L
+                                                }
+                                            }
+                                        }
+                                    } else if (event.type == PointerEventType.Release) {
+                                        if (change.isConsumed) break
+                                        change.consume()
+                                        if (isDragging) {
+                                            if (gestureMode == 3) {
+                                                player.seekTo(hudSeekTarget)
+                                            }
+                                            scope.launch {
+                                                delay(900)
+                                                hudType = null
+                                            }
+                                        } else {
+                                            // Stationary Tap or Double-tap
+                                            val now = System.currentTimeMillis()
+                                            val isQuickSecondTap = (now - lastTapTime < 320L) && (kotlin.math.abs(startX - lastTapPos.x) < 50f * density)
+
+                                            if (isQuickSecondTap) {
+                                                // Double-Tap Execution
+                                                lastTapTime = 0L
+                                                if (!isLocked) {
+                                                    when {
+                                                        startX < sWidth * 0.35f -> {
+                                                            player.seekTo((player.currentPosition - 10000).coerceAtLeast(0))
+                                                            hudType = "DOUBLE_SEEK"
+                                                            hudSeekDelta = -10L
+                                                            scope.launch { delay(700); hudType = null }
+                                                        }
+                                                        startX > sWidth * 0.65f -> {
+                                                            player.seekTo((player.currentPosition + 10000).coerceAtMost(totalDuration))
+                                                            hudType = "DOUBLE_SEEK"
+                                                            hudSeekDelta = 10L
+                                                            scope.launch { delay(700); hudType = null }
+                                                        }
+                                                        else -> {
+                                                            if (player.isPlaying) player.pause() else player.play()
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                // First Tap Registered - Toggle Controls after double-tap window expires
+                                                lastTapTime = now
+                                                lastTapPos = Offset(startX, startY)
+                                                scope.launch {
+                                                    delay(320L)
+                                                    if (lastTapTime == now) {
+                                                        showControls = !showControls
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
             )
 
             // 2. Left Edge-Anchored Brightness HUD
