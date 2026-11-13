@@ -343,6 +343,11 @@ object PlaybackHistoryManager {
         return cache[videoId]
     }
 
+    fun getAllHistory(context: Context): Map<String, JSONObject> {
+        ensureLoaded(context)
+        return cache.toMap()
+    }
+
     fun getSavedSubtitle(context: Context, videoId: String): Pair<String, String>? {
         val state = getSavedState(context, videoId) ?: return null
         val path = state.optString("localSrtPath", "")
@@ -360,18 +365,26 @@ object PlaybackHistoryManager {
 object SrtParser {
     fun parse(text: String): List<SubtitleCue> {
         val list = mutableListOf<SubtitleCue>()
-        val blocks = text.replace("\r\n", "\n").replace("\r", "\n").split("\n\n")
+        val normalized = text.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n")
+        val blocks = normalized.split(Regex("\n{2,}"))
         for (block in blocks) {
-            val lines = block.trim().lines()
-            if (lines.size < 2) continue
-            val timeIdx = if (lines[0].toIntOrNull() != null && lines.size >= 3) 1 else 0
-            val timeLine = lines[timeIdx]
-            if (!timeLine.contains("-->")) continue
+            val trimmedBlock = block.trim()
+            if (trimmedBlock.isEmpty() ||
+                trimmedBlock.startsWith("WEBVTT", ignoreCase = true) ||
+                trimmedBlock.startsWith("NOTE", ignoreCase = true)
+            ) continue
 
+            val lines = trimmedBlock.lines()
+            val timeIdx = lines.indexOfFirst { it.contains("-->") }
+            if (timeIdx < 0 || timeIdx >= lines.lastIndex) continue
+
+            val timeLine = lines[timeIdx]
             val parts = timeLine.split("-->")
             if (parts.size != 2) continue
-            val startMs = parseTimestamp(parts[0].trim())
-            val endMs = parseTimestamp(parts[1].trim())
+            val startToken = parts[0].trim().split(Regex("\\s+")).firstOrNull() ?: continue
+            val endToken = parts[1].trim().split(Regex("\\s+")).firstOrNull() ?: continue
+            val startMs = parseTimestamp(startToken)
+            val endMs = parseTimestamp(endToken)
             if (startMs < 0 || endMs < 0) continue
 
             val textLines = lines.subList(timeIdx + 1, lines.size)
