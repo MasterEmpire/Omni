@@ -574,6 +574,7 @@ fun buildAiStudioPuppetScript(): String {
 
                     updateStatus((stepLabel + ': Submitting prompt.').trim());
                     const wireTurnToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
+                    hostLog('WIRE_TURN', 'beginTurn -> token=' + wireTurnToken + ', wireHooked=' + !!(window.__omniWire && window.__omniWire.hasHooked));
                     await dismissInterstitials();
 
                     if (attachments && Array.isArray(attachments) && attachments.length > 0) {
@@ -650,6 +651,7 @@ fun buildAiStudioPuppetScript(): String {
                     let latestTurnThoughts = '';
                     let activeWireToken = wireTurnToken;
                     let usedWireStream = false;
+                    let loggedWireMiss = false;
 
                     while (totalTurnTicks < MAX_TOTAL_TICKS && !this.aborted) {
                         await delay(300);
@@ -657,6 +659,11 @@ fun buildAiStudioPuppetScript(): String {
                         idleTicks++;
 
                         const wire = (activeWireToken && window.__omniWire) ? window.__omniWire.getTurn(activeWireToken) : null;
+                        if (!wire && !loggedWireMiss && totalTurnTicks === 10) {
+                            loggedWireMiss = true;
+                            const latestSnap = (window.__omniWire && window.__omniWire.getLatest) ? window.__omniWire.getLatest() : null;
+                            hostLog('WIRE_MISS', 'No stream matched token=' + activeWireToken + ' after 3s. latest=' + (latestSnap ? (latestSnap.url + ' (done=' + latestSnap.done + ', out=' + latestSnap.output.length + ')') : 'null'));
+                        }
 
                         if (wire) {
                             usedWireStream = true;
