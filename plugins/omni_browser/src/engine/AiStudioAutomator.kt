@@ -12,6 +12,7 @@ import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.omni.hub.api.HostBridge
+import com.omni.plugin.browser.utils.AI_STUDIO_HEADLESS_TURBO_SCRIPT
 import com.omni.plugin.browser.utils.AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT
 import com.omni.plugin.browser.utils.BOT_BYPASS_POLYFILL
 import com.omni.plugin.browser.utils.DOM_SNAPSHOT_SCRIPT
@@ -34,6 +35,7 @@ data class ActivePuppetSession(
     var onReadyCallback: ((Boolean, String?) -> Unit)? = null,
     var onConfigCallback: ((Boolean, String?) -> Unit)? = null,
     var onTurnProgressCallback: ((String, String) -> Unit)? = null,
+    var onTurnDeltaCallback: ((String, String, Boolean) -> Unit)? = null,
     var onTurnCompleteCallback: ((String, String) -> Unit)? = null,
     var onTurnErrorCallback: ((String) -> Unit)? = null,
     var isAborted: Boolean = false
@@ -117,8 +119,9 @@ class AiStudioAutomator(
 
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 try {
+                    WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_HEADLESS_TURBO_SCRIPT, setOf("https://aistudio.google.com"))
                     WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT, setOf("https://aistudio.google.com"))
-                    bridge.log("WIRE_SETUP", "Registered AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT at document-start for [$sessionId]")
+                    bridge.log("WIRE_SETUP", "Registered Turbo & Wire scripts at document-start for [$sessionId]")
                 } catch (e: Exception) {
                     bridge.log("WIRE_SETUP_ERR", "addDocumentStartJavaScript failed for [$sessionId]: ${e.message}")
                 }
@@ -237,6 +240,13 @@ class AiStudioAutomator(
                 }
 
                 @JavascriptInterface
+                fun onPuppetTurnDelta(thoughtsDelta: String, outputDelta: String, isFirst: Boolean) {
+                    mainHandler.post {
+                        sessionInstance.onTurnDeltaCallback?.invoke(thoughtsDelta, outputDelta, isFirst)
+                    }
+                }
+
+                @JavascriptInterface
                 fun onPuppetTurnComplete(thoughts: String, output: String) {
                     mainHandler.post {
                         sessionInstance.onTurnCompleteCallback?.invoke(thoughts, output)
@@ -252,6 +262,39 @@ class AiStudioAutomator(
             }, "OmniAutomator")
 
             webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                    val reqUri = request?.url ?: return super.shouldInterceptRequest(view, request)
+                    val urlStr = reqUri.toString().lowercase(java.util.Locale.US)
+                    val host = reqUri.host?.lowercase(java.util.Locale.US) ?: ""
+                    val path = reqUri.path?.lowercase(java.util.Locale.US) ?: ""
+
+                    val isJunkHost = host.contains("googletagmanager.com") ||
+                        host.contains("google-analytics.com") ||
+                        host.contains("analytics.google.com") ||
+                        host.contains("doubleclick.net") ||
+                        urlStr.contains("play.google.com/log") ||
+                        urlStr.contains("console.cloud.google.com/onboarding/auth_warmup") ||
+                        urlStr.contains("cookienotificationbar") ||
+                        urlStr.contains("feedback/js/help") ||
+                        urlStr.contains("cspreport/fine-allowlist") ||
+                        urlStr.contains("gstatic.com/images/branding/")
+
+                    val isStaticWeight = path.endsWith(".woff2") ||
+                        path.endsWith(".woff") ||
+                        path.endsWith(".ttf") ||
+                        path.endsWith(".otf") ||
+                        path.endsWith(".png") ||
+                        path.endsWith(".jpg") ||
+                        path.endsWith(".jpeg") ||
+                        path.endsWith(".webp") ||
+                        path.endsWith(".gif")
+
+                    if (isJunkHost || isStaticWeight) {
+                        return WebResourceResponse("text/plain", "UTF-8", 200, "OK", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                    }
+                    return super.shouldInterceptRequest(view, request)
+                }
+
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
@@ -311,6 +354,7 @@ class AiStudioAutomator(
         model: String = "",
         fallbackEnabled: Boolean = true,
         temporaryChat: Boolean = false,
+        headlessTurbo: Boolean = true,
         onDone: (Boolean, String?) -> Unit
     ) {
         val session = sessions[sessionId]
@@ -327,6 +371,7 @@ class AiStudioAutomator(
             put("model", model.ifEmpty { session.model })
             put("fallbackEnabled", fallbackEnabled)
             put("temporaryChat", temporaryChat)
+            put("headlessTurbo", headlessTurbo)
         }
 
         val script = "if (window.__omniPuppet) { window.__omniPuppet.configure(${configObj}); }"
@@ -340,7 +385,8 @@ class AiStudioAutomator(
         label: String = "Turn",
         onProgress: (thoughts: String, output: String) -> Unit,
         onComplete: (thoughts: String, output: String) -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        onDelta: ((thoughtsDelta: String, outputDelta: String, isFirst: Boolean) -> Unit)? = null
     ) {
         val session = sessions[sessionId]
         if (session == null) {
@@ -349,6 +395,7 @@ class AiStudioAutomator(
         }
 
         session.onTurnProgressCallback = onProgress
+        session.onTurnDeltaCallback = onDelta
         session.onTurnCompleteCallback = onComplete
         session.onTurnErrorCallback = onError
 
@@ -367,6 +414,7 @@ class AiStudioAutomator(
             put("prompt", prompt.trim())
             put("attachments", attachmentsArray)
             put("label", label)
+            put("deltaMode", onDelta != null)
         }
 
         val script = "if (window.__omniPuppet) { window.__omniPuppet.executeTurn(${turnObj}); }"
