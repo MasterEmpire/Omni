@@ -1083,7 +1083,6 @@ class OmniPlayerPlugin : PluginEntry() {
         var isDelayWidgetVisible by remember { mutableStateOf(false) }
 
         var inspectingCueText by remember { mutableStateOf("") }
-        var inspectingContextText by remember { mutableStateOf("") }
 
         val scope = rememberCoroutineScope()
 
@@ -1854,7 +1853,6 @@ class OmniPlayerPlugin : PluginEntry() {
                         player.pause()
                         bridge.vibrate(35L)
                         inspectingCueText = activeCueText
-                        inspectingContextText = subtitleState.getSurroundingContext(currentPos, radius = 2)
                         if (!GroqAiService.isKeyConfigured(context)) {
                             activeSubtitleModal = "GROQ_KEY"
                         } else {
@@ -1934,7 +1932,6 @@ class OmniPlayerPlugin : PluginEntry() {
                     AiDialogueInspectorSheet(
                         context = context,
                         currentCue = inspectingCueText,
-                        surroundingContext = inspectingContextText,
                         onConfigureKey = { activeSubtitleModal = "GROQ_KEY" },
                         onResumeMovie = {
                             activeSubtitleModal = null
@@ -1947,7 +1944,7 @@ class OmniPlayerPlugin : PluginEntry() {
                     GroqKeyConfigDialog(
                         context = context,
                         onKeySaved = {
-                            bridge.showToast("Groq API Key Saved!")
+                            bridge.showToast("Groq AI Settings Saved!")
                             if (inspectingCueText.isNotBlank()) {
                                 activeSubtitleModal = "AI_INSPECT"
                             } else {
