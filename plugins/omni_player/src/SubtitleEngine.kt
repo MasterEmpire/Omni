@@ -129,6 +129,9 @@ object GroqAiService {
     private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
     private const val MODEL_NAME = "qwen/qwen3.8-27b"
     private const val KEY_FILE_NAME = "groq_api_key.txt"
+    private const val PROMPT_FILE_NAME = "groq_system_prompt.txt"
+
+    const val DEFAULT_SYSTEM_PROMPT = "You are a blunt, unfiltered dictionary and slang translator for movie dialogue. Tell the user directly and plainly what the line or word means in everyday English. When a line contains profanity, vulgarity, sexual references, street slang, or harsh insults, state the exact explicit meaning openly—never euphemize, beat around the bush, soften, censor, or moralize. Keep it concise (1-2 sentences) with zero filler."
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
@@ -149,51 +152,65 @@ object GroqAiService {
         } catch (_: Exception) {}
     }
 
+    fun getSystemPrompt(context: Context): String {
+        return try {
+            val file = File(context.filesDir, PROMPT_FILE_NAME)
+            if (file.exists()) {
+                file.readText(Charsets.UTF_8).trim().takeIf { it.isNotEmpty() } ?: DEFAULT_SYSTEM_PROMPT
+            } else {
+                DEFAULT_SYSTEM_PROMPT
+            }
+        } catch (_: Exception) { DEFAULT_SYSTEM_PROMPT }
+    }
+
+    fun saveSystemPrompt(context: Context, prompt: String) {
+        try {
+            val file = File(context.filesDir, PROMPT_FILE_NAME)
+            val cleaned = prompt.trim()
+            if (cleaned.isEmpty()) {
+                if (file.exists()) file.delete()
+            } else {
+                file.writeText(cleaned, Charsets.UTF_8)
+            }
+        } catch (_: Exception) {}
+    }
+
     fun isKeyConfigured(context: Context): Boolean = !getApiKey(context).isNullOrBlank()
 
-    suspend fun explainDialogue(context: Context, currentCue: String, surroundingContext: String): String = withContext(Dispatchers.IO) {
+    suspend fun explainDialogue(context: Context, currentCue: String): String = withContext(Dispatchers.IO) {
         val prompt = """
-            Scene Dialogue Context:
-            $surroundingContext
+            Line: "$currentCue"
 
-            Specific Spoken Line:
-            "$currentCue"
-
-            Explain what this character's line means in this scene. Focus on the subtext, emotion, idioms, or underlying intent. Be concise, direct, and punchy (1 to 2 sentences max). No introductory fluff.
+            State directly and plainly what this exact line means.
         """.trimIndent()
         queryGroq(context, prompt)
     }
 
-    suspend fun explainWord(context: Context, targetWord: String, currentCue: String, surroundingContext: String): String = withContext(Dispatchers.IO) {
+    suspend fun explainWord(context: Context, targetWord: String, currentCue: String): String = withContext(Dispatchers.IO) {
         val prompt = """
-            Scene Context:
-            $surroundingContext
+            Line: "$currentCue"
+            Word/Term: "$targetWord"
 
-            Dialogue Line:
-            "$currentCue"
-
-            Target Word:
-            "$targetWord"
-
-            Explain this word in 2 short bullet points:
-            1. General Meaning: Standard definition (1 short line).
-            2. In-Context Meaning: Exactly how the speaker is using it here (slang, sarcasm, tone, or specific nuance in this scene).
+            Explain this word or slang term in 2 short bullet points:
+            1. Direct Meaning: Standard or street definition (1 short line).
+            2. In This Line: Exactly what it means as used here.
         """.trimIndent()
         queryGroq(context, prompt)
     }
 
     private fun queryGroq(context: Context, userPrompt: String): String {
         val apiKey = getApiKey(context) ?: throw IllegalStateException("Groq API key not set. Please enter your key.")
+        val systemPrompt = getSystemPrompt(context)
 
         val root = JSONObject().apply {
             put("model", MODEL_NAME)
-            put("temperature", 0.3)
+            put("temperature", 0.2)
             put("max_tokens", 250)
 
             val messages = org.json.JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
-                    put("content", "You are an expert cinema dialogue interpreter. Provide instant, punchy, contextual explanations. No filler text.")
+                    put("content", systemPrompt)
                 })
                 put(JSONObject().apply {
                     put("role", "user")
