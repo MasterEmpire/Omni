@@ -262,7 +262,11 @@ class WebViewPoolManager(
 
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 try {
-                    WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT, setOf("*"))
+                    WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT, setOf("https://aistudio.google.com"))
+                } catch (e: Exception) {
+                    bridge.log("WIRE_SETUP_ERR", "Pool addDocumentStartJavaScript (wire) failed: ${e.message}")
+                }
+                try {
                     WebViewCompat.addDocumentStartJavaScript(this, BLOB_INTERCEPTOR_SCRIPT, setOf("*"))
                     WebViewCompat.addDocumentStartJavaScript(this, BACKGROUND_MEDIA_SCRIPT, setOf("*"))
                 } catch (_: Exception) {}
