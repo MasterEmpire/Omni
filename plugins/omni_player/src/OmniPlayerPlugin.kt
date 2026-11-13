@@ -1,24 +1,38 @@
 package com.omni.plugin.player
 
-import android.media.AudioManager
-import android.media.MediaMetadataRetriever
-import android.media.MediaScannerConnection
+import android.app.Activity
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Color as AndroidColor
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.media.AudioManager
+import android.media.MediaMetadataRetriever
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.text.Layout
+import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Rational
 import android.util.Size
 import android.view.MotionEvent
+import android.view.PixelCopy
 import android.view.View
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -53,6 +67,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -91,7 +106,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
@@ -281,6 +298,209 @@ object VideoRepository {
             }
         }
         return a.length.compareTo(b.length)
+    }
+}
+
+object VideoSnapshotHelper {
+
+    suspend fun grabVideoFrame(
+        context: Context,
+        video: VideoItem,
+        positionMs: Long,
+        hostActivity: Activity?,
+        playerView: PlayerView?
+    ): Bitmap? {
+        val retrieved = withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                try {
+                    retriever.setDataSource(context, video.uri)
+                } catch (_: Exception) {
+                    if (video.path.isNotEmpty()) {
+                        retriever.setDataSource(video.path)
+                    } else {
+                        return@withContext null
+                    }
+                }
+                val timeUs = (positionMs.coerceAtLeast(0L)) * 1000L
+                retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                    ?: retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            } catch (_: Exception) {
+                null
+            } finally {
+                try { retriever.release() } catch (_: Exception) {}
+            }
+        }
+
+        if (retrieved != null) return retrieved
+
+        val window = hostActivity?.window ?: return null
+        val pv = playerView ?: return null
+        if (pv.width <= 0 || pv.height <= 0) return null
+
+        return suspendCancellableCoroutine { cont ->
+            try {
+                val loc = IntArray(2)
+                pv.getLocationInWindow(loc)
+                val rect = Rect(loc[0], loc[1], loc[0] + pv.width, loc[1] + pv.height)
+                val decor = window.decorView
+                if (!rect.intersect(0, 0, decor.width, decor.height) || rect.width() <= 0 || rect.height() <= 0) {
+                    if (cont.isActive) cont.resume(null)
+                    return@suspendCancellableCoroutine
+                }
+
+                val bmp = Bitmap.createBitmap(rect.width(), rect.height(), Bitmap.Config.ARGB_8888)
+                PixelCopy.request(window, rect, bmp, { result ->
+                    if (cont.isActive) {
+                        if (result == PixelCopy.SUCCESS) {
+                            cont.resume(bmp)
+                        } else {
+                            bmp.recycle()
+                            cont.resume(null)
+                        }
+                    }
+                }, Handler(Looper.getMainLooper()))
+            } catch (_: Exception) {
+                if (cont.isActive) cont.resume(null)
+            }
+        }
+    }
+
+    fun burnSubtitleAndSaveJpeg(
+        context: Context,
+        rawFrame: Bitmap,
+        videoName: String,
+        subtitleText: String?,
+        fontSizeSp: Float,
+        fontColorArgb: Int,
+        boxColorArgb: Int,
+        hasOutline: Boolean,
+        yFraction: Float
+    ): String? {
+        val workingBitmap = if (rawFrame.config == Bitmap.Config.ARGB_8888 && rawFrame.isMutable) {
+            rawFrame
+        } else {
+            val copy = rawFrame.copy(Bitmap.Config.ARGB_8888, true)
+            rawFrame.recycle()
+            copy
+        }
+
+        try {
+            if (!subtitleText.isNullOrBlank()) {
+                val canvas = AndroidCanvas(workingBitmap)
+                val bmpW = workingBitmap.width.toFloat()
+                val bmpH = workingBitmap.height.toFloat()
+                val refDim = minOf(bmpW, bmpH)
+                val textSizePx = (refDim * (fontSizeSp / 450f)).coerceIn(20f, bmpH * 0.12f)
+                val maxTextWidth = (bmpW * 0.88f).toInt().coerceAtLeast(100)
+
+                val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = fontColorArgb
+                    textSize = textSizePx
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    setShadowLayer(textSizePx * 0.12f, 0f, textSizePx * 0.05f, AndroidColor.BLACK)
+                }
+
+                val layout = StaticLayout.Builder
+                    .obtain(subtitleText, 0, subtitleText.length, textPaint, maxTextWidth)
+                    .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                    .setLineSpacing(0f, 1.15f)
+                    .setIncludePad(false)
+                    .build()
+
+                var maxLineWidth = 0f
+                for (i in 0 until layout.lineCount) {
+                    val lw = layout.getLineWidth(i)
+                    if (lw > maxLineWidth) maxLineWidth = lw
+                }
+
+                val padX = textSizePx * 0.45f
+                val padY = textSizePx * 0.25f
+                val boxBottom = (bmpH * (1f - yFraction.coerceIn(0.04f, 0.85f))).coerceIn(layout.height + padY * 2f, bmpH - 8f)
+                val boxTop = boxBottom - layout.height - padY * 2f
+                val boxLeft = (bmpW - maxLineWidth) / 2f - padX
+                val boxRight = (bmpW + maxLineWidth) / 2f + padX
+
+                if (AndroidColor.alpha(boxColorArgb) > 0) {
+                    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = boxColorArgb
+                        style = Paint.Style.FILL
+                    }
+                    val radius = textSizePx * 0.18f
+                    canvas.drawRoundRect(RectF(boxLeft, boxTop, boxRight, boxBottom), radius, radius, bgPaint)
+                }
+
+                val textLeft = (bmpW - maxTextWidth) / 2f
+                val textTop = boxTop + padY
+                canvas.save()
+                canvas.translate(textLeft, textTop)
+
+                if (hasOutline || AndroidColor.alpha(boxColorArgb) == 0) {
+                    val strokePaint = TextPaint(textPaint).apply {
+                        style = Paint.Style.STROKE
+                        strokeWidth = (textSizePx * 0.08f).coerceAtLeast(2f)
+                        color = AndroidColor.BLACK
+                        clearShadowLayer()
+                    }
+                    val strokeLayout = StaticLayout.Builder
+                        .obtain(subtitleText, 0, subtitleText.length, strokePaint, maxTextWidth)
+                        .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                        .setLineSpacing(0f, 1.15f)
+                        .setIncludePad(false)
+                        .build()
+                    strokeLayout.draw(canvas)
+                }
+
+                layout.draw(canvas)
+                canvas.restore()
+            }
+
+            val cleanTitle = videoName.substringBeforeLast(".")
+                .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                .take(28)
+                .ifEmpty { "Video" }
+            val filename = "OmniShot_${cleanTitle}_${System.currentTimeMillis()}.jpg"
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/OmniSnapshots")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+                val ok = resolver.openOutputStream(uri)?.use { out ->
+                    workingBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                } ?: false
+
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                return if (ok) filename else null
+            } else {
+                val picsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                val outDir = File(picsDir, "OmniSnapshots").apply { if (!exists()) mkdirs() }
+                val outFile = File(outDir, filename)
+                val ok = FileOutputStream(outFile).use { out ->
+                    workingBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                }
+                if (ok) {
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(outFile.absolutePath),
+                        arrayOf("image/jpeg"),
+                        null
+                    )
+                    return filename
+                }
+                return null
+            }
+        } catch (_: Exception) {
+            return null
+        } finally {
+            workingBitmap.recycle()
+        }
     }
 }
 
@@ -1337,6 +1557,9 @@ class OmniPlayerPlugin : PluginEntry() {
         var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
         var showShutterFlash by remember { mutableStateOf(false) }
         var isSavingSnapshot by remember { mutableStateOf(false) }
+        var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
+        var showShutterFlash by remember { mutableStateOf(false) }
+        var isSavingSnapshot by remember { mutableStateOf(false) }
 
         val hostActivity = remember(context) {
             var ctx: Context? = context
@@ -1622,120 +1845,129 @@ class OmniPlayerPlugin : PluginEntry() {
                                     }
                                 } else null
 
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == downChange.id } ?: break
+                                try {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == downChange.id } ?: break
 
-                                    if (event.type == PointerEventType.Move) {
-                                        if (change.isConsumed) {
-                                            holdJob?.cancel()
-                                            break
-                                        }
-                                        val totalDx = change.position.x - startX
-                                        val totalDy = change.position.y - startY
-                                        val dist = kotlin.math.hypot(totalDx, totalDy)
-
-                                        if (!isDragging && !isHold2xActive && dist > touchSlopPx && !isLocked) {
-                                            holdJob?.cancel()
-                                            isDragging = true
-                                            if (kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx)) {
-                                                gestureMode = if (startX < sWidth * 0.45f) 1 else if (startX > sWidth * 0.55f) 2 else 0
-                                            } else {
-                                                gestureMode = if (isGestureSeekEnabled) 3 else 0
+                                        if (event.type == PointerEventType.Move) {
+                                            if (change.isConsumed) {
+                                                holdJob?.cancel()
+                                                break
                                             }
-                                        }
+                                            val totalDx = change.position.x - startX
+                                            val totalDy = change.position.y - startY
+                                            val dist = kotlin.math.hypot(totalDx, totalDy)
 
-                                        if (isDragging) {
-                                            change.consume()
-                                            when (gestureMode) {
-                                                1 -> {
-                                                    val deltaY = startY - change.position.y
-                                                    val newB = (initialB + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
-                                                    currentBrightness = newB
-                                                    applyWindowBrightness(newB)
-                                                    hudType = "BRIGHTNESS"
-                                                    hudValue = newB
-                                                }
-                                                2 -> {
-                                                    val deltaY = startY - change.position.y
-                                                    val newV = (initialV + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
-                                                    currentVolume = newV
-                                                    bridge.setVolume("MEDIA", newV)
-                                                    hudType = "VOLUME"
-                                                    hudValue = newV
-                                                }
-                                                3 -> {
-                                                    val deltaX = change.position.x - startX
-                                                    val deltaMs = (deltaX * 120f).toLong()
-                                                    val targetMs = (player.currentPosition + deltaMs).coerceIn(0L, totalDuration)
-                                                    hudType = "SEEK"
-                                                    hudSeekTarget = targetMs
-                                                    hudSeekDelta = deltaMs / 1000L
+                                            if (!isDragging && !isHold2xActive && dist > touchSlopPx && !isLocked) {
+                                                holdJob?.cancel()
+                                                isDragging = true
+                                                if (kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx)) {
+                                                    gestureMode = if (startX < sWidth * 0.45f) 1 else if (startX > sWidth * 0.55f) 2 else 0
+                                                } else {
+                                                    gestureMode = if (isGestureSeekEnabled) 3 else 0
                                                 }
                                             }
-                                        }
-                                    } else if (event.type == PointerEventType.Release) {
-                                        holdJob?.cancel()
-                                        if (isHold2xActive) {
-                                            player.playbackParameters = PlaybackParameters(speedBeforeHold)
-                                            if (hudType == "HOLD_2X") hudType = null
-                                            change.consume()
-                                            break
-                                        }
-                                        if (change.isConsumed) break
-                                        change.consume()
-                                        if (isDragging) {
-                                            if (gestureMode == 3) {
-                                                player.seekTo(hudSeekTarget)
-                                            }
-                                            scope.launch {
-                                                delay(900)
-                                                hudType = null
-                                            }
-                                        } else {
-                                            // Stationary Tap or Double-tap
-                                            val now = System.currentTimeMillis()
-                                            val isQuickSecondTap = (now - lastTapTime < 320L) && (kotlin.math.abs(startX - lastTapPos.x) < 50f * density)
 
-                                            if (isQuickSecondTap) {
-                                                // Double-Tap Execution
-                                                lastTapTime = 0L
-                                                if (!isLocked) {
-                                                    when {
-                                                        startX < sWidth * 0.35f -> {
-                                                            if (isGestureSeekEnabled) {
-                                                                onSeekTo(player.currentPosition - 10000)
-                                                                hudType = "DOUBLE_SEEK"
-                                                                hudSeekDelta = -10L
-                                                                scope.launch { delay(700); hudType = null }
-                                                            }
-                                                        }
-                                                        startX > sWidth * 0.65f -> {
-                                                            if (isGestureSeekEnabled) {
-                                                                onSeekTo(player.currentPosition + 10000)
-                                                                hudType = "DOUBLE_SEEK"
-                                                                hudSeekDelta = 10L
-                                                                scope.launch { delay(700); hudType = null }
-                                                            }
-                                                        }
-                                                        else -> {
-                                                            if (player.isPlaying) player.pause() else player.play()
-                                                        }
+                                            if (isDragging) {
+                                                change.consume()
+                                                when (gestureMode) {
+                                                    1 -> {
+                                                        val deltaY = startY - change.position.y
+                                                        val newB = (initialB + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
+                                                        currentBrightness = newB
+                                                        applyWindowBrightness(newB)
+                                                        hudType = "BRIGHTNESS"
+                                                        hudValue = newB
+                                                    }
+                                                    2 -> {
+                                                        val deltaY = startY - change.position.y
+                                                        val newV = (initialV + (deltaY / sHeight * 100f)).toInt().coerceIn(0, 100)
+                                                        currentVolume = newV
+                                                        bridge.setVolume("MEDIA", newV)
+                                                        hudType = "VOLUME"
+                                                        hudValue = newV
+                                                    }
+                                                    3 -> {
+                                                        val deltaX = change.position.x - startX
+                                                        val deltaMs = (deltaX * 120f).toLong()
+                                                        val targetMs = (player.currentPosition + deltaMs).coerceIn(0L, totalDuration)
+                                                        hudType = "SEEK"
+                                                        hudSeekTarget = targetMs
+                                                        hudSeekDelta = deltaMs / 1000L
                                                     }
                                                 }
-                                            } else {
-                                                // First Tap Registered - Toggle Controls after double-tap window expires
-                                                lastTapTime = now
-                                                lastTapPos = Offset(startX, startY)
+                                            }
+                                        } else if (event.type == PointerEventType.Release) {
+                                            holdJob?.cancel()
+                                            if (isHold2xActive) {
+                                                player.playbackParameters = PlaybackParameters(speedBeforeHold)
+                                                if (hudType == "HOLD_2X") hudType = null
+                                                isHold2xActive = false
+                                                change.consume()
+                                                break
+                                            }
+                                            if (change.isConsumed) break
+                                            change.consume()
+                                            if (isDragging) {
+                                                if (gestureMode == 3) {
+                                                    player.seekTo(hudSeekTarget)
+                                                }
                                                 scope.launch {
-                                                    delay(320L)
-                                                    if (lastTapTime == now) {
-                                                        showControls = !showControls
+                                                    delay(900)
+                                                    hudType = null
+                                                }
+                                            } else {
+                                                // Stationary Tap or Double-tap
+                                                val now = System.currentTimeMillis()
+                                                val isQuickSecondTap = (now - lastTapTime < 320L) && (kotlin.math.abs(startX - lastTapPos.x) < 50f * density)
+
+                                                if (isQuickSecondTap) {
+                                                    // Double-Tap Execution
+                                                    lastTapTime = 0L
+                                                    if (!isLocked) {
+                                                        when {
+                                                            startX < sWidth * 0.35f -> {
+                                                                if (isGestureSeekEnabled) {
+                                                                    onSeekTo(player.currentPosition - 10000)
+                                                                    hudType = "DOUBLE_SEEK"
+                                                                    hudSeekDelta = -10L
+                                                                    scope.launch { delay(700); hudType = null }
+                                                                }
+                                                            }
+                                                            startX > sWidth * 0.65f -> {
+                                                                if (isGestureSeekEnabled) {
+                                                                    onSeekTo(player.currentPosition + 10000)
+                                                                    hudType = "DOUBLE_SEEK"
+                                                                    hudSeekDelta = 10L
+                                                                    scope.launch { delay(700); hudType = null }
+                                                                }
+                                                            }
+                                                            else -> {
+                                                                if (player.isPlaying) player.pause() else player.play()
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    // First Tap Registered - Toggle Controls after double-tap window expires
+                                                    lastTapTime = now
+                                                    lastTapPos = Offset(startX, startY)
+                                                    scope.launch {
+                                                        delay(320L)
+                                                        if (lastTapTime == now) {
+                                                            showControls = !showControls
+                                                        }
                                                     }
                                                 }
                                             }
+                                            break
                                         }
-                                        break
+                                    }
+                                } finally {
+                                    holdJob?.cancel()
+                                    if (isHold2xActive) {
+                                        player.playbackParameters = PlaybackParameters(speedBeforeHold)
+                                        if (hudType == "HOLD_2X") hudType = null
                                     }
                                 }
                             }
@@ -1965,14 +2197,75 @@ class OmniPlayerPlugin : PluginEntry() {
                         .size(46.dp)
                         .clip(CircleShape)
                         .clickable {
-                            bridge.vibrate(100L)
-                            bridge.showToast("Snapshot saved to device gallery")
+                            if (isSavingSnapshot) return@clickable
+                            isSavingSnapshot = true
+                            bridge.vibrate(60L)
+                            val snapPosMs = player.currentPosition
+                            val activeSub = subtitleState.getCurrentCue(snapPosMs)
+                            val subFontSp = subtitleState.fontSizeSp
+                            val subColorArgb = subtitleState.fontColor.toArgb()
+                            val subBoxArgb = subtitleState.boxColor.toArgb()
+                            val subOutline = subtitleState.hasOutline
+                            val subYFrac = subtitleState.yFraction
+
+                            scope.launch {
+                                try {
+                                    val frame = VideoSnapshotHelper.grabVideoFrame(
+                                        context = context,
+                                        video = video,
+                                        positionMs = snapPosMs,
+                                        hostActivity = hostActivity,
+                                        playerView = playerViewRef
+                                    )
+                                    if (frame == null) {
+                                        bridge.showToast("Could not capture video frame")
+                                        return@launch
+                                    }
+                                    showShutterFlash = true
+                                    launch {
+                                        delay(110L)
+                                        showShutterFlash = false
+                                    }
+                                    val savedName = withContext(Dispatchers.IO) {
+                                        VideoSnapshotHelper.burnSubtitleAndSaveJpeg(
+                                            context = context,
+                                            rawFrame = frame,
+                                            videoName = video.name,
+                                            subtitleText = activeSub,
+                                            fontSizeSp = subFontSp,
+                                            fontColorArgb = subColorArgb,
+                                            boxColorArgb = subBoxArgb,
+                                            hasOutline = subOutline,
+                                            yFraction = subYFrac
+                                        )
+                                    }
+                                    if (savedName != null) {
+                                        bridge.showToast("Saved: Pictures/OmniSnapshots/$savedName")
+                                    } else {
+                                        bridge.showToast("Failed saving snapshot to Gallery")
+                                    }
+                                } finally {
+                                    isSavingSnapshot = false
+                                }
+                            }
                         }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         CineCameraIcon(tint = Color.White)
                     }
                 }
+            }
+
+            AnimatedVisibility(
+                visible = showShutterFlash,
+                enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(40)),
+                exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(160))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.White.copy(alpha = 0.65f))
+                )
             }
 
             // 7. X-PLAYER CINEMA OVERLAYS (FADES IN-PLACE, NO SLIDING)
