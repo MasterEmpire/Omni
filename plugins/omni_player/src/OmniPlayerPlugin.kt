@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -50,6 +51,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
@@ -943,6 +945,7 @@ class OmniPlayerPlugin : PluginEntry() {
         var currentResizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
         var isMuted by remember { mutableStateOf(false) }
         var currentOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_SENSOR) }
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
         val hostActivity = remember(context) {
             var ctx: Context? = context
@@ -1627,10 +1630,10 @@ class OmniPlayerPlugin : PluginEntry() {
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable {
-                                            currentOrientation = if (currentOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) {
+                                            currentOrientation = if (isLandscape) {
                                                 ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                                             } else {
-                                                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                                             }
                                             bridge.setScreenOrientation(currentOrientation)
                                         }
