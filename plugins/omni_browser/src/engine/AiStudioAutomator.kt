@@ -166,7 +166,10 @@ class AiStudioAutomator(
                     if (msg.isEmpty() ||
                         msg.contains("preloaded using link preload", ignoreCase = true) ||
                         msg.contains("Failed to upload to drive", ignoreCase = true) ||
-                        msg.contains("GapiService.upload failed", ignoreCase = true)
+                        msg.contains("GapiService.upload failed", ignoreCase = true) ||
+                        msg.contains("violates the following Content Security Policy directive", ignoreCase = true) ||
+                        msg.contains("Unknown Key:", ignoreCase = true) ||
+                        msg.contains("NG0953", ignoreCase = true)
                     ) return true
 
                     val lvl = consoleMessage?.messageLevel()?.name ?: "LOG"
