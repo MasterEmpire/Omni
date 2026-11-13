@@ -271,41 +271,344 @@ class OmniPlayerPlugin : PluginEntry() {
         var currentFolder by remember { mutableStateOf<VideoFolder?>(null) }
         var currentPlayingVideo by remember { mutableStateOf<VideoItem?>(null) }
         var videoQueue by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+        var isPlayerFullScreen by remember { mutableStateOf(false) }
+        var isBackgroundAudioEnabled by remember { mutableStateOf(false) }
 
-        when {
-            currentPlayingVideo != null -> {
-                XPlayerCinemaScreen(
-                    context = context,
-                    bridge = bridge,
-                    video = currentPlayingVideo!!,
-                    queue = videoQueue,
-                    onClosePlayer = {
-                        bridge.setImmersiveMode(false)
-                        bridge.setScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
-                        currentPlayingVideo = null
-                    },
-                    onSelectVideo = { nextVideo ->
-                        currentPlayingVideo = nextVideo
-                    }
-                )
+        val player = remember(context) {
+            ExoPlayer.Builder(context).build().apply {
+                playWhenReady = false
+                repeatMode = Player.REPEAT_MODE_OFF
             }
-            currentFolder != null -> {
-                FolderVideosScreen(
-                    context = context,
-                    folder = currentFolder!!,
-                    onBack = { currentFolder = null },
-                    onPlayVideo = { video, queue ->
-                        videoQueue = queue
-                        currentPlayingVideo = video
-                    }
-                )
+        }
+        val subtitleState = remember { SubtitleState() }
+        var isPlaying by remember { mutableStateOf(false) }
+        var currentPos by remember { mutableLongStateOf(0L) }
+        var totalDuration by remember { mutableLongStateOf(1L) }
+
+        fun saveCurrentVideoState(vid: VideoItem?) {
+            if (vid == null) return
+            PlaybackHistoryManager.saveVideoState(
+                context = context,
+                videoId = vid.id.toString(),
+                positionMs = player.currentPosition,
+                subtitleName = subtitleState.currentSubtitleName,
+                rawSrtText = subtitleState.rawSrtContent,
+                delaySec = subtitleState.delaySec,
+                yFraction = subtitleState.yFraction,
+                isEnabled = subtitleState.isEnabled
+            )
+        }
+
+        fun stopAndClearPlayback() {
+            saveCurrentVideoState(currentPlayingVideo)
+            player.pause()
+            player.stop()
+            player.clearMediaItems()
+            isPlaying = false
+            isBackgroundAudioEnabled = false
+            isPlayerFullScreen = false
+            bridge.stopMediaPlayback()
+            currentPlayingVideo = null
+        }
+
+        fun toggleBackgroundAudio() {
+            val vid = currentPlayingVideo ?: return
+            if (!isBackgroundAudioEnabled) {
+                isBackgroundAudioEnabled = true
+                bridge.startMediaPlayback(vid.name, "Omni Background Player", player.isPlaying) { playState ->
+                    if (playState) player.play() else player.pause()
+                }
+                bridge.showToast("Background audio enabled")
+            } else {
+                isBackgroundAudioEnabled = false
+                bridge.stopMediaPlayback()
+                bridge.showToast("Background audio disabled")
             }
-            else -> {
-                FolderCatalogScreen(
-                    context = context,
-                    bridge = bridge,
-                    onOpenFolder = { folder -> currentFolder = folder }
-                )
+        }
+
+        // Load media only when the active video changes
+        LaunchedEffect(currentPlayingVideo?.id) {
+            val vid = currentPlayingVideo ?: return@LaunchedEffect
+            subtitleState.clearSubtitle()
+            val savedState = PlaybackHistoryManager.getSavedState(context, vid.id.toString())
+            if (savedState != null) {
+                subtitleState.delaySec = savedState.optDouble("delaySec", 0.0).toFloat()
+                subtitleState.yFraction = savedState.optDouble("yFraction", 0.08).toFloat()
+                subtitleState.isEnabled = savedState.optBoolean("isEnabled", true)
+            }
+            val cachedSub = PlaybackHistoryManager.getSavedSubtitle(context, vid.id.toString())
+            if (cachedSub != null) {
+                subtitleState.loadSrtText(cachedSub.second, cachedSub.first)
+            }
+
+            totalDuration = vid.durationMs.coerceAtLeast(1L)
+            val resumeMs = savedState?.optLong("positionMs", 0L) ?: 0L
+            currentPos = resumeMs
+            player.setMediaItem(MediaItem.fromUri(vid.uri), resumeMs)
+            player.prepare()
+            player.play()
+            isPlaying = true
+
+            if (isBackgroundAudioEnabled) {
+                bridge.updateMediaPlayback(vid.name, "Omni Background Player", true)
+            }
+        }
+
+        // Track Timeline Progress across fullscreen & background mini-player
+        LaunchedEffect(player, currentPlayingVideo?.id, isPlaying) {
+            while (isActive && currentPlayingVideo != null) {
+                if (player.isPlaying) {
+                    currentPos = player.currentPosition
+                    if (player.duration > 0) totalDuration = player.duration
+                }
+                delay(200)
+            }
+        }
+
+        DisposableEffect(player) {
+            val listener = object : Player.Listener {
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    isPlaying = playing
+                    if (isBackgroundAudioEnabled) {
+                        bridge.updateMediaPlayback(
+                            currentPlayingVideo?.name ?: "Omni Player",
+                            "Omni Background Player",
+                            playing
+                        )
+                    }
+                    if (!playing) {
+                        saveCurrentVideoState(currentPlayingVideo)
+                    }
+                }
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY && player.duration > 0) {
+                        totalDuration = player.duration
+                    }
+                }
+            }
+            player.addListener(listener)
+            onDispose {
+                saveCurrentVideoState(currentPlayingVideo)
+                bridge.stopMediaPlayback()
+                bridge.setImmersiveMode(false)
+                bridge.setScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+                player.removeListener(listener)
+                player.release()
+            }
+        }
+
+        if (isPlayerFullScreen && currentPlayingVideo != null) {
+            XPlayerCinemaScreen(
+                context = context,
+                bridge = bridge,
+                player = player,
+                video = currentPlayingVideo!!,
+                queue = videoQueue,
+                isPlaying = isPlaying,
+                currentPos = currentPos,
+                totalDuration = totalDuration,
+                subtitleState = subtitleState,
+                isBackgroundAudioEnabled = isBackgroundAudioEnabled,
+                onToggleBackgroundAudio = { toggleBackgroundAudio() },
+                onSeekTo = { targetMs ->
+                    val clamped = targetMs.coerceIn(0L, totalDuration.coerceAtLeast(1L))
+                    currentPos = clamped
+                    player.seekTo(clamped)
+                },
+                onClosePlayer = {
+                    bridge.setImmersiveMode(false)
+                    bridge.setScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+                    if (isBackgroundAudioEnabled) {
+                        saveCurrentVideoState(currentPlayingVideo)
+                        isPlayerFullScreen = false
+                    } else {
+                        stopAndClearPlayback()
+                    }
+                },
+                onSelectVideo = { nextVideo ->
+                    saveCurrentVideoState(currentPlayingVideo)
+                    currentPlayingVideo = nextVideo
+                }
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF07090E))
+                    .navigationBarsPadding()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    if (currentFolder != null) {
+                        FolderVideosScreen(
+                            context = context,
+                            folder = currentFolder!!,
+                            onBack = { currentFolder = null },
+                            onPlayVideo = { video, queue ->
+                                videoQueue = queue
+                                if (currentPlayingVideo?.id != video.id) {
+                                    saveCurrentVideoState(currentPlayingVideo)
+                                    currentPlayingVideo = video
+                                }
+                                isPlayerFullScreen = true
+                            }
+                        )
+                    } else {
+                        FolderCatalogScreen(
+                            context = context,
+                            bridge = bridge,
+                            onOpenFolder = { folder -> currentFolder = folder }
+                        )
+                    }
+                }
+
+                if (currentPlayingVideo != null) {
+                    BackgroundMiniPlayerBar(
+                        context = context,
+                        video = currentPlayingVideo!!,
+                        isPlaying = isPlaying,
+                        currentPos = currentPos,
+                        totalDuration = totalDuration,
+                        onOpenPlayer = { isPlayerFullScreen = true },
+                        onTogglePlayPause = {
+                            if (player.isPlaying) player.pause() else player.play()
+                        },
+                        onClose = { stopAndClearPlayback() }
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun BackgroundMiniPlayerBar(
+        context: Context,
+        video: VideoItem,
+        isPlaying: Boolean,
+        currentPos: Long,
+        totalDuration: Long,
+        onOpenPlayer: () -> Unit,
+        onTogglePlayPause: () -> Unit,
+        onClose: () -> Unit
+    ) {
+        var thumbnail by remember(video.id) { mutableStateOf<Bitmap?>(null) }
+        LaunchedEffect(video.id) {
+            thumbnail = VideoRepository.getThumbnail(context, video.id, video.uri, video.path)
+        }
+
+        val progressFraction = if (totalDuration > 0L) {
+            (currentPos.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
+        } else 0f
+
+        Surface(
+            color = Color(0xFF161B22),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenPlayer() }
+        ) {
+            Column {
+                // Electric green progress hairline
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(Color.White.copy(alpha = 0.1f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(progressFraction)
+                            .background(Color(0xFF00E676))
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Stop Background Audio",
+                            tint = Color(0xFF8B949E),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(4.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .width(52.dp)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (thumbnail != null) {
+                            Image(
+                                bitmap = thumbnail!!.asImageBitmap(),
+                                contentDescription = video.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            CineHeadphonesIcon(tint = Color(0xFF00E676), modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    Spacer(Modifier.width(10.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = video.name,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "${VideoRepository.formatDuration(currentPos)} / ${VideoRepository.formatDuration(totalDuration)}",
+                            color = Color(0xFF8B949E),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFF00E676).copy(alpha = 0.16f),
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            CineHeadphonesIcon(tint = Color(0xFF00E676), modifier = Modifier.size(14.dp))
+                        }
+                    }
+
+                    Spacer(Modifier.width(4.dp))
+
+                    IconButton(
+                        onClick = onTogglePlayPause,
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        CinePlayPauseIcon(
+                            isPlaying = isPlaying,
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -616,21 +919,19 @@ class OmniPlayerPlugin : PluginEntry() {
     fun XPlayerCinemaScreen(
         context: Context,
         bridge: HostBridge,
+        player: ExoPlayer,
         video: VideoItem,
         queue: List<VideoItem>,
+        isPlaying: Boolean,
+        currentPos: Long,
+        totalDuration: Long,
+        subtitleState: SubtitleState,
+        isBackgroundAudioEnabled: Boolean,
+        onToggleBackgroundAudio: () -> Unit,
+        onSeekTo: (Long) -> Unit,
         onClosePlayer: () -> Unit,
         onSelectVideo: (VideoItem) -> Unit
     ) {
-        val player = remember(context) {
-            ExoPlayer.Builder(context).build().apply {
-                playWhenReady = true
-                repeatMode = Player.REPEAT_MODE_OFF
-            }
-        }
-
-        var isPlaying by remember { mutableStateOf(true) }
-        var currentPos by remember { mutableLongStateOf(0L) }
-        var totalDuration by remember { mutableLongStateOf(video.durationMs.coerceAtLeast(1L)) }
         var showControls by remember { mutableStateOf(true) }
         var isLocked by remember { mutableStateOf(false) }
 
@@ -683,7 +984,6 @@ class OmniPlayerPlugin : PluginEntry() {
         var lastTapPos by remember { mutableStateOf(Offset.Zero) }
 
         // Subtitle Suite State
-        val subtitleState = remember { SubtitleState() }
         var activeSubtitleModal by remember { mutableStateOf<String?>(null) } // "HUB", "STYLE", "DOWNLOAD", "AI_INSPECT", "GROQ_KEY"
         var isDelayWidgetVisible by remember { mutableStateOf(false) }
 
@@ -699,37 +999,9 @@ class OmniPlayerPlugin : PluginEntry() {
             }
         }
 
-        // Initialize Player with Video and Restore Memory Vault State
-        LaunchedEffect(video.uri) {
-            bridge.setImmersiveMode(true)
-            val savedState = PlaybackHistoryManager.getSavedState(context, video.id.toString())
-            if (savedState != null) {
-                subtitleState.delaySec = savedState.optDouble("delaySec", 0.0).toFloat()
-                subtitleState.yFraction = savedState.optDouble("yFraction", 0.08).toFloat()
-                subtitleState.isEnabled = savedState.optBoolean("isEnabled", true)
-            }
-            val cachedSub = PlaybackHistoryManager.getSavedSubtitle(context, video.id.toString())
-            if (cachedSub != null) {
-                subtitleState.loadSrtText(cachedSub.second, cachedSub.first)
-            }
-
-            val mediaItem = MediaItem.fromUri(video.uri)
-            val resumeMs = savedState?.optLong("positionMs", 0L) ?: 0L
-            player.setMediaItem(mediaItem, resumeMs)
-            player.prepare()
-            player.play()
-            isPlaying = true
-        }
-
-        // Track Timeline Progress
-        LaunchedEffect(player, isPlaying) {
-            while (isActive) {
-                if (player.isPlaying) {
-                    currentPos = player.currentPosition
-                    if (player.duration > 0) totalDuration = player.duration
-                }
-                delay(200)
-            }
+        // Sync phone system bars (nav + status) with playback controls visibility
+        LaunchedEffect(showControls, isLocked) {
+            bridge.setImmersiveMode(!showControls || isLocked)
         }
 
         // Auto-Hide Controls Timer (4 seconds)
@@ -740,41 +1012,8 @@ class OmniPlayerPlugin : PluginEntry() {
             }
         }
 
-        DisposableEffect(player) {
-            val listener = object : Player.Listener {
-                override fun onIsPlayingChanged(playing: Boolean) {
-                    isPlaying = playing
-                    if (!playing) {
-                        PlaybackHistoryManager.saveVideoState(
-                            context = context,
-                            videoId = video.id.toString(),
-                            positionMs = player.currentPosition,
-                            subtitleName = subtitleState.currentSubtitleName,
-                            rawSrtText = subtitleState.rawSrtContent,
-                            delaySec = subtitleState.delaySec,
-                            yFraction = subtitleState.yFraction,
-                            isEnabled = subtitleState.isEnabled
-                        )
-                    }
-                }
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_READY) {
-                        if (player.duration > 0) totalDuration = player.duration
-                    }
-                }
-            }
-            player.addListener(listener)
+        DisposableEffect(hostActivity) {
             onDispose {
-                PlaybackHistoryManager.saveVideoState(
-                    context = context,
-                    videoId = video.id.toString(),
-                    positionMs = player.currentPosition,
-                    subtitleName = subtitleState.currentSubtitleName,
-                    rawSrtText = subtitleState.rawSrtContent,
-                    delaySec = subtitleState.delaySec,
-                    yFraction = subtitleState.yFraction,
-                    isEnabled = subtitleState.isEnabled
-                )
                 hostActivity?.window?.let { win ->
                     val lp = win.attributes
                     lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
@@ -782,8 +1021,6 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
                 bridge.setImmersiveMode(false)
                 bridge.setScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
-                player.removeListener(listener)
-                player.release()
             }
         }
 
@@ -1139,7 +1376,10 @@ class OmniPlayerPlugin : PluginEntry() {
                 exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(250))
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     // --- TOP BAR WITH CINEMA GRADIENT SCRIM ---
@@ -1266,19 +1506,19 @@ class OmniPlayerPlugin : PluginEntry() {
 
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
-                                    color = Color.Black.copy(alpha = 0.6f),
-                                    border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.2f)),
+                                    color = if (isBackgroundAudioEnabled) Color(0xFF00E676) else Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(
+                                        0.8.dp,
+                                        if (isBackgroundAudioEnabled) Color(0xFF00E676) else Color.White.copy(alpha = 0.2f)
+                                    ),
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
-                                        .clickable {
-                                            bridge.startMediaPlayback(video.name, "Omni Background Player", true) { playState ->
-                                                if (playState) player.play() else player.pause()
-                                            }
-                                            bridge.showToast("Background audio mode armed")
-                                        }
+                                        .clickable { onToggleBackgroundAudio() }
                                 ) {
                                     Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                        CineHeadphonesIcon(tint = Color.White)
+                                        CineHeadphonesIcon(
+                                            tint = if (isBackgroundAudioEnabled) Color.Black else Color.White
+                                        )
                                     }
                                 }
 
@@ -1342,12 +1582,11 @@ class OmniPlayerPlugin : PluginEntry() {
                                 )
 
                                 Slider(
-                                    value = currentPos.toFloat(),
+                                    value = currentPos.coerceIn(0L, totalDuration.coerceAtLeast(1L)).toFloat(),
                                     onValueChange = { targetPos ->
-                                        currentPos = targetPos.toLong()
-                                        player.seekTo(currentPos)
+                                        onSeekTo(targetPos.toLong())
                                     },
-                                    valueRange = 0f..totalDuration.toFloat(),
+                                    valueRange = 0f..totalDuration.coerceAtLeast(1L).toFloat(),
                                     colors = SliderDefaults.colors(
                                         thumbColor = Color.White,
                                         activeTrackColor = Color(0xFF00E676),
