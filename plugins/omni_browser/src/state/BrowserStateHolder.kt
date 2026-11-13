@@ -43,6 +43,7 @@ class BrowserStateHolder(
     val vaultManager = VaultManager(context, bridge)
     val downloadController = DownloadController(context, bridge)
     val captchaService = CaptchaSolverService(bridge)
+    val sourceDumper = com.omni.plugin.browser.services.WebSourceDumper(context, bridge)
     val poolManager = WebViewPoolManager(context, bridge)
     val automator = AiStudioAutomator(context, bridge)
 
@@ -126,8 +127,10 @@ class BrowserStateHolder(
     var activeMediaTabId by mutableStateOf<String?>(null)
 
     // Menu Layout State
-    val defaultActiveMenu = listOf("force_dark", "data_saver", "focus_lock", "copy_url", "dom_snapshot", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
+    val defaultActiveMenu = listOf("force_dark", "data_saver", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
     var activeMenuItems by mutableStateOf(defaultActiveMenu)
+    var isDumpingSource by mutableStateOf(false)
+    var sourceDumpStatus by mutableStateOf("")
     var hiddenMenuItems by mutableStateOf<List<String>>(emptyList())
     var showMenuCustomizerDialog by mutableStateOf(false)
 
@@ -359,15 +362,23 @@ class BrowserStateHolder(
             }
             val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems }
             if (missing.isNotEmpty()) {
-                val autoIdx = activeMenuItems.indexOf("ai_automator")
-                if (autoIdx >= 0 && "studio_lab" in missing) {
-                    val updatedList = activeMenuItems.toMutableList()
-                    updatedList.add(autoIdx, "studio_lab")
-                    val remainingMissing = missing.filter { it != "studio_lab" }
-                    activeMenuItems = updatedList + remainingMissing
-                } else {
-                    activeMenuItems = activeMenuItems + missing
+                val updatedList = activeMenuItems.toMutableList()
+                val remaining = missing.toMutableList()
+                if ("studio_lab" in remaining) {
+                    val autoIdx = updatedList.indexOf("ai_automator")
+                    if (autoIdx >= 0) {
+                        updatedList.add(autoIdx, "studio_lab")
+                        remaining.remove("studio_lab")
+                    }
                 }
+                if ("full_source" in remaining) {
+                    val snapIdx = updatedList.indexOf("dom_snapshot")
+                    if (snapIdx >= 0) {
+                        updatedList.add(snapIdx + 1, "full_source")
+                        remaining.remove("full_source")
+                    }
+                }
+                activeMenuItems = updatedList + remaining
             }
         }
 
@@ -1144,6 +1155,42 @@ class BrowserStateHolder(
         }
         bridge.showToast(statusText)
         bridge.log("DATA_SAVER", "Toggled data-saver: mode=$dataSaverMode, effective=$effective")
+    }
+
+    fun captureFullWebSource() {
+        val wv = currentWebView
+        if (wv == null || currentUrl == "about:blank") {
+            bridge.showToast("Open a web app first to export its source.")
+            return
+        }
+        if (isDumpingSource) {
+            bridge.showToast("Source export already in progress...")
+            return
+        }
+        val activeTab = tabs.find { it.id == activeTabId }
+        val profileId = activeTab?.profileId ?: selectedProfileId
+
+        isDumpingSource = true
+        sourceDumpStatus = "Initializing source harvest..."
+        bridge.showToast("📦 Exporting full web source bundle...")
+
+        coroutineScope.launch {
+            val result = sourceDumper.captureFullSourceBundle(
+                webView = wv,
+                profileId = profileId,
+                localServerPort = localServerPort,
+                onStatus = { status -> sourceDumpStatus = status }
+            )
+            isDumpingSource = false
+            sourceDumpStatus = ""
+            result.onSuccess { dump ->
+                refreshCompletedDownloads()
+                notifyDownloadCompleted(dump.outerZipFile)
+                bridge.showToast("✅ Exported ${dump.totalAssets} assets (${dump.automationAssets} automation) -> ${dump.displayPath}")
+            }.onFailure { err ->
+                bridge.showToast("❌ Source export failed: ${err.message}")
+            }
+        }
     }
 
     fun toggleDesktopMode() {
