@@ -615,9 +615,9 @@ fun buildAiStudioPuppetScript(): String {
                             submitBtn.click();
                             submitTriggered = true;
                             let verifyTicks = 0;
-                            while (verifyTicks < 8) {
-                                await delay(500);
-                                if (checkUiGenerating() || document.querySelector('ms-thought-chunk')) break;
+                            while (verifyTicks < 10) {
+                                await delay(250);
+                                if (checkUiGenerating() || document.querySelector('ms-thought-chunk') || (wireTurnToken && window.__omniWire && window.__omniWire.getTurn(wireTurnToken))) break;
                                 verifyTicks++;
                             }
                         }
@@ -857,11 +857,23 @@ fun buildAiStudioPuppetScript(): String {
                             idleTicks = 0;
                             contentStaticTicks = 0;
                             lastThoughtsText = latestTurnThoughts;
-                        } else if (hasContent && !usedWireStream) {
-                            if (isBackendGenerating) {
-                                contentStaticTicks = 0;
+                        } else if (hasContent) {
+                            if (usedWireStream) {
+                                if (!checkUiGenerating()) {
+                                    contentStaticTicks++;
+                                    if (contentStaticTicks >= 8) {
+                                        hostLog('WIRE_SAFETY_STOP', '⚡ Wire safety settle: UI stopped generating with ' + currentTurnOutput.length + ' chars captured.');
+                                        break;
+                                    }
+                                } else {
+                                    contentStaticTicks = 0;
+                                }
                             } else {
-                                contentStaticTicks++;
+                                if (isBackendGenerating) {
+                                    contentStaticTicks = 0;
+                                } else {
+                                    contentStaticTicks++;
+                                }
                             }
                         }
 
