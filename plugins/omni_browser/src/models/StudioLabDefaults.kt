@@ -28,7 +28,19 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
     window.__omniRpcProgress = function(id, data) {
         const cb = callbacks.get(id);
         if (cb && typeof cb.onProgress === 'function') {
-            cb.onProgress(data);
+            if (data && data.__isDelta) {
+                if (data.dt) cb.thoughtsAcc += data.dt;
+                if (data.do) cb.outputAcc += data.do;
+                cb.onProgress({
+                    thoughts: cb.thoughtsAcc,
+                    output: cb.outputAcc,
+                    deltaThoughts: data.dt || '',
+                    deltaOutput: data.do || '',
+                    isFirst: !!data.isFirst
+                });
+            } else {
+                cb.onProgress(data);
+            }
         }
     };
 
@@ -38,7 +50,7 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                 return reject(new Error("OmniStudioLabBridge is not attached to this tab"));
             }
             const id = 'call_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-            callbacks.set(id, { resolve, reject, onProgress });
+            callbacks.set(id, { resolve, reject, onProgress, thoughtsAcc: '', outputAcc: '' });
             try {
                 window.__OmniStudioLabBridge[method](id, ...(args || []));
             } catch(e) {
