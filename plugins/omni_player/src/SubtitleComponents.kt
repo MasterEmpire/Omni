@@ -8,6 +8,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.withTimeoutOrNull
@@ -572,7 +574,6 @@ fun SubtitleOnVideoOverlay(
 fun AiDialogueInspectorSheet(
     context: Context,
     currentCue: String,
-    surroundingContext: String,
     onConfigureKey: () -> Unit,
     onResumeMovie: () -> Unit,
     onClose: () -> Unit
@@ -597,9 +598,9 @@ fun AiDialogueInspectorSheet(
             errorMessage = null
             try {
                 explanationText = if (word != null) {
-                    GroqAiService.explainWord(context, word, currentCue, surroundingContext)
+                    GroqAiService.explainWord(context, word, currentCue)
                 } else {
-                    GroqAiService.explainDialogue(context, currentCue, surroundingContext)
+                    GroqAiService.explainDialogue(context, currentCue)
                 }
             } catch (e: Exception) {
                 errorMessage = e.message ?: "Failed to generate explanation"
@@ -657,7 +658,26 @@ fun AiDialogueInspectorSheet(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF161B22),
+                        border = BorderStroke(0.8.dp, Color(0xFF58A6FF).copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onConfigureKey() }
+                    ) {
+                        Text(
+                            text = "Prompt",
+                            color = Color(0xFF58A6FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                     IconButton(onClick = onConfigureKey, modifier = Modifier.size(32.dp)) {
                         CineLockIcon(isLocked = false, tint = Color(0xFF58A6FF), modifier = Modifier.size(16.dp))
                     }
@@ -831,6 +851,7 @@ fun GroqKeyConfigDialog(
     onDismiss: () -> Unit
 ) {
     var keyInput by remember { mutableStateOf(GroqAiService.getApiKey(context) ?: "") }
+    var promptInput by remember { mutableStateOf(GroqAiService.getSystemPrompt(context)) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -838,23 +859,65 @@ fun GroqKeyConfigDialog(
         shape = RoundedCornerShape(16.dp),
         title = {
             Column {
-                Text("Groq API Key", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Groq AI Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 Spacer(Modifier.height(2.dp))
-                Text("Powers instant Qwen 3.8 27B scene explanations", color = Color(0xFF00E676), fontSize = 11.sp)
+                Text("Qwen 3.8 27B • Key & System Instruction", color = Color(0xFF00E676), fontSize = 11.sp)
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 Text(
-                    text = "Paste your Groq API key (starts with gsk_...). It will be stored securely on your device.",
-                    color = Color(0xFF8B949E),
-                    fontSize = 12.sp
+                    text = "Groq API Key",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 OutlinedTextField(
                     value = keyInput,
                     onValueChange = { keyInput = it },
                     singleLine = true,
                     placeholder = { Text("gsk_...", fontSize = 12.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF00E676),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "System Instruction",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Reset Default",
+                        color = Color(0xFF58A6FF),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { promptInput = GroqAiService.DEFAULT_SYSTEM_PROMPT }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = promptInput,
+                    onValueChange = { promptInput = it },
+                    minLines = 3,
+                    maxLines = 6,
+                    placeholder = { Text("Custom system prompt...", fontSize = 12.sp) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
@@ -870,13 +933,14 @@ fun GroqKeyConfigDialog(
                 onClick = {
                     if (keyInput.isNotBlank()) {
                         GroqAiService.saveApiKey(context, keyInput.trim())
+                        GroqAiService.saveSystemPrompt(context, promptInput)
                         onKeySaved(keyInput.trim())
                     }
                 },
                 enabled = keyInput.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
             ) {
-                Text("Save Key", color = Color.Black, fontWeight = FontWeight.Bold)
+                Text("Save", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
