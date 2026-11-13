@@ -862,6 +862,7 @@ fun MenuCustomizerDialog(
             "focus_lock" to "🔒 Focus Lock Toggle",
             "copy_url" to "🔗 Copy Clean URL",
         "dom_snapshot" to "📸 Capture DOM Snapshot",
+        "full_source" to "📦 Export Full Web Source (ZIP)",
         "local_ide" to "💻 Open Local IDE",
         "studio_lab" to "🧪 Studio Lab (Playbooks)",
         "autopilot" to "⚡ Live Auto-Pilot",
