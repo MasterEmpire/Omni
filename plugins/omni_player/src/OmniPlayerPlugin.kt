@@ -32,6 +32,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -79,6 +81,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -251,6 +254,34 @@ object VideoRepository {
             else -> String.format(Locale.US, "%.0f KB", kb)
         }
     }
+
+    fun naturalCompare(a: String, b: String): Int {
+        var i = 0
+        var j = 0
+        while (i < a.length && j < b.length) {
+            val ca = a[i]
+            val cb = b[j]
+            if (ca.isDigit() && cb.isDigit()) {
+                var na = 0L
+                while (i < a.length && a[i].isDigit()) {
+                    na = (na * 10L + (a[i] - '0')).coerceAtMost(Long.MAX_VALUE / 20L)
+                    i++
+                }
+                var nb = 0L
+                while (j < b.length && b[j].isDigit()) {
+                    nb = (nb * 10L + (b[j] - '0')).coerceAtMost(Long.MAX_VALUE / 20L)
+                    j++
+                }
+                if (na != nb) return na.compareTo(nb)
+            } else {
+                val cmp = ca.lowercaseChar().compareTo(cb.lowercaseChar())
+                if (cmp != 0) return cmp
+                i++
+                j++
+            }
+        }
+        return a.length.compareTo(b.length)
+    }
 }
 
 // ==========================================
@@ -283,6 +314,12 @@ class OmniPlayerPlugin : PluginEntry() {
         var videoQueue by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
         var isPlayerFullScreen by remember { mutableStateOf(false) }
         var isBackgroundAudioEnabled by remember { mutableStateOf(false) }
+        val playerPrefs = remember(context) {
+            context.getSharedPreferences("omni_player_prefs", Context.MODE_PRIVATE)
+        }
+        var isAutoPlayNextEnabled by remember {
+            mutableStateOf(playerPrefs.getBoolean("key_auto_play_next", true))
+        }
 
         val player = remember(context) {
             ExoPlayer.Builder(context).build().apply {
@@ -296,6 +333,7 @@ class OmniPlayerPlugin : PluginEntry() {
         var isPlaying by remember { mutableStateOf(false) }
         var currentPos by remember { mutableLongStateOf(0L) }
         var totalDuration by remember { mutableLongStateOf(1L) }
+        var libraryRefreshTick by remember { mutableIntStateOf(0) }
 
         fun saveCurrentVideoState(vid: VideoItem?) {
             if (vid == null) return
@@ -351,6 +389,38 @@ class OmniPlayerPlugin : PluginEntry() {
             val cachedSub = PlaybackHistoryManager.getSavedSubtitle(context, vid.id.toString())
             if (cachedSub != null) {
                 subtitleState.loadSrtText(cachedSub.second, cachedSub.first)
+            } else if (vid.path.isNotEmpty()) {
+                val sidecar = withContext(Dispatchers.IO) {
+                    try {
+                        val videoFile = File(vid.path)
+                        val parentDir = videoFile.parentFile
+                        val baseName = videoFile.nameWithoutExtension
+                        val match = parentDir?.listFiles()?.firstOrNull { f ->
+                            f.isFile &&
+                                (f.extension.equals("srt", true) || f.extension.equals("vtt", true)) &&
+                                f.nameWithoutExtension.equals(baseName, ignoreCase = true)
+                        }
+                        if (match != null && match.length() > 0) {
+                            Pair(match.name, match.readText(Charsets.UTF_8))
+                        } else null
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                if (sidecar != null) {
+                    subtitleState.loadSrtText(sidecar.second, sidecar.first)
+                    PlaybackHistoryManager.saveVideoState(
+                        context = context,
+                        videoId = vid.id.toString(),
+                        positionMs = savedState?.optLong("positionMs", 0L) ?: 0L,
+                        subtitleName = sidecar.first,
+                        rawSrtText = sidecar.second,
+                        delaySec = subtitleState.delaySec,
+                        yFraction = subtitleState.yFraction,
+                        isEnabled = subtitleState.isEnabled
+                    )
+                    bridge.showToast("Auto-loaded: ${sidecar.first}")
+                }
             }
 
             totalDuration = vid.durationMs.coerceAtLeast(1L)
@@ -395,6 +465,29 @@ class OmniPlayerPlugin : PluginEntry() {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY && player.duration > 0) {
                         totalDuration = player.duration
+                    } else if (playbackState == Player.STATE_ENDED) {
+                        val finishedVid = currentPlayingVideo
+                        if (finishedVid != null) {
+                            PlaybackHistoryManager.saveVideoState(
+                                context = context,
+                                videoId = finishedVid.id.toString(),
+                                positionMs = 0L,
+                                subtitleName = subtitleState.currentSubtitleName,
+                                rawSrtText = subtitleState.rawSrtContent,
+                                delaySec = subtitleState.delaySec,
+                                yFraction = subtitleState.yFraction,
+                                isEnabled = subtitleState.isEnabled
+                            )
+                            libraryRefreshTick++
+                            if (isAutoPlayNextEnabled) {
+                                val curIdx = videoQueue.indexOfFirst { it.id == finishedVid.id }
+                                if (curIdx >= 0 && curIdx < videoQueue.lastIndex) {
+                                    val nextVid = videoQueue[curIdx + 1]
+                                    currentPlayingVideo = nextVid
+                                    bridge.showToast("Up Next: ${nextVid.name}")
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -421,6 +514,11 @@ class OmniPlayerPlugin : PluginEntry() {
                 totalDuration = totalDuration,
                 subtitleState = subtitleState,
                 isBackgroundAudioEnabled = isBackgroundAudioEnabled,
+                isAutoPlayNextEnabled = isAutoPlayNextEnabled,
+                onToggleAutoPlayNext = { enabled ->
+                    isAutoPlayNextEnabled = enabled
+                    playerPrefs.edit().putBoolean("key_auto_play_next", enabled).apply()
+                },
                 onToggleBackgroundAudio = { toggleBackgroundAudio() },
                 onSeekTo = { targetMs ->
                     val clamped = targetMs.coerceIn(0L, totalDuration.coerceAtLeast(1L))
@@ -436,10 +534,12 @@ class OmniPlayerPlugin : PluginEntry() {
                     } else {
                         stopAndClearPlayback()
                     }
+                    libraryRefreshTick++
                 },
                 onSelectVideo = { nextVideo ->
                     saveCurrentVideoState(currentPlayingVideo)
                     currentPlayingVideo = nextVideo
+                    libraryRefreshTick++
                 }
             )
         } else {
@@ -458,6 +558,7 @@ class OmniPlayerPlugin : PluginEntry() {
                         FolderVideosScreen(
                             context = context,
                             folder = currentFolder!!,
+                            refreshKey = libraryRefreshTick,
                             onBack = { currentFolder = null },
                             onPlayVideo = { video, queue ->
                                 videoQueue = queue
@@ -472,7 +573,16 @@ class OmniPlayerPlugin : PluginEntry() {
                         FolderCatalogScreen(
                             context = context,
                             bridge = bridge,
-                            onOpenFolder = { folder -> currentFolder = folder }
+                            refreshKey = libraryRefreshTick,
+                            onOpenFolder = { folder -> currentFolder = folder },
+                            onPlayRecent = { video, queue ->
+                                videoQueue = queue
+                                if (currentPlayingVideo?.id != video.id) {
+                                    saveCurrentVideoState(currentPlayingVideo)
+                                    currentPlayingVideo = video
+                                }
+                                isPlayerFullScreen = true
+                            }
                         )
                     }
                 }
@@ -633,22 +743,51 @@ class OmniPlayerPlugin : PluginEntry() {
     fun FolderCatalogScreen(
         context: Context,
         bridge: HostBridge,
-        onOpenFolder: (VideoFolder) -> Unit
+        refreshKey: Int = 0,
+        onOpenFolder: (VideoFolder) -> Unit,
+        onPlayRecent: (VideoItem, List<VideoItem>) -> Unit = { _, _ -> }
     ) {
         var folders by remember { mutableStateOf<List<VideoFolder>>(emptyList()) }
+        var allVideos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+        var historyMap by remember { mutableStateOf<Map<String, JSONObject>>(emptyMap()) }
         var isLoading by remember { mutableStateOf(true) }
         val scope = rememberCoroutineScope()
 
-        fun loadData() {
+        fun loadData(showSpinner: Boolean = true) {
             scope.launch {
-                isLoading = true
-                folders = VideoRepository.getFolders(context)
+                if (showSpinner) isLoading = true
+                val loadedVideos = VideoRepository.getAllVideos(context)
+                val loadedFolders = withContext(Dispatchers.IO) {
+                    loadedVideos.groupBy { it.folderName }.map { (folderName, items) ->
+                        val first = items.firstOrNull()
+                        VideoFolder(
+                            id = folderName,
+                            name = folderName,
+                            path = first?.path?.substringBeforeLast("/", "") ?: "",
+                            videoCount = items.size,
+                            totalSize = items.sumOf { it.sizeBytes },
+                            firstVideoUri = first?.uri
+                        )
+                    }.sortedByDescending { it.videoCount }
+                }
+                allVideos = loadedVideos
+                folders = loadedFolders
+                historyMap = PlaybackHistoryManager.getAllHistory(context)
                 isLoading = false
             }
         }
 
-        LaunchedEffect(Unit) {
-            loadData()
+        LaunchedEffect(refreshKey) {
+            loadData(showSpinner = folders.isEmpty())
+        }
+
+        val recentVideos = remember(allVideos, historyMap) {
+            allVideos.mapNotNull { vid ->
+                val obj = historyMap[vid.id.toString()] ?: return@mapNotNull null
+                val pos = obj.optLong("positionMs", 0L)
+                val updated = obj.optLong("updatedAt", 0L)
+                if (pos > 2000L) Triple(vid, pos, updated) else null
+            }.sortedByDescending { it.third }.take(10)
         }
 
         Column(
@@ -714,6 +853,108 @@ class OmniPlayerPlugin : PluginEntry() {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
+                    if (recentVideos.isNotEmpty()) {
+                        item {
+                            Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                                Text(
+                                    text = "CONTINUE WATCHING",
+                                    color = Color(0xFF00E676),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(recentVideos, key = { it.first.id }) { (vid, savedPos, _) ->
+                                        var thumb by remember(vid.id) { mutableStateOf<Bitmap?>(null) }
+                                        LaunchedEffect(vid.id) {
+                                            thumb = VideoRepository.getThumbnail(context, vid.id, vid.uri, vid.path)
+                                        }
+                                        val frac = if (vid.durationMs > 0L) {
+                                            (savedPos.toFloat() / vid.durationMs.toFloat()).coerceIn(0.02f, 1f)
+                                        } else 0f
+
+                                        Card(
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = CardDefaults.cardColors(containerColor = Color(0xFF11151D)),
+                                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                            modifier = Modifier
+                                                .width(156.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .clickable {
+                                                    val folderQueue = allVideos.filter { it.folderName.equals(vid.folderName, true) }
+                                                    onPlayRecent(vid, folderQueue.ifEmpty { listOf(vid) })
+                                                }
+                                        ) {
+                                            Column {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .aspectRatio(16f / 9f)
+                                                        .background(Color.Black),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (thumb != null) {
+                                                        Image(
+                                                            bitmap = thumb!!.asImageBitmap(),
+                                                            contentDescription = vid.name,
+                                                            contentScale = ContentScale.Crop,
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
+                                                    } else {
+                                                        CinePlayPauseIcon(isPlaying = false, tint = Color(0xFF8B949E), modifier = Modifier.size(18.dp))
+                                                    }
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = Color.Black.copy(alpha = 0.8f),
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(end = 5.dp, bottom = 6.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = VideoRepository.formatDuration(vid.durationMs),
+                                                            color = Color.White,
+                                                            fontSize = 9.sp,
+                                                            fontFamily = FontFamily.Monospace,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                        )
+                                                    }
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomStart)
+                                                            .fillMaxWidth()
+                                                            .height(3.dp)
+                                                            .background(Color.White.copy(alpha = 0.2f))
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxHeight()
+                                                                .fillMaxWidth(frac)
+                                                                .background(Color(0xFF00E676))
+                                                        )
+                                                    }
+                                                }
+                                                Text(
+                                                    text = vid.name,
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     items(folders) { folder ->
                         Card(
                             shape = RoundedCornerShape(12.dp),
@@ -789,18 +1030,46 @@ class OmniPlayerPlugin : PluginEntry() {
     fun FolderVideosScreen(
         context: Context,
         folder: VideoFolder,
+        refreshKey: Int = 0,
         onBack: () -> Unit,
         onPlayVideo: (VideoItem, List<VideoItem>) -> Unit
     ) {
+        val prefs = remember(context) {
+            context.getSharedPreferences("omni_player_prefs", Context.MODE_PRIVATE)
+        }
         var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+        var historyMap by remember { mutableStateOf<Map<String, JSONObject>>(emptyMap()) }
         var isLoading by remember { mutableStateOf(true) }
+        var isSearchOpen by remember { mutableStateOf(false) }
+        var searchQuery by remember { mutableStateOf("") }
+        var sortMode by remember { mutableStateOf(prefs.getString("key_folder_sort_mode", "NAME") ?: "NAME") }
+        var showSortMenu by remember { mutableStateOf(false) }
 
-        BackHandler { onBack() }
+        BackHandler {
+            if (isSearchOpen) {
+                isSearchOpen = false
+                searchQuery = ""
+            } else {
+                onBack()
+            }
+        }
 
-        LaunchedEffect(folder.name) {
-            isLoading = true
+        LaunchedEffect(folder.name, refreshKey) {
+            if (videos.isEmpty()) isLoading = true
             videos = VideoRepository.getVideosInFolder(context, folder.name)
+            historyMap = PlaybackHistoryManager.getAllHistory(context)
             isLoading = false
+        }
+
+        val displayedVideos = remember(videos, searchQuery, sortMode) {
+            val filtered = if (searchQuery.isBlank()) videos else {
+                videos.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }
+            }
+            when (sortMode) {
+                "DATE" -> filtered.sortedByDescending { it.dateModified }
+                "SIZE" -> filtered.sortedByDescending { it.sizeBytes }
+                else -> filtered.sortedWith { a, b -> VideoRepository.naturalCompare(a.name, b.name) }
+            }
         }
 
         Column(
@@ -812,16 +1081,105 @@ class OmniPlayerPlugin : PluginEntry() {
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Column {
+                        Text(
+                            folder.name,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text("${displayedVideos.size} videos available", color = Color(0xFF8B949E), fontSize = 11.sp)
+                    }
                 }
-                Spacer(Modifier.width(6.dp))
-                Column {
-                    Text(folder.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text("${videos.size} videos available", color = Color(0xFF8B949E), fontSize = 11.sp)
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        isSearchOpen = !isSearchOpen
+                        if (!isSearchOpen) searchQuery = ""
+                    }) {
+                        Icon(
+                            if (isSearchOpen) Icons.Default.Close else Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = if (isSearchOpen) Color(0xFF00E676) else Color.White
+                        )
+                    }
+
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF161B22),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showSortMenu = true }
+                        ) {
+                            Text(
+                                text = when (sortMode) {
+                                    "DATE" -> "Newest"
+                                    "SIZE" -> "Size"
+                                    else -> "A-Z"
+                                },
+                                color = Color(0xFF00E676),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false },
+                            modifier = Modifier.background(Color(0xFF161B22))
+                        ) {
+                            listOf("NAME" to "Name (A-Z / Ep)", "DATE" to "Newest First", "SIZE" to "Largest Size").forEach { (key, label) ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = label,
+                                            color = if (sortMode == key) Color(0xFF00E676) else Color.White,
+                                            fontWeight = if (sortMode == key) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 13.sp
+                                        )
+                                    },
+                                    onClick = {
+                                        sortMode = key
+                                        prefs.edit().putString("key_folder_sort_mode", key).apply()
+                                        showSortMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
+            }
+
+            if (isSearchOpen) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Filter videos in ${folder.name}...", color = Color(0xFF8B949E), fontSize = 13.sp) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF00E676),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             Spacer(Modifier.height(14.dp))
@@ -837,7 +1195,11 @@ class OmniPlayerPlugin : PluginEntry() {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(videos) { video ->
+                    items(displayedVideos, key = { it.id }) { video ->
+                        val savedPos = historyMap[video.id.toString()]?.optLong("positionMs", 0L) ?: 0L
+                        val progressFrac = if (savedPos > 2000L && video.durationMs > 0L) {
+                            (savedPos.toFloat() / video.durationMs.toFloat()).coerceIn(0.02f, 1f)
+                        } else 0f
                         var thumbnail by remember(video.id) { mutableStateOf<Bitmap?>(null) }
 
                         LaunchedEffect(video.id) {
@@ -851,7 +1213,7 @@ class OmniPlayerPlugin : PluginEntry() {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable { onPlayVideo(video, videos) }
+                                .clickable { onPlayVideo(video, displayedVideos) }
                         ) {
                             Column {
                                 Box(
@@ -886,7 +1248,7 @@ class OmniPlayerPlugin : PluginEntry() {
                                         border = BorderStroke(0.6.dp, Color.White.copy(alpha = 0.2f)),
                                         modifier = Modifier
                                             .align(Alignment.BottomEnd)
-                                            .padding(6.dp)
+                                            .padding(end = 6.dp, bottom = if (progressFrac > 0f) 8.dp else 6.dp)
                                     ) {
                                         Text(
                                             text = VideoRepository.formatDuration(video.durationMs),
@@ -896,6 +1258,23 @@ class OmniPlayerPlugin : PluginEntry() {
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                         )
+                                    }
+
+                                    if (progressFrac > 0f) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .fillMaxWidth()
+                                                .height(3.dp)
+                                                .background(Color.White.copy(alpha = 0.22f))
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxHeight()
+                                                    .fillMaxWidth(progressFrac)
+                                                    .background(Color(0xFF00E676))
+                                            )
+                                        }
                                     }
                                 }
 
@@ -939,6 +1318,8 @@ class OmniPlayerPlugin : PluginEntry() {
         totalDuration: Long,
         subtitleState: SubtitleState,
         isBackgroundAudioEnabled: Boolean,
+        isAutoPlayNextEnabled: Boolean,
+        onToggleAutoPlayNext: (Boolean) -> Unit,
         onToggleBackgroundAudio: () -> Unit,
         onSeekTo: (Long) -> Unit,
         onClosePlayer: () -> Unit,
@@ -1021,6 +1402,9 @@ class OmniPlayerPlugin : PluginEntry() {
         }
         var isGestureSeekEnabled by remember {
             mutableStateOf(playerPrefs.getBoolean("key_gesture_seek_enabled", true))
+        }
+        var isHold2xEnabled by remember {
+            mutableStateOf(playerPrefs.getBoolean("key_hold_2x_enabled", true))
         }
         var showMoreMenu by remember { mutableStateOf(false) }
         var showSpeedMenu by remember { mutableStateOf(false) }
@@ -1201,7 +1585,7 @@ class OmniPlayerPlugin : PluginEntry() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(isLocked, activeSubtitleModal, isGestureSeekEnabled, isInPip) {
+                    .pointerInput(isLocked, activeSubtitleModal, isGestureSeekEnabled, isHold2xEnabled, isInPip) {
                         if (activeSubtitleModal != null || isInPip) return@pointerInput
                         awaitPointerEventScope {
                             val density = this.density
@@ -1223,17 +1607,36 @@ class OmniPlayerPlugin : PluginEntry() {
                                 val initialB = currentBrightness
                                 val initialV = getLiveVolumePct().also { currentVolume = it }
 
+                                var isHold2xActive = false
+                                var speedBeforeHold = currentSpeed
+                                val holdJob = if (isHold2xEnabled && !isLocked) {
+                                    scope.launch {
+                                        delay(380L)
+                                        if (!isDragging && !isLocked) {
+                                            isHold2xActive = true
+                                            speedBeforeHold = currentSpeed
+                                            player.playbackParameters = PlaybackParameters(2.0f)
+                                            hudType = "HOLD_2X"
+                                            bridge.vibrate(25L)
+                                        }
+                                    }
+                                } else null
+
                                 while (true) {
                                     val event = awaitPointerEvent()
                                     val change = event.changes.firstOrNull { it.id == downChange.id } ?: break
 
                                     if (event.type == PointerEventType.Move) {
-                                        if (change.isConsumed) break
+                                        if (change.isConsumed) {
+                                            holdJob?.cancel()
+                                            break
+                                        }
                                         val totalDx = change.position.x - startX
                                         val totalDy = change.position.y - startY
                                         val dist = kotlin.math.hypot(totalDx, totalDy)
 
-                                        if (!isDragging && dist > touchSlopPx && !isLocked) {
+                                        if (!isDragging && !isHold2xActive && dist > touchSlopPx && !isLocked) {
+                                            holdJob?.cancel()
                                             isDragging = true
                                             if (kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx)) {
                                                 gestureMode = if (startX < sWidth * 0.45f) 1 else if (startX > sWidth * 0.55f) 2 else 0
@@ -1272,6 +1675,13 @@ class OmniPlayerPlugin : PluginEntry() {
                                             }
                                         }
                                     } else if (event.type == PointerEventType.Release) {
+                                        holdJob?.cancel()
+                                        if (isHold2xActive) {
+                                            player.playbackParameters = PlaybackParameters(speedBeforeHold)
+                                            if (hudType == "HOLD_2X") hudType = null
+                                            change.consume()
+                                            break
+                                        }
                                         if (change.isConsumed) break
                                         change.consume()
                                         if (isDragging) {
@@ -1427,7 +1837,28 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // 4. Center Seeking / Fast-Forward / Info HUD
+            // 4. Center / Top Seeking / Fast-Forward / Hold-2X / Info HUD
+            if (!isInPip && hudType == "HOLD_2X") {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, Color(0xFF00E676)),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 24.dp)
+                ) {
+                    Text(
+                        text = "▶▶  2.0X SPEED",
+                        color = Color(0xFF00E676),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                    )
+                }
+            }
+
             if (!isInPip && hudType == "INFO" && hudInfoText.isNotEmpty()) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -1650,6 +2081,20 @@ class OmniPlayerPlugin : PluginEntry() {
                                             onDismissRequest = { showMoreMenu = false },
                                             modifier = Modifier.background(Color(0xFF161B22))
                                         ) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = "Audio & Tracks",
+                                                        color = Color(0xFF00E676),
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showMoreMenu = false
+                                                    activeSubtitleModal = "TRACKS"
+                                                }
+                                            )
                                             DropdownMenuItem(
                                                 text = {
                                                     Text(
@@ -2063,6 +2508,12 @@ class OmniPlayerPlugin : PluginEntry() {
                         onClose = { activeSubtitleModal = "HUB" }
                     )
                 }
+                "TRACKS" -> {
+                    AudioAndTracksDialog(
+                        player = player,
+                        onDismiss = { activeSubtitleModal = null }
+                    )
+                }
                 "SETTINGS" -> {
                     PlayerSettingsDialog(
                         isGestureSeekEnabled = isGestureSeekEnabled,
@@ -2070,6 +2521,13 @@ class OmniPlayerPlugin : PluginEntry() {
                             isGestureSeekEnabled = enabled
                             playerPrefs.edit().putBoolean("key_gesture_seek_enabled", enabled).apply()
                         },
+                        isHold2xEnabled = isHold2xEnabled,
+                        onToggleHold2x = { enabled ->
+                            isHold2xEnabled = enabled
+                            playerPrefs.edit().putBoolean("key_hold_2x_enabled", enabled).apply()
+                        },
+                        isAutoPlayNextEnabled = isAutoPlayNextEnabled,
+                        onToggleAutoPlayNext = onToggleAutoPlayNext,
                         onDismiss = { activeSubtitleModal = null }
                     )
                 }
@@ -2104,9 +2562,205 @@ class OmniPlayerPlugin : PluginEntry() {
     }
 
     @Composable
+    fun AudioAndTracksDialog(
+        player: ExoPlayer,
+        onDismiss: () -> Unit
+    ) {
+        var selectionVersion by remember { mutableIntStateOf(0) }
+        val currentTracks = remember(selectionVersion) { player.currentTracks }
+
+        val audioTracks = remember(currentTracks) {
+            val items = mutableListOf<Triple<androidx.media3.common.Tracks.Group, Int, String>>()
+            currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEachIndexed { gIdx, group ->
+                for (tIdx in 0 until group.length) {
+                    if (!group.isTrackSupported(tIdx)) continue
+                    val fmt = group.getTrackFormat(tIdx)
+                    val lang = fmt.language?.takeIf { it.isNotBlank() && it != "und" }?.uppercase(Locale.US)
+                    val label = fmt.label?.takeIf { it.isNotBlank() }
+                    val ch = if (fmt.channelCount > 0) "${fmt.channelCount}ch" else null
+                    val title = listOfNotNull(label, lang, ch).joinToString(" • ").ifEmpty { "Audio Track ${gIdx + 1}" }
+                    items.add(Triple(group, tIdx, title))
+                }
+            }
+            items
+        }
+
+        val textTracks = remember(currentTracks) {
+            val items = mutableListOf<Triple<androidx.media3.common.Tracks.Group, Int, String>>()
+            currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEachIndexed { gIdx, group ->
+                for (tIdx in 0 until group.length) {
+                    if (!group.isTrackSupported(tIdx)) continue
+                    val fmt = group.getTrackFormat(tIdx)
+                    val lang = fmt.language?.takeIf { it.isNotBlank() && it != "und" }?.uppercase(Locale.US)
+                    val label = fmt.label?.takeIf { it.isNotBlank() }
+                    val title = listOfNotNull(label, lang).joinToString(" • ").ifEmpty { "Embedded Sub ${gIdx + 1}" }
+                    items.add(Triple(group, tIdx, title))
+                }
+            }
+            items
+        }
+
+        val isAnyTextSelected = textTracks.any { (g, idx, _) -> g.isTrackSelected(idx) }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            containerColor = Color(0xFF11151D),
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Audio & Tracks", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("Built-in Video Streams", color = Color(0xFF00E676), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8B949E))
+                    }
+                }
+            },
+            text = {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.heightIn(max = 320.dp)
+                ) {
+                    item {
+                        Text("AUDIO TRACKS", color = Color(0xFF8B949E), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (audioTracks.isEmpty()) {
+                        item {
+                            Text("No selectable audio tracks found.", color = Color(0xFF484F58), fontSize = 12.sp)
+                        }
+                    } else {
+                        items(audioTracks) { (group, tIdx, title) ->
+                            val selected = group.isTrackSelected(tIdx)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (selected) Color(0xFF00E676).copy(alpha = 0.16f) else Color(0xFF161B22),
+                                border = BorderStroke(1.dp, if (selected) Color(0xFF00E676) else Color.White.copy(alpha = 0.08f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        player.trackSelectionParameters = player.trackSelectionParameters
+                                            .buildUpon()
+                                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                                            .addOverride(TrackSelectionOverride(group.mediaTrackGroup, tIdx))
+                                            .build()
+                                        selectionVersion++
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = title,
+                                        color = if (selected) Color(0xFF00E676) else Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                    if (selected) {
+                                        Text("ACTIVE", color = Color(0xFF00E676), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (textTracks.isNotEmpty()) {
+                        item {
+                            Spacer(Modifier.height(6.dp))
+                            Text("EMBEDDED SUBTITLES", color = Color(0xFF8B949E), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (!isAnyTextSelected) Color(0xFF00E676).copy(alpha = 0.16f) else Color(0xFF161B22),
+                                border = BorderStroke(1.dp, if (!isAnyTextSelected) Color(0xFF00E676) else Color.White.copy(alpha = 0.08f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        player.trackSelectionParameters = player.trackSelectionParameters
+                                            .buildUpon()
+                                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                            .build()
+                                        selectionVersion++
+                                    }
+                            ) {
+                                Text(
+                                    text = "Off (Use External .srt / None)",
+                                    color = if (!isAnyTextSelected) Color(0xFF00E676) else Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (!isAnyTextSelected) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                                )
+                            }
+                        }
+                        items(textTracks) { (group, tIdx, title) ->
+                            val selected = group.isTrackSelected(tIdx)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (selected) Color(0xFF00E676).copy(alpha = 0.16f) else Color(0xFF161B22),
+                                border = BorderStroke(1.dp, if (selected) Color(0xFF00E676) else Color.White.copy(alpha = 0.08f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        player.trackSelectionParameters = player.trackSelectionParameters
+                                            .buildUpon()
+                                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                                            .addOverride(TrackSelectionOverride(group.mediaTrackGroup, tIdx))
+                                            .build()
+                                        selectionVersion++
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = title,
+                                        color = if (selected) Color(0xFF00E676) else Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                    if (selected) {
+                                        Text("ACTIVE", color = Color(0xFF00E676), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Done", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    @Composable
     fun PlayerSettingsDialog(
         isGestureSeekEnabled: Boolean,
         onToggleGestureSeek: (Boolean) -> Unit,
+        isHold2xEnabled: Boolean,
+        onToggleHold2x: (Boolean) -> Unit,
+        isAutoPlayNextEnabled: Boolean,
+        onToggleAutoPlayNext: (Boolean) -> Unit,
         onDismiss: () -> Unit
     ) {
         AlertDialog(
@@ -2129,50 +2783,79 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF161B22),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onToggleGestureSeek(!isGestureSeekEnabled) }
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    @Composable
+                    fun SettingSwitchCard(
+                        title: String,
+                        subtitle: String,
+                        checked: Boolean,
+                        onCheckedChange: (Boolean) -> Unit
                     ) {
-                        Row(
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF161B22),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onCheckedChange(!checked) }
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Gesture Seeking",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    text = "Swipe horizontally or double-tap edges to seek ±10s",
-                                    color = Color(0xFF8B949E),
-                                    fontSize = 11.sp
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = title,
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = subtitle,
+                                        color = Color(0xFF8B949E),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Switch(
+                                    checked = checked,
+                                    onCheckedChange = onCheckedChange,
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFF00E676),
+                                        uncheckedThumbColor = Color(0xFF8B949E),
+                                        uncheckedTrackColor = Color(0xFF21262D)
+                                    )
                                 )
                             }
-                            Spacer(Modifier.width(8.dp))
-                            Switch(
-                                checked = isGestureSeekEnabled,
-                                onCheckedChange = onToggleGestureSeek,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Color(0xFF00E676),
-                                    uncheckedThumbColor = Color(0xFF8B949E),
-                                    uncheckedTrackColor = Color(0xFF21262D)
-                                )
-                            )
                         }
                     }
+
+                    SettingSwitchCard(
+                        title = "Gesture Seeking",
+                        subtitle = "Swipe horizontally or double-tap edges to seek ±10s",
+                        checked = isGestureSeekEnabled,
+                        onCheckedChange = onToggleGestureSeek
+                    )
+
+                    SettingSwitchCard(
+                        title = "Hold Screen for 2.0X",
+                        subtitle = "Press and hold video to fast-forward at 2X until released",
+                        checked = isHold2xEnabled,
+                        onCheckedChange = onToggleHold2x
+                    )
+
+                    SettingSwitchCard(
+                        title = "Auto-Play Next Video",
+                        subtitle = "Automatically play next episode/video in folder when finished",
+                        checked = isAutoPlayNextEnabled,
+                        onCheckedChange = onToggleAutoPlayNext
+                    )
                 }
             },
             confirmButton = {
