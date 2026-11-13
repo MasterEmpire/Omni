@@ -44,6 +44,17 @@ fun buildAiStudioPuppetScript(): String {
                 return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden' && window.getComputedStyle(el).display !== 'none';
             }
 
+            async function waitForEl(selector, timeoutMs, intervalMs) {
+                const step = intervalMs || 25;
+                const maxTries = Math.max(1, Math.ceil((timeoutMs || 2000) / step));
+                for (let i = 0; i < maxTries; i++) {
+                    const el = document.querySelector(selector);
+                    if (el && isElementVisible(el)) return el;
+                    await delay(step);
+                }
+                return null;
+            }
+
             async function dismissInterstitials() {
                 try {
                     const dialogContainers = document.querySelectorAll(
@@ -318,7 +329,7 @@ fun buildAiStudioPuppetScript(): String {
                 },
 
                 init: async function() {
-                    hostLog('PUPPET_INIT', 'Initializing AI Studio Puppet Engine...');
+                    hostLog('PUPPET_INIT', 'Initializing AI Studio Puppet Engine (Turbo)...');
                     if (window.location.href.includes('accounts.google.com') || window.location.href.includes('/signin/')) {
                         const authErr = 'Account not logged in on this profile. Please log in to Google AI Studio first.';
                         hostLog('AUTH_ERR', authErr);
@@ -332,15 +343,12 @@ fun buildAiStudioPuppetScript(): String {
                     let mountAttempts = 0;
                     let promptArea = null;
 
-                    while (mountAttempts < 35) {
-                        await dismissInterstitials();
+                    while (mountAttempts < 700) {
+                        if (mountAttempts % 20 === 0) await dismissInterstitials();
                         promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
                         if (promptArea && isElementVisible(promptArea)) break;
-                        await delay(1000);
+                        await delay(50);
                         mountAttempts++;
-                        if (mountAttempts % 5 === 0) {
-                            hostLog('MOUNT', 'Polling prompt area (' + mountAttempts + '/35)...');
-                        }
                     }
 
                     if (!promptArea) {
@@ -354,16 +362,16 @@ fun buildAiStudioPuppetScript(): String {
 
                     hostLog('PUPPET_INIT', 'Prompt area mounted. Waiting for AI Studio auth/model boot RPCs to settle...');
                     let warmTicks = 0;
-                    while (warmTicks < 24 && !this.aborted) {
+                    while (warmTicks < 150 && !this.aborted) {
                         const warm = (window.__omniWire && window.__omniWire.isSessionWarm) ? window.__omniWire.isSessionWarm() : null;
                         if (warm && warm.ready) {
-                            hostLog('PUPPET_INIT', 'Boot settled cleanly (' + (warmTicks * 250) + 'ms, accessToken=' + warm.hasAccessToken + ', models=' + warm.hasListModels + ').');
+                            hostLog('PUPPET_INIT', 'Boot settled cleanly (' + (warmTicks * 40) + 'ms, accessToken=' + warm.hasAccessToken + ', models=' + warm.hasListModels + ').');
                             break;
                         }
-                        await delay(250);
+                        await delay(40);
                         warmTicks++;
                     }
-                    await delay(1000);
+                    await delay(30);
                     hostLog('PUPPET_INIT', 'Session warm and ready!');
                     if (window.OmniAutomator && window.OmniAutomator.onPuppetReady) {
                         window.OmniAutomator.onPuppetReady(true, 'Ready');
@@ -378,8 +386,13 @@ fun buildAiStudioPuppetScript(): String {
                     const THINKING_LEVEL = opts.thinkingLevel || 'Default';
                     const TEMPORARY_CHAT = !!opts.temporaryChat;
                     const FALLBACK_ENABLED = opts.fallbackEnabled !== false;
+                    const HEADLESS_TURBO = opts.headlessTurbo === true;
 
                     try {
+                        if (HEADLESS_TURBO && window.__omniEnableHeadlessTurbo) {
+                            window.__omniEnableHeadlessTurbo();
+                        }
+
                         await dismissInterstitials();
                         const currentTempState = isTemporaryChatActive();
                         if (TEMPORARY_CHAT !== currentTempState) {
@@ -388,14 +401,13 @@ fun buildAiStudioPuppetScript(): String {
                             const overflowBtn = document.querySelector('.overflow-menu-wrapper button, button[aria-label*="View more actions"]');
                             if (overflowBtn && isElementVisible(overflowBtn)) {
                                 overflowBtn.click();
-                                await randomDelay(800, 1200);
-                                const tempChatOption = document.querySelector('button[data-test-incognito-toggle], button[aria-label*="temporary chat"]');
+                                const tempChatOption = await waitForEl('button[data-test-incognito-toggle], button[aria-label*="temporary chat"]', 1500, 25);
                                 if (tempChatOption) {
                                     tempChatOption.click();
-                                    await randomDelay(1000, 1400);
+                                    await delay(120);
                                 } else {
                                     document.body.click();
-                                    await randomDelay(300, 500);
+                                    await delay(50);
                                 }
                             }
                         }
@@ -409,7 +421,7 @@ fun buildAiStudioPuppetScript(): String {
                                 const tuneBtn = document.querySelector('button.runsettings-toggle-button, button[aria-label*="Toggle run settings"], button[aria-label*="run settings"]');
                                 if (tuneBtn && isElementVisible(tuneBtn)) {
                                     tuneBtn.click();
-                                    await randomDelay(1000, 1500);
+                                    await waitForEl('ms-thinking-level-setting mat-select, button.system-instructions-card, ms-model-setting mat-select', 1500, 25);
                                 }
                             }
 
@@ -422,7 +434,7 @@ fun buildAiStudioPuppetScript(): String {
                                         if (!curModel.includes(targetClean)) {
                                             hostLog('SETTINGS', 'Switching model to: ' + TARGET_MODEL);
                                             modelSelect.click();
-                                            await randomDelay(800, 1200);
+                                            await waitForEl('.mat-mdc-select-panel mat-option, mat-option, .model-option', 1500, 25);
                                             const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option, .model-option'));
                                             const match = options.find(o => {
                                                 const oText = (o.textContent || '').trim().toLowerCase();
@@ -434,7 +446,7 @@ fun buildAiStudioPuppetScript(): String {
                                             } else {
                                                 document.body.click();
                                             }
-                                            await randomDelay(600, 1000);
+                                            await delay(80);
                                         }
                                     }
                                 } catch(e) {
@@ -449,12 +461,12 @@ fun buildAiStudioPuppetScript(): String {
                                         const currentVal = (thinkingSelect.textContent || '').trim().toLowerCase();
                                         if (!currentVal.includes(THINKING_LEVEL.toLowerCase())) {
                                             thinkingSelect.click();
-                                            await randomDelay(800, 1200);
+                                            await waitForEl('.mat-mdc-select-panel mat-option, mat-option', 1500, 25);
                                             const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
                                             const match = options.find(o => (o.textContent || '').trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
                                             if (match) match.click();
                                             else document.body.click();
-                                            await randomDelay(600, 1000);
+                                            await delay(80);
                                         }
                                     }
                                 } catch(e) {
@@ -474,7 +486,7 @@ fun buildAiStudioPuppetScript(): String {
                                         hostLog('SYS_PROMPT', 'System instructions match preview. Skipping.');
                                     } else if (sysCard) {
                                         sysCard.click();
-                                        await randomDelay(1200, 1800);
+                                        await waitForEl('ms-system-instructions', 1800, 25);
                                         let matchedExisting = false;
 
                                         const sysSelect = document.querySelector('ms-system-instructions mat-select, .select-tooltip-wrapper mat-select');
@@ -484,24 +496,24 @@ fun buildAiStudioPuppetScript(): String {
                                                 matchedExisting = true;
                                             } else {
                                                 sysSelect.click();
-                                                await randomDelay(800, 1200);
+                                                await waitForEl('.mat-mdc-select-panel mat-option, mat-option', 1500, 25);
                                                 const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
                                                 if (SYS_TITLE && SYS_TITLE.length > 0) {
                                                     const match = options.find(opt => (opt.textContent || '').trim().toLowerCase() === SYS_TITLE.toLowerCase());
                                                     if (match) {
                                                         match.click();
                                                         matchedExisting = true;
-                                                        await randomDelay(800, 1200);
+                                                        await delay(120);
                                                     }
                                                 }
                                                 if (!matchedExisting) {
                                                     const createNewOpt = options.find(opt => (opt.textContent || '').includes('Create new instruction'));
                                                     if (createNewOpt) {
                                                         createNewOpt.click();
-                                                        await randomDelay(800, 1200);
+                                                        await delay(120);
                                                     } else {
                                                         document.body.click();
-                                                        await randomDelay(400, 600);
+                                                        await delay(60);
                                                     }
                                                 }
                                             }
@@ -511,32 +523,26 @@ fun buildAiStudioPuppetScript(): String {
                                             const titleInput = document.querySelector('ms-system-instructions .title-row input, ms-system-instructions input[placeholder*="Title"], ms-system-instructions input');
                                             if (titleInput && SYS_TITLE && SYS_TITLE.length > 0 && titleInput.value !== SYS_TITLE) {
                                                 safeInjectText(titleInput, SYS_TITLE);
-                                                await randomDelay(400, 700);
+                                                await delay(60);
                                             }
-                                            let sysTa = null;
-                                            for (let a = 0; a < 15; a++) {
-                                                sysTa = document.querySelector('ms-system-instructions textarea, textarea.in-run-settings, textarea[aria-label*="System"], textarea[placeholder*="instructions"]');
-                                                if (sysTa && isElementVisible(sysTa)) break;
-                                                await delay(400);
-                                            }
+                                            const sysTa = await waitForEl('ms-system-instructions textarea, textarea.in-run-settings, textarea[aria-label*="System"], textarea[placeholder*="instructions"]', 2000, 25);
                                             if (sysTa && sysTa.value !== SYS_PROMPT) {
                                                 safeInjectText(sysTa, SYS_PROMPT);
-                                                await randomDelay(800, 1400);
+                                                await delay(150);
                                             }
                                         }
 
                                         let saveWait = 0;
-                                        while (saveWait < 12) {
+                                        while (saveWait < 30) {
                                             const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status');
                                             if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) break;
-                                            await delay(300);
+                                            await delay(100);
                                             saveWait++;
                                         }
-                                        await randomDelay(500, 800);
                                         const closeBtn = document.querySelector('mat-dialog-container button[mat-dialog-close], mat-dialog-container button[aria-label*="Close"], button[data-test-close-button]');
                                         if (closeBtn) {
                                             closeBtn.click();
-                                            await randomDelay(1000, 1500);
+                                            await delay(150);
                                         }
                                     }
                                 } catch(e) {
@@ -545,10 +551,10 @@ fun buildAiStudioPuppetScript(): String {
                             }
 
                             let promptReady = false;
-                            for (let w = 0; w < 6; w++) {
+                            for (let w = 0; w < 10; w++) {
                                 const pa = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
                                 if (pa && isElementVisible(pa)) { promptReady = true; break; }
-                                await delay(250);
+                                await delay(40);
                             }
                             if (!promptReady) {
                                 const openDrawer = document.querySelector('ms-run-settings.expanded, .content-container ms-run-settings:not(.collapsed)');
@@ -556,7 +562,7 @@ fun buildAiStudioPuppetScript(): String {
                                     const closeSettingsBtn = openDrawer.querySelector('button[aria-label*="Close run settings"], button[aria-label*="Close"]');
                                     if (closeSettingsBtn && isElementVisible(closeSettingsBtn)) {
                                         closeSettingsBtn.click();
-                                        await randomDelay(800, 1200);
+                                        await delay(150);
                                     }
                                 }
                             }
@@ -581,82 +587,72 @@ fun buildAiStudioPuppetScript(): String {
                     const prompt = turnOpts.prompt || '';
                     const attachments = turnOpts.attachments || [];
                     const stepLabel = turnOpts.label || 'Turn';
+                    const useDeltaMode = !!turnOpts.deltaMode;
                     this.aborted = false;
                     this.isBusy = true;
 
                     updateStatus((stepLabel + ': Submitting prompt.').trim());
                     const wireTurnToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
                     hostLog('WIRE_TURN', 'beginTurn -> token=' + wireTurnToken + ', wireHooked=' + !!(window.__omniWire && window.__omniWire.hasHooked));
-                    await dismissInterstitials();
+
+                    if (!this.isConfigured) {
+                        await dismissInterstitials();
+                    }
 
                     if (attachments && Array.isArray(attachments) && attachments.length > 0) {
                         await injectAttachments(attachments, stepLabel);
                     }
 
                     let activePromptArea = null;
-                    for (let a = 0; a < 25; a++) {
+                    for (let a = 0; a < 100; a++) {
                         const allAreas = Array.from(document.querySelectorAll('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea'));
                         activePromptArea = allAreas.length > 0 ? allAreas[allAreas.length - 1] : null;
                         if (activePromptArea && isElementVisible(activePromptArea)) break;
-                        await dismissInterstitials();
-                        await delay(400);
+                        if (a % 8 === 0) await dismissInterstitials();
+                        await delay(50);
                     }
 
                     if (activePromptArea && prompt && prompt.trim().length > 0) {
                         safeInjectText(activePromptArea, prompt);
-                        await randomDelay(800, 1400);
+                        await delay(16);
                     }
 
                     if (!checkUiGenerating()) {
                         updateStatus((stepLabel + ': Preparing to run.').trim());
                         let readyTicks = 0;
                         let submitBtn = null;
-                        const maxReadyTicks = Math.max(120, (attachments ? attachments.length : 0) * 30);
+                        const maxReadyTicks = Math.max(2400, (attachments ? attachments.length : 0) * 600);
 
                         while (readyTicks < maxReadyTicks) {
                             if (checkUiGenerating()) break;
                             submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
                             if (submitBtn && isRunButtonReady(submitBtn)) break;
-                            await delay(500);
+                            await delay(25);
                             readyTicks++;
                         }
 
-                        let submitTriggered = false;
                         if (!checkUiGenerating() && submitBtn && isRunButtonReady(submitBtn)) {
                             hostLog('RUN', 'Clicking Run button for ' + stepLabel + '...');
                             submitBtn.click();
-                            submitTriggered = true;
-                            let verifyTicks = 0;
-                            while (verifyTicks < 10) {
-                                await delay(250);
-                                if (checkUiGenerating() || document.querySelector('ms-thought-chunk') || (wireTurnToken && window.__omniWire && window.__omniWire.getTurn(wireTurnToken))) break;
-                                verifyTicks++;
-                            }
-                        }
-
-                        if (!checkUiGenerating() && !submitTriggered && activePromptArea && (activePromptArea.value || '').trim().length > 0) {
+                        } else if (!checkUiGenerating() && activePromptArea && (activePromptArea.value || '').trim().length > 0) {
                             hostLog('RUN', 'Fallback Ctrl+Enter for ' + stepLabel + '...');
                             activePromptArea.focus();
                             activePromptArea.dispatchEvent(new KeyboardEvent('keydown', {
                                 key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, cancelable: true
                             }));
-                            let fallbackVerify = 0;
-                            while (fallbackVerify < 6) {
-                                await delay(500);
-                                if (checkUiGenerating()) break;
-                                fallbackVerify++;
-                            }
                         }
                     }
 
                     updateStatus((stepLabel + ': Generating answers.').trim());
                     let lastOutputText = '';
                     let lastThoughtsText = '';
+                    let emittedOutputLen = 0;
+                    let emittedThoughtsLen = 0;
                     let contentStaticTicks = 0;
                     let totalTurnTicks = 0;
                     let idleTicks = 0;
-                    const MAX_IDLE_TICKS = 240; // 72s of silence at 300ms tick
-                    const MAX_TOTAL_TICKS = 7200; // 36 minutes ceiling
+                    const MAX_IDLE_TICKS = 280; // ~70s silence at 250ms tick
+                    const MAX_TOTAL_TICKS = 8600;
                     let turnRetryCount = 0;
                     const MAX_RETRIES = 2;
                     let currentTurnOutput = '';
@@ -664,276 +660,346 @@ fun buildAiStudioPuppetScript(): String {
                     let activeWireToken = wireTurnToken;
                     let usedWireStream = false;
                     let loggedWireMiss = false;
+                    let fallbackCtrlTriggered = false;
 
-                    while (totalTurnTicks < MAX_TOTAL_TICKS && !this.aborted) {
-                        await delay(300);
-                        totalTurnTicks++;
-                        idleTicks++;
-
-                        const wire = (activeWireToken && window.__omniWire) ? window.__omniWire.getTurn(activeWireToken) : null;
-                        if (!wire && !loggedWireMiss && totalTurnTicks === 10) {
-                            loggedWireMiss = true;
-                            const latestSnap = (window.__omniWire && window.__omniWire.getLatest) ? window.__omniWire.getLatest() : null;
-                            hostLog('WIRE_MISS', 'No stream matched token=' + activeWireToken + ' after 3s. latest=' + (latestSnap ? (latestSnap.url + ' (done=' + latestSnap.done + ', out=' + latestSnap.output.length + ')') : 'null'));
+                    let wireWakeup = null;
+                    const notifyWire = () => {
+                        if (wireWakeup) {
+                            const fn = wireWakeup;
+                            wireWakeup = null;
+                            fn();
                         }
+                    };
+                    const onWireEv = (ev) => {
+                        const d = ev && ev.detail;
+                        if (!d || (activeWireToken && d.turnToken !== activeWireToken)) return;
+                        notifyWire();
+                    };
+                    window.addEventListener('__omniWireUpdate', onWireEv);
 
-                        if (wire) {
-                            usedWireStream = true;
-                            if (wire.thoughts && wire.thoughts.length > latestTurnThoughts.length) {
-                                latestTurnThoughts = wire.thoughts;
-                                idleTicks = 0;
+                    const waitForWireOrTick = (ms) => new Promise((resolve) => {
+                        let settled = false;
+                        const finish = () => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(tid);
+                            resolve();
+                        };
+                        const tid = setTimeout(() => {
+                            if (wireWakeup === finish) wireWakeup = null;
+                            finish();
+                        }, ms);
+                        wireWakeup = finish;
+                    });
+
+                    function emitTurnUpdate() {
+                        if (useDeltaMode && window.OmniAutomator && window.OmniAutomator.onPuppetTurnDelta) {
+                            const dt = latestTurnThoughts.slice(emittedThoughtsLen);
+                            const doStr = currentTurnOutput.slice(emittedOutputLen);
+                            if (dt.length > 0 || doStr.length > 0) {
+                                const isFirstOut = emittedOutputLen === 0 && doStr.length > 0;
+                                emittedThoughtsLen = latestTurnThoughts.length;
+                                emittedOutputLen = currentTurnOutput.length;
+                                window.OmniAutomator.onPuppetTurnDelta(dt, doStr, isFirstOut);
                             }
-                            if (wire.output && wire.output.length > currentTurnOutput.length) {
-                                currentTurnOutput = wire.output;
-                                idleTicks = 0;
+                        } else if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnProgress) {
+                            if (latestTurnThoughts.length !== emittedThoughtsLen || currentTurnOutput.length !== emittedOutputLen) {
+                                emittedThoughtsLen = latestTurnThoughts.length;
+                                emittedOutputLen = currentTurnOutput.length;
+                                window.OmniAutomator.onPuppetTurnProgress(latestTurnThoughts, currentTurnOutput);
+                            }
+                        }
+                    }
+
+                    try {
+                        while (totalTurnTicks < MAX_TOTAL_TICKS && !this.aborted) {
+                            const preWire = (activeWireToken && window.__omniWire) ? window.__omniWire.getTurn(activeWireToken) : null;
+                            if (!preWire || !preWire.done) {
+                                await waitForWireOrTick(250);
+                            }
+                            totalTurnTicks++;
+                            idleTicks++;
+
+                            const wire = (activeWireToken && window.__omniWire) ? window.__omniWire.getTurn(activeWireToken) : null;
+
+                            if (!wire && !fallbackCtrlTriggered && totalTurnTicks === 6 && !checkUiGenerating()) {
+                                if (activePromptArea && (activePromptArea.value || '').trim().length > 0) {
+                                    fallbackCtrlTriggered = true;
+                                    hostLog('RUN', 'Delayed fallback Ctrl+Enter for ' + stepLabel + '...');
+                                    activePromptArea.focus();
+                                    activePromptArea.dispatchEvent(new KeyboardEvent('keydown', {
+                                        key: 'Enter', code: 'Enter', keyCode: 13, which: 13, ctrlKey: true, bubbles: true, cancelable: true
+                                    }));
+                                }
                             }
 
-                            if (wire.error) {
-                                const lowerWireErr = String(wire.error).toLowerCase();
-                                const isWireQuota = wire.httpStatus === 429 || wire.statusCode === 8 ||
-                                    lowerWireErr.includes('quota') || lowerWireErr.includes('resource exhausted') ||
-                                    lowerWireErr.includes('resource_exhausted') || lowerWireErr.includes('rate limit') || lowerWireErr.includes('429');
+                            if (!wire && !loggedWireMiss && totalTurnTicks === 12) {
+                                loggedWireMiss = true;
+                                const latestSnap = (window.__omniWire && window.__omniWire.getLatest) ? window.__omniWire.getLatest() : null;
+                                hostLog('WIRE_MISS', 'No stream matched token=' + activeWireToken + ' after 3s. latest=' + (latestSnap ? (latestSnap.url + ' (done=' + latestSnap.done + ', out=' + latestSnap.output.length + ')') : 'null'));
+                            }
 
-                                if (isWireQuota) {
-                                    hostLog('WIRE_ERROR', 'Quota exhausted on wire (' + wire.httpStatus + '/' + wire.statusCode + '): ' + wire.error);
-                                    this.isBusy = false;
-                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
-                                        window.OmniAutomator.onPuppetTurnError('Quota Exhausted (429): ' + wire.error);
-                                    }
-                                    return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + wire.error };
+                            if (wire) {
+                                usedWireStream = true;
+                                if (wire.thoughts && wire.thoughts.length > latestTurnThoughts.length) {
+                                    latestTurnThoughts = wire.thoughts;
+                                    idleTicks = 0;
+                                }
+                                if (wire.output && wire.output.length > currentTurnOutput.length) {
+                                    currentTurnOutput = wire.output;
+                                    idleTicks = 0;
                                 }
 
-                                const isWireRetryable = wire.httpStatus >= 500 || wire.httpStatus === 403 || wire.statusCode === 7 ||
-                                    lowerWireErr.includes('caller does not have permission') || lowerWireErr.includes('permission denied') ||
-                                    lowerWireErr.includes('internal') || lowerWireErr.includes('overloaded') ||
-                                    lowerWireErr.includes('unavailable') || lowerWireErr.includes('network');
+                                emitTurnUpdate();
 
-                                if (isWireRetryable && turnRetryCount < MAX_RETRIES) {
+                                if (wire.error) {
+                                    const lowerWireErr = String(wire.error).toLowerCase();
+                                    const isWireQuota = wire.httpStatus === 429 || wire.statusCode === 8 ||
+                                        lowerWireErr.includes('quota') || lowerWireErr.includes('resource exhausted') ||
+                                        lowerWireErr.includes('resource_exhausted') || lowerWireErr.includes('rate limit') || lowerWireErr.includes('429');
+
+                                    if (isWireQuota) {
+                                        hostLog('WIRE_ERROR', 'Quota exhausted on wire (' + wire.httpStatus + '/' + wire.statusCode + '): ' + wire.error);
+                                        this.isBusy = false;
+                                        if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                            window.OmniAutomator.onPuppetTurnError('Quota Exhausted (429): ' + wire.error);
+                                        }
+                                        return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + wire.error };
+                                    }
+
+                                    const isWireRetryable = wire.httpStatus >= 500 || wire.httpStatus === 403 || wire.statusCode === 7 ||
+                                        lowerWireErr.includes('caller does not have permission') || lowerWireErr.includes('permission denied') ||
+                                        lowerWireErr.includes('internal') || lowerWireErr.includes('overloaded') ||
+                                        lowerWireErr.includes('unavailable') || lowerWireErr.includes('network');
+
+                                    if (isWireRetryable && turnRetryCount < MAX_RETRIES) {
+                                        turnRetryCount++;
+                                        hostLog('WIRE_RETRY', 'Transient wire error: "' + wire.error + '". Retrying ' + turnRetryCount + '/' + MAX_RETRIES + '...');
+                                        updateStatus((stepLabel + ': Retrying turn, attempt ' + turnRetryCount + '.').trim());
+                                        await delay(1200 + (turnRetryCount * 500));
+                                        activeWireToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
+                                        const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
+                                        const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
+                                        const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
+                                        if (rerunBtn && isElementVisible(rerunBtn)) rerunBtn.click();
+                                        else {
+                                            const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
+                                            if (submitBtn) submitBtn.click();
+                                        }
+                                        lastOutputText = '';
+                                        currentTurnOutput = '';
+                                        latestTurnThoughts = '';
+                                        emittedOutputLen = 0;
+                                        emittedThoughtsLen = 0;
+                                        contentStaticTicks = 0;
+                                        idleTicks = 0;
+                                        continue;
+                                    } else {
+                                        hostLog('WIRE_ERROR', 'Fatal wire error on ' + stepLabel + ': ' + wire.error);
+                                        this.isBusy = false;
+                                        if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                            window.OmniAutomator.onPuppetTurnError(wire.error);
+                                        }
+                                        return { thoughts: latestTurnThoughts, output: '', error: wire.error };
+                                    }
+                                }
+
+                                if (wire.done && wire.statusCode === 0) {
+                                    if (currentTurnOutput.trim().length > 0) {
+                                        const wireTtft = wire.firstOutputAt && wire.startedAt ? (wire.firstOutputAt - wire.startedAt) : 0;
+                                        hostLog('WIRE_STOP', '⚡ DECISION: Wire stream finished cleanly (' + wire.transport + ', chunks=' + wire.chunkCount + ', wireTTFT=' + wireTtft + 'ms, size=' + currentTurnOutput.length + 'c). Zero stillness wait!');
+                                        break;
+                                    } else {
+                                        hostLog('WIRE_FALLBACK', 'Wire stream closed with 0 parsed chars; falling back to DOM scrape.');
+                                        let fbTicks = 0;
+                                        while (fbTicks < 10 && checkUiGenerating()) {
+                                            await delay(150);
+                                            fbTicks++;
+                                        }
+                                        const fbContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
+                                        if (fbContainers.length > 0) {
+                                            const fbTxt = getScreenText(fbContainers[fbContainers.length - 1]);
+                                            if (fbTxt.length > currentTurnOutput.length) currentTurnOutput = fbTxt;
+                                        }
+                                        emitTurnUpdate();
+                                        if (currentTurnOutput.trim().length > 0) break;
+                                    }
+                                }
+
+                                // Fast-path: while wire is actively streaming, skip DOM scraping & UI polls entirely!
+                                if (wire.active) {
+                                    continue;
+                                }
+                            }
+
+                            // DOM Error Banner Guard (only checked when wire is not actively streaming)
+                            const errBanner = document.querySelector('ms-banner .error-banner-message, ms-global-banner');
+                            const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error, ms-chat-turn:last-of-type .model-error');
+                            const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
+                            const errTxt = ((errBanner ? errBanner.innerText : "") + (turnErr ? turnErr.innerText : "") + (toast ? toast.innerText : "")).trim();
+
+                            if (errTxt && !errTxt.toLowerCase().includes('saved')) {
+                                const lowerErr = errTxt.toLowerCase();
+                                const isQuota = lowerErr.includes('quota') || lowerErr.includes('resource exhausted') || lowerErr.includes('resource_exhausted') || lowerErr.includes('rate limit') || lowerErr.includes('429');
+                                if (isQuota) {
+                                    hostLog('STUDIO_ERROR', 'Quota exhausted (429): ' + errTxt);
+                                    this.isBusy = false;
+                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                        window.OmniAutomator.onPuppetTurnError('Quota Exhausted (429): ' + errTxt);
+                                    }
+                                    return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + errTxt };
+                                }
+
+                                const isRetryable = lowerErr.includes('internal error') ||
+                                                    lowerErr.includes('permission denied') ||
+                                                    lowerErr.includes('overloaded') ||
+                                                    lowerErr.includes('try again') ||
+                                                    lowerErr.includes('server error');
+
+                                if (isRetryable && turnRetryCount < MAX_RETRIES) {
                                     turnRetryCount++;
-                                    hostLog('WIRE_RETRY', 'Transient wire error: "' + wire.error + '". Retrying ' + turnRetryCount + '/' + MAX_RETRIES + '...');
+                                    hostLog('RETRY', 'Transient error: "' + errTxt + '". Retrying attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
                                     updateStatus((stepLabel + ': Retrying turn, attempt ' + turnRetryCount + '.').trim());
-                                    await delay(1800 + (turnRetryCount * 600));
+                                    await delay(1200 + (turnRetryCount * 500));
+                                    activeWireToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
+
+                                    const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
+                                    const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
+                                    const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
+                                    if (rerunBtn && isElementVisible(rerunBtn)) {
+                                        rerunBtn.click();
+                                    } else {
+                                        const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
+                                        if (submitBtn) submitBtn.click();
+                                    }
+                                    lastOutputText = '';
+                                    contentStaticTicks = 0;
+                                    idleTicks = 0;
+                                    currentTurnOutput = '';
+                                    emittedOutputLen = 0;
+                                    emittedThoughtsLen = 0;
+                                    continue;
+                                } else {
+                                    hostLog('STUDIO_ERROR', 'Fatal error on ' + stepLabel + ': ' + errTxt);
+                                    this.isBusy = false;
+                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                        window.OmniAutomator.onPuppetTurnError(errTxt);
+                                    }
+                                    return { thoughts: latestTurnThoughts, output: '', error: errTxt };
+                                }
+                            }
+
+                            // Fallback DOM scraping only when wire hasn't captured this turn yet
+                            if (!wire || (!wire.active && !wire.done)) {
+                                const thoughtBlocks = Array.from(document.querySelectorAll('ms-thought-chunk'));
+                                if (thoughtBlocks.length > 0) {
+                                    latestTurnThoughts = thoughtBlocks
+                                        .map(b => (b.innerText || b.textContent || '').trim())
+                                        .filter(Boolean)
+                                        .join('\n\n')
+                                        .trim();
+                                }
+
+                                const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
+                                let activeModelTurn = null;
+                                for (let i = allModelContainers.length - 1; i >= 0; i--) {
+                                    const t = allModelContainers[i];
+                                    const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+                                        .some(el => !el.closest('ms-thought-chunk'));
+                                    if (hasRealAnswer) {
+                                        activeModelTurn = t;
+                                        break;
+                                    }
+                                }
+                                if (!activeModelTurn && allModelContainers.length > 0) {
+                                    activeModelTurn = allModelContainers[allModelContainers.length - 1];
+                                }
+
+                                if (activeModelTurn) {
+                                    const screenText = getScreenText(activeModelTurn);
+                                    if (screenText.length >= currentTurnOutput.length) {
+                                        currentTurnOutput = screenText;
+                                    }
+                                }
+                            }
+
+                            const isBackendGenerating = (wire && wire.active) ? true : checkUiGenerating();
+                            const hasContent = currentTurnOutput.length > 0;
+                            const textGrew = currentTurnOutput.length > lastOutputText.length;
+                            const thoughtsChanged = latestTurnThoughts !== lastThoughtsText;
+
+                            if (textGrew) {
+                                idleTicks = 0;
+                                contentStaticTicks = 0;
+                                lastOutputText = currentTurnOutput;
+                                lastThoughtsText = latestTurnThoughts;
+                            } else if (thoughtsChanged) {
+                                idleTicks = 0;
+                                contentStaticTicks = 0;
+                                lastThoughtsText = latestTurnThoughts;
+                            } else if (hasContent) {
+                                if (usedWireStream) {
+                                    if (!checkUiGenerating()) {
+                                        contentStaticTicks++;
+                                        if (contentStaticTicks >= 8) {
+                                            hostLog('WIRE_SAFETY_STOP', '⚡ Wire safety settle: UI stopped generating with ' + currentTurnOutput.length + ' chars captured.');
+                                            break;
+                                        }
+                                    } else {
+                                        contentStaticTicks = 0;
+                                    }
+                                } else {
+                                    if (isBackendGenerating) {
+                                        contentStaticTicks = 0;
+                                    } else {
+                                        contentStaticTicks++;
+                                    }
+                                }
+                            }
+
+                            if (!hasContent && idleTicks >= MAX_IDLE_TICKS) {
+                                if (turnRetryCount < MAX_RETRIES) {
+                                    turnRetryCount++;
+                                    hostLog('IDLE_RETRY', 'Silence timeout. Auto-rerun ' + turnRetryCount + '/' + MAX_RETRIES);
+                                    idleTicks = 0;
+                                    contentStaticTicks = 0;
                                     activeWireToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
                                     const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
                                     const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
                                     const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
                                     if (rerunBtn && isElementVisible(rerunBtn)) rerunBtn.click();
                                     else {
-                                        const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
-                                        if (submitBtn) submitBtn.click();
+                                        const retrySubmit = document.querySelector('ms-run-button button:not(.stoppable)');
+                                        if (retrySubmit && isRunButtonReady(retrySubmit)) retrySubmit.click();
                                     }
-                                    lastOutputText = '';
-                                    currentTurnOutput = '';
-                                    latestTurnThoughts = '';
-                                    contentStaticTicks = 0;
-                                    idleTicks = 0;
-                                    await delay(1000);
+                                    await delay(1200);
                                     continue;
                                 } else {
-                                    hostLog('WIRE_ERROR', 'Fatal wire error on ' + stepLabel + ': ' + wire.error);
+                                    const timeoutErr = 'AI Studio generation stalled after ' + MAX_RETRIES + ' rerun attempts.';
                                     this.isBusy = false;
                                     if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
-                                        window.OmniAutomator.onPuppetTurnError(wire.error);
+                                        window.OmniAutomator.onPuppetTurnError(timeoutErr);
                                     }
-                                    return { thoughts: latestTurnThoughts, output: '', error: wire.error };
+                                    return { thoughts: latestTurnThoughts, output: '', error: timeoutErr };
                                 }
                             }
 
-                            if (wire.done && wire.statusCode === 0) {
-                                if (currentTurnOutput.trim().length > 0) {
-                                    hostLog('WIRE_STOP', '⚡ DECISION: Wire stream finished cleanly (' + wire.transport + ', chunks=' + wire.chunkCount + ', size=' + currentTurnOutput.length + ' chars / ' + (currentTurnOutput.length / 1024).toFixed(1) + ' KB). Zero stillness wait!');
-                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnProgress) {
-                                        window.OmniAutomator.onPuppetTurnProgress(latestTurnThoughts, currentTurnOutput);
-                                    }
-                                    break;
-                                } else {
-                                    // Unrecognized RPC payload fallback: brief DOM settle check
-                                    hostLog('WIRE_FALLBACK', 'Wire stream closed with 0 parsed chars; falling back to DOM scrape.');
-                                    let fbTicks = 0;
-                                    while (fbTicks < 10 && checkUiGenerating()) {
-                                        await delay(250);
-                                        fbTicks++;
-                                    }
-                                    const fbContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
-                                    if (fbContainers.length > 0) {
-                                        const fbTxt = getScreenText(fbContainers[fbContainers.length - 1]);
-                                        if (fbTxt.length > currentTurnOutput.length) currentTurnOutput = fbTxt;
-                                    }
-                                    if (currentTurnOutput.trim().length > 0) break;
-                                }
-                            }
-                        }
+                            emitTurnUpdate();
 
-                        // DOM Error Banner Guard (catches pre-flight UI validation errors before a network call starts)
-                        const errBanner = document.querySelector('ms-banner .error-banner-message, ms-global-banner');
-                        const turnErr = document.querySelector('.chat-turn-container.model:last-of-type .model-error, ms-chat-turn:last-of-type .model-error');
-                        const toast = document.querySelector('.cdk-overlay-container .mat-mdc-simple-snack-bar');
-                        const errTxt = ((errBanner ? errBanner.innerText : "") + (turnErr ? turnErr.innerText : "") + (toast ? toast.innerText : "")).trim();
+                            if (!usedWireStream) {
+                                const trimmedOutput = currentTurnOutput.trim();
+                                const looksLikeJson = trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[') || trimmedOutput.includes('"solutions"');
+                                const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
+                                const targetTicks = balanced ? 18 : 32;
 
-                        if (errTxt && !errTxt.toLowerCase().includes('saved')) {
-                            const lowerErr = errTxt.toLowerCase();
-                            const isQuota = lowerErr.includes('quota') || lowerErr.includes('resource exhausted') || lowerErr.includes('resource_exhausted') || lowerErr.includes('rate limit') || lowerErr.includes('429');
-                            if (isQuota) {
-                                hostLog('STUDIO_ERROR', 'Quota exhausted (429): ' + errTxt);
-                                this.isBusy = false;
-                                if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
-                                    window.OmniAutomator.onPuppetTurnError('Quota Exhausted (429): ' + errTxt);
-                                }
-                                return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + errTxt };
-                            }
-
-                            const isRetryable = lowerErr.includes('internal error') ||
-                                                lowerErr.includes('permission denied') ||
-                                                lowerErr.includes('overloaded') ||
-                                                lowerErr.includes('try again') ||
-                                                lowerErr.includes('server error');
-
-                            if (isRetryable && turnRetryCount < MAX_RETRIES) {
-                                turnRetryCount++;
-                                hostLog('RETRY', 'Transient error: "' + errTxt + '". Retrying attempt ' + turnRetryCount + '/' + MAX_RETRIES + '...');
-                                updateStatus((stepLabel + ': Retrying turn, attempt ' + turnRetryCount + '.').trim());
-                                await delay(1800 + (turnRetryCount * 600));
-                                activeWireToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
-
-                                const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
-                                const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
-                                const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
-                                if (rerunBtn && isElementVisible(rerunBtn)) {
-                                    rerunBtn.click();
-                                } else {
-                                    const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
-                                    if (submitBtn) submitBtn.click();
-                                }
-                                lastOutputText = '';
-                                contentStaticTicks = 0;
-                                idleTicks = 0;
-                                currentTurnOutput = '';
-                                await delay(1200);
-                                continue;
-                            } else {
-                                hostLog('STUDIO_ERROR', 'Fatal error on ' + stepLabel + ': ' + errTxt);
-                                this.isBusy = false;
-                                if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
-                                    window.OmniAutomator.onPuppetTurnError(errTxt);
-                                }
-                                return { thoughts: latestTurnThoughts, output: '', error: errTxt };
-                            }
-                        }
-
-                        // Skip heavy DOM scraping whenever wire hook is actively streaming tokens
-                        if (!wire || (!wire.active && !wire.done)) {
-                            const thoughtBlocks = Array.from(document.querySelectorAll('ms-thought-chunk'));
-                            if (thoughtBlocks.length > 0) {
-                                latestTurnThoughts = thoughtBlocks
-                                    .map(b => (b.innerText || b.textContent || '').trim())
-                                    .filter(Boolean)
-                                    .join('\n\n')
-                                    .trim();
-                            }
-
-                            const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
-                            let activeModelTurn = null;
-                            for (let i = allModelContainers.length - 1; i >= 0; i--) {
-                                const t = allModelContainers[i];
-                                const hasRealAnswer = Array.from(t.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
-                                    .some(el => !el.closest('ms-thought-chunk'));
-                                if (hasRealAnswer) {
-                                    activeModelTurn = t;
+                                if (hasContent && !isBackendGenerating && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
+                                    hostLog('DECISION_STOP', '🛑 DECISION: Fallback DOM turn completed (' + currentTurnOutput.length + ' chars).');
                                     break;
                                 }
                             }
-                            if (!activeModelTurn && allModelContainers.length > 0) {
-                                activeModelTurn = allModelContainers[allModelContainers.length - 1];
-                            }
-
-                            if (activeModelTurn) {
-                                const screenText = getScreenText(activeModelTurn);
-                                if (screenText.length >= currentTurnOutput.length) {
-                                    currentTurnOutput = screenText;
-                                }
-                            }
                         }
-
-                        const isBackendGenerating = (wire && wire.active) ? true : checkUiGenerating();
-                        const hasContent = currentTurnOutput.length > 0;
-                        const textGrew = currentTurnOutput.length > lastOutputText.length;
-                        const thoughtsChanged = latestTurnThoughts !== lastThoughtsText;
-
-                        if (textGrew) {
-                            const diff = currentTurnOutput.length - lastOutputText.length;
-                            hostLog(usedWireStream ? 'WIRE_GROWTH' : 'WATCHDOG_GROWTH', '📈 Growth: ' + lastOutputText.length + ' -> ' + currentTurnOutput.length + ' chars (+' + diff + '). Active: ' + isBackendGenerating);
-                            idleTicks = 0;
-                            contentStaticTicks = 0;
-                            lastOutputText = currentTurnOutput;
-                            lastThoughtsText = latestTurnThoughts;
-                        } else if (thoughtsChanged) {
-                            hostLog(usedWireStream ? 'WIRE_THOUGHTS' : 'WATCHDOG_THOUGHTS', '🧠 Thoughts updated (' + latestTurnThoughts.length + ' chars).');
-                            idleTicks = 0;
-                            contentStaticTicks = 0;
-                            lastThoughtsText = latestTurnThoughts;
-                        } else if (hasContent) {
-                            if (usedWireStream) {
-                                if (!checkUiGenerating()) {
-                                    contentStaticTicks++;
-                                    if (contentStaticTicks >= 8) {
-                                        hostLog('WIRE_SAFETY_STOP', '⚡ Wire safety settle: UI stopped generating with ' + currentTurnOutput.length + ' chars captured.');
-                                        break;
-                                    }
-                                } else {
-                                    contentStaticTicks = 0;
-                                }
-                            } else {
-                                if (isBackendGenerating) {
-                                    contentStaticTicks = 0;
-                                } else {
-                                    contentStaticTicks++;
-                                }
-                            }
-                        }
-
-                        if (!hasContent && idleTicks >= MAX_IDLE_TICKS) {
-                            if (turnRetryCount < MAX_RETRIES) {
-                                turnRetryCount++;
-                                hostLog('IDLE_RETRY', 'Silence timeout. Auto-rerun ' + turnRetryCount + '/' + MAX_RETRIES);
-                                idleTicks = 0;
-                                contentStaticTicks = 0;
-                                activeWireToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
-                                const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
-                                const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
-                                const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
-                                if (rerunBtn && isElementVisible(rerunBtn)) rerunBtn.click();
-                                else {
-                                    const retrySubmit = document.querySelector('ms-run-button button:not(.stoppable)');
-                                    if (retrySubmit && isRunButtonReady(retrySubmit)) retrySubmit.click();
-                                }
-                                await delay(2000);
-                                continue;
-                            } else {
-                                const timeoutErr = 'AI Studio generation stalled after ' + MAX_RETRIES + ' rerun attempts.';
-                                this.isBusy = false;
-                                if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
-                                    window.OmniAutomator.onPuppetTurnError(timeoutErr);
-                                }
-                                return { thoughts: latestTurnThoughts, output: '', error: timeoutErr };
-                            }
-                        }
-
-                        if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnProgress) {
-                            window.OmniAutomator.onPuppetTurnProgress(latestTurnThoughts, currentTurnOutput);
-                        }
-
-                        // Fallback stillness exit (only triggers if wire interceptor wasn't matched)
-                        if (!usedWireStream) {
-                            const trimmedOutput = currentTurnOutput.trim();
-                            const looksLikeJson = trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[') || trimmedOutput.includes('"solutions"');
-                            const balanced = looksLikeJson && isBracketsBalanced(trimmedOutput);
-                            const targetTicks = balanced ? 16 : 28; // ~4.8s / ~8.4s at 300ms tick
-
-                            if (hasContent && !isBackendGenerating && contentStaticTicks >= targetTicks && (balanced || trimmedOutput.length >= 20)) {
-                                hostLog('DECISION_STOP', '🛑 DECISION: Fallback DOM turn completed (' + currentTurnOutput.length + ' chars).');
-                                break;
-                            }
-                        }
+                    } finally {
+                        window.removeEventListener('__omniWireUpdate', onWireEv);
                     }
 
                     this.isBusy = false;
