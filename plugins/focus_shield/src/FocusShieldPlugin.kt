@@ -1592,7 +1592,9 @@ class FocusShieldPlugin : PluginEntry() {
             "acr.browser.barebones",               // Lightning
             "com.mi.globalbrowser",                // Mi Browser
             "com.mi.globalbrowser.mini",           // Mint Browser
-            "com.android.browser"                  // AOSP Browser
+            "com.android.browser",                 // AOSP Browser
+            "com.google.android.googlequicksearchbox", // Google Search App
+            "com.google.android.apps.searchlite"   // Google Go
         )
     }
 }
