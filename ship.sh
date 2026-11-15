@@ -28,8 +28,8 @@ APP_LABEL="$RAW_LABEL"
 MODULE_ID=$(normalize_slug "$RAW_LABEL")
 TARGET_FILENAME=$(normalize_filename "$RAW_TARGET")
 
-SUPABASE_URL="${SUPABASE_URL:-https://vlzgfaqrnyiqfxxxvtas.supabase.co}"
-ANON_KEY="${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsemdmYXFybnlpcWZ4eHh2dGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU1NTk5NDAsImV4cCI6MjA4MTEzNTk0MH0.y93d68JWyGL7NKXZEHLunAuayMEWw1K6yATFGLxkUxY}"
+SUPABASE_URL="${SUPABASE_URL:-https://srcynzxpodjfvcydqipt.supabase.co}"
+ANON_KEY="${ANON_KEY:-sb_publishable_eU7Sck13kjRIe0yQ3WFuVg_N70_ckBA}"
 
 echo "🏷️  App Display Name: '$APP_LABEL'"
 echo "🆔 Canonical Module ID: '$MODULE_ID'"
@@ -59,7 +59,6 @@ fi
 # 2. Upload Bundle to Supabase Storage
 echo "📦 Uploading $BUNDLE_PATH to Supabase Storage bucket 'omni-modules' as '$TARGET_FILENAME'..."
 STORAGE_STATUS=$(curl -s -o response_storage.txt -w "%{http_code}" -X POST "$SUPABASE_URL/storage/v1/object/omni-modules/$TARGET_FILENAME" \
-  -H "Authorization: Bearer $ANON_KEY" \
   -H "apikey: $ANON_KEY" \
   -H "Content-Type: application/zip" \
   -H "x-upsert: true" \
@@ -115,7 +114,6 @@ def send_upsert(data):
         f"{supabase_url}/rest/v1/omni_modules?on_conflict=id",
         data=json.dumps(data).encode('utf-8'),
         headers={
-            'Authorization': f"Bearer {anon_key}",
             'apikey': anon_key,
             'Content-Type': 'application/json',
             'Prefer': 'resolution=merge-duplicates'
