@@ -7,8 +7,8 @@ jobs:
   forge-runtime:
     runs-on: ubuntu-latest
     env:
-      SUPABASE_URL: https://vlzgfaqrnyiqfxxxvtas.supabase.co
-      ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsemdmYXFybnlpcWZ4eHh2dGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU1NTk5NDAsImV4cCI6MjA4MTEzNTk0MH0.y93d68JWyGL7NKXZEHLunAuayMEWw1K6yATFGLxkUxY
+      SUPABASE_URL: https://srcynzxpodjfvcydqipt.supabase.co
+      ANON_KEY: sb_publishable_eU7Sck13kjRIe0yQ3WFuVg_N70_ckBA
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -48,7 +48,6 @@ jobs:
         run: |
           echo "🚀 Uploading extended_icons.dex to Supabase Storage bucket 'omni-modules'..."
           UPLOAD_STATUS=$(curl -s -o response_runtime.txt -w "%{http_code}" -X POST "$SUPABASE_URL/storage/v1/object/omni-modules/extended_icons.dex" \
-            -H "Authorization: Bearer $ANON_KEY" \
             -H "apikey: $ANON_KEY" \
             -H "Content-Type: application/octet-stream" \
             -H "x-upsert: true" \
