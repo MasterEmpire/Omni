@@ -130,12 +130,11 @@ private suspend fun fetchCloudModules(): Pair<Boolean, List<CloudModule>> = with
     val list = mutableListOf<CloudModule>()
     var isOnline = false
     try {
-        val url = "https://vlzgfaqrnyiqfxxxvtas.supabase.co/rest/v1/omni_modules?select=*&order=created_at.desc"
-        val anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsemdmYXFybnlpcWZ4eHh2dGFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU1NTk5NDAsImV4cCI6MjA4MTEzNTk0MH0.y93d68JWyGL7NKXZEHLunAuayMEWw1K6yATFGLxkUxY"
+        val url = "https://srcynzxpodjfvcydqipt.supabase.co/rest/v1/omni_modules?select=*&order=created_at.desc"
+        val anonKey = "sb_publishable_eU7Sck13kjRIe0yQ3WFuVg_N70_ckBA"
         val request = Request.Builder()
             .url(url)
             .addHeader("apikey", anonKey)
-            .addHeader("Authorization", "Bearer $anonKey")
             .build()
 
         val response = supabaseHttpClient.newCall(request).execute()
