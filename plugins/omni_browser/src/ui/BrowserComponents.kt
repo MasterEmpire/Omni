@@ -865,6 +865,8 @@ fun CxpIngestionPillBanner(
             "SUCCESS" -> Triple(Color(0xFF238636), "✅", "Success")
             "PARTIAL" -> Triple(Color(0xFFD29922), "✨", "AI Healed")
             "PARTIAL_PARSE_BLOCKED" -> Triple(Color(0xFFFF9800), "⚠️", "Parse Blocked")
+            "DUPLICATE" -> Triple(Color(0xFFFF9800), "🔁", "Duplicate Blocked")
+            "NETWORK_ERROR" -> Triple(Color(0xFFDA3633), "📡", "Network Error")
             "FAILED" -> Triple(Color(0xFFDA3633), "❌", "Failed")
             else -> Triple(Color(0xFF58A6FF), "⏳", "Committing")
         }
@@ -885,7 +887,7 @@ fun CxpIngestionPillBanner(
             ) {
                 Text(icon, fontSize = 16.sp)
 
-                Column(modifier = Modifier.widthIn(max = 160.dp)) {
+                Column(modifier = Modifier.widthIn(max = 210.dp)) {
                     Text(
                         text = titleText,
                         color = borderColor,
@@ -896,7 +898,7 @@ fun CxpIngestionPillBanner(
                         text = message,
                         color = Color(0xFFE8EAED),
                         fontSize = 10.sp,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
