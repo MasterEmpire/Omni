@@ -272,9 +272,14 @@ object LiveAutoPilotEngine {
                     function isBurgerValidAndBalanced(burgerStr) {
                         if (!burgerStr || burgerStr.length < 20) return false;
 
-                        // 1. Must contain at least one real operational tag
-                        const hasAction = /<(?:comment|replace_block|create_file|delete_file|rename_file|export_files)\b/i.test(burgerStr);
+                        // 1. Must contain at least one real mutation/export operational tag (never <comment> or <pull_files> alone)
+                        const hasAction = /<(?:replace_block|create_file|delete_file|rename_file|export_files)\b/i.test(burgerStr);
                         if (!hasAction) return false;
+
+                        // Reject pull_files wrappers masquerading as code patches
+                        if (/<pull_files\b/i.test(burgerStr) && !/<(?:replace_block|create_file|delete_file|rename_file)\b/i.test(burgerStr)) {
+                            return false;
+                        }
 
                         // 2. Exactly one open wrapper and one close wrapper in this candidate slice
                         const openWrapper = (burgerStr.match(/<(?:cxp|omni_cxp|patch)\b/gi) || []).length;
