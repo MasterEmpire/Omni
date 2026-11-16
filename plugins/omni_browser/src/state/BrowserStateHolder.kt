@@ -1455,9 +1455,13 @@ class BrowserStateHolder(
                 delay(600)
                 val wv = poolManager.pool[targetTabId]
                 bridge.log("AUTOPILOT_DEBUG", "⏳ [POST DELAY] Re-checked pool for '$targetTabId': wv is ${if (wv != null) "FOUND (url='${wv.url}')" else "STILL NULL"}")
-                wv?.onResume()
-                wv?.evaluateJavascript(probeScript) { evalResult ->
-                    bridge.log("AUTOPILOT_DEBUG", "📝 Post-delay evaluateJavascript callback returned: $evalResult")
+                if (wv != null) {
+                    wv.onResume()
+                    wv.evaluateJavascript(probeScript) { evalResult ->
+                        bridge.log("AUTOPILOT_DEBUG", "📝 Post-delay evaluateJavascript callback returned: $evalResult")
+                    }
+                } else {
+                    onPatchReported("FAILED", "Conduit IDE tab failed to initialize")
                 }
             }
         }
@@ -1478,14 +1482,17 @@ class BrowserStateHolder(
         cxpPillMessage = when (cxpPillStatus) {
             "SUCCESS" -> "Patch Committed to Git!"
             "PARTIAL" -> "Committed with AI Healing"
-            "PARTIAL_PARSE_BLOCKED" -> "Blocked: Incomplete XML (Review in IDE)"
+            "PARTIAL_PARSE_BLOCKED" -> details.ifEmpty { "Blocked: Incomplete XML (Review in IDE)" }
+            "DUPLICATE" -> details.ifEmpty { "Duplicate of previous commit blocked" }
+            "NETWORK_ERROR" -> details.ifEmpty { "Failed to fetch (Check internet)" }
             "FAILED" -> details.ifEmpty { "Patch Failed" }
-            else -> details
+            else -> details.ifEmpty { status }
         }
+        val isErrorLike = cxpPillStatus in setOf("FAILED", "DUPLICATE", "NETWORK_ERROR", "PARTIAL_PARSE_BLOCKED")
         showCxpPill = true
         cxpPillDismissJob?.cancel()
         cxpPillDismissJob = coroutineScope.launch {
-            delay(5500)
+            delay(if (isErrorLike) 7500L else 5500L)
             showCxpPill = false
             bridge.log("AUTOPILOT_PIPELINE", "🧹 [STAGE 5: DISMISSED] Pill banner auto-dismissed.")
         }
