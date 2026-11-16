@@ -32,6 +32,22 @@ class OmniStudioLabBridge(
 
     private fun resolveProfileId(input: String): String {
         val trimmed = input.trim()
+        if (trimmed.equals("random", ignoreCase = true)) {
+            val vault = com.omni.plugin.browser.storage.VaultManager(context, bridge)
+            val profiles = (vault.loadProfiles() ?: emptyList()).ifEmpty {
+                listOf(BrowserProfile("default", "Default", 0xFF2979FF))
+            }
+            val analytics = vault.loadAiAnalytics()
+            val now = System.currentTimeMillis()
+            val healthy = profiles.filter { prof ->
+                val qTime = analytics[prof.id]?.lastQuotaHitTimestamp ?: 0L
+                qTime == 0L || (now - qTime) >= 24 * 60 * 60 * 1000L
+            }
+            val pool = if (healthy.isNotEmpty()) healthy else profiles
+            val chosen = pool.random()
+            bridge.log("STUDIO_LAB", "🎲 [RANDOM PROFILE] Selected '${chosen.name}' (${chosen.id}) from ${pool.size} profile(s)")
+            return chosen.id
+        }
         if (trimmed.isEmpty() || trimmed.equals("default", ignoreCase = true)) return "default"
         val profiles = com.omni.plugin.browser.storage.VaultManager(context, bridge).loadProfiles() ?: emptyList()
         val matched = profiles.find { it.id.equals(trimmed, ignoreCase = true) }
