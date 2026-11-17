@@ -1,10 +1,13 @@
 package com.omni.plugin.notes.ui
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -31,12 +35,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -52,6 +62,7 @@ import com.omni.plugin.notes.model.NoteSecurity
 import com.omni.plugin.notes.model.NoteStatus
 import com.omni.plugin.notes.model.NoteThemeMode
 import com.omni.plugin.notes.model.NoteType
+import com.omni.plugin.notes.model.formatBytesHuman
 import com.omni.plugin.notes.storage.NoteRepository
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -74,12 +85,14 @@ fun NoteEditorScreen(
 ) {
     val isDark = NoteRepository.settings.themeMode == NoteThemeMode.DARK
     val isPaperMode = NoteRepository.settings.isPaperMode
+    val isMarkdownEnabled = NoteRepository.settings.isMarkdownEnabled
     val noteId = remember(existingNote?.id) { existingNote?.id ?: "note_${System.currentTimeMillis()}" }
     val noteType = existingNote?.type ?: initialType
     val createdAt = existingNote?.createdAtMs ?: System.currentTimeMillis()
 
     var title by remember(noteId) { mutableStateOf(existingNote?.title ?: "") }
     var content by remember(noteId) { mutableStateOf(existingNote?.content ?: "") }
+    var marginContent by remember(noteId) { mutableStateOf(existingNote?.marginContent ?: "") }
     var checklist by remember(noteId) { mutableStateOf(existingNote?.checklist ?: emptyList()) }
     var colorId by remember(noteId) { mutableStateOf(existingNote?.colorId ?: initialColorId) }
     var folderId by remember(noteId) { mutableStateOf(existingNote?.folderId ?: initialFolderId) }
@@ -117,6 +130,7 @@ fun NoteEditorScreen(
             id = noteId,
             title = title.trim(),
             content = content,
+            marginContent = marginContent,
             type = noteType,
             checklist = checklist,
             colorId = colorId,
@@ -135,6 +149,7 @@ fun NoteEditorScreen(
     fun persistIfNonEmpty(): Boolean {
         val hasData = title.isNotBlank() ||
             content.isNotBlank() ||
+            marginContent.isNotBlank() ||
             checklist.isNotEmpty() ||
             existingNote != null
         if (hasData) {
@@ -148,12 +163,52 @@ fun NoteEditorScreen(
         return false
     }
 
+    fun formattedNoteForExport(): String {
+        return if (noteType == NoteType.CHECKLIST) {
+            buildString {
+                if (title.isNotBlank()) appendLine(title)
+                checklist.forEach { appendLine("${if (it.isChecked) "[x]" else "[ ]"} ${it.text}") }
+            }.trim()
+        } else {
+            if (title.isNotBlank()) "$title\n\n$content".trim() else content.trim()
+        }
+    }
+
+    fun shareCurrentNote() {
+        val body = formattedNoteForExport()
+        if (body.isBlank()) {
+            bridge.showToast("Nothing to share")
+            return
+        }
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            if (title.isNotBlank()) putExtra(Intent.EXTRA_SUBJECT, title)
+            putExtra(Intent.EXTRA_TEXT, body)
+        }
+        context.startActivity(Intent.createChooser(sendIntent, "Share Note").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
     fun saveAndExit() {
         if (isDirty && persistIfNonEmpty()) {
             isDirty = false
             bridge.showToast("Note saved")
         }
         onExitEditor()
+    }
+
+    fun handleBackAction() {
+        val hasTextData = title.isNotBlank() || content.isNotBlank() || marginContent.isNotBlank() || existingNote != null
+        if (noteType == NoteType.TEXT && isEditMode && hasTextData) {
+            if (isDirty && persistIfNonEmpty()) {
+                isDirty = false
+                bridge.showToast("Note saved")
+            }
+            isEditMode = false
+        } else {
+            saveAndExit()
+        }
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -173,7 +228,7 @@ fun NoteEditorScreen(
 
     DisposableEffect(Unit) {
         registerBackInterceptor {
-            saveAndExit()
+            handleBackAction()
             true
         }
         onDispose { }
@@ -185,7 +240,7 @@ fun NoteEditorScreen(
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = topBarBg),
                 navigationIcon = {
-                    IconButton(onClick = { saveAndExit() }) {
+                    IconButton(onClick = { handleBackAction() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Save & Back", tint = primaryText)
                     }
                 },
@@ -344,15 +399,14 @@ fun NoteEditorScreen(
                                 text = { Text("📋 Copy Note Text", color = primaryText, fontSize = 13.sp) },
                                 onClick = {
                                     showMoreMenu = false
-                                    val formatted = if (noteType == NoteType.CHECKLIST) {
-                                        buildString {
-                                            if (title.isNotBlank()) appendLine(title)
-                                            checklist.forEach { appendLine("${if (it.isChecked) "[x]" else "[ ]"} ${it.text}") }
-                                        }
-                                    } else {
-                                        if (title.isNotBlank()) "$title\n\n$content" else content
-                                    }
-                                    bridge.copyToClipboard(formatted.trim())
+                                    bridge.copyToClipboard(formattedNoteForExport())
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("📤 Share Note", color = primaryText, fontSize = 13.sp) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    shareCurrentNote()
                                 }
                             )
                             DropdownMenuItem(
@@ -467,9 +521,9 @@ fun NoteEditorScreen(
                 val noteLineHeight = if (isPaperMode) 26.sp else 22.sp
                 val lineStepPx = with(density) { noteLineHeight.toPx() }
                 val topPadPx = with(density) { 16.dp.toPx() }
-                val marginXPx = with(density) { 38.dp.toPx() }
+                val marginXPx = with(density) { 44.dp.toPx() }
                 val ruleColor = if (isDark) Color.White.copy(alpha = 0.09f) else Color(0xFF60A5FA).copy(alpha = 0.35f)
-                val marginColor = Color(0xFFF85149).copy(alpha = if (isDark) 0.34f else 0.5f)
+                val marginColor = Color(0xFFF85149).copy(alpha = if (isDark) 0.36f else 0.52f)
                 val paperModifier = if (isPaperMode) {
                     Modifier.drawBehind {
                         drawLine(
@@ -495,16 +549,46 @@ fun NoteEditorScreen(
                 } else {
                     Modifier
                 }
-                val startPadding = if (isPaperMode) 48.dp else 16.dp
 
                 if (isEditMode) {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
                             .then(paperModifier)
                             .verticalScroll(textScrollState)
                     ) {
+                        if (isPaperMode) {
+                            BasicTextField(
+                                value = marginContent,
+                                onValueChange = {
+                                    marginContent = it
+                                    isDirty = true
+                                },
+                                textStyle = TextStyle(
+                                    color = accent,
+                                    fontSize = 13.sp,
+                                    lineHeight = noteLineHeight,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                cursorBrush = SolidColor(accent),
+                                decorationBox = { inner ->
+                                    Box(
+                                        modifier = Modifier
+                                            .width(44.dp)
+                                            .defaultMinSize(minHeight = 420.dp)
+                                            .padding(start = 6.dp, end = 4.dp, top = 16.dp, bottom = 32.dp)
+                                    ) {
+                                        if (marginContent.isEmpty()) {
+                                            Text("1.", color = mutedText.copy(alpha = 0.35f), fontSize = 13.sp, lineHeight = noteLineHeight)
+                                        }
+                                        inner()
+                                    }
+                                },
+                                modifier = Modifier.width(44.dp)
+                            )
+                        }
+
                         BasicTextField(
                             value = content,
                             onValueChange = { next ->
@@ -527,7 +611,7 @@ fun NoteEditorScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .defaultMinSize(minHeight = 420.dp)
-                                        .padding(start = startPadding, end = 16.dp, top = 16.dp, bottom = 32.dp)
+                                        .padding(start = if (isPaperMode) 10.dp else 16.dp, end = 16.dp, top = 16.dp, bottom = 32.dp)
                                 ) {
                                     if (content.isEmpty()) {
                                         Text("Start typing your note...", color = mutedText.copy(alpha = 0.6f), fontSize = 15.sp)
@@ -535,31 +619,125 @@ fun NoteEditorScreen(
                                     inner()
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 } else {
-                    Column(
+                    val linkColor = if (isDark) Color(0xFF58A6FF) else Color(0xFF1D4ED8)
+                    val codeBg = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.07f)
+                    val renderedAnnotated = remember(content, isMarkdownEnabled, isDark, primaryText, mutedText) {
+                        if (content.isBlank()) {
+                            AnnotatedString("Double-tap anywhere to start writing...")
+                        } else if (isMarkdownEnabled) {
+                            buildMarkdownAndLinksAnnotatedString(
+                                raw = content,
+                                primaryText = primaryText,
+                                mutedText = mutedText,
+                                linkColor = linkColor,
+                                codeBg = codeBg
+                            )
+                        } else {
+                            AnnotatedString(content)
+                        }
+                    }
+
+                    var lastQuickTapMs by remember { mutableLongStateOf(0L) }
+                    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
                             .then(paperModifier)
                             .verticalScroll(textScrollState)
-                            .clickable { isEditMode = true }
-                            .padding(start = startPadding, end = 16.dp, top = 16.dp, bottom = 32.dp)
                     ) {
-                        Text(
-                            text = content.ifBlank { "Tap anywhere to start writing..." },
-                            color = if (content.isBlank()) mutedText else primaryText,
-                            fontSize = 15.sp,
-                            lineHeight = noteLineHeight
-                        )
+                        if (isPaperMode) {
+                            Text(
+                                text = marginContent,
+                                color = accent,
+                                fontSize = 13.sp,
+                                lineHeight = noteLineHeight,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .width(44.dp)
+                                    .padding(start = 6.dp, end = 4.dp, top = 16.dp, bottom = 32.dp)
+                            )
+                        }
+
+                        SelectionContainer(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = if (isPaperMode) 10.dp else 16.dp, end = 16.dp, top = 16.dp, bottom = 32.dp)
+                        ) {
+                            Text(
+                                text = renderedAnnotated,
+                                color = if (content.isBlank()) mutedText else primaryText,
+                                fontSize = 15.sp,
+                                lineHeight = noteLineHeight,
+                                onTextLayout = { textLayoutResult = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 420.dp)
+                                    .pointerInput(renderedAnnotated, isMarkdownEnabled) {
+                                        awaitEachGesture {
+                                            val down = awaitFirstDown(requireUnconsumed = false)
+                                            val downTime = down.uptimeMillis
+                                            val downPos = down.position
+                                            var movedFar = false
+                                            var upPos = downPos
+                                            var upTime = downTime
+
+                                            while (true) {
+                                                val event = awaitPointerEvent(PointerEventPass.Main)
+                                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                                if (!change.pressed) {
+                                                    upPos = change.position
+                                                    upTime = change.uptimeMillis
+                                                    break
+                                                }
+                                                if ((change.position - downPos).getDistance() > viewConfiguration.touchSlop) {
+                                                    movedFar = true
+                                                }
+                                            }
+
+                                            if (!movedFar && (upTime - downTime) < 260L) {
+                                                var openedLink = false
+                                                if (isMarkdownEnabled && content.isNotBlank()) {
+                                                    textLayoutResult?.let { layout ->
+                                                        val offset = layout.getOffsetForPosition(upPos)
+                                                        val urlAnn = renderedAnnotated.getStringAnnotations("URL", offset, offset).firstOrNull()
+                                                        if (urlAnn != null) {
+                                                            openedLink = true
+                                                            openUrlInOmniBrowser(context, bridge, urlAnn.item)
+                                                        }
+                                                    }
+                                                }
+                                                if (!openedLink) {
+                                                    val nowMs = System.currentTimeMillis()
+                                                    if (nowMs - lastQuickTapMs < 320L) {
+                                                        lastQuickTapMs = 0L
+                                                        isEditMode = true
+                                                    } else {
+                                                        lastQuickTapMs = nowMs
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                            )
+                        }
                     }
                 }
 
                 // Footer Metadata Bar
                 val wordCount = remember(content) {
                     content.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+                }
+                val sizeStr = remember(title, content, marginContent) {
+                    val bytes = title.toByteArray(Charsets.UTF_8).size +
+                        content.toByteArray(Charsets.UTF_8).size +
+                        marginContent.toByteArray(Charsets.UTF_8).size
+                    formatBytesHuman(bytes)
                 }
                 val dateFmt = remember(existingNote?.updatedAtMs) {
                     SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date(existingNote?.updatedAtMs ?: createdAt))
@@ -568,11 +746,30 @@ fun NoteEditorScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(topBarBg.copy(alpha = 0.55f))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("$wordCount words • ${content.length} chars", color = mutedText, fontSize = 11.sp)
-                    Text(if (isEditMode) "Editing" else "Read mode • $dateFmt", color = mutedText, fontSize = 11.sp)
+                    Text("$wordCount words • ${content.length} chars • $sizeStr", color = mutedText, fontSize = 11.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(if (isEditMode) "Editing" else dateFmt, color = mutedText, fontSize = 11.sp)
+                        Text(
+                            "📋",
+                            fontSize = 13.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { bridge.copyToClipboard(formattedNoteForExport()) }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                        Text(
+                            "📤",
+                            fontSize = 13.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { shareCurrentNote() }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             } else {
                 // Checklist Mode with Drag-to-Reorder
@@ -1099,5 +1296,201 @@ fun NoteEditorScreen(
                 }
             }
         )
+    }
+}
+
+private fun openUrlInOmniBrowser(context: Context, bridge: HostBridge, rawUrl: String) {
+    val cleanUrl = if (rawUrl.startsWith("http://", true) || rawUrl.startsWith("https://", true)) {
+        rawUrl
+    } else {
+        "https://$rawUrl"
+    }
+    try {
+        val browserDataDir = java.io.File(context.getDir("plugins_data", Context.MODE_PRIVATE), "omni_browser/config")
+        browserDataDir.mkdirs()
+        val pendingFile = java.io.File(browserDataDir, "pending_url.json")
+        val payload = org.json.JSONObject().apply {
+            put("url", cleanUrl)
+            put("ts", System.currentTimeMillis())
+        }
+        pendingFile.writeText(payload.toString(), Charsets.UTF_8)
+
+        context.sendBroadcast(Intent("com.omni.hub.action.BROWSER_OPEN_URL").apply {
+            setPackage(context.packageName)
+        })
+
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            putExtra("extra_open_plugin_id", "omni_browser")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        if (launchIntent != null) {
+            context.startActivity(launchIntent)
+        } else {
+            bridge.showToast("Opening in Omni Browser...")
+        }
+    } catch (e: Exception) {
+        bridge.showToast("Could not open link: ${e.message}")
+    }
+}
+
+private val BARE_URL_REGEX = Regex("""((?:https?://|www\.)[^\s<>()\[\]"'`,;]+)""", RegexOption.IGNORE_CASE)
+private val MD_LINK_REGEX = Regex("""\[([^\]]+)\]\((https?://[^)\s]+)\)""")
+private val INLINE_TOKEN_REGEX = Regex("""(\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|`[^`\n]+`|\*[^*\n]+\*|_[^_\n]+_)""")
+
+private fun buildMarkdownAndLinksAnnotatedString(
+    raw: String,
+    primaryText: Color,
+    mutedText: Color,
+    linkColor: Color,
+    codeBg: Color
+): AnnotatedString {
+    return buildAnnotatedString {
+        val lines = raw.split('\n')
+        var inCodeFence = false
+
+        lines.forEachIndexed { lineIdx, origLine ->
+            val trimmed = origLine.trimStart()
+            if (trimmed.startsWith("```")) {
+                inCodeFence = !inCodeFence
+                pushStyle(SpanStyle(color = mutedText, fontFamily = FontFamily.Monospace, fontSize = 12.sp))
+                append(origLine)
+                pop()
+                if (lineIdx < lines.lastIndex) append('\n')
+                return@forEachIndexed
+            }
+
+            if (inCodeFence) {
+                pushStyle(SpanStyle(color = primaryText, fontFamily = FontFamily.Monospace, background = codeBg, fontSize = 13.sp))
+                append(origLine)
+                pop()
+                if (lineIdx < lines.lastIndex) append('\n')
+                return@forEachIndexed
+            }
+
+            when {
+                origLine.startsWith("### ") -> {
+                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 17.sp))
+                    appendInlineMarkdownAndLinks(origLine.drop(4), linkColor, codeBg)
+                    pop()
+                }
+                origLine.startsWith("## ") -> {
+                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 19.sp))
+                    appendInlineMarkdownAndLinks(origLine.drop(3), linkColor, codeBg)
+                    pop()
+                }
+                origLine.startsWith("# ") -> {
+                    pushStyle(SpanStyle(fontWeight = FontWeight.ExtraBold, fontSize = 21.sp))
+                    appendInlineMarkdownAndLinks(origLine.drop(2), linkColor, codeBg)
+                    pop()
+                }
+                origLine.startsWith("> ") -> {
+                    pushStyle(SpanStyle(color = mutedText, fontStyle = FontStyle.Italic))
+                    append("│ ")
+                    appendInlineMarkdownAndLinks(origLine.drop(2), linkColor, codeBg)
+                    pop()
+                }
+                origLine.startsWith("- ") || origLine.startsWith("* ") -> {
+                    append("• ")
+                    appendInlineMarkdownAndLinks(origLine.drop(2), linkColor, codeBg)
+                }
+                else -> {
+                    appendInlineMarkdownAndLinks(origLine, linkColor, codeBg)
+                }
+            }
+
+            if (lineIdx < lines.lastIndex) append('\n')
+        }
+    }
+}
+
+private fun AnnotatedString.Builder.appendInlineMarkdownAndLinks(
+    line: String,
+    linkColor: Color,
+    codeBg: Color
+) {
+    // First pass: split out Markdown links [label](url)
+    var cursor = 0
+    for (m in MD_LINK_REGEX.findAll(line)) {
+        if (m.range.first > cursor) {
+            appendFormattedWithBareUrls(line.substring(cursor, m.range.first), linkColor, codeBg)
+        }
+        val label = m.groupValues[1]
+        val url = m.groupValues[2]
+        pushStringAnnotation("URL", url)
+        pushStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Medium))
+        append(label)
+        pop()
+        pop()
+        cursor = m.range.last + 1
+    }
+    if (cursor < line.length) {
+        appendFormattedWithBareUrls(line.substring(cursor), linkColor, codeBg)
+    }
+}
+
+private fun AnnotatedString.Builder.appendFormattedWithBareUrls(
+    segment: String,
+    linkColor: Color,
+    codeBg: Color
+) {
+    var cursor = 0
+    for (u in BARE_URL_REGEX.findAll(segment)) {
+        if (u.range.first > cursor) {
+            appendStyledInlineTokens(segment.substring(cursor, u.range.first), codeBg)
+        }
+        val urlText = u.groupValues[1].trimEnd('.', ',', ';', ')')
+        val trailingCount = u.groupValues[1].length - urlText.length
+        pushStringAnnotation("URL", urlText)
+        pushStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline))
+        append(urlText)
+        pop()
+        pop()
+        if (trailingCount > 0) {
+            append(u.groupValues[1].takeLast(trailingCount))
+        }
+        cursor = u.range.last + 1
+    }
+    if (cursor < segment.length) {
+        appendStyledInlineTokens(segment.substring(cursor), codeBg)
+    }
+}
+
+private fun AnnotatedString.Builder.appendStyledInlineTokens(
+    text: String,
+    codeBg: Color
+) {
+    var cursor = 0
+    for (tok in INLINE_TOKEN_REGEX.findAll(text)) {
+        if (tok.range.first > cursor) {
+            append(text.substring(cursor, tok.range.first))
+        }
+        val raw = tok.value
+        when {
+            (raw.startsWith("**") && raw.endsWith("**")) || (raw.startsWith("__") && raw.endsWith("__")) -> {
+                pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                append(raw.substring(2, raw.length - 2))
+                pop()
+            }
+            raw.startsWith("~~") && raw.endsWith("~~") -> {
+                pushStyle(SpanStyle(textDecoration = TextDecoration.LineThrough))
+                append(raw.substring(2, raw.length - 2))
+                pop()
+            }
+            raw.startsWith("`") && raw.endsWith("`") -> {
+                pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg, fontSize = 13.sp))
+                append(raw.substring(1, raw.length - 1))
+                pop()
+            }
+            (raw.startsWith("*") && raw.endsWith("*")) || (raw.startsWith("_") && raw.endsWith("_")) -> {
+                pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
+                append(raw.substring(1, raw.length - 1))
+                pop()
+            }
+            else -> append(raw)
+        }
+        cursor = tok.range.last + 1
+    }
+    if (cursor < text.length) {
+        append(text.substring(cursor))
     }
 }
