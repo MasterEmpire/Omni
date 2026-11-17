@@ -20,6 +20,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -46,6 +48,7 @@ import com.omni.plugin.notes.model.NoteType
 import com.omni.plugin.notes.storage.NoteRepository
 import com.omni.plugin.notes.ui.NoteEditorScreen
 import com.omni.plugin.notes.ui.NotesHomeScreen
+import com.omni.plugin.notes.ui.NotesSettingsScreen
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -201,6 +204,11 @@ class OmniNotesPlugin : PluginEntry() {
         var creatingNewType by remember { mutableStateOf<NoteType?>(null) }
         var creatingColorId by remember { mutableStateOf("yellow") }
         var creatingFolderId by remember { mutableStateOf<String?>(null) }
+        var isSettingsOpen by remember { mutableStateOf(false) }
+
+        val homeGridState = rememberLazyGridState()
+        val homeListState = rememberLazyListState()
+        var cachedHomeNotes by remember { mutableStateOf<List<NoteItem>>(emptyList()) }
 
         var pendingUnlockNote by remember { mutableStateOf<NoteItem?>(null) }
         var pinInput by remember { mutableStateOf("") }
@@ -224,7 +232,7 @@ class OmniNotesPlugin : PluginEntry() {
             onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
 
-        DisposableEffect(isInEditor, homeBackInterceptor) {
+        DisposableEffect(isInEditor, isSettingsOpen, homeBackInterceptor) {
             bridge.setOnBackPressedHandler {
                 val handledByChild = homeBackInterceptor?.invoke() ?: false
                 if (handledByChild) {
@@ -252,10 +260,22 @@ class OmniNotesPlugin : PluginEntry() {
                     creatingNewType = null
                 }
             )
+        } else if (isSettingsOpen) {
+            NotesSettingsScreen(
+                context = context,
+                bridge = bridge,
+                registerBackInterceptor = { interceptor -> homeBackInterceptor = interceptor },
+                onBack = { isSettingsOpen = false }
+            )
         } else {
             NotesHomeScreen(
                 context = context,
                 bridge = bridge,
+                lazyGridState = homeGridState,
+                lazyListState = homeListState,
+                cachedNotes = cachedHomeNotes,
+                onCacheNotesChanged = { cachedHomeNotes = it },
+                onOpenSettings = { isSettingsOpen = true },
                 registerBackInterceptor = { interceptor -> homeBackInterceptor = interceptor },
                 onOpenNote = { note ->
                     if (note.isLocked) {
