@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.notes.OmniNotesPlugin
 import com.omni.plugin.notes.model.NoteColor
+import com.omni.plugin.notes.model.NoteFolder
 import com.omni.plugin.notes.model.NoteItem
 import com.omni.plugin.notes.model.NoteSection
 import com.omni.plugin.notes.model.NoteSecurity
@@ -77,7 +78,7 @@ fun NotesHomeScreen(
     bridge: HostBridge,
     registerBackInterceptor: ((() -> Boolean)?) -> Unit,
     onOpenNote: (NoteItem) -> Unit,
-    onCreateNote: (type: NoteType, colorId: String) -> Unit
+    onCreateNote: (type: NoteType, colorId: String, folderId: String?) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -90,6 +91,8 @@ fun NotesHomeScreen(
     val mutedText = if (isDark) Color(0xFF8B949E) else Color(0xFF57606A)
 
     var selectedSection by remember { mutableStateOf(NoteSection.ALL) }
+    var activeFolderId by remember { mutableStateOf<String?>(null) }
+    var unfiledOnly by remember { mutableStateOf(false) }
     var selectedColorFilter by remember { mutableStateOf<String?>(null) }
     var isSearchOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -100,6 +103,9 @@ fun NotesHomeScreen(
     var selectedNoteIds by remember { mutableStateOf(setOf<String>()) }
     val isSelectionMode = selectedNoteIds.isNotEmpty()
     var showBatchColorDialog by remember { mutableStateOf(false) }
+    var showBatchMoveFolderDialog by remember { mutableStateOf(false) }
+    var showFolderEditorDialog by remember { mutableStateOf(false) }
+    var editingFolder by remember { mutableStateOf<NoteFolder?>(null) }
     var showMasterPinDialog by remember { mutableStateOf(false) }
     var pendingBatchLockIds by remember { mutableStateOf<Set<String>?>(null) }
 
@@ -107,7 +113,7 @@ fun NotesHomeScreen(
     var pendingImportEncryptedCount by remember { mutableIntStateOf(0) }
     var showColorNoteDecryptDialog by remember { mutableStateOf(false) }
 
-    DisposableEffect(drawerState.isOpen, isSearchOpen, showFabMenu, selectedColorFilter, isSelectionMode) {
+    DisposableEffect(drawerState.isOpen, isSearchOpen, showFabMenu, selectedColorFilter, isSelectionMode, activeFolderId, unfiledOnly, selectedSection) {
         registerBackInterceptor {
             when {
                 isSelectionMode -> {
@@ -127,8 +133,20 @@ fun NotesHomeScreen(
                     searchQuery = ""
                     true
                 }
+                activeFolderId != null -> {
+                    activeFolderId = null
+                    true
+                }
+                unfiledOnly -> {
+                    unfiledOnly = false
+                    true
+                }
                 selectedColorFilter != null -> {
                     selectedColorFilter = null
+                    true
+                }
+                selectedSection != NoteSection.ALL -> {
+                    selectedSection = NoteSection.ALL
                     true
                 }
                 else -> false
@@ -148,30 +166,65 @@ fun NotesHomeScreen(
     }
 
     var displayNotes by remember { mutableStateOf<List<NoteItem>>(emptyList()) }
+    var displayFolders by remember { mutableStateOf<List<NoteFolder>>(emptyList()) }
+    var folderCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var folderLabels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
     LaunchedEffect(
         NoteRepository.dataRevision,
         selectedSection,
+        activeFolderId,
+        unfiledOnly,
         selectedColorFilter,
         debouncedQuery,
         settings.sortOrder
     ) {
-        val computed = withContext(Dispatchers.Default) {
+        val (computedNotes, computedFolders, countsMap, labelsMap) = withContext(Dispatchers.Default) {
             val snapshot = NoteRepository.snapshotNotes()
-            val base = snapshot.filter { note ->
-                val sectionOk = when (selectedSection) {
-                    NoteSection.ALL -> note.status == NoteStatus.ACTIVE
-                    NoteSection.PINNED -> note.status == NoteStatus.ACTIVE && note.isPinned
-                    NoteSection.REMINDERS -> note.status != NoteStatus.TRASH && note.reminderAtMs != null
-                    NoteSection.ARCHIVE -> note.status == NoteStatus.ARCHIVED
-                    NoteSection.TRASH -> note.status == NoteStatus.TRASH
-                }
-                if (!sectionOk) return@filter false
-                if (selectedColorFilter != null && note.colorId != selectedColorFilter) return@filter false
-                if (debouncedQuery.isEmpty()) return@filter true
+            val foldersSnap = NoteRepository.snapshotFolders()
 
-                note.title.contains(debouncedQuery, ignoreCase = true) ||
-                    (!note.isLocked && note.content.contains(debouncedQuery, ignoreCase = true)) ||
-                    (!note.isLocked && note.checklist.any { it.text.contains(debouncedQuery, ignoreCase = true) })
+            val activeCounts = HashMap<String, Int>()
+            snapshot.forEach { n ->
+                if (n.status == NoteStatus.ACTIVE && !n.folderId.isNullOrBlank()) {
+                    activeCounts[n.folderId] = (activeCounts[n.folderId] ?: 0) + 1
+                }
+            }
+            val labels = foldersSnap.associate { it.id to "${it.icon} ${it.name}" }
+
+            val filteredFolders = foldersSnap
+                .filter { f ->
+                    val cOk = selectedColorFilter == null || f.colorId == selectedColorFilter
+                    val qOk = debouncedQuery.isEmpty() || f.name.contains(debouncedQuery, ignoreCase = true)
+                    cOk && qOk
+                }
+                .sortedByDescending { it.lastUsedAtMs }
+
+            val base = if (selectedSection == NoteSection.FOLDERS) {
+                emptyList()
+            } else {
+                snapshot.filter { note ->
+                    val sectionOk = when (selectedSection) {
+                        NoteSection.ALL -> {
+                            note.status == NoteStatus.ACTIVE && when {
+                                activeFolderId != null -> note.folderId == activeFolderId
+                                unfiledOnly -> note.folderId == null
+                                else -> true
+                            }
+                        }
+                        NoteSection.FOLDERS -> false
+                        NoteSection.PINNED -> note.status == NoteStatus.ACTIVE && note.isPinned
+                        NoteSection.REMINDERS -> note.status != NoteStatus.TRASH && note.reminderAtMs != null
+                        NoteSection.ARCHIVE -> note.status == NoteStatus.ARCHIVED
+                        NoteSection.TRASH -> note.status == NoteStatus.TRASH
+                    }
+                    if (!sectionOk) return@filter false
+                    if (selectedColorFilter != null && note.colorId != selectedColorFilter) return@filter false
+                    if (debouncedQuery.isEmpty()) return@filter true
+
+                    note.title.contains(debouncedQuery, ignoreCase = true) ||
+                        (!note.isLocked && note.content.contains(debouncedQuery, ignoreCase = true)) ||
+                        (!note.isLocked && note.checklist.any { it.text.contains(debouncedQuery, ignoreCase = true) })
+                }
             }
 
             val comparator = when (settings.sortOrder) {
@@ -181,9 +234,13 @@ fun NotesHomeScreen(
                 NoteSortOrder.TITLE_ASC -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.title.lowercase(Locale.US) }
                 NoteSortOrder.COLOR -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.color.ordinal }.thenByDescending { it.updatedAtMs }
             }
-            base.sortedWith(comparator)
+
+            Tuple4(base.sortedWith(comparator), filteredFolders, activeCounts, labels)
         }
-        displayNotes = computed
+        displayNotes = computedNotes
+        displayFolders = computedFolders
+        folderCounts = countsMap
+        folderLabels = labelsMap
     }
 
     var didDragReorder by remember { mutableStateOf(false) }
@@ -220,14 +277,19 @@ fun NotesHomeScreen(
                     HorizontalDivider(color = mutedText.copy(alpha = 0.2f))
                     Spacer(Modifier.height(12.dp))
 
+                    val recentFolders = remember(NoteRepository.dataRevision) {
+                        NoteRepository.folders.sortedByDescending { it.lastUsedAtMs }.take(5)
+                    }
                     NoteSection.entries.forEach { section ->
                         val count = when (section) {
                             NoteSection.ALL -> NoteRepository.notes.count { it.status == NoteStatus.ACTIVE }
+                            NoteSection.FOLDERS -> NoteRepository.folders.size
                             NoteSection.PINNED -> NoteRepository.notes.count { it.status == NoteStatus.ACTIVE && it.isPinned }
                             NoteSection.REMINDERS -> NoteRepository.notes.count { it.status != NoteStatus.TRASH && it.reminderAtMs != null }
                             NoteSection.ARCHIVE -> NoteRepository.notes.count { it.status == NoteStatus.ARCHIVED }
                             NoteSection.TRASH -> NoteRepository.notes.count { it.status == NoteStatus.TRASH }
                         }
+                        val isSectionSelected = selectedSection == section && (section != NoteSection.ALL || activeFolderId == null)
                         NavigationDrawerItem(
                             icon = { Text(section.icon, fontSize = 16.sp) },
                             label = {
@@ -240,7 +302,7 @@ fun NotesHomeScreen(
                                     Text("$count", fontSize = 12.sp, color = mutedText)
                                 }
                             },
-                            selected = selectedSection == section,
+                            selected = isSectionSelected,
                             colors = NavigationDrawerItemDefaults.colors(
                                 selectedContainerColor = Color(0xFFE5A93C).copy(alpha = 0.18f),
                                 selectedTextColor = if (isDark) Color(0xFFE5A93C) else Color(0xFFB45309),
@@ -248,9 +310,58 @@ fun NotesHomeScreen(
                             ),
                             onClick = {
                                 selectedSection = section
+                                activeFolderId = null
+                                unfiledOnly = false
+                                selectedNoteIds = emptySet()
                                 scope.launch { drawerState.close() }
                             }
                         )
+
+                        if (section == NoteSection.FOLDERS && recentFolders.isNotEmpty()) {
+                            recentFolders.forEach { rf ->
+                                val isRfSel = selectedSection == NoteSection.ALL && activeFolderId == rf.id
+                                val rfCount = folderCounts[rf.id] ?: 0
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 24.dp, end = 6.dp, top = 2.dp, bottom = 2.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isRfSel) Color(rf.color.accentHex).copy(alpha = 0.2f) else Color.Transparent)
+                                        .clickable {
+                                            selectedSection = NoteSection.ALL
+                                            activeFolderId = rf.id
+                                            unfiledOnly = false
+                                            selectedNoteIds = emptySet()
+                                            NoteRepository.touchFolderUsed(bridge, rf.id)
+                                            scope.launch { drawerState.close() }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(rf.color.accentHex))
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "${rf.icon} ${rf.name}",
+                                            color = if (isRfSel) Color(rf.color.accentHex) else primaryText,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text("$rfCount", fontSize = 11.sp, color = mutedText)
+                                }
+                            }
+                        }
                     }
 
                     Spacer(Modifier.height(14.dp))
@@ -461,11 +572,19 @@ fun NotesHomeScreen(
                                 modifier = Modifier.fillMaxWidth()
                             )
                         } else {
+                            val activeFolder = activeFolderId?.let { id -> NoteRepository.folders.find { it.id == id } }
+                            val titleText = when {
+                                activeFolder != null -> "${activeFolder.icon} ${activeFolder.name}"
+                                unfiledOnly && selectedSection == NoteSection.ALL -> "📄 Unfiled Notes"
+                                else -> "${selectedSection.icon} ${selectedSection.label}"
+                            }
                             Text(
-                                "${selectedSection.icon} ${selectedSection.label}",
+                                titleText,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.sp,
-                                color = primaryText
+                                color = primaryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     },
@@ -530,12 +649,12 @@ fun NotesHomeScreen(
             floatingActionButton = {
                 if (selectedSection != NoteSection.TRASH && selectedSection != NoteSection.ARCHIVE) {
                     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        AnimatedVisibility(visible = showFabMenu) {
+                        AnimatedVisibility(visible = showFabMenu && selectedSection != NoteSection.FOLDERS) {
                             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ExtendedFloatingActionButton(
                                     onClick = {
                                         showFabMenu = false
-                                        onCreateNote(NoteType.CHECKLIST, selectedColorFilter ?: NoteColor.BLUE.id)
+                                        onCreateNote(NoteType.CHECKLIST, selectedColorFilter ?: NoteColor.BLUE.id, activeFolderId)
                                     },
                                     containerColor = surfaceColor,
                                     contentColor = primaryText,
@@ -546,7 +665,7 @@ fun NotesHomeScreen(
                                 ExtendedFloatingActionButton(
                                     onClick = {
                                         showFabMenu = false
-                                        onCreateNote(NoteType.TEXT, selectedColorFilter ?: NoteColor.YELLOW.id)
+                                        onCreateNote(NoteType.TEXT, selectedColorFilter ?: NoteColor.YELLOW.id, activeFolderId)
                                     },
                                     containerColor = surfaceColor,
                                     contentColor = primaryText,
@@ -558,14 +677,21 @@ fun NotesHomeScreen(
                         }
 
                         FloatingActionButton(
-                            onClick = { showFabMenu = !showFabMenu },
+                            onClick = {
+                                if (selectedSection == NoteSection.FOLDERS) {
+                                    editingFolder = null
+                                    showFolderEditorDialog = true
+                                } else {
+                                    showFabMenu = !showFabMenu
+                                }
+                            },
                             containerColor = Color(0xFFE5A93C),
                             contentColor = Color.Black,
                             shape = CircleShape
                         ) {
                             Icon(
-                                if (showFabMenu) Icons.Default.Close else Icons.Default.Add,
-                                contentDescription = "New Note"
+                                if (showFabMenu && selectedSection != NoteSection.FOLDERS) Icons.Default.Close else Icons.Default.Add,
+                                contentDescription = if (selectedSection == NoteSection.FOLDERS) "New Folder" else "New Note"
                             )
                         }
                     }
@@ -622,6 +748,13 @@ fun NotesHomeScreen(
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                     ) {
                                         Text(if (allPinned) "📌 Unpin" else "📌 Pin", fontSize = 12.sp)
+                                    }
+                                    FilledTonalButton(
+                                        onClick = { showBatchMoveFolderDialog = true },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("📁 Move", fontSize = 12.sp)
                                     }
                                     FilledTonalButton(
                                         onClick = { showBatchColorDialog = true },
@@ -730,7 +863,7 @@ fun NotesHomeScreen(
                     .padding(padding)
                     .background(bgColor)
             ) {
-                // Color Filter Dot Bar
+                // Color & Folder Quick Filter Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -739,6 +872,44 @@ fun NotesHomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (selectedSection == NoteSection.ALL) {
+                        if (activeFolderId != null) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFF58A6FF).copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, Color(0xFF58A6FF)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { activeFolderId = null }
+                            ) {
+                                Text(
+                                    "← All Notes",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF58A6FF),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (unfiledOnly) Color(0xFF58A6FF) else surfaceColor,
+                                border = BorderStroke(1.dp, mutedText.copy(alpha = 0.25f)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { unfiledOnly = !unfiledOnly }
+                            ) {
+                                Text(
+                                    "Unfiled",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (unfiledOnly) Color.White else primaryText,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = if (selectedColorFilter == null) Color(0xFFE5A93C) else surfaceColor,
@@ -748,7 +919,7 @@ fun NotesHomeScreen(
                             .clickable { selectedColorFilter = null }
                     ) {
                         Text(
-                            "All",
+                            "All Colors",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (selectedColorFilter == null) Color.Black else primaryText,
@@ -798,7 +969,79 @@ fun NotesHomeScreen(
                     }
                 }
 
-                if (displayNotes.isEmpty()) {
+                if (selectedSection == NoteSection.FOLDERS) {
+                    if (displayFolders.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("📁", fontSize = 40.sp)
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    if (searchQuery.isNotBlank()) "No matching folders" else "No folders yet",
+                                    color = primaryText,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 15.sp
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text("Tap + to create your first folder", color = mutedText, fontSize = 12.sp)
+                            }
+                        }
+                    } else if (settings.viewMode == NoteViewMode.GRID) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            contentPadding = PaddingValues(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            items(displayFolders, key = { it.id }) { folder ->
+                                FolderGridCard(
+                                    folder = folder,
+                                    noteCount = folderCounts[folder.id] ?: 0,
+                                    isDark = isDark,
+                                    onClick = {
+                                        selectedSection = NoteSection.ALL
+                                        activeFolderId = folder.id
+                                        unfiledOnly = false
+                                        NoteRepository.touchFolderUsed(bridge, folder.id)
+                                    },
+                                    onEdit = {
+                                        editingFolder = folder
+                                        showFolderEditorDialog = true
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            items(displayFolders, key = { it.id }) { folder ->
+                                FolderRowCard(
+                                    folder = folder,
+                                    noteCount = folderCounts[folder.id] ?: 0,
+                                    isDark = isDark,
+                                    onClick = {
+                                        selectedSection = NoteSection.ALL
+                                        activeFolderId = folder.id
+                                        unfiledOnly = false
+                                        NoteRepository.touchFolderUsed(bridge, folder.id)
+                                    },
+                                    onEdit = {
+                                        editingFolder = folder
+                                        showFolderEditorDialog = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else if (displayNotes.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -852,6 +1095,7 @@ fun NotesHomeScreen(
                                             val isSelected = selectedNoteIds.contains(note.id)
                                             NoteGridCard(
                                                 note = note,
+                                                folderLabel = if (activeFolderId == null) note.folderId?.let { folderLabels[it] } else null,
                                                 isDark = isDark,
                                                 isSelected = isSelected,
                                                 isDimmed = isSelectionMode && !isSelected,
@@ -943,6 +1187,7 @@ fun NotesHomeScreen(
                                             val isSelected = selectedNoteIds.contains(note.id)
                                             NoteRowCard(
                                                 note = note,
+                                                folderLabel = if (activeFolderId == null) note.folderId?.let { folderLabels[it] } else null,
                                                 isDark = isDark,
                                                 showDetails = showDetails,
                                                 isSelected = isSelected,
@@ -1206,6 +1451,350 @@ fun NotesHomeScreen(
             }
         )
     }
+
+    if (showBatchMoveFolderDialog) {
+        val allFolders = remember(NoteRepository.dataRevision) {
+            NoteRepository.folders.sortedByDescending { it.lastUsedAtMs }
+        }
+        AlertDialog(
+            onDismissRequest = { showBatchMoveFolderDialog = false },
+            containerColor = surfaceColor,
+            title = { Text("📁 Move to Folder", color = primaryText, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                NoteRepository.batchMoveToFolder(bridge, selectedNoteIds, null)
+                                selectedNoteIds = emptySet()
+                                showBatchMoveFolderDialog = false
+                                bridge.showToast("Moved to Unfiled")
+                            }
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📄 Unfiled (No Folder)", color = primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    allFolders.forEach { folder ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(folder.color.accentHex).copy(alpha = 0.14f))
+                                .clickable {
+                                    NoteRepository.batchMoveToFolder(bridge, selectedNoteIds, folder.id)
+                                    selectedNoteIds = emptySet()
+                                    showBatchMoveFolderDialog = false
+                                    bridge.showToast("Moved to ${folder.name}")
+                                }
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("${folder.icon} ${folder.name}", color = primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text("${folderCounts[folder.id] ?: 0}", color = mutedText, fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBatchMoveFolderDialog = false
+                    editingFolder = null
+                    showFolderEditorDialog = true
+                }) {
+                    Text("+ New Folder", color = Color(0xFFE5A93C), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchMoveFolderDialog = false }) {
+                    Text("Cancel", color = mutedText)
+                }
+            }
+        )
+    }
+
+    if (showFolderEditorDialog) {
+        val targetFolder = editingFolder
+        var folderName by remember(targetFolder?.id) { mutableStateOf(targetFolder?.name ?: "") }
+        var folderColorId by remember(targetFolder?.id) { mutableStateOf(targetFolder?.colorId ?: NoteColor.BLUE.id) }
+        var folderIcon by remember(targetFolder?.id) { mutableStateOf(targetFolder?.icon ?: "📁") }
+        val iconOptions = listOf("📁", "📚", "💼", "💡", "🏠", "🛒", "🎯", "❤️")
+
+        AlertDialog(
+            onDismissRequest = { showFolderEditorDialog = false },
+            containerColor = surfaceColor,
+            title = {
+                Text(
+                    if (targetFolder == null) "New Folder" else "Edit Folder",
+                    color = primaryText,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = folderName,
+                        onValueChange = { folderName = it },
+                        label = { Text("Folder Name") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = primaryText, unfocusedTextColor = primaryText)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        iconOptions.forEach { ic ->
+                            val isSel = folderIcon == ic
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) Color(0xFFE5A93C).copy(alpha = 0.25f) else Color.Transparent,
+                                border = BorderStroke(1.dp, if (isSel) Color(0xFFE5A93C) else mutedText.copy(alpha = 0.25f)),
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { folderIcon = ic }
+                            ) {
+                                Text(ic, fontSize = 18.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        NoteColor.entries.forEach { nc ->
+                            val isSel = folderColorId == nc.id
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(nc.accentHex))
+                                    .border(if (isSel) 2.5.dp else 0.dp, primaryText, CircleShape)
+                                    .clickable { folderColorId = nc.id }
+                            )
+                        }
+                    }
+                    if (targetFolder != null) {
+                        TextButton(
+                            onClick = {
+                                if (activeFolderId == targetFolder.id) activeFolderId = null
+                                NoteRepository.deleteFolder(bridge, targetFolder.id)
+                                showFolderEditorDialog = false
+                                bridge.showToast("Folder deleted (notes kept in All Notes)")
+                            }
+                        ) {
+                            Text("🗑️ Delete Folder", color = Color(0xFFF85149), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = folderName.trim()
+                        if (trimmed.isNotEmpty()) {
+                            val newId = targetFolder?.id ?: "fld_${System.currentTimeMillis()}"
+                            val savedFolder = NoteFolder(
+                                id = newId,
+                                name = trimmed,
+                                colorId = folderColorId,
+                                icon = folderIcon,
+                                lastUsedAtMs = System.currentTimeMillis(),
+                                createdAtMs = targetFolder?.createdAtMs ?: System.currentTimeMillis()
+                            )
+                            NoteRepository.upsertFolder(bridge, savedFolder)
+                            if (selectedNoteIds.isNotEmpty() && targetFolder == null) {
+                                NoteRepository.batchMoveToFolder(bridge, selectedNoteIds, savedFolder.id)
+                                selectedNoteIds = emptySet()
+                            }
+                            showFolderEditorDialog = false
+                        }
+                    },
+                    enabled = folderName.isNotBlank()
+                ) {
+                    Text(if (targetFolder == null) "Create" else "Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFolderEditorDialog = false }) {
+                    Text("Cancel", color = mutedText)
+                }
+            }
+        )
+    }
+}
+
+private data class Tuple4<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
+@Composable
+private fun FolderGridCard(
+    folder: NoteFolder,
+    noteCount: Int,
+    isDark: Boolean,
+    onClick: () -> Unit,
+    onEdit: () -> Unit
+) {
+    val nc = folder.color
+    val cardBg = Color(if (isDark) nc.darkBgHex else nc.paperBgHex)
+    val accent = Color(nc.accentHex)
+    val textColor = if (isDark) Color(0xFFF0F6FC) else Color(0xFF1F2328)
+    val subColor = if (isDark) Color(0xFF9EA7B3) else Color(0xFF4B5563)
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = cardBg),
+        border = BorderStroke(1.dp, accent.copy(alpha = if (isDark) 0.5f else 0.75f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(156.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .background(accent)
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(folder.icon, fontSize = 26.sp)
+                    Text(
+                        "Edit",
+                        color = accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onEdit() }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Text(
+                    text = folder.name,
+                    color = textColor,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "$noteCount ${if (noteCount == 1) "note" else "notes"}",
+                        color = accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        NoteDateFormats.formatShort(folder.lastUsedAtMs),
+                        color = subColor,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderRowCard(
+    folder: NoteFolder,
+    noteCount: Int,
+    isDark: Boolean,
+    onClick: () -> Unit,
+    onEdit: () -> Unit
+) {
+    val nc = folder.color
+    val cardBg = Color(if (isDark) nc.darkBgHex else nc.paperBgHex)
+    val accent = Color(nc.accentHex)
+    val textColor = if (isDark) Color(0xFFF0F6FC) else Color(0xFF1F2328)
+    val subColor = if (isDark) Color(0xFF9EA7B3) else Color(0xFF4B5563)
+
+    Card(
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = cardBg),
+        border = BorderStroke(1.dp, accent.copy(alpha = if (isDark) 0.4f else 0.7f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(76.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    drawRect(
+                        color = accent,
+                        topLeft = Offset.Zero,
+                        size = Size(7.dp.toPx(), size.height)
+                    )
+                }
+                .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(folder.icon, fontSize = 24.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = folder.name,
+                            color = textColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "$noteCount ${if (noteCount == 1) "note" else "notes"} • ${NoteDateFormats.formatShort(folder.lastUsedAtMs)}",
+                            color = subColor,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+                Text(
+                    "Edit",
+                    color = accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { onEdit() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+    }
 }
 
 private object NoteDateFormats {
@@ -1326,6 +1915,7 @@ private fun EdgeFastScroller(
 @Composable
 private fun NoteGridCard(
     note: NoteItem,
+    folderLabel: String? = null,
     isDark: Boolean,
     isSelected: Boolean = false,
     isDimmed: Boolean = false,
@@ -1445,7 +2035,14 @@ private fun NoteGridCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val dateStr = remember(note.updatedAtMs) { NoteDateFormats.formatShort(note.updatedAtMs) }
-                        Text(dateStr, color = subColor, fontSize = 10.sp)
+                        Text(
+                            if (folderLabel != null) "$dateStr • $folderLabel" else dateStr,
+                            color = subColor,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
 
                         if (note.status == NoteStatus.TRASH) {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1506,6 +2103,7 @@ private fun NoteGridCard(
 @Composable
 private fun NoteRowCard(
     note: NoteItem,
+    folderLabel: String? = null,
     isDark: Boolean,
     showDetails: Boolean,
     isSelected: Boolean = false,
@@ -1581,7 +2179,13 @@ private fun NoteRowCard(
                         if (note.isLocked) Text("🔒", fontSize = 12.sp)
                         if (note.reminderAtMs != null && !note.reminderTriggered) Text("⏰", fontSize = 12.sp)
                         if (isStickyMounted) Text("🪟", fontSize = 12.sp)
-                        Text(dateStr, color = subColor, fontSize = 11.sp)
+                        Text(
+                            if (folderLabel != null) "$folderLabel • $dateStr" else dateStr,
+                            color = subColor,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         if (isSelected) {
                             Box(
                                 modifier = Modifier
