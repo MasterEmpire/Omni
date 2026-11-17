@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.notes.model.ChecklistEntry
+import com.omni.plugin.notes.model.NoteFolder
 import com.omni.plugin.notes.model.NoteItem
 import com.omni.plugin.notes.model.NoteSecurity
 import com.omni.plugin.notes.model.NoteSortOrder
@@ -45,23 +46,28 @@ data class ColorNoteImportResult(
 
 object NoteRepository {
     private const val NOTES_FILE = "notes_db.json"
+    private const val FOLDERS_FILE = "notes_folders.json"
     private const val SETTINGS_FILE = "notes_settings.json"
     private const val VAULT_BACKUP_NAME = "omni_notes_backup.json"
+    private const val VAULT_FOLDERS_BACKUP_NAME = "omni_notes_folders_backup.json"
 
     private val dbLock = Any()
     private val ioExecutor = Executors.newSingleThreadExecutor()
     val notes = mutableStateListOf<NoteItem>()
+    val folders = mutableStateListOf<NoteFolder>()
     var settings by mutableStateOf(NotesSettings())
     var dataRevision by mutableIntStateOf(0)
     @Volatile var isLoaded = false
 
     fun snapshotNotes(): List<NoteItem> = synchronized(dbLock) { notes.toList() }
+    fun snapshotFolders(): List<NoteFolder> = synchronized(dbLock) { folders.toList() }
 
     fun load(bridge: HostBridge, forceReload: Boolean = false) {
         if (isLoaded && !forceReload) return
         synchronized(dbLock) {
             if (isLoaded && !forceReload) return
             loadSettingsInternal(bridge)
+            loadFoldersInternal(bridge)
             loadNotesInternal(bridge)
             isLoaded = true
         }
@@ -268,6 +274,64 @@ object NoteRepository {
         }
     }
 
+    fun upsertFolder(bridge: HostBridge, folder: NoteFolder) {
+        synchronized(dbLock) {
+            val idx = folders.indexOfFirst { it.id == folder.id }
+            if (idx >= 0) {
+                folders[idx] = folder
+            } else {
+                folders.add(0, folder)
+            }
+            saveFoldersInternal(bridge)
+        }
+    }
+
+    fun touchFolderUsed(bridge: HostBridge, folderId: String?) {
+        if (folderId.isNullOrBlank()) return
+        synchronized(dbLock) {
+            val idx = folders.indexOfFirst { it.id == folderId }
+            if (idx >= 0) {
+                folders[idx] = folders[idx].copy(lastUsedAtMs = System.currentTimeMillis())
+                saveFoldersInternal(bridge)
+            }
+        }
+    }
+
+    fun deleteFolder(bridge: HostBridge, folderId: String) {
+        synchronized(dbLock) {
+            folders.removeAll { it.id == folderId }
+            var notesTouched = false
+            for (i in notes.indices) {
+                if (notes[i].folderId == folderId) {
+                    notes[i] = notes[i].copy(folderId = null)
+                    notesTouched = true
+                }
+            }
+            saveFoldersInternal(bridge)
+            if (notesTouched) saveNotesInternal(bridge)
+        }
+    }
+
+    fun batchMoveToFolder(bridge: HostBridge, ids: Set<String>, folderId: String?) {
+        synchronized(dbLock) {
+            val now = System.currentTimeMillis()
+            for (i in notes.indices) {
+                val n = notes[i]
+                if (ids.contains(n.id)) {
+                    notes[i] = n.copy(folderId = folderId, updatedAtMs = now)
+                }
+            }
+            if (!folderId.isNullOrBlank()) {
+                val fIdx = folders.indexOfFirst { it.id == folderId }
+                if (fIdx >= 0) {
+                    folders[fIdx] = folders[fIdx].copy(lastUsedAtMs = now)
+                    saveFoldersInternal(bridge)
+                }
+            }
+            saveNotesInternal(bridge)
+        }
+    }
+
     fun serializeNotesJson(): String {
         val arr = JSONArray()
         notes.forEach { n ->
@@ -383,6 +447,7 @@ object NoteRepository {
                     writer.name("isPinned").value(n.isPinned)
                     writer.name("isLocked").value(n.isLocked)
                     writer.name("sortIndex").value(n.sortIndex.toLong())
+                    if (!n.folderId.isNullOrBlank()) writer.name("folderId").value(n.folderId)
                     writer.name("status").value(n.status.name)
                     if (!n.pinHash.isNullOrBlank()) writer.name("pinHash").value(n.pinHash)
                     if (n.reminderAtMs != null) writer.name("reminderAtMs").value(n.reminderAtMs)
@@ -417,6 +482,7 @@ object NoteRepository {
                 var isPinned = false
                 var isLockedFlag = false
                 var sortIndex = idx
+                var folderId: String? = null
                 var status = NoteStatus.ACTIVE
                 var pinHash: String? = null
                 var reminderAtMs: Long? = null
@@ -467,6 +533,7 @@ object NoteRepository {
                         "isPinned" -> isPinned = reader.nextBoolean()
                         "isLocked" -> isLockedFlag = reader.nextBoolean()
                         "sortIndex" -> sortIndex = reader.nextInt()
+                        "folderId" -> folderId = reader.nextString().takeIf { it.isNotBlank() && !it.equals("null", true) }
                         "status" -> status = runCatching { NoteStatus.valueOf(reader.nextString()) }.getOrDefault(NoteStatus.ACTIVE)
                         "pinHash" -> pinHash = reader.nextString().takeIf { it.isNotBlank() && !it.equals("null", true) }
                         "reminderAtMs" -> reminderAtMs = reader.nextLong()
@@ -490,6 +557,7 @@ object NoteRepository {
                             isPinned = isPinned,
                             isLocked = isLockedFlag || !pinHash.isNullOrBlank(),
                             sortIndex = sortIndex,
+                            folderId = folderId,
                             status = status,
                             pinHash = pinHash,
                             reminderAtMs = reminderAtMs,
@@ -506,6 +574,91 @@ object NoteRepository {
         return result
     }
 
+    private fun loadFoldersInternal(bridge: HostBridge) {
+        try {
+            val file = File(bridge.getPluginDir(), FOLDERS_FILE)
+            if (!file.exists() || file.length() == 0L) return
+            val parsed = readFoldersStreaming(file)
+            folders.clear()
+            folders.addAll(parsed)
+            dataRevision++
+        } catch (_: Exception) {}
+    }
+
+    private fun saveFoldersInternal(bridge: HostBridge) {
+        dataRevision++
+        val snapshot = folders.toList()
+        val targetFile = File(bridge.getPluginDir(), FOLDERS_FILE)
+        ioExecutor.execute {
+            writeFoldersStreaming(targetFile, snapshot)
+        }
+    }
+
+    private fun writeFoldersStreaming(targetFile: File, items: List<NoteFolder>) {
+        try {
+            targetFile.parentFile?.mkdirs()
+            val tmpFile = File(targetFile.parentFile, "${targetFile.name}.tmp")
+            JsonWriter(BufferedWriter(OutputStreamWriter(BufferedOutputStream(FileOutputStream(tmpFile)), Charsets.UTF_8), 4096)).use { writer ->
+                writer.beginArray()
+                for (f in items) {
+                    writer.beginObject()
+                    writer.name("id").value(f.id)
+                    writer.name("name").value(f.name)
+                    writer.name("colorId").value(f.colorId)
+                    writer.name("icon").value(f.icon)
+                    writer.name("lastUsedAtMs").value(f.lastUsedAtMs)
+                    writer.name("createdAtMs").value(f.createdAtMs)
+                    writer.endObject()
+                }
+                writer.endArray()
+                writer.flush()
+            }
+            if (targetFile.exists()) targetFile.delete()
+            if (!tmpFile.renameTo(targetFile)) {
+                tmpFile.copyTo(targetFile, overwrite = true)
+                tmpFile.delete()
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun readFoldersStreaming(sourceFile: File): List<NoteFolder> {
+        val result = mutableListOf<NoteFolder>()
+        JsonReader(InputStreamReader(BufferedInputStream(FileInputStream(sourceFile), 4096), Charsets.UTF_8)).use { reader ->
+            reader.beginArray()
+            while (reader.hasNext()) {
+                var id = ""
+                var name = ""
+                var colorId = "blue"
+                var icon = "📁"
+                var lastUsedAtMs = System.currentTimeMillis()
+                var createdAtMs = lastUsedAtMs
+                reader.beginObject()
+                while (reader.hasNext()) {
+                    val key = reader.nextName()
+                    if (reader.peek() == JsonToken.NULL) {
+                        reader.skipValue()
+                        continue
+                    }
+                    when (key) {
+                        "id" -> id = reader.nextString()
+                        "name" -> name = reader.nextString()
+                        "colorId" -> colorId = reader.nextString()
+                        "icon" -> icon = reader.nextString()
+                        "lastUsedAtMs" -> lastUsedAtMs = reader.nextLong()
+                        "createdAtMs" -> createdAtMs = reader.nextLong()
+                        else -> reader.skipValue()
+                    }
+                }
+                reader.endObject()
+                if (id.isNotBlank() && name.isNotBlank()) {
+                    result.add(NoteFolder(id, name, colorId, icon, lastUsedAtMs, createdAtMs))
+                }
+            }
+            reader.endArray()
+        }
+        return result
+    }
+
     private fun getVaultBackupFile(): File {
         val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         val dir = File(File(docsDir, ".omni_runtime"), "notes_backup")
@@ -513,12 +666,21 @@ object NoteRepository {
         return File(dir, VAULT_BACKUP_NAME)
     }
 
+    private fun getVaultFoldersBackupFile(): File {
+        val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val dir = File(File(docsDir, ".omni_runtime"), "notes_backup")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, VAULT_FOLDERS_BACKUP_NAME)
+    }
+
     fun exportVaultBackup(bridge: HostBridge): String? {
         return try {
             val snapshot = snapshotNotes()
+            val folderSnap = snapshotFolders()
             val file = getVaultBackupFile()
             writeNotesStreaming(file, snapshot)
-            bridge.log("OMNI_NOTES", "Exported ${snapshot.size} notes to vault: ${file.absolutePath}")
+            writeFoldersStreaming(getVaultFoldersBackupFile(), folderSnap)
+            bridge.log("OMNI_NOTES", "Exported ${snapshot.size} notes & ${folderSnap.size} folders to vault: ${file.absolutePath}")
             file.absolutePath
         } catch (e: Exception) {
             bridge.log("OMNI_NOTES_ERR", "Vault export failed: ${e.message}")
@@ -531,7 +693,19 @@ object NoteRepository {
             val file = getVaultBackupFile()
             if (!file.exists() || file.length() == 0L) return -1
             val imported = readNotesStreaming(file)
+            val foldersFile = getVaultFoldersBackupFile()
+            val importedFolders = if (foldersFile.exists() && foldersFile.length() > 0L) readFoldersStreaming(foldersFile) else emptyList()
             synchronized(dbLock) {
+                if (importedFolders.isNotEmpty()) {
+                    val existingFolders = folders.associateBy { it.id }.toMutableMap()
+                    importedFolders.forEach { f ->
+                        val cur = existingFolders[f.id]
+                        if (cur == null || f.lastUsedAtMs > cur.lastUsedAtMs) existingFolders[f.id] = f
+                    }
+                    folders.clear()
+                    folders.addAll(existingFolders.values)
+                    saveFoldersInternal(bridge)
+                }
                 val existingById = notes.associateBy { it.id }.toMutableMap()
                 var addedOrUpdated = 0
                 imported.forEach { item ->
