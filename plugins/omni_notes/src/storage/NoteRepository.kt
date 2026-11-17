@@ -58,6 +58,8 @@ object NoteRepository {
     var settings by mutableStateOf(NotesSettings())
     var dataRevision by mutableIntStateOf(0)
     @Volatile var isLoaded = false
+    @Volatile private var lastKnownDbModifiedMs = 0L
+    @Volatile private var lastKnownFoldersModifiedMs = 0L
 
     fun snapshotNotes(): List<NoteItem> = synchronized(dbLock) { notes.toList() }
     fun snapshotFolders(): List<NoteFolder> = synchronized(dbLock) { folders.toList() }
@@ -70,6 +72,29 @@ object NoteRepository {
             loadFoldersInternal(bridge)
             loadNotesInternal(bridge)
             isLoaded = true
+        }
+    }
+
+    fun syncIfModifiedOnDisk(bridge: HostBridge) {
+        val dbFile = File(bridge.getPluginDir(), NOTES_FILE)
+        val fldFile = File(bridge.getPluginDir(), FOLDERS_FILE)
+        val dbNewer = dbFile.exists() && dbFile.lastModified() > lastKnownDbModifiedMs
+        val fldNewer = fldFile.exists() && fldFile.lastModified() > lastKnownFoldersModifiedMs
+        if (!dbNewer && !fldNewer) return
+
+        synchronized(dbLock) {
+            syncFromDiskIfNewerLocked(bridge)
+        }
+    }
+
+    private fun syncFromDiskIfNewerLocked(bridge: HostBridge) {
+        val fldFile = File(bridge.getPluginDir(), FOLDERS_FILE)
+        if (fldFile.exists() && fldFile.lastModified() > lastKnownFoldersModifiedMs) {
+            loadFoldersInternal(bridge)
+        }
+        val dbFile = File(bridge.getPluginDir(), NOTES_FILE)
+        if (dbFile.exists() && dbFile.lastModified() > lastKnownDbModifiedMs) {
+            loadNotesInternal(bridge)
         }
     }
 
@@ -98,6 +123,7 @@ object NoteRepository {
             val file = File(bridge.getPluginDir(), NOTES_FILE)
             if (!file.exists() || file.length() == 0L) return
             val parsed = readNotesStreaming(file)
+            lastKnownDbModifiedMs = file.lastModified()
             notes.clear()
             notes.addAll(parsed)
             dataRevision++
@@ -128,6 +154,7 @@ object NoteRepository {
 
     fun upsertNote(bridge: HostBridge, note: NoteItem) {
         synchronized(dbLock) {
+            syncFromDiskIfNewerLocked(bridge)
             val idx = notes.indexOfFirst { it.id == note.id }
             if (idx >= 0) {
                 notes[idx] = note
@@ -150,6 +177,7 @@ object NoteRepository {
 
     fun setStatus(bridge: HostBridge, noteId: String, status: NoteStatus) {
         synchronized(dbLock) {
+            syncFromDiskIfNewerLocked(bridge)
             val idx = notes.indexOfFirst { it.id == noteId }
             if (idx >= 0) {
                 val existing = notes[idx]
@@ -165,6 +193,7 @@ object NoteRepository {
 
     fun togglePin(bridge: HostBridge, noteId: String) {
         synchronized(dbLock) {
+            syncFromDiskIfNewerLocked(bridge)
             val idx = notes.indexOfFirst { it.id == noteId }
             if (idx >= 0) {
                 val existing = notes[idx]
@@ -179,6 +208,7 @@ object NoteRepository {
 
     fun deleteForever(bridge: HostBridge, noteId: String) {
         synchronized(dbLock) {
+            syncFromDiskIfNewerLocked(bridge)
             notes.removeAll { it.id == noteId }
             saveNotesInternal(bridge)
         }
@@ -186,6 +216,7 @@ object NoteRepository {
 
     fun emptyTrash(bridge: HostBridge) {
         synchronized(dbLock) {
+            syncFromDiskIfNewerLocked(bridge)
             notes.removeAll { it.status == NoteStatus.TRASH }
             saveNotesInternal(bridge)
         }
@@ -193,6 +224,7 @@ object NoteRepository {
 
     fun applyCustomOrder(bridge: HostBridge, orderedIds: List<String>) {
         synchronized(dbLock) {
+            syncFromDiskIfNewerLocked(bridge)
             val indexMap = orderedIds.withIndex().associate { it.value to it.index }
             var fallbackIdx = orderedIds.size
             for (i in notes.indices) {
@@ -464,6 +496,9 @@ object NoteRepository {
                 tmpFile.copyTo(targetFile, overwrite = true)
                 tmpFile.delete()
             }
+            if (targetFile.name == NOTES_FILE) {
+                lastKnownDbModifiedMs = targetFile.lastModified()
+            }
         } catch (_: Exception) {}
     }
 
@@ -579,6 +614,7 @@ object NoteRepository {
             val file = File(bridge.getPluginDir(), FOLDERS_FILE)
             if (!file.exists() || file.length() == 0L) return
             val parsed = readFoldersStreaming(file)
+            lastKnownFoldersModifiedMs = file.lastModified()
             folders.clear()
             folders.addAll(parsed)
             dataRevision++
@@ -617,6 +653,9 @@ object NoteRepository {
             if (!tmpFile.renameTo(targetFile)) {
                 tmpFile.copyTo(targetFile, overwrite = true)
                 tmpFile.delete()
+            }
+            if (targetFile.name == FOLDERS_FILE) {
+                lastKnownFoldersModifiedMs = targetFile.lastModified()
             }
         } catch (_: Exception) {}
     }
