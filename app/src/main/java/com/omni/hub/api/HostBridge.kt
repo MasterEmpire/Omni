@@ -52,6 +52,8 @@ interface HostBridge {
     fun setOnBackPressedHandler(handler: (() -> Boolean)?)
     fun handleBackPressed(): Boolean
     fun pickFiles(mimeType: String = "*/*", allowMultiple: Boolean = false, onResult: (List<Uri>) -> Unit)
+    fun setStandaloneWindowEnabled(enabled: Boolean)
+    fun isStandaloneWindowEnabled(): Boolean
 
     // --- Permissions & Security ---
     fun hasPermission(permission: String): Boolean
@@ -155,14 +157,46 @@ interface HostBridge {
 }
 
 object PermissionDispatcher {
-    private var launcher: ((Array<String>, (Map<String, Boolean>) -> Unit) -> Unit)? = null
+    private val launchers = java.util.concurrent.ConcurrentHashMap<Int, (Array<String>, (Map<String, Boolean>) -> Unit) -> Unit>()
+    private val ownerOrder = java.util.Collections.synchronizedList(mutableListOf<Int>())
+    @Volatile private var activeOwnerId: Int = 0
 
     fun registerLauncher(block: (Array<String>, (Map<String, Boolean>) -> Unit) -> Unit) {
-        launcher = block
+        registerLauncher(0, block)
+    }
+
+    fun registerLauncher(owner: Any, block: (Array<String>, (Map<String, Boolean>) -> Unit) -> Unit) {
+        val key = if (owner is Int && owner == 0) 0 else System.identityHashCode(owner)
+        launchers[key] = block
+        synchronized(ownerOrder) {
+            ownerOrder.remove(key)
+            ownerOrder.add(key)
+        }
+        activeOwnerId = key
+    }
+
+    fun setActiveOwner(owner: Any) {
+        val key = System.identityHashCode(owner)
+        if (launchers.containsKey(key)) {
+            activeOwnerId = key
+        }
+    }
+
+    fun unregisterLauncher(owner: Any) {
+        val key = System.identityHashCode(owner)
+        launchers.remove(key)
+        synchronized(ownerOrder) {
+            ownerOrder.remove(key)
+            if (activeOwnerId == key) {
+                activeOwnerId = ownerOrder.lastOrNull() ?: 0
+            }
+        }
     }
 
     fun request(permissions: Array<String>, callback: (Map<String, Boolean>) -> Unit) {
-        val l = launcher
+        val l = launchers[activeOwnerId] ?: synchronized(ownerOrder) {
+            ownerOrder.lastOrNull()?.let { launchers[it] }
+        }
         if (l != null) {
             Handler(Looper.getMainLooper()).post {
                 l(permissions, callback)
@@ -176,14 +210,46 @@ object PermissionDispatcher {
 }
 
 object FilePickerDispatcher {
-    private var launcher: ((String, Boolean, (List<Uri>) -> Unit) -> Unit)? = null
+    private val launchers = java.util.concurrent.ConcurrentHashMap<Int, (String, Boolean, (List<Uri>) -> Unit) -> Unit>()
+    private val ownerOrder = java.util.Collections.synchronizedList(mutableListOf<Int>())
+    @Volatile private var activeOwnerId: Int = 0
 
     fun registerLauncher(block: (String, Boolean, (List<Uri>) -> Unit) -> Unit) {
-        launcher = block
+        registerLauncher(0, block)
+    }
+
+    fun registerLauncher(owner: Any, block: (String, Boolean, (List<Uri>) -> Unit) -> Unit) {
+        val key = if (owner is Int && owner == 0) 0 else System.identityHashCode(owner)
+        launchers[key] = block
+        synchronized(ownerOrder) {
+            ownerOrder.remove(key)
+            ownerOrder.add(key)
+        }
+        activeOwnerId = key
+    }
+
+    fun setActiveOwner(owner: Any) {
+        val key = System.identityHashCode(owner)
+        if (launchers.containsKey(key)) {
+            activeOwnerId = key
+        }
+    }
+
+    fun unregisterLauncher(owner: Any) {
+        val key = System.identityHashCode(owner)
+        launchers.remove(key)
+        synchronized(ownerOrder) {
+            ownerOrder.remove(key)
+            if (activeOwnerId == key) {
+                activeOwnerId = ownerOrder.lastOrNull() ?: 0
+            }
+        }
     }
 
     fun pick(mimeType: String, allowMultiple: Boolean, callback: (List<Uri>) -> Unit) {
-        val l = launcher
+        val l = launchers[activeOwnerId] ?: synchronized(ownerOrder) {
+            ownerOrder.lastOrNull()?.let { launchers[it] }
+        }
         if (l != null) {
             Handler(Looper.getMainLooper()).post {
                 l(mimeType, allowMultiple, callback)
@@ -212,14 +278,50 @@ object MediaPlaybackDispatcher {
 }
 
 object ScreenCaptureDispatcher {
-    private var launcher: (((Int, Intent?) -> Unit) -> Unit)? = null
+    private val launchers = java.util.concurrent.ConcurrentHashMap<Int, (((Int, Intent?) -> Unit) -> Unit)>()
+    private val ownerOrder = java.util.Collections.synchronizedList(mutableListOf<Int>())
+    @Volatile private var activeOwnerId: Int = 0
 
     fun registerLauncher(block: (((Int, Intent?) -> Unit) -> Unit)?) {
-        launcher = block
+        if (block == null) {
+            launchers.remove(0)
+        } else {
+            registerLauncher(0, block)
+        }
+    }
+
+    fun registerLauncher(owner: Any, block: (((Int, Intent?) -> Unit) -> Unit)) {
+        val key = if (owner is Int && owner == 0) 0 else System.identityHashCode(owner)
+        launchers[key] = block
+        synchronized(ownerOrder) {
+            ownerOrder.remove(key)
+            ownerOrder.add(key)
+        }
+        activeOwnerId = key
+    }
+
+    fun setActiveOwner(owner: Any) {
+        val key = System.identityHashCode(owner)
+        if (launchers.containsKey(key)) {
+            activeOwnerId = key
+        }
+    }
+
+    fun unregisterLauncher(owner: Any) {
+        val key = System.identityHashCode(owner)
+        launchers.remove(key)
+        synchronized(ownerOrder) {
+            ownerOrder.remove(key)
+            if (activeOwnerId == key) {
+                activeOwnerId = ownerOrder.lastOrNull() ?: 0
+            }
+        }
     }
 
     fun requestCapture(callback: (Int, Intent?) -> Unit) {
-        val l = launcher
+        val l = launchers[activeOwnerId] ?: synchronized(ownerOrder) {
+            ownerOrder.lastOrNull()?.let { launchers[it] }
+        }
         if (l != null) {
             Handler(Looper.getMainLooper()).post {
                 l(callback)
@@ -525,6 +627,8 @@ class OverlayLifecycleOwner : androidx.lifecycle.LifecycleOwner,
 class HostBridgeImpl(
     private val context: Context,
     private val pluginDir: File,
+    private val pluginId: String = pluginDir.name,
+    private val onWindowModeChanged: ((Boolean) -> Unit)? = null,
     private val onCloseRequested: () -> Unit
 ) : HostBridge {
 
@@ -715,11 +819,38 @@ class HostBridgeImpl(
     }
 
     override fun showRecents() {
+        if (context.javaClass.name == "com.omni.hub.container.PluginContainerActivity") {
+            try {
+                val intent = Intent().apply {
+                    setClassName(context.packageName, "com.omni.hub.MainActivity")
+                    putExtra("extra_open_recents", true)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                }
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {}
+        }
         RecentsDispatcher.showRecents()
     }
 
     override fun pickFiles(mimeType: String, allowMultiple: Boolean, onResult: (List<Uri>) -> Unit) {
         FilePickerDispatcher.pick(mimeType, allowMultiple, onResult)
+    }
+
+    override fun setStandaloneWindowEnabled(enabled: Boolean) {
+        val prefs = context.applicationContext.getSharedPreferences("omni_window_mode_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("standalone_$pluginId", enabled).apply()
+        OmniLogger.log("WINDOW_MODE", "Window mode set for [$pluginId]: standalone=$enabled")
+        onWindowModeChanged?.let { cb ->
+            Handler(Looper.getMainLooper()).post {
+                cb(enabled)
+            }
+        }
+    }
+
+    override fun isStandaloneWindowEnabled(): Boolean {
+        val prefs = context.applicationContext.getSharedPreferences("omni_window_mode_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("standalone_$pluginId", true)
     }
 
     override fun hasPermission(permission: String): Boolean {
@@ -1280,6 +1411,17 @@ class HostBridgeImpl(
     }
 
     override fun showDiagnostics() {
+        if (context.javaClass.name == "com.omni.hub.container.PluginContainerActivity") {
+            try {
+                val intent = Intent().apply {
+                    setClassName(context.packageName, "com.omni.hub.MainActivity")
+                    putExtra("extra_open_diagnostics", true)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                }
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {}
+        }
         DiagnosticsDispatcher.showDiagnostics()
     }
 
