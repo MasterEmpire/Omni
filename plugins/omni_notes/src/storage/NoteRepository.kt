@@ -3,6 +3,7 @@ package com.omni.plugin.notes.storage
 import android.os.Environment
 import android.util.Base64
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -39,6 +40,9 @@ object NoteRepository {
     private val dbLock = Any()
     val notes = mutableStateListOf<NoteItem>()
     var settings by mutableStateOf(NotesSettings())
+    var dataRevision by mutableIntStateOf(0)
+
+    fun snapshotNotes(): List<NoteItem> = synchronized(dbLock) { notes.toList() }
 
     fun load(bridge: HostBridge) {
         synchronized(dbLock) {
@@ -73,6 +77,7 @@ object NoteRepository {
             val parsed = parseNotesJson(String(bytes, Charsets.UTF_8))
             notes.clear()
             notes.addAll(parsed)
+            dataRevision++
         } catch (_: Exception) {}
     }
 
@@ -324,6 +329,7 @@ object NoteRepository {
     }
 
     private fun saveNotesInternal(bridge: HostBridge) {
+        dataRevision++
         try {
             bridge.saveFile(NOTES_FILE, serializeNotesJson().toByteArray(Charsets.UTF_8))
         } catch (_: Exception) {}
