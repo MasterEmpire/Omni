@@ -1,6 +1,8 @@
 package com.omni.plugin.browser.storage
 
 import android.content.Context
+import android.os.Build
+import android.os.Environment
 import android.util.JsonReader
 import android.util.JsonToken
 import android.util.JsonWriter
@@ -140,6 +142,7 @@ class UnifiedNotesStore(
             ioExecutor.execute {
                 writeNotesStreaming(target, snapshotToWrite)
                 lastLoadedDbModifiedMs = target.lastModified()
+                mirrorNotesToExternalVault(snapshotToWrite)
             }
 
             return cachedAllNotes
@@ -163,6 +166,7 @@ class UnifiedNotesStore(
                 ioExecutor.execute {
                     writeNotesStreaming(target, snapshotToWrite)
                     lastLoadedDbModifiedMs = target.lastModified()
+                    mirrorNotesToExternalVault(snapshotToWrite)
                 }
             }
             return cachedAllNotes
@@ -307,6 +311,7 @@ class UnifiedNotesStore(
                     var id = ""
                     var title = ""
                     var content = ""
+                    var marginContent = ""
                     var type = "TEXT"
                     val checklist = mutableListOf<SmartNoteChecklistItem>()
                     var colorId = "yellow"
@@ -332,6 +337,7 @@ class UnifiedNotesStore(
                             "id" -> id = reader.nextString()
                             "title" -> title = reader.nextString()
                             "content" -> content = reader.nextString()
+                            "marginContent" -> marginContent = reader.nextString()
                             "type" -> type = reader.nextString()
                             "checklist" -> {
                                 reader.beginArray()
@@ -382,6 +388,7 @@ class UnifiedNotesStore(
                                 id = id,
                                 title = title,
                                 content = content,
+                                marginContent = marginContent,
                                 type = type,
                                 checklist = checklist,
                                 colorId = colorId,
@@ -419,6 +426,7 @@ class UnifiedNotesStore(
                     writer.name("id").value(n.id)
                     writer.name("title").value(n.title)
                     writer.name("content").value(n.content)
+                    if (n.marginContent.isNotEmpty()) writer.name("marginContent").value(n.marginContent)
                     writer.name("type").value(n.type)
                     writer.name("checklist")
                     writer.beginArray()
@@ -454,5 +462,19 @@ class UnifiedNotesStore(
         } catch (e: Exception) {
             bridge.log("UNIFIED_NOTES_ERR", "Streaming write failed: ${e.message}")
         }
+    }
+
+    private fun mirrorNotesToExternalVault(items: List<SmartNote>) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) return
+            val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            val dir = File(File(docsDir, ".omni_runtime"), "notes_backup")
+            if (!dir.exists()) dir.mkdirs()
+            val backupFile = File(dir, "omni_notes_backup.json")
+            if (backupFile.exists() && backupFile.length() > 0L) {
+                backupFile.copyTo(File(dir, "omni_notes_backup.prev.json"), overwrite = true)
+            }
+            writeNotesStreaming(backupFile, items)
+        } catch (_: Exception) {}
     }
 }
