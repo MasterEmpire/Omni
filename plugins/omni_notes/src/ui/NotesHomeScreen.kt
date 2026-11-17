@@ -361,8 +361,10 @@ fun NotesHomeScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = {
-                                val path = NoteRepository.exportVaultBackup(bridge)
-                                bridge.showToast(if (path != null) "Backed up ${NoteRepository.notes.size} notes!" else "Backup failed")
+                                scope.launch {
+                                    val path = withContext(Dispatchers.IO) { NoteRepository.exportVaultBackup(bridge) }
+                                    bridge.showToast(if (path != null) "Backed up ${NoteRepository.notes.size} notes!" else "Backup failed")
+                                }
                             },
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f),
@@ -372,14 +374,16 @@ fun NotesHomeScreen(
                         }
                         OutlinedButton(
                             onClick = {
-                                val count = NoteRepository.importVaultBackup(bridge)
-                                val msg = when {
-                                    count > 0 -> "Restored $count notes from Vault!"
-                                    count == 0 -> "All Vault notes already up to date"
-                                    count == -1 -> "No Vault backup found yet"
-                                    else -> "Restore failed"
+                                scope.launch {
+                                    val count = withContext(Dispatchers.IO) { NoteRepository.importVaultBackup(bridge) }
+                                    val msg = when {
+                                        count > 0 -> "Restored $count notes from Vault!"
+                                        count == 0 -> "All Vault notes already up to date"
+                                        count == -1 -> "No Vault backup found yet"
+                                        else -> "Restore failed"
+                                    }
+                                    bridge.showToast(msg)
                                 }
-                                bridge.showToast(msg)
                             },
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f),
@@ -394,23 +398,28 @@ fun NotesHomeScreen(
                             scope.launch { drawerState.close() }
                             bridge.pickFiles("application/json", false) { uris ->
                                 val uri = uris.firstOrNull() ?: return@pickFiles
-                                try {
-                                    val raw = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                                    if (raw.isNullOrBlank()) {
-                                        bridge.showToast("Selected file is empty")
-                                        return@pickFiles
+                                scope.launch {
+                                    try {
+                                        val (raw, encCount) = withContext(Dispatchers.IO) {
+                                            val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                                            if (text.isNullOrBlank()) Pair(null, 0)
+                                            else Pair(text, NoteRepository.countEncryptedInColorNoteJson(text))
+                                        }
+                                        if (raw.isNullOrBlank()) {
+                                            bridge.showToast("Selected file is empty")
+                                            return@launch
+                                        }
+                                        if (encCount > 0) {
+                                            pendingImportJson = raw
+                                            pendingImportEncryptedCount = encCount
+                                            showColorNoteDecryptDialog = true
+                                        } else {
+                                            val res = withContext(Dispatchers.IO) { NoteRepository.importColorNoteJson(bridge, raw, null) }
+                                            bridge.showToast("Imported ${res.importedCount} ColorNote notes!")
+                                        }
+                                    } catch (e: Exception) {
+                                        bridge.showToast("Import error: ${e.message}")
                                     }
-                                    val encCount = NoteRepository.countEncryptedInColorNoteJson(raw)
-                                    if (encCount > 0) {
-                                        pendingImportJson = raw
-                                        pendingImportEncryptedCount = encCount
-                                        showColorNoteDecryptDialog = true
-                                    } else {
-                                        val res = NoteRepository.importColorNoteJson(bridge, raw, null)
-                                        bridge.showToast("Imported ${res.importedCount} ColorNote notes!")
-                                    }
-                                } catch (e: Exception) {
-                                    bridge.showToast("Import error: ${e.message}")
                                 }
                             }
                         },
@@ -824,6 +833,7 @@ fun NotesHomeScreen(
                                         list.add(to.index, list.removeAt(from.index))
                                         displayNotes = list
                                         didDragReorder = true
+                                        selectedNoteIds = emptySet()
                                         bridge.vibrate(12L)
                                     }
                                 }
@@ -916,6 +926,7 @@ fun NotesHomeScreen(
                                         list.add(to.index, list.removeAt(from.index))
                                         displayNotes = list
                                         didDragReorder = true
+                                        selectedNoteIds = emptySet()
                                         bridge.vibrate(12L)
                                     }
                                 }
@@ -1165,10 +1176,13 @@ fun NotesHomeScreen(
                 Button(
                     onClick = {
                         val raw = pendingImportJson!!
+                        val pw = passwordInput
                         showColorNoteDecryptDialog = false
                         pendingImportJson = null
-                        val res = NoteRepository.importColorNoteJson(bridge, raw, passwordInput)
-                        bridge.showToast("Imported ${res.importedCount} notes (${res.decryptedCount} decrypted, ${res.lockedSkippedOrFailedCount} skipped)")
+                        scope.launch {
+                            val res = withContext(Dispatchers.IO) { NoteRepository.importColorNoteJson(bridge, raw, pw) }
+                            bridge.showToast("Imported ${res.importedCount} notes (${res.decryptedCount} decrypted, ${res.lockedSkippedOrFailedCount} skipped)")
+                        }
                     },
                     enabled = passwordInput.isNotEmpty()
                 ) {
@@ -1181,8 +1195,10 @@ fun NotesHomeScreen(
                         val raw = pendingImportJson!!
                         showColorNoteDecryptDialog = false
                         pendingImportJson = null
-                        val res = NoteRepository.importColorNoteJson(bridge, raw, null)
-                        bridge.showToast("Imported ${res.importedCount} unencrypted notes (${res.lockedSkippedOrFailedCount} locked skipped)")
+                        scope.launch {
+                            val res = withContext(Dispatchers.IO) { NoteRepository.importColorNoteJson(bridge, raw, null) }
+                            bridge.showToast("Imported ${res.importedCount} unencrypted notes (${res.lockedSkippedOrFailedCount} locked skipped)")
+                        }
                     }
                 ) {
                     Text("Skip Locked", color = mutedText)
