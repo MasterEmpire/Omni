@@ -46,6 +46,7 @@ class BrowserStateHolder(
     val sourceDumper = com.omni.plugin.browser.services.WebSourceDumper(context, bridge)
     val poolManager = WebViewPoolManager(context, bridge)
     val automator = AiStudioAutomator(context, bridge)
+    val unifiedNotesStore = com.omni.plugin.browser.storage.UnifiedNotesStore(context, bridge)
 
     // UI & Profile State
     var profiles by mutableStateOf(listOf(BrowserProfile("default", "Default", 0xFF2979FF)))
@@ -113,6 +114,9 @@ class BrowserStateHolder(
     var showDownloadsDialog by mutableStateOf(false)
     var showSmartNotesDialog by mutableStateOf(false)
     var smartNotes by mutableStateOf<List<SmartNote>>(emptyList())
+    var smartNoteFolders by mutableStateOf<List<SmartNoteFolder>>(emptyList())
+    var smartNotesMasterPinHash by mutableStateOf<String?>(null)
+    val unlockedSmartNoteIds = mutableStateListOf<String>()
     var showStudioLabDialog by mutableStateOf(false)
     var playbooks by mutableStateOf<List<com.omni.plugin.browser.models.StudioPlaybook>>(emptyList())
     val trackedDownloadIds = mutableStateListOf<Long>()
@@ -410,8 +414,8 @@ class BrowserStateHolder(
             if (loaded.isNotEmpty()) systemPresets = loaded
         }
 
-        vaultManager.loadSmartNotes()?.let { loaded ->
-            if (loaded.isNotEmpty()) smartNotes = loaded
+        coroutineScope.launch(Dispatchers.IO) {
+            refreshSmartNotes(force = true)
         }
 
         vaultManager.loadTabGroups()?.let { loaded ->
@@ -2194,33 +2198,64 @@ class BrowserStateHolder(
         }
     }
 
-    fun saveSmartNote(title: String, content: String, existingId: String? = null) {
-        val cleanContent = content.trim()
-        if (cleanContent.isEmpty()) return
+    suspend fun refreshSmartNotes(force: Boolean = false) {
+        val snap = withContext(Dispatchers.IO) {
+            unifiedNotesStore.loadIfNeeded(force)
+        }
+        withContext(Dispatchers.Main) {
+            if (snap.didRefresh || smartNotes.isEmpty()) {
+                smartNotes = snap.activeNotes
+                smartNoteFolders = snap.folders
+                smartNotesMasterPinHash = snap.masterPinHash
+            }
+        }
+    }
 
+    fun openSmartNotes() {
+        showSmartNotesDialog = true
+        coroutineScope.launch {
+            refreshSmartNotes(force = false)
+        }
+    }
+
+    fun verifySmartNotePin(note: SmartNote, pin: String): Boolean {
+        val ok = unifiedNotesStore.verifyPin(pin, note)
+        if (ok && !unlockedSmartNoteIds.contains(note.id)) {
+            unlockedSmartNoteIds.add(note.id)
+        }
+        return ok
+    }
+
+    fun saveSmartNote(
+        title: String,
+        content: String,
+        existingId: String? = null,
+        colorId: String = "yellow",
+        folderId: String? = null
+    ) {
+        val cleanContent = content.trim()
         val cleanTitle = title.trim().ifEmpty {
             cleanContent.lines().firstOrNull { it.isNotBlank() }?.take(32) ?: "Note"
         }
+        if (cleanContent.isEmpty() && cleanTitle == "Note") return
 
-        val updated = if (existingId != null && smartNotes.any { it.id == existingId }) {
-            smartNotes.map {
-                if (it.id == existingId) it.copy(title = cleanTitle, content = cleanContent, updatedAt = System.currentTimeMillis())
-                else it
+        coroutineScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                unifiedNotesStore.upsertNote(cleanTitle, cleanContent, existingId, colorId, folderId)
             }
-        } else {
-            listOf(SmartNote(title = cleanTitle, content = cleanContent)) + smartNotes
+            smartNotes = updated
+            bridge.showToast("Note saved to Omni Notes!")
         }
-
-        smartNotes = updated
-        vaultManager.saveSmartNotes(updated)
-        bridge.showToast("Note saved!")
     }
 
     fun deleteSmartNote(id: String) {
-        val updated = smartNotes.filter { it.id != id }
-        smartNotes = updated
-        vaultManager.saveSmartNotes(updated)
-        bridge.showToast("Note deleted")
+        coroutineScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                unifiedNotesStore.moveToTrash(id)
+            }
+            smartNotes = updated
+            bridge.showToast("Moved to Omni Notes Trash")
+        }
     }
 
     fun savePlaybook(title: String, description: String, content: String, existingId: String? = null) {
