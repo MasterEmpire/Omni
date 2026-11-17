@@ -64,6 +64,7 @@ object OmniTaskManager {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val pendingStandaloneLaunchMs = ConcurrentHashMap<String, Long>()
     private val pluginSlotMap = ConcurrentHashMap<String, Int>()
+    @Volatile private var lastResumedStandaloneRef: WeakReference<PluginContainerActivity>? = null
     private val SLOT_CLASSES: List<Class<out PluginContainerActivity>> = listOf(
         PluginSlot0Activity::class.java,
         PluginSlot1Activity::class.java,
@@ -310,6 +311,7 @@ object OmniTaskManager {
     }
 
     fun onStandaloneActivityResumed(pluginId: String, activity: PluginContainerActivity) {
+        lastResumedStandaloneRef = WeakReference(activity)
         val session = activeSessions.find { it.pluginId == pluginId && it.activityRef?.get() === activity } ?: return
         val idx = activeSessions.indexOf(session)
         if (idx > 0) {
@@ -319,17 +321,45 @@ object OmniTaskManager {
     }
 
     fun onStandaloneActivityPaused(pluginId: String, activity: PluginContainerActivity) {
+        if (lastResumedStandaloneRef?.get() === activity) {
+            lastResumedStandaloneRef = null
+        }
         val session = activeSessions.find { it.pluginId == pluginId && it.activityRef?.get() === activity } ?: return
         captureSnapshot(session)
     }
 
     fun onStandaloneActivityDestroyed(pluginId: String, activity: PluginContainerActivity) {
+        if (lastResumedStandaloneRef?.get() === activity) {
+            lastResumedStandaloneRef = null
+        }
         val session = activeSessions.find { it.pluginId == pluginId && it.activityRef?.get() === activity } ?: return
         OmniLogger.log("TASK_MANAGER", "Standalone window destroyed for [${session.pluginName}]")
         sessionHistory.removeAll { it == session.taskId }
         pluginSlotMap.remove(pluginId)
         cleanupSessionLifecycle(activity.applicationContext, session)
         activeSessions.remove(session)
+    }
+
+    fun finishForegroundOnDynamicCrash() {
+        val crashedAct = lastResumedStandaloneRef?.get()
+        if (crashedAct != null && !crashedAct.isFinishing && !crashedAct.isDestroyed) {
+            lastResumedStandaloneRef = null
+            crashedAct.finishAndRemoveTask()
+        } else {
+            suspendCurrent(returnToDashboard = true)
+        }
+    }
+
+    fun trimMemory(level: Int) {
+        val isSevere = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
+        activeSessions.forEach { session ->
+            if (isSevere && currentForegroundSession?.taskId != session.taskId) {
+                session.thumbnail = null
+            }
+            try {
+                session.loadedPlugin.instance.onSystemEvent("TRIM_MEMORY", mapOf("level" to level))
+            } catch (_: Exception) {}
+        }
     }
 
     fun closeStandaloneWindow(activity: PluginContainerActivity, pluginId: String) {
