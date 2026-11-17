@@ -72,6 +72,7 @@ data class SmartNote(
     val id: String = java.util.UUID.randomUUID().toString(),
     val title: String,
     val content: String,
+    val marginContent: String = "",
     val type: String = "TEXT",
     val checklist: List<SmartNoteChecklistItem> = emptyList(),
     val colorId: String = "yellow",
