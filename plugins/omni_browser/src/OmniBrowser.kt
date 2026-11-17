@@ -665,7 +665,7 @@ class OmniBrowser : PluginEntry() {
                     state.openLocalIdeAsNeighbor()
                 },
                 onOpenAutomation = { state.showAutomationDialog = true },
-                onOpenSmartNotes = { state.showSmartNotesDialog = true },
+                onOpenSmartNotes = { state.openSmartNotes() },
                 onOpenStudioLab = { state.showStudioLabDialog = true },
                 activeDownloadsCount = state.trackedDownloadIds.size,
                 onOpenDownloads = {
@@ -855,7 +855,14 @@ class OmniBrowser : PluginEntry() {
                     SmartNotesDialog(
                         bridge = bridge,
                         notes = state.smartNotes,
-                        onSaveNote = { title: String, content: String, id: String? -> state.saveSmartNote(title, content, id) },
+                        folders = state.smartNoteFolders,
+                        unlockedNoteIds = state.unlockedSmartNoteIds,
+                        currentPageUrl = state.currentUrl,
+                        currentPageTitle = state.pageTitle,
+                        onUnlockNote = { note, pin -> state.verifySmartNotePin(note, pin) },
+                        onSaveNote = { title, content, id, colorId, folderId ->
+                            state.saveSmartNote(title, content, id, colorId, folderId)
+                        },
                         onDeleteNote = { id: String -> state.deleteSmartNote(id) },
                         onInjectToPage = { text: String -> state.injectTextToActivePage(text) },
                         onDismiss = { state.showSmartNotesDialog = false }
