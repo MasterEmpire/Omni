@@ -68,6 +68,7 @@ fun NoteEditorScreen(
     existingNote: NoteItem?,
     initialType: NoteType,
     initialColorId: String,
+    initialFolderId: String? = null,
     registerBackInterceptor: ((() -> Boolean)?) -> Unit,
     onExitEditor: () -> Unit
 ) {
@@ -81,6 +82,7 @@ fun NoteEditorScreen(
     var content by remember(noteId) { mutableStateOf(existingNote?.content ?: "") }
     var checklist by remember(noteId) { mutableStateOf(existingNote?.checklist ?: emptyList()) }
     var colorId by remember(noteId) { mutableStateOf(existingNote?.colorId ?: initialColorId) }
+    var folderId by remember(noteId) { mutableStateOf(existingNote?.folderId ?: initialFolderId) }
     var isPinned by remember(noteId) { mutableStateOf(existingNote?.isPinned ?: false) }
     var isLocked by remember(noteId) { mutableStateOf(existingNote?.isLocked ?: false) }
     var status by remember(noteId) { mutableStateOf(existingNote?.status ?: NoteStatus.ACTIVE) }
@@ -98,6 +100,7 @@ fun NoteEditorScreen(
     var newItemText by remember { mutableStateOf("") }
     var editingCheckItem by remember { mutableStateOf<ChecklistEntry?>(null) }
     var showColorDialog by remember { mutableStateOf(false) }
+    var showFolderPickerDialog by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showPinDialog by remember { mutableStateOf(false) }
     var showReminderDialog by remember { mutableStateOf(false) }
@@ -120,6 +123,7 @@ fun NoteEditorScreen(
             isPinned = isPinned,
             isLocked = isLocked,
             sortIndex = existingNote?.sortIndex ?: 0,
+            folderId = folderId,
             status = status,
             reminderAtMs = reminderAtMs,
             reminderTriggered = reminderTriggered,
@@ -297,6 +301,13 @@ fun NoteEditorScreen(
                                 }
                             )
                             DropdownMenuItem(
+                                text = { Text("📁 Folder", color = primaryText, fontSize = 13.sp) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    showFolderPickerDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("⏰ Reminder", color = primaryText, fontSize = 13.sp) },
                                 onClick = {
                                     showMoreMenu = false
@@ -412,6 +423,22 @@ fun NoteEditorScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
+
+            // Active Folder Pill
+            val currentFolder = folderId?.let { fId -> NoteRepository.folders.find { it.id == fId } }
+            if (currentFolder != null) {
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(accent.copy(alpha = 0.14f))
+                        .clickable { showFolderPickerDialog = true }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("${currentFolder.icon} ${currentFolder.name}", color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
 
             // Active Reminder Pill
             if (reminderAtMs != null) {
@@ -773,6 +800,63 @@ fun NoteEditorScreen(
             dismissButton = {
                 TextButton(onClick = { editingCheckItem = null }) {
                     Text("Cancel", color = mutedText)
+                }
+            }
+        )
+    }
+
+    if (showFolderPickerDialog) {
+        val allFolders = remember(NoteRepository.dataRevision) {
+            NoteRepository.folders.sortedByDescending { it.lastUsedAtMs }
+        }
+        AlertDialog(
+            onDismissRequest = { showFolderPickerDialog = false },
+            containerColor = topBarBg,
+            title = { Text("📁 Move to Folder", color = primaryText, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (folderId == null) accent.copy(alpha = 0.2f) else Color.Transparent)
+                            .clickable {
+                                folderId = null
+                                isDirty = true
+                                persistIfNonEmpty()
+                                showFolderPickerDialog = false
+                            }
+                            .padding(horizontal = 10.dp, vertical = 10.dp)
+                    ) {
+                        Text("📄 Unfiled (No Folder)", color = primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    allFolders.forEach { folder ->
+                        val isSel = folderId == folder.id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSel) accent.copy(alpha = 0.24f) else Color.Transparent)
+                                .clickable {
+                                    folderId = folder.id
+                                    isDirty = true
+                                    NoteRepository.touchFolderUsed(bridge, folder.id)
+                                    persistIfNonEmpty()
+                                    showFolderPickerDialog = false
+                                }
+                                .padding(horizontal = 10.dp, vertical = 10.dp)
+                        ) {
+                            Text("${folder.icon} ${folder.name}", color = primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFolderPickerDialog = false }) {
+                    Text("Close", color = mutedText)
                 }
             }
         )
