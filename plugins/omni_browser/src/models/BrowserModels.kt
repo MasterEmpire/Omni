@@ -55,10 +55,34 @@ data class ShortcutItem(
     val isGlobalProfile: Boolean = false
 )
 
+data class SmartNoteChecklistItem(
+    val id: String,
+    val text: String,
+    val isChecked: Boolean = false
+)
+
+data class SmartNoteFolder(
+    val id: String,
+    val name: String,
+    val colorId: String = "blue",
+    val icon: String = "📁"
+)
+
 data class SmartNote(
     val id: String = java.util.UUID.randomUUID().toString(),
     val title: String,
     val content: String,
+    val type: String = "TEXT",
+    val checklist: List<SmartNoteChecklistItem> = emptyList(),
+    val colorId: String = "yellow",
+    val isPinned: Boolean = false,
+    val isLocked: Boolean = false,
+    val sortIndex: Int = 0,
+    val folderId: String? = null,
+    val status: String = "ACTIVE",
+    val pinHash: String? = null,
+    val reminderAtMs: Long? = null,
+    val reminderTriggered: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
