@@ -132,6 +132,7 @@ open class PluginContainerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        OmniLogger.log("CONTAINER_LIFE", "onDestroy [${javaClass.simpleName}] plugin=$currentPluginId isFinishing=$isFinishing")
         PermissionDispatcher.unregisterLauncher(this)
         FilePickerDispatcher.unregisterLauncher(this)
         ScreenCaptureDispatcher.unregisterLauncher(this)
@@ -206,6 +207,7 @@ open class PluginContainerActivity : ComponentActivity() {
 
             currentPluginId = loadedPlugin.id
             currentSessionStartedAt = System.currentTimeMillis()
+            OmniLogger.log("CONTAINER_LIFE", "Mounted [${loadedPlugin.id}] in [${javaClass.simpleName}] taskId=$taskId")
             applyTaskDescription(loadedPlugin, resolvedName, resolvedIcon)
 
             val hostBridge = HostBridgeImpl(
