@@ -533,20 +533,20 @@ class BrowserStateHolder(
         poolManager.pool.forEach { (id, wv) ->
             if (id != targetTabId) {
                 val tab = tabs.find { it.id == id }
-                val isVipAi = tab?.url?.contains("aistudio.google.com") == true || tab?.url?.contains("chatgpt.com") == true
+                val isVipAi = tab?.url?.contains("aistudio.google.com") == true || tab?.url?.contains("chatgpt.com") == true || tab?.url?.contains("gemini.google.com") == true
                 val isMediaActive = isBackgroundAudioEnabled && id == activeMediaTabId
 
                 if (!isVipAi && !isMediaActive) {
                     wv.onPause()
                 } else {
-                    // God-Mode VIP: Never pause AI Studio or ChatGPT in background so token streams never disconnect
+                    // God-Mode VIP: Never pause AI Studio, ChatGPT or Gemini in background so token streams never disconnect
                     wv.onResume()
                 }
             }
         }
         CookieManager.getInstance().flush()
 
-        if (tabs.any { it.url.contains("aistudio.google.com") || it.url.contains("chatgpt.com") }) {
+        if (tabs.any { it.url.contains("aistudio.google.com") || it.url.contains("chatgpt.com") || it.url.contains("gemini.google.com") }) {
             bridge.acquireWakeLock("AiStudioVIP")
         }
 
@@ -599,15 +599,15 @@ class BrowserStateHolder(
         targetWv.visibility = android.view.View.VISIBLE
         container.visibility = android.view.View.VISIBLE
 
-        // Safely manage sibling views: keep AI Studio & ChatGPT WebViews attached in background (INVISIBLE)
+        // Safely manage sibling views: keep AI Studio, ChatGPT & Gemini WebViews attached in background (INVISIBLE)
         for (i in container.childCount - 1 downTo 0) {
             val child = container.getChildAt(i)
             if (child !== targetWv) {
                 val childTab = tabs.find { poolManager.pool[it.id] === child }
-                val isChildVipAi = childTab?.url?.contains("aistudio.google.com") == true || childTab?.url?.contains("chatgpt.com") == true
+                val isChildVipAi = childTab?.url?.contains("aistudio.google.com") == true || childTab?.url?.contains("chatgpt.com") == true || childTab?.url?.contains("gemini.google.com") == true
 
                 if (isChildVipAi) {
-                    // God-Mode VIP: Keep AI Studio & ChatGPT attached in ViewTree so DOM updates continue in background
+                    // God-Mode VIP: Keep AI Studio, ChatGPT & Gemini attached in ViewTree so DOM updates continue in background
                     child.visibility = android.view.View.INVISIBLE
                 } else {
                     container.removeViewAt(i)
@@ -879,7 +879,7 @@ class BrowserStateHolder(
         val currentIdx = tabs.indexOfFirst { it.id == targetId }
         val remainingTabs = tabs.filter { it.id != targetId }
 
-        if (remainingTabs.none { it.url.contains("aistudio.google.com") || it.url.contains("chatgpt.com") }) {
+        if (remainingTabs.none { it.url.contains("aistudio.google.com") || it.url.contains("chatgpt.com") || it.url.contains("gemini.google.com") }) {
             bridge.releaseWakeLock()
         }
 
@@ -2833,7 +2833,7 @@ class BrowserStateHolder(
     override fun onFocusViolation(tabId: String) {
         val targetTab = tabs.find { it.id == tabId }
         val tabUrl = (targetTab?.url ?: currentUrl).lowercase(Locale.US)
-        if (tabUrl.contains("aistudio.google.com") || tabUrl.contains("chatgpt.com") || tabUrl.contains("localhost") || tabUrl == "about:blank") {
+        if (tabUrl.contains("aistudio.google.com") || tabUrl.contains("chatgpt.com") || tabUrl.contains("gemini.google.com") || tabUrl.contains("localhost") || tabUrl == "about:blank") {
             return
         }
 
