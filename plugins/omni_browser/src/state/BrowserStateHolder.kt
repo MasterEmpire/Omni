@@ -417,6 +417,7 @@ class BrowserStateHolder(
         coroutineScope.launch(Dispatchers.IO) {
             refreshSmartNotes(force = true)
         }
+        checkAndConsumePendingUrl()
 
         vaultManager.loadTabGroups()?.let { loaded ->
             if (loaded.isNotEmpty()) tabGroups = loaded
@@ -2208,6 +2209,31 @@ class BrowserStateHolder(
                 smartNoteFolders = snap.folders
                 smartNotesMasterPinHash = snap.masterPinHash
             }
+        }
+    }
+
+    private val pendingUrlLock = Any()
+
+    fun checkAndConsumePendingUrl() {
+        val targetUrl: String = synchronized(pendingUrlLock) {
+            try {
+                val pendingFile = File(bridge.getPluginDir(), "config/pending_url.json")
+                if (!pendingFile.exists() || pendingFile.length() == 0L) return
+                val raw = pendingFile.readText(Charsets.UTF_8)
+                pendingFile.delete()
+                val obj = org.json.JSONObject(raw)
+                val ts = obj.optLong("ts", 0L)
+                val url = obj.optString("url", "").trim()
+                if (url.isBlank() || (ts > 0L && System.currentTimeMillis() - ts > 60_000L)) return
+                url
+            } catch (_: Exception) {
+                return
+            }
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            isHomeOverlayOpen = false
+            isTabSwitcherOpen = false
+            createNewTab(targetUrl = targetUrl, targetProfileId = selectedProfileId)
         }
     }
 
