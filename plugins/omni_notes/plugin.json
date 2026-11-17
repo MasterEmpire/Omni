@@ -1,0 +1,14 @@
+{
+  "id": "omni_notes",
+  "name": "Omni Notes",
+  "version": "1.0.0",
+  "entryClass": "com.omni.plugin.notes.OmniNotesPlugin",
+  "description": "ColorNote-inspired sticky notes, reorderable checklists, floating overlays, PIN lock & reminders",
+  "icon": "📝",
+  "autoStart": true,
+  "permissions": [
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.VIBRATE",
+    "android.permission.SYSTEM_ALERT_WINDOW"
+  ]
+}
