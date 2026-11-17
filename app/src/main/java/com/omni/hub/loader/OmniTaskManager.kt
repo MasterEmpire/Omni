@@ -20,6 +20,18 @@ import com.omni.hub.MainActivity
 import com.omni.hub.api.HostBridgeImpl
 import com.omni.hub.api.OmniLogger
 import com.omni.hub.container.PluginContainerActivity
+import com.omni.hub.container.PluginSlot0Activity
+import com.omni.hub.container.PluginSlot1Activity
+import com.omni.hub.container.PluginSlot2Activity
+import com.omni.hub.container.PluginSlot3Activity
+import com.omni.hub.container.PluginSlot4Activity
+import com.omni.hub.container.PluginSlot5Activity
+import com.omni.hub.container.PluginSlot6Activity
+import com.omni.hub.container.PluginSlot7Activity
+import com.omni.hub.container.PluginSlot8Activity
+import com.omni.hub.container.PluginSlot9Activity
+import com.omni.hub.container.PluginSlot10Activity
+import com.omni.hub.container.PluginSlot11Activity
 import java.io.File
 import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
@@ -51,6 +63,50 @@ object OmniTaskManager {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val pendingStandaloneLaunchMs = ConcurrentHashMap<String, Long>()
+    private val pluginSlotMap = ConcurrentHashMap<String, Int>()
+    private val SLOT_CLASSES: List<Class<out PluginContainerActivity>> = listOf(
+        PluginSlot0Activity::class.java,
+        PluginSlot1Activity::class.java,
+        PluginSlot2Activity::class.java,
+        PluginSlot3Activity::class.java,
+        PluginSlot4Activity::class.java,
+        PluginSlot5Activity::class.java,
+        PluginSlot6Activity::class.java,
+        PluginSlot7Activity::class.java,
+        PluginSlot8Activity::class.java,
+        PluginSlot9Activity::class.java,
+        PluginSlot10Activity::class.java,
+        PluginSlot11Activity::class.java
+    )
+
+    private fun resolveSlotClass(context: Context, pluginId: String): Class<out PluginContainerActivity> {
+        val activeSlotOwners = activeSessions
+            .filter { it.isStandaloneWindow && it.pluginId != pluginId }
+            .mapNotNull { pluginSlotMap[it.pluginId] }
+            .toSet()
+
+        val existingSlot = pluginSlotMap[pluginId]
+        if (existingSlot != null && !activeSlotOwners.contains(existingSlot) && existingSlot in SLOT_CLASSES.indices) {
+            return SLOT_CLASSES[existingSlot]
+        }
+
+        val freeSlot = SLOT_CLASSES.indices.firstOrNull { !activeSlotOwners.contains(it) }
+        if (freeSlot != null) {
+            pluginSlotMap[pluginId] = freeSlot
+            return SLOT_CLASSES[freeSlot]
+        }
+
+        val lruStandalone = activeSessions.lastOrNull { it.isStandaloneWindow && it.pluginId != pluginId }
+        if (lruStandalone != null) {
+            val recycledSlot = pluginSlotMap[lruStandalone.pluginId] ?: 0
+            killTask(context, lruStandalone.taskId)
+            pluginSlotMap[pluginId] = recycledSlot
+            return SLOT_CLASSES[recycledSlot]
+        }
+
+        pluginSlotMap[pluginId] = 0
+        return SLOT_CLASSES[0]
+    }
 
     fun isStandaloneWindowEnabled(context: Context, pluginId: String): Boolean {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_WINDOW_MODE, Context.MODE_PRIVATE)
@@ -197,13 +253,11 @@ object OmniTaskManager {
         pluginName: String,
         entryClass: String
     ) {
-        val intent = Intent(context, PluginContainerActivity::class.java).apply {
+        val slotClass = resolveSlotClass(context, pluginId)
+        val intent = Intent(context, slotClass).apply {
             action = Intent.ACTION_VIEW
             data = Uri.parse("omni://plugin/$pluginId")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
-            if (context !is Activity) {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra(PluginContainerActivity.EXTRA_PLUGIN_ID, pluginId)
             putExtra(PluginContainerActivity.EXTRA_PLUGIN_NAME, pluginName)
             putExtra(PluginContainerActivity.EXTRA_ENTRY_CLASS, entryClass)
@@ -273,6 +327,7 @@ object OmniTaskManager {
         val session = activeSessions.find { it.pluginId == pluginId && it.activityRef?.get() === activity } ?: return
         OmniLogger.log("TASK_MANAGER", "Standalone window destroyed for [${session.pluginName}]")
         sessionHistory.removeAll { it == session.taskId }
+        pluginSlotMap.remove(pluginId)
         cleanupSessionLifecycle(activity.applicationContext, session)
         activeSessions.remove(session)
     }
@@ -314,6 +369,7 @@ object OmniTaskManager {
 
     private fun teardownSessionForMigration(context: Context, session: AppTaskSession) {
         sessionHistory.removeAll { it == session.taskId }
+        pluginSlotMap.remove(session.pluginId)
         val wasForeground = currentForegroundSession?.taskId == session.taskId
         if (wasForeground) {
             (session.pluginView.parent as? ViewGroup)?.removeView(session.pluginView)
@@ -429,6 +485,7 @@ object OmniTaskManager {
         cleanupSessionLifecycle(context, target)
 
         val isTargetForeground = currentForegroundSession?.taskId == taskId
+        pluginSlotMap.remove(target.pluginId)
         activeSessions.remove(target)
 
         if (target.isStandaloneWindow) {
@@ -458,6 +515,7 @@ object OmniTaskManager {
                 (session.pluginView.parent as? ViewGroup)?.removeView(session.pluginView)
             }
         }
+        pluginSlotMap.clear()
         currentForegroundSession = null
         activeSessions.clear()
     }
