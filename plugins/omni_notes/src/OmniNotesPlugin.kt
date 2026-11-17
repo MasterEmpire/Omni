@@ -27,7 +27,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -209,6 +212,17 @@ class OmniNotesPlugin : PluginEntry() {
         val isInEditor = activeEditorNote != null || creatingNewType != null
 
         var homeBackInterceptor by remember { mutableStateOf<(() -> Boolean)?>(null) }
+
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    pluginScope.launch { NoteRepository.syncIfModifiedOnDisk(bridge) }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
 
         DisposableEffect(isInEditor, homeBackInterceptor) {
             bridge.setOnBackPressedHandler {
