@@ -164,8 +164,11 @@
         <activity
             android:name=".container.PluginContainerActivity"
             android:exported="false"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="false"
+            android:supportsPictureInPicture="true"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode|density"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <service
