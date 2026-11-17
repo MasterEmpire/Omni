@@ -1690,7 +1690,7 @@ private fun EdgeFastScroller(
                 lastIdx = targetIdx
                 onScrollToIndex(targetIdx)
             }
-            withFrameNanos { }
+            delay(16L)
         }
     }
 
