@@ -17,10 +17,21 @@ import com.omni.plugin.notes.model.NoteThemeMode
 import com.omni.plugin.notes.model.NoteType
 import com.omni.plugin.notes.model.NoteViewMode
 import com.omni.plugin.notes.model.NotesSettings
+import android.util.JsonReader
+import android.util.JsonToken
+import android.util.JsonWriter
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.BufferedWriter
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
 import java.security.MessageDigest
+import java.util.concurrent.Executors
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -38,16 +49,21 @@ object NoteRepository {
     private const val VAULT_BACKUP_NAME = "omni_notes_backup.json"
 
     private val dbLock = Any()
+    private val ioExecutor = Executors.newSingleThreadExecutor()
     val notes = mutableStateListOf<NoteItem>()
     var settings by mutableStateOf(NotesSettings())
     var dataRevision by mutableIntStateOf(0)
+    @Volatile var isLoaded = false
 
     fun snapshotNotes(): List<NoteItem> = synchronized(dbLock) { notes.toList() }
 
-    fun load(bridge: HostBridge) {
+    fun load(bridge: HostBridge, forceReload: Boolean = false) {
+        if (isLoaded && !forceReload) return
         synchronized(dbLock) {
+            if (isLoaded && !forceReload) return
             loadSettingsInternal(bridge)
             loadNotesInternal(bridge)
+            isLoaded = true
         }
     }
 
@@ -73,12 +89,15 @@ object NoteRepository {
 
     private fun loadNotesInternal(bridge: HostBridge) {
         try {
-            val bytes = bridge.readFile(NOTES_FILE) ?: return
-            val parsed = parseNotesJson(String(bytes, Charsets.UTF_8))
+            val file = File(bridge.getPluginDir(), NOTES_FILE)
+            if (!file.exists() || file.length() == 0L) return
+            val parsed = readNotesStreaming(file)
             notes.clear()
             notes.addAll(parsed)
             dataRevision++
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            bridge.log("OMNI_NOTES_ERR", "Streaming load failed: ${e.message}")
+        }
     }
 
     fun updateSettings(bridge: HostBridge, newSettings: NotesSettings) {
@@ -329,10 +348,162 @@ object NoteRepository {
     }
 
     private fun saveNotesInternal(bridge: HostBridge) {
+        isLoaded = true
         dataRevision++
+        val snapshot = notes.toList()
+        val targetFile = File(bridge.getPluginDir(), NOTES_FILE)
+        ioExecutor.execute {
+            writeNotesStreaming(targetFile, snapshot)
+        }
+    }
+
+    private fun writeNotesStreaming(targetFile: File, items: List<NoteItem>) {
         try {
-            bridge.saveFile(NOTES_FILE, serializeNotesJson().toByteArray(Charsets.UTF_8))
+            targetFile.parentFile?.mkdirs()
+            val tmpFile = File(targetFile.parentFile, "${targetFile.name}.tmp")
+            JsonWriter(BufferedWriter(OutputStreamWriter(BufferedOutputStream(FileOutputStream(tmpFile)), Charsets.UTF_8), 16384)).use { writer ->
+                writer.beginArray()
+                for (n in items) {
+                    writer.beginObject()
+                    writer.name("id").value(n.id)
+                    writer.name("title").value(n.title)
+                    writer.name("content").value(n.content)
+                    writer.name("type").value(n.type.name)
+                    writer.name("checklist")
+                    writer.beginArray()
+                    for (c in n.checklist) {
+                        writer.beginObject()
+                        writer.name("id").value(c.id)
+                        writer.name("text").value(c.text)
+                        writer.name("isChecked").value(c.isChecked)
+                        writer.endObject()
+                    }
+                    writer.endArray()
+                    writer.name("colorId").value(n.colorId)
+                    writer.name("isPinned").value(n.isPinned)
+                    writer.name("isLocked").value(n.isLocked)
+                    writer.name("sortIndex").value(n.sortIndex.toLong())
+                    writer.name("status").value(n.status.name)
+                    if (!n.pinHash.isNullOrBlank()) writer.name("pinHash").value(n.pinHash)
+                    if (n.reminderAtMs != null) writer.name("reminderAtMs").value(n.reminderAtMs)
+                    writer.name("reminderTriggered").value(n.reminderTriggered)
+                    writer.name("createdAtMs").value(n.createdAtMs)
+                    writer.name("updatedAtMs").value(n.updatedAtMs)
+                    writer.endObject()
+                }
+                writer.endArray()
+                writer.flush()
+            }
+            if (targetFile.exists()) targetFile.delete()
+            if (!tmpFile.renameTo(targetFile)) {
+                tmpFile.copyTo(targetFile, overwrite = true)
+                tmpFile.delete()
+            }
         } catch (_: Exception) {}
+    }
+
+    private fun readNotesStreaming(sourceFile: File): List<NoteItem> {
+        val result = mutableListOf<NoteItem>()
+        JsonReader(InputStreamReader(BufferedInputStream(FileInputStream(sourceFile), 16384), Charsets.UTF_8)).use { reader ->
+            reader.beginArray()
+            var idx = 0
+            while (reader.hasNext()) {
+                var id = ""
+                var title = ""
+                var content = ""
+                var type = NoteType.TEXT
+                val checklist = mutableListOf<ChecklistEntry>()
+                var colorId = "yellow"
+                var isPinned = false
+                var isLockedFlag = false
+                var sortIndex = idx
+                var status = NoteStatus.ACTIVE
+                var pinHash: String? = null
+                var reminderAtMs: Long? = null
+                var reminderTriggered = false
+                var createdAtMs = System.currentTimeMillis()
+                var updatedAtMs = createdAtMs
+
+                reader.beginObject()
+                while (reader.hasNext()) {
+                    val name = reader.nextName()
+                    if (reader.peek() == JsonToken.NULL) {
+                        reader.skipValue()
+                        continue
+                    }
+                    when (name) {
+                        "id" -> id = reader.nextString()
+                        "title" -> title = reader.nextString()
+                        "content" -> content = reader.nextString()
+                        "type" -> type = runCatching { NoteType.valueOf(reader.nextString()) }.getOrDefault(NoteType.TEXT)
+                        "checklist" -> {
+                            reader.beginArray()
+                            var cIdx = 0
+                            while (reader.hasNext()) {
+                                var cId = "chk_${idx}_$cIdx"
+                                var cText = ""
+                                var cChecked = false
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    val cName = reader.nextName()
+                                    if (reader.peek() == JsonToken.NULL) {
+                                        reader.skipValue()
+                                        continue
+                                    }
+                                    when (cName) {
+                                        "id" -> cId = reader.nextString()
+                                        "text" -> cText = reader.nextString()
+                                        "isChecked" -> cChecked = reader.nextBoolean()
+                                        else -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                                checklist.add(ChecklistEntry(cId, cText, cChecked))
+                                cIdx++
+                            }
+                            reader.endArray()
+                        }
+                        "colorId" -> colorId = reader.nextString()
+                        "isPinned" -> isPinned = reader.nextBoolean()
+                        "isLocked" -> isLockedFlag = reader.nextBoolean()
+                        "sortIndex" -> sortIndex = reader.nextInt()
+                        "status" -> status = runCatching { NoteStatus.valueOf(reader.nextString()) }.getOrDefault(NoteStatus.ACTIVE)
+                        "pinHash" -> pinHash = reader.nextString().takeIf { it.isNotBlank() && !it.equals("null", true) }
+                        "reminderAtMs" -> reminderAtMs = reader.nextLong()
+                        "reminderTriggered" -> reminderTriggered = reader.nextBoolean()
+                        "createdAtMs" -> createdAtMs = reader.nextLong()
+                        "updatedAtMs" -> updatedAtMs = reader.nextLong()
+                        else -> reader.skipValue()
+                    }
+                }
+                reader.endObject()
+
+                if (id.isNotBlank()) {
+                    result.add(
+                        NoteItem(
+                            id = id,
+                            title = title,
+                            content = content,
+                            type = type,
+                            checklist = checklist,
+                            colorId = colorId,
+                            isPinned = isPinned,
+                            isLocked = isLockedFlag || !pinHash.isNullOrBlank(),
+                            sortIndex = sortIndex,
+                            status = status,
+                            pinHash = pinHash,
+                            reminderAtMs = reminderAtMs,
+                            reminderTriggered = reminderTriggered,
+                            createdAtMs = createdAtMs,
+                            updatedAtMs = updatedAtMs
+                        )
+                    )
+                }
+                idx++
+            }
+            reader.endArray()
+        }
+        return result
     }
 
     private fun getVaultBackupFile(): File {
@@ -344,10 +515,10 @@ object NoteRepository {
 
     fun exportVaultBackup(bridge: HostBridge): String? {
         return try {
-            val json = synchronized(dbLock) { serializeNotesJson() }
+            val snapshot = snapshotNotes()
             val file = getVaultBackupFile()
-            file.writeText(json, Charsets.UTF_8)
-            bridge.log("OMNI_NOTES", "Exported ${notes.size} notes to vault: ${file.absolutePath}")
+            writeNotesStreaming(file, snapshot)
+            bridge.log("OMNI_NOTES", "Exported ${snapshot.size} notes to vault: ${file.absolutePath}")
             file.absolutePath
         } catch (e: Exception) {
             bridge.log("OMNI_NOTES_ERR", "Vault export failed: ${e.message}")
@@ -359,7 +530,7 @@ object NoteRepository {
         return try {
             val file = getVaultBackupFile()
             if (!file.exists() || file.length() == 0L) return -1
-            val imported = parseNotesJson(file.readText(Charsets.UTF_8))
+            val imported = readNotesStreaming(file)
             synchronized(dbLock) {
                 val existingById = notes.associateBy { it.id }.toMutableMap()
                 var addedOrUpdated = 0
