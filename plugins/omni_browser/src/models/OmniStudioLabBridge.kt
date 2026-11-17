@@ -7,6 +7,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.browser.engine.AiStudioAutomator
+import com.omni.plugin.browser.engine.ChatGptAutomator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -23,6 +24,7 @@ class OmniStudioLabBridge(
     private val context: Context,
     private val bridge: HostBridge,
     private val automator: AiStudioAutomator,
+    private val chatGptAutomator: ChatGptAutomator = ChatGptAutomator(context, bridge),
     private val onIdePull: (project: String, files: List<String>, onResult: (String, Int) -> Unit) -> Unit,
     private val onIdeCommit: (xml: String, onResult: (String, String) -> Unit) -> Unit,
     private val scope: CoroutineScope,
@@ -304,6 +306,207 @@ class OmniStudioLabBridge(
     fun studioClose() {
         mainHandler.post {
             automator.stop(null)
+        }
+    }
+
+    // --- 1B. ChatGPT Puppet Pool Methods (Dedicated Engine) ---
+    @JavascriptInterface
+    fun gptCreateSession(callId: String, profileId: String, model: String, temporaryChat: Boolean) {
+        mainHandler.post {
+            val resolvedId = resolveProfileId(profileId)
+            chatGptAutomator.createSession(resolvedId, model, temporaryChat) { sessionId, err ->
+                if (sessionId != null) {
+                    val res = JSONObject().apply { put("sessionId", sessionId) }
+                    resolve(callId, res)
+                } else {
+                    reject(callId, err ?: "Failed creating ChatGPT session")
+                }
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun gptConfigureSession(callId: String, sessionId: String, configJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(configJson)
+                val tempChat: Boolean? = if (json.has("temporaryChat") && !json.isNull("temporaryChat")) json.getBoolean("temporaryChat") else null
+                chatGptAutomator.configureSession(
+                    sessionId = sessionId,
+                    model = json.optString("model", ""),
+                    temporaryChat = tempChat,
+                    headlessTurbo = json.optBoolean("headlessTurbo", true)
+                ) { success, err ->
+                    if (success) resolve(callId, "Configured")
+                    else reject(callId, err ?: "ChatGPT configuration error")
+                }
+            } catch (e: Exception) {
+                reject(callId, "Invalid config JSON: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun gptSendSessionTurn(callId: String, sessionId: String, turnJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(turnJson)
+                val prompt = json.optString("prompt", "")
+                val label = json.optString("label", "Turn")
+                val attachments = parseAttachmentsFromJson(json.optJSONArray("attachments"))
+
+                chatGptAutomator.executeSessionTurn(
+                    sessionId = sessionId,
+                    prompt = prompt,
+                    attachments = attachments,
+                    label = label,
+                    onProgress = { thoughts, output ->
+                        val progObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        progress(callId, progObj)
+                    },
+                    onDelta = { thoughtsDelta, outputDelta, isFirst ->
+                        progressDelta(callId, thoughtsDelta, outputDelta, isFirst)
+                    },
+                    onComplete = { thoughts, output ->
+                        val resObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        resolve(callId, resObj)
+                    },
+                    onError = { err ->
+                        reject(callId, err)
+                    }
+                )
+            } catch (e: Exception) {
+                reject(callId, "ChatGPT turn error: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun gptNewChatSession(callId: String, sessionId: String, temporaryChatJson: String) {
+        mainHandler.post {
+            val tempChat: Boolean? = when (temporaryChatJson.trim().lowercase()) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+            chatGptAutomator.newChatSession(sessionId, tempChat) { success, err ->
+                if (success) resolve(callId, "Ready")
+                else reject(callId, err ?: "Failed resetting ChatGPT session")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun gptCloseSession(callId: String, sessionId: String) {
+        mainHandler.post {
+            chatGptAutomator.closeSession(sessionId)
+            resolve(callId, "Closed")
+        }
+    }
+
+    @JavascriptInterface
+    fun gptInit(callId: String, profileId: String, model: String, temporaryChat: Boolean) {
+        mainHandler.post {
+            val resolvedId = resolveProfileId(profileId)
+            chatGptAutomator.prepareSession(resolvedId, model, temporaryChat) { success, err ->
+                if (success) resolve(callId, "Ready")
+                else reject(callId, err ?: "Failed initializing ChatGPT session")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun gptConfigure(callId: String, configJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(configJson)
+                val tempChat: Boolean? = if (json.has("temporaryChat") && !json.isNull("temporaryChat")) json.getBoolean("temporaryChat") else null
+                chatGptAutomator.configure(
+                    model = json.optString("model", ""),
+                    temporaryChat = tempChat,
+                    headlessTurbo = json.optBoolean("headlessTurbo", true)
+                ) { success, err ->
+                    if (success) resolve(callId, "Configured")
+                    else reject(callId, err ?: "ChatGPT configuration error")
+                }
+            } catch (e: Exception) {
+                reject(callId, "Invalid config JSON: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun gptSendTurn(callId: String, turnJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(turnJson)
+                val prompt = json.optString("prompt", "")
+                val label = json.optString("label", "Playbook Turn")
+                val attachments = parseAttachmentsFromJson(json.optJSONArray("attachments"))
+
+                chatGptAutomator.executeTurn(
+                    prompt = prompt,
+                    attachments = attachments,
+                    label = label,
+                    onProgress = { thoughts, output ->
+                        val progObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        progress(callId, progObj)
+                    },
+                    onDelta = { thoughtsDelta, outputDelta, isFirst ->
+                        progressDelta(callId, thoughtsDelta, outputDelta, isFirst)
+                    },
+                    onComplete = { thoughts, output ->
+                        val resObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        resolve(callId, resObj)
+                    },
+                    onError = { err ->
+                        reject(callId, err)
+                    }
+                )
+            } catch (e: Exception) {
+                reject(callId, "ChatGPT turn error: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun gptNewChat(callId: String, temporaryChatJson: String) {
+        mainHandler.post {
+            val tempChat: Boolean? = when (temporaryChatJson.trim().lowercase()) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+            chatGptAutomator.newChat(tempChat) { success, err ->
+                if (success) resolve(callId, "Ready")
+                else reject(callId, err ?: "Failed resetting ChatGPT session")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun gptAbort() {
+        mainHandler.post {
+            chatGptAutomator.isAborted = true
+        }
+    }
+
+    @JavascriptInterface
+    fun gptClose() {
+        mainHandler.post {
+            chatGptAutomator.closeAllSessions()
         }
     }
 
