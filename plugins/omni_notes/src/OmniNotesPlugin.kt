@@ -300,9 +300,10 @@ class OmniNotesPlugin : PluginEntry() {
                 },
                 confirmButton = {
                     Button(
-                        onClick = {
-                            if (NoteSecurity.hashPin(pinInput) == lockedNote.pinHash) {
-                                val targetId = lockedNote.id
+                                            onClick = {
+                        val expectedHash = NoteRepository.settings.masterPinHash ?: lockedNote.pinHash
+                        if (expectedHash == null || NoteSecurity.hashPin(pinInput) == expectedHash) {
+                            val targetId = lockedNote.id
                                 pendingUnlockNote = null
                                 editingNoteId = targetId
                                 creatingNewType = null
