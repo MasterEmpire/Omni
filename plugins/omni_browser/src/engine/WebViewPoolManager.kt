@@ -203,12 +203,13 @@ class WebViewPoolManager(
     fun pruneHotPool(keepTabId: String, tabs: List<BrowserTab>, onTabStateSaved: (String, Bundle) -> Unit, containerLayout: FrameLayout?) {
         if (pool.size <= maxHotTabs) return
 
-        // God-Mode VIP: AI Studio & ChatGPT tabs are immune from hot pool eviction
+        // God-Mode VIP: AI Studio, ChatGPT & Gemini tabs are immune from hot pool eviction
         val tabsInPool = tabs.filter {
             it.id in pool.keys &&
             it.id != keepTabId &&
             !it.url.contains("aistudio.google.com") &&
-            !it.url.contains("chatgpt.com")
+            !it.url.contains("chatgpt.com") &&
+            !it.url.contains("gemini.google.com")
         }.sortedBy { it.lastAccessedTime }
 
         var numToEvict = pool.size - maxHotTabs
@@ -242,7 +243,8 @@ class WebViewPoolManager(
             it.id in pool.keys &&
             it.id != keepTabId &&
             !it.url.contains("aistudio.google.com") &&
-            !it.url.contains("chatgpt.com")
+            !it.url.contains("chatgpt.com") &&
+            !it.url.contains("gemini.google.com")
         }.sortedBy { it.lastAccessedTime }
 
         var numToEvict = nonAiTabsInPool.size - maxNonAiTabs.coerceAtLeast(0)
@@ -301,6 +303,7 @@ class WebViewPoolManager(
                 try {
                     WebViewCompat.addDocumentStartJavaScript(this, AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT, setOf("https://aistudio.google.com"))
                     WebViewCompat.addDocumentStartJavaScript(this, CHATGPT_WIRE_INTERCEPTOR_SCRIPT, setOf("https://chatgpt.com"))
+                    WebViewCompat.addDocumentStartJavaScript(this, GEMINI_WIRE_INTERCEPTOR_SCRIPT, setOf("https://gemini.google.com"))
                 } catch (e: Exception) {
                     bridge.log("WIRE_SETUP_ERR", "Pool addDocumentStartJavaScript (wire) failed: ${e.message}")
                 }
@@ -387,6 +390,7 @@ class WebViewPoolManager(
                 bridge = bridge,
                 automator = com.omni.plugin.browser.engine.AiStudioAutomator(context, bridge),
                 chatGptAutomator = com.omni.plugin.browser.engine.ChatGptAutomator(context, bridge),
+                geminiAutomator = com.omni.plugin.browser.engine.GeminiAutomator(context, bridge),
                 onIdePull = { project, files, onRes ->
                     listener.onPlaybookFilePullRequested(project, files, onRes)
                 },
@@ -577,9 +581,10 @@ class WebViewPoolManager(
 
                     if (isDataSaverActive) {
                         val reqUrl = reqUri.toString().lowercase(Locale.US)
-                        // God-Mode VIP: Never throttle or block AI Studio or ChatGPT streaming traffic
+                        // God-Mode VIP: Never throttle or block AI Studio, ChatGPT or Gemini streaming traffic
                         if (host.contains("aistudio.google.com") || host.contains("alkalimakersuite") || reqUrl.contains("generativelanguage") ||
-                            host.contains("chatgpt.com") || host.contains("oaistatic.com") || host.contains("openai.com")) {
+                            host.contains("chatgpt.com") || host.contains("oaistatic.com") || host.contains("openai.com") ||
+                            host.contains("gemini.google.com") || host.contains("gemini.gstatic.com") || host.contains("waa-pa.clients6.google.com")) {
                             return super.shouldInterceptRequest(view, request)
                         }
 
@@ -653,7 +658,7 @@ class WebViewPoolManager(
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
-                    if (url != null && !url.contains("aistudio.google.com") && !url.contains("chatgpt.com") && !url.contains("localhost") && url != "about:blank") {
+                    if (url != null && !url.contains("aistudio.google.com") && !url.contains("chatgpt.com") && !url.contains("gemini.google.com") && !url.contains("localhost") && url != "about:blank") {
                         view?.evaluateJavascript(com.omni.plugin.browser.utils.buildFocusWatchdogScript(), null)
                     }
                 }
@@ -666,7 +671,7 @@ class WebViewPoolManager(
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
-                    if (url != null && !url.contains("aistudio.google.com") && !url.contains("chatgpt.com") && !url.contains("localhost") && url != "about:blank") {
+                    if (url != null && !url.contains("aistudio.google.com") && !url.contains("chatgpt.com") && !url.contains("gemini.google.com") && !url.contains("localhost") && url != "about:blank") {
                         view?.evaluateJavascript(com.omni.plugin.browser.utils.buildFocusWatchdogScript(), null)
                     }
                     val colorSchemeScript = if (isForceDarkWebPages) {
