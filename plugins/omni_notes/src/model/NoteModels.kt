@@ -34,10 +34,22 @@ enum class NoteThemeMode(val label: String) {
 
 enum class NoteSection(val label: String, val icon: String) {
     ALL("All Notes", "📝"),
+    FOLDERS("All Folders", "📁"),
     PINNED("Pinned", "📌"),
     REMINDERS("Reminders", "⏰"),
     ARCHIVE("Archive", "📦"),
     TRASH("Trash", "🗑️")
+}
+
+data class NoteFolder(
+    val id: String,
+    val name: String,
+    val colorId: String = NoteColor.BLUE.id,
+    val icon: String = "📁",
+    val lastUsedAtMs: Long = System.currentTimeMillis(),
+    val createdAtMs: Long = System.currentTimeMillis()
+) {
+    val color: NoteColor get() = NoteColor.fromId(colorId)
 }
 
 enum class NoteColor(
@@ -80,6 +92,7 @@ data class NoteItem(
     val isPinned: Boolean = false,
     val isLocked: Boolean = false,
     val sortIndex: Int = 0,
+    val folderId: String? = null,
     val status: NoteStatus = NoteStatus.ACTIVE,
     val pinHash: String? = null,
     val reminderAtMs: Long? = null,
