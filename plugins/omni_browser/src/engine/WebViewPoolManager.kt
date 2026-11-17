@@ -53,7 +53,7 @@ interface WebViewEventListener {
 class WebViewPoolManager(
     private val context: Context,
     private val bridge: HostBridge,
-    private val maxHotTabs: Int = 15
+    private val maxHotTabs: Int = 6
 ) {
     val pool = mutableMapOf<String, WebView>()
     val pendingPurge = mutableMapOf<String, WebView>()
