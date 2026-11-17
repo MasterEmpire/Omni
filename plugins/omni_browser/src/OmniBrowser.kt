@@ -64,6 +64,8 @@ class OmniBrowser : PluginEntry() {
     companion object {
         @Volatile
         private var activeSolverAutomator: AiStudioAutomator? = null
+        @Volatile
+        private var activeBrowserStateRef: java.lang.ref.WeakReference<BrowserStateHolder>? = null
 
         fun abortCurrentSolve() {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -75,6 +77,14 @@ class OmniBrowser : PluginEntry() {
     }
 
     override fun onSystemEvent(event: String, payload: Map<String, Any>) {
+        if (event == "TRIM_MEMORY") {
+            val level = (payload["level"] as? Int) ?: return
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                activeBrowserStateRef?.get()?.trimMemory(level)
+            }
+            return
+        }
+
         if (event == "ABORT_SOLVE") {
             val bridge = payload["bridge"] as? HostBridge
             bridge?.log("OMNI_SOLVE_IPC", "🛑 Processing ABORT_SOLVE. Halting AI Studio automator immediately.")
@@ -306,7 +316,11 @@ class OmniBrowser : PluginEntry() {
         val focusManager = LocalFocusManager.current
         val coroutineScope = rememberCoroutineScope()
 
-        val state = remember { BrowserStateHolder(context, bridge, coroutineScope) }
+        val state = remember {
+            BrowserStateHolder(context, bridge, coroutineScope).also {
+                activeBrowserStateRef = java.lang.ref.WeakReference(it)
+            }
+        }
 
         // --- Activity Launchers ---
         var restoreCallback by remember { mutableStateOf<((android.net.Uri) -> Unit)?>(null) }
