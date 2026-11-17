@@ -6,6 +6,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,8 +31,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,13 +58,17 @@ import com.omni.plugin.notes.model.NoteThemeMode
 import com.omni.plugin.notes.model.NoteType
 import com.omni.plugin.notes.model.NoteViewMode
 import com.omni.plugin.notes.storage.NoteRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,46 +137,59 @@ fun NotesHomeScreen(
         onDispose { }
     }
 
-    val filteredNotes = remember(
-        NoteRepository.notes.toList(),
+    var debouncedQuery by remember { mutableStateOf("") }
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isBlank()) {
+            debouncedQuery = ""
+        } else {
+            delay(120L)
+            debouncedQuery = searchQuery.trim()
+        }
+    }
+
+    var displayNotes by remember { mutableStateOf<List<NoteItem>>(emptyList()) }
+    LaunchedEffect(
+        NoteRepository.dataRevision,
         selectedSection,
         selectedColorFilter,
-        searchQuery,
+        debouncedQuery,
         settings.sortOrder
     ) {
-        val base = NoteRepository.notes.filter { note ->
-            val sectionOk = when (selectedSection) {
-                NoteSection.ALL -> note.status == NoteStatus.ACTIVE
-                NoteSection.PINNED -> note.status == NoteStatus.ACTIVE && note.isPinned
-                NoteSection.REMINDERS -> note.status != NoteStatus.TRASH && note.reminderAtMs != null
-                NoteSection.ARCHIVE -> note.status == NoteStatus.ARCHIVED
-                NoteSection.TRASH -> note.status == NoteStatus.TRASH
-            }
-            val colorOk = selectedColorFilter == null || note.colorId == selectedColorFilter
-            val queryOk = if (searchQuery.isBlank()) true else {
-                val q = searchQuery.trim()
-                note.title.contains(q, ignoreCase = true) ||
-                    (!note.isLocked && note.content.contains(q, ignoreCase = true)) ||
-                    (!note.isLocked && note.checklist.any { it.text.contains(q, ignoreCase = true) })
-            }
-            sectionOk && colorOk && queryOk
-        }
+        val computed = withContext(Dispatchers.Default) {
+            val snapshot = NoteRepository.snapshotNotes()
+            val base = snapshot.filter { note ->
+                val sectionOk = when (selectedSection) {
+                    NoteSection.ALL -> note.status == NoteStatus.ACTIVE
+                    NoteSection.PINNED -> note.status == NoteStatus.ACTIVE && note.isPinned
+                    NoteSection.REMINDERS -> note.status != NoteStatus.TRASH && note.reminderAtMs != null
+                    NoteSection.ARCHIVE -> note.status == NoteStatus.ARCHIVED
+                    NoteSection.TRASH -> note.status == NoteStatus.TRASH
+                }
+                if (!sectionOk) return@filter false
+                if (selectedColorFilter != null && note.colorId != selectedColorFilter) return@filter false
+                if (debouncedQuery.isEmpty()) return@filter true
 
-        val comparator = when (settings.sortOrder) {
-            NoteSortOrder.CUSTOM -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.sortIndex }.thenByDescending { it.updatedAtMs }
-            NoteSortOrder.MODIFIED_DESC -> compareByDescending<NoteItem> { it.isPinned }.thenByDescending { it.updatedAtMs }
-            NoteSortOrder.CREATED_DESC -> compareByDescending<NoteItem> { it.isPinned }.thenByDescending { it.createdAtMs }
-            NoteSortOrder.TITLE_ASC -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.title.lowercase(Locale.US) }
-            NoteSortOrder.COLOR -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.color.ordinal }.thenByDescending { it.updatedAtMs }
+                note.title.contains(debouncedQuery, ignoreCase = true) ||
+                    (!note.isLocked && note.content.contains(debouncedQuery, ignoreCase = true)) ||
+                    (!note.isLocked && note.checklist.any { it.text.contains(debouncedQuery, ignoreCase = true) })
+            }
+
+            val comparator = when (settings.sortOrder) {
+                NoteSortOrder.CUSTOM -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.sortIndex }.thenByDescending { it.updatedAtMs }
+                NoteSortOrder.MODIFIED_DESC -> compareByDescending<NoteItem> { it.isPinned }.thenByDescending { it.updatedAtMs }
+                NoteSortOrder.CREATED_DESC -> compareByDescending<NoteItem> { it.isPinned }.thenByDescending { it.createdAtMs }
+                NoteSortOrder.TITLE_ASC -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.title.lowercase(Locale.US) }
+                NoteSortOrder.COLOR -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.color.ordinal }.thenByDescending { it.updatedAtMs }
+            }
+            base.sortedWith(comparator)
         }
-        base.sortedWith(comparator)
+        displayNotes = computed
     }
 
-    var displayNotes by remember { mutableStateOf(filteredNotes) }
-    LaunchedEffect(filteredNotes) {
-        displayNotes = filteredNotes
-    }
     var didDragReorder by remember { mutableStateOf(false) }
+    var activeLongPressNoteId by remember { mutableStateOf<String?>(null) }
+    var lastLongPressEndedNoteId by remember { mutableStateOf<String?>(null) }
+    var lastLongPressEndMs by remember { mutableLongStateOf(0L) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -740,7 +767,7 @@ fun NotesHomeScreen(
                 }
 
                 // Trash Header Bar
-                if (selectedSection == NoteSection.TRASH && filteredNotes.isNotEmpty()) {
+                if (selectedSection == NoteSection.TRASH && displayNotes.isNotEmpty()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -749,7 +776,7 @@ fun NotesHomeScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "${filteredNotes.size} deleted notes",
+                            "${displayNotes.size} deleted notes",
                             color = mutedText,
                             fontSize = 12.sp
                         )
@@ -762,7 +789,7 @@ fun NotesHomeScreen(
                     }
                 }
 
-                if (filteredNotes.isEmpty()) {
+                if (displayNotes.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -791,120 +818,183 @@ fun NotesHomeScreen(
                         NoteViewMode.GRID -> {
                             val lazyGridState = rememberLazyGridState()
                             val reorderableGridState = rememberReorderableLazyGridState(lazyGridState) { from, to ->
-                                val list = displayNotes.toMutableList()
-                                if (from.index in list.indices && to.index in list.indices) {
-                                    list.add(to.index, list.removeAt(from.index))
-                                    displayNotes = list
-                                    didDragReorder = true
-                                    bridge.vibrate(12L)
-                                }
-                            }
-                            LazyVerticalGrid(
-                                state = lazyGridState,
-                                columns = GridCells.Fixed(2),
-                                contentPadding = PaddingValues(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                items(displayNotes, key = { it.id }) { note ->
-                                    ReorderableItem(reorderableGridState, key = note.id) { isDragging ->
-                                        val isSelected = selectedNoteIds.contains(note.id)
-                                        NoteGridCard(
-                                            note = note,
-                                            isDark = isDark,
-                                            isSelected = isSelected,
-                                            isDragging = isDragging,
-                                            isStickyMounted = OmniNotesPlugin.isStickyMounted(note.id),
-                                            dragModifier = Modifier.longPressDraggableHandle(
-                                                onDragStarted = {
-                                                    didDragReorder = false
-                                                    bridge.vibrate(25L)
-                                                    selectedNoteIds = selectedNoteIds + note.id
-                                                },
-                                                onDragStopped = {
-                                                    if (didDragReorder) {
-                                                        NoteRepository.applyCustomOrder(bridge, displayNotes.map { it.id })
-                                                        selectedNoteIds = emptySet()
-                                                    }
-                                                }
-                                            ),
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    selectedNoteIds = if (isSelected) selectedNoteIds - note.id else selectedNoteIds + note.id
-                                                } else {
-                                                    onOpenNote(note)
-                                                }
-                                            },
-                                            onTogglePin = { NoteRepository.togglePin(bridge, note.id) },
-                                            onToggleSticky = { OmniNotesPlugin.toggleStickyOverlay(context, bridge, note) },
-                                            onRestore = { NoteRepository.setStatus(bridge, note.id, NoteStatus.ACTIVE) },
-                                            onDeleteForever = {
-                                                OmniNotesPlugin.dismissStickyOverlay(bridge, note.id)
-                                                NoteRepository.deleteForever(bridge, note.id)
-                                            }
-                                        )
+                                if (from.index != to.index) {
+                                    val list = displayNotes.toMutableList()
+                                    if (from.index in list.indices && to.index in list.indices) {
+                                        list.add(to.index, list.removeAt(from.index))
+                                        displayNotes = list
+                                        didDragReorder = true
+                                        bridge.vibrate(12L)
                                     }
                                 }
+                            }
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                LazyVerticalGrid(
+                                    state = lazyGridState,
+                                    columns = GridCells.Fixed(2),
+                                    contentPadding = PaddingValues(start = 12.dp, end = 18.dp, top = 12.dp, bottom = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(displayNotes, key = { it.id }, contentType = { it.type }) { note ->
+                                        ReorderableItem(reorderableGridState, key = note.id) { isDragging ->
+                                            val isSelected = selectedNoteIds.contains(note.id)
+                                            NoteGridCard(
+                                                note = note,
+                                                isDark = isDark,
+                                                isSelected = isSelected,
+                                                isDimmed = isSelectionMode && !isSelected,
+                                                isDragging = isDragging,
+                                                isStickyMounted = OmniNotesPlugin.isStickyMounted(note.id),
+                                                dragModifier = Modifier.longPressDraggableHandle(
+                                                    onDragStarted = {
+                                                        didDragReorder = false
+                                                        activeLongPressNoteId = note.id
+                                                        bridge.vibrate(25L)
+                                                        selectedNoteIds = selectedNoteIds + note.id
+                                                    },
+                                                    onDragStopped = {
+                                                        activeLongPressNoteId = null
+                                                        lastLongPressEndedNoteId = note.id
+                                                        lastLongPressEndMs = System.currentTimeMillis()
+                                                        if (didDragReorder) {
+                                                            NoteRepository.applyCustomOrder(bridge, displayNotes.map { it.id })
+                                                            selectedNoteIds = emptySet()
+                                                        }
+                                                    }
+                                                ),
+                                                onClick = {
+                                                    val justEndedThis = lastLongPressEndedNoteId == note.id &&
+                                                        (System.currentTimeMillis() - lastLongPressEndMs) < 350L
+                                                    if (activeLongPressNoteId == note.id || justEndedThis) {
+                                                        return@NoteGridCard
+                                                    }
+                                                    if (isSelectionMode) {
+                                                        selectedNoteIds = if (isSelected) selectedNoteIds - note.id else selectedNoteIds + note.id
+                                                    } else {
+                                                        onOpenNote(note)
+                                                    }
+                                                },
+                                                onToggleSticky = { OmniNotesPlugin.toggleStickyOverlay(context, bridge, note) },
+                                                onRestore = { NoteRepository.setStatus(bridge, note.id, NoteStatus.ACTIVE) },
+                                                onDeleteForever = {
+                                                    OmniNotesPlugin.dismissStickyOverlay(bridge, note.id)
+                                                    NoteRepository.deleteForever(bridge, note.id)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                val gridInfo by remember { derivedStateOf { lazyGridState.layoutInfo } }
+                                EdgeFastScroller(
+                                    totalItems = gridInfo.totalItemsCount,
+                                    visibleItems = gridInfo.visibleItemsInfo.size,
+                                    firstVisibleIndex = lazyGridState.firstVisibleItemIndex,
+                                    accentColor = Color(0xFFE5A93C),
+                                    surfaceColor = surfaceColor,
+                                    textColor = primaryText,
+                                    getPreviewLabel = { idx ->
+                                        val item = displayNotes.getOrNull(idx)
+                                        if (item != null) "${NoteDateFormats.formatShort(item.updatedAtMs)} • ${idx + 1}/${displayNotes.size}" else "${idx + 1}"
+                                    },
+                                    onScrollToIndex = { idx ->
+                                        scope.launch { lazyGridState.scrollToItem(idx) }
+                                    },
+                                    modifier = Modifier.align(Alignment.CenterEnd)
+                                )
                             }
                         }
                         NoteViewMode.LIST, NoteViewMode.DETAILS -> {
                             val showDetails = settings.viewMode == NoteViewMode.DETAILS
                             val lazyListState = rememberLazyListState()
                             val reorderableListState = rememberReorderableLazyListState(lazyListState) { from, to ->
-                                val list = displayNotes.toMutableList()
-                                if (from.index in list.indices && to.index in list.indices) {
-                                    list.add(to.index, list.removeAt(from.index))
-                                    displayNotes = list
-                                    didDragReorder = true
-                                    bridge.vibrate(12L)
-                                }
-                            }
-                            LazyColumn(
-                                state = lazyListState,
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                items(displayNotes, key = { it.id }) { note ->
-                                    ReorderableItem(reorderableListState, key = note.id) { isDragging ->
-                                        val isSelected = selectedNoteIds.contains(note.id)
-                                        NoteRowCard(
-                                            note = note,
-                                            isDark = isDark,
-                                            showDetails = showDetails,
-                                            isSelected = isSelected,
-                                            isDragging = isDragging,
-                                            isStickyMounted = OmniNotesPlugin.isStickyMounted(note.id),
-                                            dragModifier = Modifier.longPressDraggableHandle(
-                                                onDragStarted = {
-                                                    didDragReorder = false
-                                                    bridge.vibrate(25L)
-                                                    selectedNoteIds = selectedNoteIds + note.id
-                                                },
-                                                onDragStopped = {
-                                                    if (didDragReorder) {
-                                                        NoteRepository.applyCustomOrder(bridge, displayNotes.map { it.id })
-                                                        selectedNoteIds = emptySet()
-                                                    }
-                                                }
-                                            ),
-                                            onClick = {
-                                                if (isSelectionMode) {
-                                                    selectedNoteIds = if (isSelected) selectedNoteIds - note.id else selectedNoteIds + note.id
-                                                } else {
-                                                    onOpenNote(note)
-                                                }
-                                            },
-                                            onToggleSticky = { OmniNotesPlugin.toggleStickyOverlay(context, bridge, note) },
-                                            onRestore = { NoteRepository.setStatus(bridge, note.id, NoteStatus.ACTIVE) },
-                                            onDeleteForever = {
-                                                OmniNotesPlugin.dismissStickyOverlay(bridge, note.id)
-                                                NoteRepository.deleteForever(bridge, note.id)
-                                            }
-                                        )
+                                if (from.index != to.index) {
+                                    val list = displayNotes.toMutableList()
+                                    if (from.index in list.indices && to.index in list.indices) {
+                                        list.add(to.index, list.removeAt(from.index))
+                                        displayNotes = list
+                                        didDragReorder = true
+                                        bridge.vibrate(12L)
                                     }
                                 }
+                            }
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                LazyColumn(
+                                    state = lazyListState,
+                                    contentPadding = PaddingValues(start = 12.dp, end = 18.dp, top = 6.dp, bottom = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(displayNotes, key = { it.id }, contentType = { it.type }) { note ->
+                                        ReorderableItem(reorderableListState, key = note.id) { isDragging ->
+                                            val isSelected = selectedNoteIds.contains(note.id)
+                                            NoteRowCard(
+                                                note = note,
+                                                isDark = isDark,
+                                                showDetails = showDetails,
+                                                isSelected = isSelected,
+                                                isDimmed = isSelectionMode && !isSelected,
+                                                isDragging = isDragging,
+                                                isStickyMounted = OmniNotesPlugin.isStickyMounted(note.id),
+                                                dragModifier = Modifier.longPressDraggableHandle(
+                                                    onDragStarted = {
+                                                        didDragReorder = false
+                                                        activeLongPressNoteId = note.id
+                                                        bridge.vibrate(25L)
+                                                        selectedNoteIds = selectedNoteIds + note.id
+                                                    },
+                                                    onDragStopped = {
+                                                        activeLongPressNoteId = null
+                                                        lastLongPressEndedNoteId = note.id
+                                                        lastLongPressEndMs = System.currentTimeMillis()
+                                                        if (didDragReorder) {
+                                                            NoteRepository.applyCustomOrder(bridge, displayNotes.map { it.id })
+                                                            selectedNoteIds = emptySet()
+                                                        }
+                                                    }
+                                                ),
+                                                onClick = {
+                                                    val justEndedThis = lastLongPressEndedNoteId == note.id &&
+                                                        (System.currentTimeMillis() - lastLongPressEndMs) < 350L
+                                                    if (activeLongPressNoteId == note.id || justEndedThis) {
+                                                        return@NoteRowCard
+                                                    }
+                                                    if (isSelectionMode) {
+                                                        selectedNoteIds = if (isSelected) selectedNoteIds - note.id else selectedNoteIds + note.id
+                                                    } else {
+                                                        onOpenNote(note)
+                                                    }
+                                                },
+                                                onToggleSticky = { OmniNotesPlugin.toggleStickyOverlay(context, bridge, note) },
+                                                onRestore = { NoteRepository.setStatus(bridge, note.id, NoteStatus.ACTIVE) },
+                                                onDeleteForever = {
+                                                    OmniNotesPlugin.dismissStickyOverlay(bridge, note.id)
+                                                    NoteRepository.deleteForever(bridge, note.id)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                val listInfo by remember { derivedStateOf { lazyListState.layoutInfo } }
+                                EdgeFastScroller(
+                                    totalItems = listInfo.totalItemsCount,
+                                    visibleItems = listInfo.visibleItemsInfo.size,
+                                    firstVisibleIndex = lazyListState.firstVisibleItemIndex,
+                                    accentColor = Color(0xFFE5A93C),
+                                    surfaceColor = surfaceColor,
+                                    textColor = primaryText,
+                                    getPreviewLabel = { idx ->
+                                        val item = displayNotes.getOrNull(idx)
+                                        if (item != null) "${NoteDateFormats.formatShort(item.updatedAtMs)} • ${idx + 1}/${displayNotes.size}" else "${idx + 1}"
+                                    },
+                                    onScrollToIndex = { idx ->
+                                        scope.launch { lazyListState.scrollToItem(idx) }
+                                    },
+                                    modifier = Modifier.align(Alignment.CenterEnd)
+                                )
                             }
                         }
                     }
@@ -1102,16 +1192,131 @@ fun NotesHomeScreen(
     }
 }
 
+private object NoteDateFormats {
+    private val shortFmt = SimpleDateFormat("MMM d", Locale.US)
+    private val longFmt = SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.US)
+
+    fun formatShort(ms: Long): String = synchronized(shortFmt) { shortFmt.format(Date(ms)) }
+    fun formatLong(ms: Long): String = synchronized(longFmt) { longFmt.format(Date(ms)) }
+}
+
+@Composable
+private fun EdgeFastScroller(
+    totalItems: Int,
+    visibleItems: Int,
+    firstVisibleIndex: Int,
+    accentColor: Color,
+    surfaceColor: Color,
+    textColor: Color,
+    getPreviewLabel: (Int) -> String,
+    onScrollToIndex: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (totalItems <= visibleItems || totalItems <= 12) return
+
+    val density = LocalDensity.current
+    var trackHeightPx by remember { mutableIntStateOf(1) }
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
+    var previewIndex by remember { mutableIntStateOf(0) }
+
+    val thumbHeightPx = with(density) { 46.dp.toPx() }
+    val usableHeightPx = (trackHeightPx - thumbHeightPx).coerceAtLeast(1f)
+    val maxFirstIndex = (totalItems - visibleItems).coerceAtLeast(1)
+
+    val activeFraction = if (isDragging) {
+        dragFraction
+    } else {
+        (firstVisibleIndex.toFloat() / maxFirstIndex.toFloat()).coerceIn(0f, 1f)
+    }
+    val thumbOffsetY = (activeFraction * usableHeightPx).roundToInt()
+
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .padding(vertical = 8.dp)
+            .onSizeChanged { trackHeightPx = it.height }
+    ) {
+        if (isDragging) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = surfaceColor,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, accentColor),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset { IntOffset(-with(density) { 36.dp.roundToPx() }, (thumbOffsetY - 4).coerceAtLeast(0)) }
+            ) {
+                Text(
+                    text = getPreviewLabel(previewIndex),
+                    color = textColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(24.dp)
+                .fillMaxHeight()
+                .pointerInput(totalItems, maxFirstIndex, usableHeightPx) {
+                    detectTapGestures { offset ->
+                        val frac = ((offset.y - thumbHeightPx / 2f) / usableHeightPx).coerceIn(0f, 1f)
+                        val target = (frac * maxFirstIndex).roundToInt().coerceIn(0, totalItems - 1)
+                        previewIndex = target
+                        onScrollToIndex(target)
+                    }
+                }
+                .pointerInput(totalItems, maxFirstIndex, usableHeightPx) {
+                    detectVerticalDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            val frac = ((offset.y - thumbHeightPx / 2f) / usableHeightPx).coerceIn(0f, 1f)
+                            dragFraction = frac
+                            val target = (frac * maxFirstIndex).roundToInt().coerceIn(0, totalItems - 1)
+                            previewIndex = target
+                            onScrollToIndex(target)
+                        },
+                        onDragEnd = { isDragging = false },
+                        onDragCancel = { isDragging = false },
+                        onVerticalDrag = { change, _ ->
+                            change.consume()
+                            val frac = ((change.position.y - thumbHeightPx / 2f) / usableHeightPx).coerceIn(0f, 1f)
+                            dragFraction = frac
+                            val target = (frac * maxFirstIndex).roundToInt().coerceIn(0, totalItems - 1)
+                            previewIndex = target
+                            onScrollToIndex(target)
+                        }
+                    )
+                }
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 3.dp)
+                    .offset { IntOffset(0, thumbOffsetY) }
+                    .width(if (isDragging) 8.dp else 5.dp)
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (isDragging) accentColor else accentColor.copy(alpha = 0.6f))
+            )
+        }
+    }
+}
+
 @Composable
 private fun NoteGridCard(
     note: NoteItem,
     isDark: Boolean,
     isSelected: Boolean = false,
+    isDimmed: Boolean = false,
     isDragging: Boolean = false,
     isStickyMounted: Boolean,
     dragModifier: Modifier = Modifier,
     onClick: () -> Unit,
-    onTogglePin: () -> Unit,
     onToggleSticky: () -> Unit,
     onRestore: () -> Unit,
     onDeleteForever: () -> Unit
@@ -1121,130 +1326,137 @@ private fun NoteGridCard(
     val accent = Color(nc.accentHex)
     val textColor = if (isDark) Color(0xFFF0F6FC) else Color(0xFF1F2328)
     val subColor = if (isDark) Color(0xFF9EA7B3) else Color(0xFF4B5563)
+    val selectColor = if (isDark) Color(0xFF58A6FF) else Color(0xFF1D4ED8)
 
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = cardBg),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 0.dp),
         border = BorderStroke(
-            if (isSelected || isDragging) 2.dp else 1.dp,
-            if (isSelected) Color(0xFFE5A93C) else accent.copy(alpha = if (isDark) 0.45f else 0.7f)
+            if (isSelected || isDragging) 2.5.dp else 1.dp,
+            if (isSelected) selectColor else accent.copy(alpha = if (isDark) 0.45f else 0.7f)
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 135.dp)
+            .height(156.dp)
+            .alpha(if (isDimmed) 0.52f else 1f)
             .clip(RoundedCornerShape(12.dp))
             .then(dragModifier)
             .clickable(onClick = onClick)
     ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .background(accent)
-            )
-            Column(modifier = Modifier.padding(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .background(if (isSelected) selectColor else accent)
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(10.dp)
                 ) {
-                    Text(
-                        text = note.title.ifBlank { if (note.type == NoteType.CHECKLIST) "Checklist" else "Untitled" },
-                        color = textColor,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        if (note.isPinned) Text("📌", fontSize = 11.sp)
-                        if (note.isLocked) Text("🔒", fontSize = 11.sp)
-                        if (note.reminderAtMs != null && !note.reminderTriggered) Text("⏰", fontSize = 11.sp)
-                        if (isStickyMounted) Text("🪟", fontSize = 11.sp)
-                    }
-                }
-
-                Spacer(Modifier.height(6.dp))
-
-                if (note.isLocked) {
-                    Text("Protected Note", color = subColor, fontSize = 12.sp)
-                } else if (note.type == NoteType.CHECKLIST) {
-                    val done = note.checklist.count { it.isChecked }
-                    val total = note.checklist.size
-                    note.checklist.take(4).forEach { entry ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = (if (entry.isChecked) "☑ " else "☐ ") + entry.text,
-                            color = if (entry.isChecked) subColor else textColor,
-                            fontSize = 11.sp,
+                            text = note.title.ifBlank { if (note.type == NoteType.CHECKLIST) "Checklist" else "Untitled" },
+                            color = textColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            if (note.isPinned) Text("📌", fontSize = 11.sp)
+                            if (note.isLocked) Text("🔒", fontSize = 11.sp)
+                            if (note.reminderAtMs != null && !note.reminderTriggered) Text("⏰", fontSize = 11.sp)
+                            if (isStickyMounted) Text("🪟", fontSize = 11.sp)
+                        }
                     }
-                    if (total > 0) {
-                        Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(
-                            progress = { done.toFloat() / total.toFloat() },
-                            color = accent,
-                            trackColor = accent.copy(alpha = 0.2f),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                        )
-                    }
-                } else {
-                    Text(
-                        text = note.content.ifBlank { "No content" },
-                        color = subColor,
-                        fontSize = 12.sp,
-                        maxLines = 5,
-                        overflow = TextOverflow.Ellipsis,
-                        lineHeight = 16.sp
-                    )
-                }
 
-                Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val dateStr = remember(note.updatedAtMs) {
-                        SimpleDateFormat("MMM d", Locale.US).format(Date(note.updatedAtMs))
-                    }
-                    Text(dateStr, color = subColor, fontSize = 10.sp)
-
-                    if (note.status == NoteStatus.TRASH) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (note.isLocked) {
+                        Text("Protected Note", color = subColor, fontSize = 12.sp)
+                    } else if (note.type == NoteType.CHECKLIST) {
+                        val done = note.checklist.count { it.isChecked }
+                        val total = note.checklist.size
+                        note.checklist.take(3).forEach { entry ->
                             Text(
-                                "Restore",
+                                text = (if (entry.isChecked) "☑ " else "☐ ") + entry.text,
+                                color = if (entry.isChecked) subColor else textColor,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (total > 0) {
+                            Spacer(Modifier.height(6.dp))
+                            LinearProgressIndicator(
+                                progress = { done.toFloat() / total.toFloat() },
+                                color = accent,
+                                trackColor = accent.copy(alpha = 0.2f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                            )
+                        }
+                    } else {
+                        val snippet = remember(note.id, note.content) {
+                            note.content.take(180).ifBlank { "No content" }
+                        }
+                        Text(
+                            text = snippet,
+                            color = subColor,
+                            fontSize = 12.sp,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 16.sp
+                        )
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val dateStr = remember(note.updatedAtMs) { NoteDateFormats.formatShort(note.updatedAtMs) }
+                        Text(dateStr, color = subColor, fontSize = 10.sp)
+
+                        if (note.status == NoteStatus.TRASH) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "Restore",
+                                    color = accent,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable { onRestore() }
+                                )
+                                Text(
+                                    "Delete",
+                                    color = Color(0xFFF85149),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable { onDeleteForever() }
+                                )
+                            }
+                        } else if (note.status == NoteStatus.ARCHIVED) {
+                            Text(
+                                "Unarchive",
                                 color = accent,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.clickable { onRestore() }
                             )
-                            Text(
-                                "Delete",
-                                color = Color(0xFFF85149),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.clickable { onDeleteForever() }
-                            )
-                        }
-                    } else if (note.status == NoteStatus.ARCHIVED) {
-                        Text(
-                            "Unarchive",
-                            color = accent,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { onRestore() }
-                        )
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        } else {
                             Text(
                                 if (isStickyMounted) "Unfloat" else "Float",
                                 color = accent,
@@ -1254,6 +1466,21 @@ private fun NoteGridCard(
                             )
                         }
                     }
+                }
+            }
+
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(selectColor)
+                        .border(1.5.dp, Color.White, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -1266,6 +1493,7 @@ private fun NoteRowCard(
     isDark: Boolean,
     showDetails: Boolean,
     isSelected: Boolean = false,
+    isDimmed: Boolean = false,
     isDragging: Boolean = false,
     isStickyMounted: Boolean,
     dragModifier: Modifier = Modifier,
@@ -1279,10 +1507,11 @@ private fun NoteRowCard(
     val accent = Color(nc.accentHex)
     val textColor = if (isDark) Color(0xFFF0F6FC) else Color(0xFF1F2328)
     val subColor = if (isDark) Color(0xFF9EA7B3) else Color(0xFF4B5563)
+    val selectColor = if (isDark) Color(0xFF58A6FF) else Color(0xFF1D4ED8)
+    val stripeColor = if (isSelected) selectColor else accent
 
     val dateStr = remember(note.updatedAtMs, showDetails) {
-        val pattern = if (showDetails) "MMM d, yyyy • h:mm a" else "MMM d"
-        SimpleDateFormat(pattern, Locale.US).format(Date(note.updatedAtMs))
+        if (showDetails) NoteDateFormats.formatLong(note.updatedAtMs) else NoteDateFormats.formatShort(note.updatedAtMs)
     }
 
     Card(
@@ -1290,31 +1519,30 @@ private fun NoteRowCard(
         colors = CardDefaults.cardColors(containerColor = cardBg),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 0.dp),
         border = BorderStroke(
-            if (isSelected || isDragging) 2.dp else 1.dp,
-            if (isSelected) Color(0xFFE5A93C) else accent.copy(alpha = if (isDark) 0.35f else 0.65f)
+            if (isSelected || isDragging) 2.5.dp else 1.dp,
+            if (isSelected) selectColor else accent.copy(alpha = if (isDark) 0.35f else 0.65f)
         ),
         modifier = Modifier
             .fillMaxWidth()
+            .height(if (showDetails) 112.dp else 76.dp)
+            .alpha(if (isDimmed) 0.52f else 1f)
             .clip(RoundedCornerShape(10.dp))
             .then(dragModifier)
             .clickable(onClick = onClick)
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(IntrinsicSize.Min)
+                .fillMaxSize()
+                .drawBehind {
+                    drawRect(
+                        color = stripeColor,
+                        topLeft = Offset.Zero,
+                        size = Size(7.dp.toPx(), size.height)
+                    )
+                }
+                .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 8.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .width(7.dp)
-                    .fillMaxHeight()
-                    .background(accent)
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            ) {
+            Column(modifier = Modifier.fillMaxSize()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1338,32 +1566,46 @@ private fun NoteRowCard(
                         if (note.reminderAtMs != null && !note.reminderTriggered) Text("⏰", fontSize = 12.sp)
                         if (isStickyMounted) Text("🪟", fontSize = 12.sp)
                         Text(dateStr, color = subColor, fontSize = 11.sp)
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(selectColor),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("✓", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
 
-                if (showDetails || note.type == NoteType.CHECKLIST || note.content.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    val preview = when {
+                Spacer(Modifier.height(4.dp))
+
+                val preview = remember(note.id, note.content, note.isLocked, note.type, note.checklist.size, showDetails) {
+                    when {
                         note.isLocked -> "🔒 Locked note"
                         note.type == NoteType.CHECKLIST -> {
                             val done = note.checklist.count { it.isChecked }
-                            val itemsPreview = note.checklist.take(if (showDetails) 4 else 2)
+                            val itemsPreview = note.checklist.take(if (showDetails) 3 else 2)
                                 .joinToString("  •  ") { (if (it.isChecked) "☑ " else "☐ ") + it.text }
                             "($done/${note.checklist.size}) $itemsPreview"
                         }
-                        else -> note.content.replace("\n", " ")
+                        else -> note.content.take(180).replace('\n', ' ').ifBlank { "No content" }
                     }
-                    Text(
-                        text = preview,
-                        color = subColor,
-                        fontSize = 12.sp,
-                        maxLines = if (showDetails) 3 else 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
 
+                Text(
+                    text = preview,
+                    color = subColor,
+                    fontSize = 12.sp,
+                    maxLines = if (showDetails) 2 else 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.weight(1f))
+
                 if (note.status == NoteStatus.TRASH) {
-                    Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             "Restore",
@@ -1381,7 +1623,6 @@ private fun NoteRowCard(
                         )
                     }
                 } else if (note.status == NoteStatus.ARCHIVED) {
-                    Spacer(Modifier.height(6.dp))
                     Text(
                         "Restore to Active",
                         color = accent,
@@ -1390,7 +1631,6 @@ private fun NoteRowCard(
                         modifier = Modifier.clickable { onRestore() }
                     )
                 } else if (showDetails) {
-                    Spacer(Modifier.height(6.dp))
                     Text(
                         if (isStickyMounted) "Unpin Floating Window" else "Pin Floating Sticky Note",
                         color = accent,
