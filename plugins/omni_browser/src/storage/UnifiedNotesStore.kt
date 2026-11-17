@@ -180,6 +180,15 @@ class UnifiedNotesStore(
         return hashPin(pin) == expected
     }
 
+    fun releaseCache() {
+        synchronized(dbLock) {
+            cachedAllNotes = mutableListOf()
+            cachedFolders = emptyList()
+            lastLoadedDbModifiedMs = 0L
+            lastLoadedFoldersModifiedMs = 0L
+        }
+    }
+
     private fun hashPin(pin: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val bytes = digest.digest(pin.toByteArray(Charsets.UTF_8))
