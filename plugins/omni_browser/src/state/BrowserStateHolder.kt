@@ -414,8 +414,6 @@ class BrowserStateHolder(
             if (loaded.isNotEmpty()) systemPresets = loaded
         }
 
-        checkAndConsumePendingUrl()
-
         vaultManager.loadTabGroups()?.let { loaded ->
             if (loaded.isNotEmpty()) tabGroups = loaded
         }
@@ -465,6 +463,7 @@ class BrowserStateHolder(
                 }
             }
         }
+        checkAndConsumePendingUrl()
     }
 
     fun changeSelectedProfile(newProfileId: String) {
@@ -2250,6 +2249,13 @@ class BrowserStateHolder(
                 containerLayout = containerLayout,
                 maxNonAiTabs = if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) 1 else 2
             )
+            if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+                tabs = tabs.map {
+                    if (it.id != activeTabId && it.id !in poolManager.pool.keys && it.thumbnail != null) {
+                        it.copy(thumbnail = null)
+                    } else it
+                }
+            }
         }
     }
 
