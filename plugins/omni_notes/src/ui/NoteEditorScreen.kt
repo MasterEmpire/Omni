@@ -28,7 +28,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +72,7 @@ fun NoteEditorScreen(
     onExitEditor: () -> Unit
 ) {
     val isDark = NoteRepository.settings.themeMode == NoteThemeMode.DARK
+    val isPaperMode = NoteRepository.settings.isPaperMode
     val noteId = remember(existingNote?.id) { existingNote?.id ?: "note_${System.currentTimeMillis()}" }
     val noteType = existingNote?.type ?: initialType
     val createdAt = existingNote?.createdAtMs ?: System.currentTimeMillis()
@@ -75,10 +82,11 @@ fun NoteEditorScreen(
     var checklist by remember(noteId) { mutableStateOf(existingNote?.checklist ?: emptyList()) }
     var colorId by remember(noteId) { mutableStateOf(existingNote?.colorId ?: initialColorId) }
     var isPinned by remember(noteId) { mutableStateOf(existingNote?.isPinned ?: false) }
+    var isLocked by remember(noteId) { mutableStateOf(existingNote?.isLocked ?: false) }
     var status by remember(noteId) { mutableStateOf(existingNote?.status ?: NoteStatus.ACTIVE) }
-    var pinHash by remember(noteId) { mutableStateOf(existingNote?.pinHash) }
     var reminderAtMs by remember(noteId) { mutableStateOf(existingNote?.reminderAtMs) }
     var reminderTriggered by remember(noteId) { mutableStateOf(existingNote?.reminderTriggered ?: false) }
+    var isDirty by remember(noteId) { mutableStateOf(false) }
 
     // Text notes open existing content in Read mode; new notes open directly in Edit mode
     var isEditMode by remember(noteId) { mutableStateOf(existingNote == null) }
@@ -110,8 +118,9 @@ fun NoteEditorScreen(
             checklist = checklist,
             colorId = colorId,
             isPinned = isPinned,
+            isLocked = isLocked,
+            sortIndex = existingNote?.sortIndex ?: 0,
             status = status,
-            pinHash = pinHash,
             reminderAtMs = reminderAtMs,
             reminderTriggered = reminderTriggered,
             createdAtMs = createdAt,
@@ -119,7 +128,7 @@ fun NoteEditorScreen(
         )
     }
 
-    fun persistIfNonEmpty() {
+    fun persistIfNonEmpty(): Boolean {
         val hasData = title.isNotBlank() ||
             content.isNotBlank() ||
             checklist.isNotEmpty() ||
@@ -130,12 +139,32 @@ fun NoteEditorScreen(
             if (OmniNotesPlugin.isStickyMounted(saved.id)) {
                 OmniNotesPlugin.mountStickyOverlay(context, bridge, saved, isReminderAlert = false)
             }
+            return true
         }
+        return false
     }
 
     fun saveAndExit() {
-        persistIfNonEmpty()
+        if (isDirty && persistIfNonEmpty()) {
+            isDirty = false
+            bridge.showToast("Note saved")
+        }
         onExitEditor()
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE && isDirty) {
+                if (persistIfNonEmpty()) {
+                    isDirty = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     DisposableEffect(Unit) {
@@ -168,7 +197,7 @@ fun NoteEditorScreen(
                             Spacer(Modifier.width(6.dp))
                             Text("📌", fontSize = 13.sp)
                         }
-                        if (!pinHash.isNullOrBlank()) {
+                        if (isLocked) {
                             Spacer(Modifier.width(4.dp))
                             Text("🔒", fontSize = 13.sp)
                         }
@@ -277,19 +306,26 @@ fun NoteEditorScreen(
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        if (pinHash.isNullOrBlank()) "🔒 Set PIN Lock" else "🔓 Remove PIN Lock",
+                                        if (isLocked) "🔓 Unlock Note" else "🔒 Lock Note",
                                         color = primaryText,
                                         fontSize = 13.sp
                                     )
                                 },
                                 onClick = {
                                     showMoreMenu = false
-                                    if (pinHash.isNullOrBlank()) {
-                                        showPinDialog = true
-                                    } else {
-                                        pinHash = null
+                                    if (isLocked) {
+                                        isLocked = false
+                                        isDirty = true
                                         persistIfNonEmpty()
-                                        bridge.showToast("PIN lock removed")
+                                        bridge.showToast("Note unlocked")
+                                    } else if (!NoteRepository.settings.masterPinHash.isNullOrBlank()) {
+                                        isLocked = true
+                                        isDirty = true
+                                        OmniNotesPlugin.dismissStickyOverlay(bridge, noteId)
+                                        persistIfNonEmpty()
+                                        bridge.showToast("🔒 Locked with Master PIN")
+                                    } else {
+                                        showPinDialog = true
                                     }
                                 }
                             )
@@ -354,7 +390,10 @@ fun NoteEditorScreen(
             // Title Input
             BasicTextField(
                 value = title,
-                onValueChange = { title = it },
+                onValueChange = {
+                    title = it
+                    isDirty = true
+                },
                 enabled = noteType == NoteType.CHECKLIST || isEditMode,
                 textStyle = TextStyle(
                     color = primaryText,
@@ -396,53 +435,97 @@ fun NoteEditorScreen(
             HorizontalDivider(color = accent.copy(alpha = 0.25f))
 
             if (noteType == NoteType.TEXT) {
+                val textScrollState = rememberScrollState()
+                val density = LocalDensity.current
+                val noteLineHeight = if (isPaperMode) 26.sp else 22.sp
+                val lineStepPx = with(density) { noteLineHeight.toPx() }
+                val topPadPx = with(density) { 16.dp.toPx() }
+                val marginXPx = with(density) { 38.dp.toPx() }
+                val ruleColor = if (isDark) Color.White.copy(alpha = 0.09f) else Color(0xFF60A5FA).copy(alpha = 0.35f)
+                val marginColor = Color(0xFFF85149).copy(alpha = if (isDark) 0.34f else 0.5f)
+                val paperModifier = if (isPaperMode) {
+                    Modifier.drawBehind {
+                        drawLine(
+                            color = marginColor,
+                            start = Offset(marginXPx, 0f),
+                            end = Offset(marginXPx, size.height),
+                            strokeWidth = 2f
+                        )
+                        val offset = textScrollState.value % lineStepPx
+                        var y = topPadPx + lineStepPx - offset
+                        while (y < size.height) {
+                            if (y >= 0f) {
+                                drawLine(
+                                    color = ruleColor,
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = 1.5f
+                                )
+                            }
+                            y += lineStepPx
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+                val startPadding = if (isPaperMode) 48.dp else 16.dp
+
                 if (isEditMode) {
-                    BasicTextField(
-                        value = content,
-                        onValueChange = { next ->
-                            if (next != content) {
-                                if (undoStack.size > 40) undoStack.removeAt(0)
-                                undoStack.add(content)
-                                redoStack.clear()
-                                content = next
-                            }
-                        },
-                        textStyle = TextStyle(
-                            color = primaryText,
-                            fontSize = 15.sp,
-                            lineHeight = 22.sp
-                        ),
-                        cursorBrush = SolidColor(accent),
-                        decorationBox = { inner ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(16.dp)
-                            ) {
-                                if (content.isEmpty()) {
-                                    Text("Start typing your note...", color = mutedText.copy(alpha = 0.6f), fontSize = 15.sp)
-                                }
-                                inner()
-                            }
-                        },
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                    )
+                            .then(paperModifier)
+                            .verticalScroll(textScrollState)
+                    ) {
+                        BasicTextField(
+                            value = content,
+                            onValueChange = { next ->
+                                if (next != content) {
+                                    if (undoStack.size > 40) undoStack.removeAt(0)
+                                    undoStack.add(content)
+                                    redoStack.clear()
+                                    content = next
+                                    isDirty = true
+                                }
+                            },
+                            textStyle = TextStyle(
+                                color = primaryText,
+                                fontSize = 15.sp,
+                                lineHeight = noteLineHeight
+                            ),
+                            cursorBrush = SolidColor(accent),
+                            decorationBox = { inner ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .defaultMinSize(minHeight = 420.dp)
+                                        .padding(start = startPadding, end = 16.dp, top = 16.dp, bottom = 32.dp)
+                                ) {
+                                    if (content.isEmpty()) {
+                                        Text("Start typing your note...", color = mutedText.copy(alpha = 0.6f), fontSize = 15.sp)
+                                    }
+                                    inner()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 } else {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            .verticalScroll(rememberScrollState())
+                            .then(paperModifier)
+                            .verticalScroll(textScrollState)
                             .clickable { isEditMode = true }
-                            .padding(16.dp)
+                            .padding(start = startPadding, end = 16.dp, top = 16.dp, bottom = 32.dp)
                     ) {
                         Text(
                             text = content.ifBlank { "Tap anywhere to start writing..." },
                             color = if (content.isBlank()) mutedText else primaryText,
                             fontSize = 15.sp,
-                            lineHeight = 22.sp
+                            lineHeight = noteLineHeight
                         )
                     }
                 }
@@ -748,7 +831,7 @@ fun NoteEditorScreen(
         AlertDialog(
             onDismissRequest = { showPinDialog = false },
             containerColor = topBarBg,
-            title = { Text("🔒 Lock Note with PIN", color = primaryText, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            title = { Text("🔒 Set Global Master PIN", color = primaryText, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -785,11 +868,16 @@ fun NoteEditorScreen(
                             newPin.length < 4 -> pinErr = "Use at least 4 digits"
                             newPin != confirmPin -> pinErr = "PINs do not match"
                             else -> {
-                                pinHash = NoteSecurity.hashPin(newPin)
+                                NoteRepository.updateSettings(
+                                    bridge,
+                                    NoteRepository.settings.copy(masterPinHash = NoteSecurity.hashPin(newPin))
+                                )
+                                isLocked = true
+                                isDirty = true
                                 OmniNotesPlugin.dismissStickyOverlay(bridge, noteId)
                                 persistIfNonEmpty()
                                 showPinDialog = false
-                                bridge.showToast("🔒 Note locked")
+                                bridge.showToast("🔒 Global Master PIN set & note locked")
                             }
                         }
                     },
