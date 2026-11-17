@@ -12,7 +12,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,6 +41,7 @@ import com.omni.plugin.notes.OmniNotesPlugin
 import com.omni.plugin.notes.model.NoteColor
 import com.omni.plugin.notes.model.NoteItem
 import com.omni.plugin.notes.model.NoteSection
+import com.omni.plugin.notes.model.NoteSecurity
 import com.omni.plugin.notes.model.NoteSortOrder
 import com.omni.plugin.notes.model.NoteStatus
 import com.omni.plugin.notes.model.NoteThemeMode
@@ -45,6 +49,9 @@ import com.omni.plugin.notes.model.NoteType
 import com.omni.plugin.notes.model.NoteViewMode
 import com.omni.plugin.notes.storage.NoteRepository
 import kotlinx.coroutines.launch
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyGridState
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -76,9 +83,23 @@ fun NotesHomeScreen(
     var showFabMenu by remember { mutableStateOf(false) }
     var standaloneWindowEnabled by remember { mutableStateOf(bridge.isStandaloneWindowEnabled()) }
 
-    DisposableEffect(drawerState.isOpen, isSearchOpen, showFabMenu, selectedColorFilter) {
+    var selectedNoteIds by remember { mutableStateOf(setOf<String>()) }
+    val isSelectionMode = selectedNoteIds.isNotEmpty()
+    var showBatchColorDialog by remember { mutableStateOf(false) }
+    var showMasterPinDialog by remember { mutableStateOf(false) }
+    var pendingBatchLockIds by remember { mutableStateOf<Set<String>?>(null) }
+
+    var pendingImportJson by remember { mutableStateOf<String?>(null) }
+    var pendingImportEncryptedCount by remember { mutableIntStateOf(0) }
+    var showColorNoteDecryptDialog by remember { mutableStateOf(false) }
+
+    DisposableEffect(drawerState.isOpen, isSearchOpen, showFabMenu, selectedColorFilter, isSelectionMode) {
         registerBackInterceptor {
             when {
+                isSelectionMode -> {
+                    selectedNoteIds = emptySet()
+                    true
+                }
                 drawerState.isOpen -> {
                     scope.launch { drawerState.close() }
                     true
@@ -128,6 +149,7 @@ fun NotesHomeScreen(
         }
 
         val comparator = when (settings.sortOrder) {
+            NoteSortOrder.CUSTOM -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.sortIndex }.thenByDescending { it.updatedAtMs }
             NoteSortOrder.MODIFIED_DESC -> compareByDescending<NoteItem> { it.isPinned }.thenByDescending { it.updatedAtMs }
             NoteSortOrder.CREATED_DESC -> compareByDescending<NoteItem> { it.isPinned }.thenByDescending { it.createdAtMs }
             NoteSortOrder.TITLE_ASC -> compareByDescending<NoteItem> { it.isPinned }.thenBy { it.title.lowercase(Locale.US) }
@@ -135,6 +157,12 @@ fun NotesHomeScreen(
         }
         base.sortedWith(comparator)
     }
+
+    var displayNotes by remember { mutableStateOf(filteredNotes) }
+    LaunchedEffect(filteredNotes) {
+        displayNotes = filteredNotes
+    }
+    var didDragReorder by remember { mutableStateOf(false) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -202,30 +230,78 @@ fun NotesHomeScreen(
                     HorizontalDivider(color = mutedText.copy(alpha = 0.2f))
                     Spacer(Modifier.height(12.dp))
 
-                    // Theme Mode Switch (Dark vs Paper)
+                    // Decoupled App Theme Switch (Dark vs Light)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .clickable {
-                                val next = if (isDark) NoteThemeMode.PAPER else NoteThemeMode.DARK
+                                val next = if (isDark) NoteThemeMode.LIGHT else NoteThemeMode.DARK
                                 NoteRepository.updateSettings(bridge, settings.copy(themeMode = next))
+                            }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Light Theme", color = primaryText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text(if (isDark) "Dark slate UI" else "Bright pastel UI", color = mutedText, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = !isDark,
+                            onCheckedChange = { light ->
+                                val next = if (light) NoteThemeMode.LIGHT else NoteThemeMode.DARK
+                                NoteRepository.updateSettings(bridge, settings.copy(themeMode = next))
+                            }
+                        )
+                    }
+
+                    // Independent Ruled Paper Mode Switch
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                NoteRepository.updateSettings(bridge, settings.copy(isPaperMode = !settings.isPaperMode))
+                            }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Paper Mode (Ruled Lines)", color = primaryText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("Notebook lines inside editor", color = mutedText, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.isPaperMode,
+                            onCheckedChange = { enabled ->
+                                NoteRepository.updateSettings(bridge, settings.copy(isPaperMode = enabled))
+                            }
+                        )
+                    }
+
+                    // Global Master Lock PIN Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                scope.launch { drawerState.close() }
+                                showMasterPinDialog = true
                             }
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Classic Paper Mode", color = primaryText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text(if (isDark) "Currently Dark Slate" else "Bright pastel cards", color = mutedText, fontSize = 10.sp)
+                            Text(
+                                if (settings.masterPinHash.isNullOrBlank()) "🔒 Set Master Lock PIN" else "🔐 Master Lock PIN Active",
+                                color = primaryText,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                            Text("One global password locks any note", color = mutedText, fontSize = 10.sp)
                         }
-                        Switch(
-                            checked = !isDark,
-                            onCheckedChange = { paper ->
-                                val next = if (paper) NoteThemeMode.PAPER else NoteThemeMode.DARK
-                                NoteRepository.updateSettings(bridge, settings.copy(themeMode = next))
-                            }
-                        )
                     }
 
                     // Granular Standalone OS Window Toggle
@@ -284,6 +360,38 @@ fun NotesHomeScreen(
                         ) {
                             Text("📥 Restore", fontSize = 11.sp)
                         }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            bridge.pickFiles("application/json", false) { uris ->
+                                val uri = uris.firstOrNull() ?: return@pickFiles
+                                try {
+                                    val raw = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                                    if (raw.isNullOrBlank()) {
+                                        bridge.showToast("Selected file is empty")
+                                        return@pickFiles
+                                    }
+                                    val encCount = NoteRepository.countEncryptedInColorNoteJson(raw)
+                                    if (encCount > 0) {
+                                        pendingImportJson = raw
+                                        pendingImportEncryptedCount = encCount
+                                        showColorNoteDecryptDialog = true
+                                    } else {
+                                        val res = NoteRepository.importColorNoteJson(bridge, raw, null)
+                                        bridge.showToast("Imported ${res.importedCount} ColorNote notes!")
+                                    }
+                                } catch (e: Exception) {
+                                    bridge.showToast("Import error: ${e.message}")
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) {
+                        Text("📒 Import ColorNote JSON", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -426,6 +534,158 @@ fun NotesHomeScreen(
                         }
                     }
                 }
+            },
+            bottomBar = {
+                if (isSelectionMode) {
+                    val selectedNotes = displayNotes.filter { selectedNoteIds.contains(it.id) }
+                    val allPinned = selectedNotes.isNotEmpty() && selectedNotes.all { it.isPinned }
+                    val allLocked = selectedNotes.isNotEmpty() && selectedNotes.all { it.isLocked }
+                    val inTrash = selectedSection == NoteSection.TRASH
+                    val inArchive = selectedSection == NoteSection.ARCHIVE
+
+                    Surface(
+                        color = surfaceColor,
+                        shadowElevation = 12.dp,
+                        border = BorderStroke(1.dp, mutedText.copy(alpha = 0.25f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${selectedNoteIds.size} selected",
+                                    color = primaryText,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(start = 4.dp)
+                                )
+                                TextButton(onClick = { selectedNoteIds = emptySet() }) {
+                                    Text("Cancel", color = mutedText, fontSize = 12.sp)
+                                }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (!inTrash) {
+                                    FilledTonalButton(
+                                        onClick = {
+                                            NoteRepository.batchSetPinned(bridge, selectedNoteIds, !allPinned)
+                                            selectedNoteIds = emptySet()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(if (allPinned) "📌 Unpin" else "📌 Pin", fontSize = 12.sp)
+                                    }
+                                    FilledTonalButton(
+                                        onClick = { showBatchColorDialog = true },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("🎨 Color", fontSize = 12.sp)
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            if (allLocked) {
+                                                NoteRepository.batchSetLocked(bridge, selectedNoteIds, false)
+                                                selectedNoteIds = emptySet()
+                                                bridge.showToast("Unlocked")
+                                            } else if (!settings.masterPinHash.isNullOrBlank()) {
+                                                selectedNoteIds.forEach { OmniNotesPlugin.dismissStickyOverlay(bridge, it) }
+                                                NoteRepository.batchSetLocked(bridge, selectedNoteIds, true)
+                                                selectedNoteIds = emptySet()
+                                                bridge.showToast("🔒 Locked with Master PIN")
+                                            } else {
+                                                pendingBatchLockIds = selectedNoteIds
+                                                showMasterPinDialog = true
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(if (allLocked) "🔓 Unlock" else "🔒 Lock", fontSize = 12.sp)
+                                    }
+                                    if (selectedNotes.size == 1) {
+                                        val single = selectedNotes.first()
+                                        FilledTonalButton(
+                                            onClick = {
+                                                OmniNotesPlugin.toggleStickyOverlay(context, bridge, single)
+                                                selectedNoteIds = emptySet()
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Text("🪟 Float", fontSize = 12.sp)
+                                        }
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            val targetStatus = if (inArchive) NoteStatus.ACTIVE else NoteStatus.ARCHIVED
+                                            NoteRepository.batchSetStatus(bridge, selectedNoteIds, targetStatus)
+                                            selectedNoteIds = emptySet()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(if (inArchive) "📤 Unarchive" else "📦 Archive", fontSize = 12.sp)
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            selectedNoteIds.forEach { OmniNotesPlugin.dismissStickyOverlay(bridge, it) }
+                                            NoteRepository.batchSetStatus(bridge, selectedNoteIds, NoteStatus.TRASH)
+                                            selectedNoteIds = emptySet()
+                                            bridge.showToast("Moved to Trash")
+                                        },
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = Color(0xFFF85149).copy(alpha = 0.2f),
+                                            contentColor = Color(0xFFF85149)
+                                        ),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("🗑️ Delete", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                } else {
+                                    FilledTonalButton(
+                                        onClick = {
+                                            NoteRepository.batchSetStatus(bridge, selectedNoteIds, NoteStatus.ACTIVE)
+                                            selectedNoteIds = emptySet()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("♻️ Restore", fontSize = 12.sp)
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            selectedNoteIds.forEach { OmniNotesPlugin.dismissStickyOverlay(bridge, it) }
+                                            NoteRepository.batchDeleteForever(bridge, selectedNoteIds)
+                                            selectedNoteIds = emptySet()
+                                        },
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = Color(0xFFF85149).copy(alpha = 0.2f),
+                                            contentColor = Color(0xFFF85149)
+                                        ),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("🗑️ Delete Forever", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         ) { padding ->
             Column(
@@ -529,51 +789,121 @@ fun NotesHomeScreen(
                 } else {
                     when (settings.viewMode) {
                         NoteViewMode.GRID -> {
+                            val lazyGridState = rememberLazyGridState()
+                            val reorderableGridState = rememberReorderableLazyGridState(lazyGridState) { from, to ->
+                                val list = displayNotes.toMutableList()
+                                if (from.index in list.indices && to.index in list.indices) {
+                                    list.add(to.index, list.removeAt(from.index))
+                                    displayNotes = list
+                                    didDragReorder = true
+                                    bridge.vibrate(12L)
+                                }
+                            }
                             LazyVerticalGrid(
+                                state = lazyGridState,
                                 columns = GridCells.Fixed(2),
                                 contentPadding = PaddingValues(12.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                items(filteredNotes, key = { it.id }) { note ->
-                                    NoteGridCard(
-                                        note = note,
-                                        isDark = isDark,
-                                        isStickyMounted = OmniNotesPlugin.isStickyMounted(note.id),
-                                        onClick = { onOpenNote(note) },
-                                        onTogglePin = { NoteRepository.togglePin(bridge, note.id) },
-                                        onToggleSticky = { OmniNotesPlugin.toggleStickyOverlay(context, bridge, note) },
-                                        onRestore = { NoteRepository.setStatus(bridge, note.id, NoteStatus.ACTIVE) },
-                                        onDeleteForever = {
-                                            OmniNotesPlugin.dismissStickyOverlay(bridge, note.id)
-                                            NoteRepository.deleteForever(bridge, note.id)
-                                        }
-                                    )
+                                items(displayNotes, key = { it.id }) { note ->
+                                    ReorderableItem(reorderableGridState, key = note.id) { isDragging ->
+                                        val isSelected = selectedNoteIds.contains(note.id)
+                                        NoteGridCard(
+                                            note = note,
+                                            isDark = isDark,
+                                            isSelected = isSelected,
+                                            isDragging = isDragging,
+                                            isStickyMounted = OmniNotesPlugin.isStickyMounted(note.id),
+                                            dragModifier = Modifier.longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    didDragReorder = false
+                                                    bridge.vibrate(25L)
+                                                    selectedNoteIds = selectedNoteIds + note.id
+                                                },
+                                                onDragStopped = {
+                                                    if (didDragReorder) {
+                                                        NoteRepository.applyCustomOrder(bridge, displayNotes.map { it.id })
+                                                        selectedNoteIds = emptySet()
+                                                    }
+                                                }
+                                            ),
+                                            onClick = {
+                                                if (isSelectionMode) {
+                                                    selectedNoteIds = if (isSelected) selectedNoteIds - note.id else selectedNoteIds + note.id
+                                                } else {
+                                                    onOpenNote(note)
+                                                }
+                                            },
+                                            onTogglePin = { NoteRepository.togglePin(bridge, note.id) },
+                                            onToggleSticky = { OmniNotesPlugin.toggleStickyOverlay(context, bridge, note) },
+                                            onRestore = { NoteRepository.setStatus(bridge, note.id, NoteStatus.ACTIVE) },
+                                            onDeleteForever = {
+                                                OmniNotesPlugin.dismissStickyOverlay(bridge, note.id)
+                                                NoteRepository.deleteForever(bridge, note.id)
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
                         NoteViewMode.LIST, NoteViewMode.DETAILS -> {
                             val showDetails = settings.viewMode == NoteViewMode.DETAILS
+                            val lazyListState = rememberLazyListState()
+                            val reorderableListState = rememberReorderableLazyListState(lazyListState) { from, to ->
+                                val list = displayNotes.toMutableList()
+                                if (from.index in list.indices && to.index in list.indices) {
+                                    list.add(to.index, list.removeAt(from.index))
+                                    displayNotes = list
+                                    didDragReorder = true
+                                    bridge.vibrate(12L)
+                                }
+                            }
                             LazyColumn(
+                                state = lazyListState,
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                items(filteredNotes, key = { it.id }) { note ->
-                                    NoteRowCard(
-                                        note = note,
-                                        isDark = isDark,
-                                        showDetails = showDetails,
-                                        isStickyMounted = OmniNotesPlugin.isStickyMounted(note.id),
-                                        onClick = { onOpenNote(note) },
-                                        onToggleSticky = { OmniNotesPlugin.toggleStickyOverlay(context, bridge, note) },
-                                        onRestore = { NoteRepository.setStatus(bridge, note.id, NoteStatus.ACTIVE) },
-                                        onDeleteForever = {
-                                            OmniNotesPlugin.dismissStickyOverlay(bridge, note.id)
-                                            NoteRepository.deleteForever(bridge, note.id)
-                                        }
-                                    )
+                                items(displayNotes, key = { it.id }) { note ->
+                                    ReorderableItem(reorderableListState, key = note.id) { isDragging ->
+                                        val isSelected = selectedNoteIds.contains(note.id)
+                                        NoteRowCard(
+                                            note = note,
+                                            isDark = isDark,
+                                            showDetails = showDetails,
+                                            isSelected = isSelected,
+                                            isDragging = isDragging,
+                                            isStickyMounted = OmniNotesPlugin.isStickyMounted(note.id),
+                                            dragModifier = Modifier.longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    didDragReorder = false
+                                                    bridge.vibrate(25L)
+                                                    selectedNoteIds = selectedNoteIds + note.id
+                                                },
+                                                onDragStopped = {
+                                                    if (didDragReorder) {
+                                                        NoteRepository.applyCustomOrder(bridge, displayNotes.map { it.id })
+                                                        selectedNoteIds = emptySet()
+                                                    }
+                                                }
+                                            ),
+                                            onClick = {
+                                                if (isSelectionMode) {
+                                                    selectedNoteIds = if (isSelected) selectedNoteIds - note.id else selectedNoteIds + note.id
+                                                } else {
+                                                    onOpenNote(note)
+                                                }
+                                            },
+                                            onToggleSticky = { OmniNotesPlugin.toggleStickyOverlay(context, bridge, note) },
+                                            onRestore = { NoteRepository.setStatus(bridge, note.id, NoteStatus.ACTIVE) },
+                                            onDeleteForever = {
+                                                OmniNotesPlugin.dismissStickyOverlay(bridge, note.id)
+                                                NoteRepository.deleteForever(bridge, note.id)
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -582,13 +912,204 @@ fun NotesHomeScreen(
             }
         }
     }
+
+    if (showBatchColorDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatchColorDialog = false },
+            containerColor = surfaceColor,
+            title = { Text("Change Color", color = primaryText, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NoteColor.entries.chunked(5).forEach { rowColors ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            rowColors.forEach { option ->
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(option.accentHex))
+                                            .clickable {
+                                                NoteRepository.batchSetColor(bridge, selectedNoteIds, option.id)
+                                                showBatchColorDialog = false
+                                                selectedNoteIds = emptySet()
+                                            }
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(option.label, color = mutedText, fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBatchColorDialog = false }) {
+                    Text("Close", color = mutedText)
+                }
+            }
+        )
+    }
+
+    if (showMasterPinDialog) {
+        val hasExisting = !settings.masterPinHash.isNullOrBlank()
+        var currentPin by remember { mutableStateOf("") }
+        var newPin by remember { mutableStateOf("") }
+        var confirmPin by remember { mutableStateOf("") }
+        var err by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = {
+                showMasterPinDialog = false
+                pendingBatchLockIds = null
+            },
+            containerColor = surfaceColor,
+            title = {
+                Text(
+                    if (hasExisting) "🔐 Change Master PIN" else "🔒 Set Global Master PIN",
+                    color = primaryText,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (hasExisting) {
+                        OutlinedTextField(
+                            value = currentPin,
+                            onValueChange = { currentPin = it.filter { c -> c.isDigit() }.take(6); err = null },
+                            label = { Text("Current PIN") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = primaryText, unfocusedTextColor = primaryText)
+                        )
+                    }
+                    OutlinedTextField(
+                        value = newPin,
+                        onValueChange = { newPin = it.filter { c -> c.isDigit() }.take(6); err = null },
+                        label = { Text("New PIN (4-6 digits)") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = primaryText, unfocusedTextColor = primaryText)
+                    )
+                    OutlinedTextField(
+                        value = confirmPin,
+                        onValueChange = { confirmPin = it.filter { c -> c.isDigit() }.take(6); err = null },
+                        label = { Text("Confirm New PIN") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = primaryText, unfocusedTextColor = primaryText)
+                    )
+                    if (err != null) {
+                        Text(err!!, color = Color(0xFFF85149), fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (hasExisting && NoteSecurity.hashPin(currentPin) != settings.masterPinHash) {
+                            err = "Incorrect current PIN"
+                            return@Button
+                        }
+                        if (newPin.length < 4) {
+                            err = "Use at least 4 digits"
+                            return@Button
+                        }
+                        if (newPin != confirmPin) {
+                            err = "PINs do not match"
+                            return@Button
+                        }
+                        NoteRepository.updateSettings(bridge, settings.copy(masterPinHash = NoteSecurity.hashPin(newPin)))
+                        pendingBatchLockIds?.let { ids ->
+                            ids.forEach { OmniNotesPlugin.dismissStickyOverlay(bridge, it) }
+                            NoteRepository.batchSetLocked(bridge, ids, true)
+                            selectedNoteIds = emptySet()
+                        }
+                        pendingBatchLockIds = null
+                        showMasterPinDialog = false
+                        bridge.showToast("🔐 Master PIN saved")
+                    }
+                ) {
+                    Text("Save PIN")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showMasterPinDialog = false
+                    pendingBatchLockIds = null
+                }) {
+                    Text("Cancel", color = mutedText)
+                }
+            }
+        )
+    }
+
+    if (showColorNoteDecryptDialog && pendingImportJson != null) {
+        var passwordInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = {
+                showColorNoteDecryptDialog = false
+                pendingImportJson = null
+            },
+            containerColor = surfaceColor,
+            title = { Text("🔒 Locked Notes Detected", color = primaryText, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Found $pendingImportEncryptedCount locked note(s) in this ColorNote export. Enter your password to decrypt them (or skip locked notes).",
+                        color = mutedText,
+                        fontSize = 12.sp
+                    )
+                    OutlinedTextField(
+                        value = passwordInput,
+                        onValueChange = { passwordInput = it },
+                        label = { Text("ColorNote Password / PIN") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = primaryText, unfocusedTextColor = primaryText)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val raw = pendingImportJson!!
+                        showColorNoteDecryptDialog = false
+                        pendingImportJson = null
+                        val res = NoteRepository.importColorNoteJson(bridge, raw, passwordInput)
+                        bridge.showToast("Imported ${res.importedCount} notes (${res.decryptedCount} decrypted, ${res.lockedSkippedOrFailedCount} skipped)")
+                    },
+                    enabled = passwordInput.isNotEmpty()
+                ) {
+                    Text("Decrypt & Import")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        val raw = pendingImportJson!!
+                        showColorNoteDecryptDialog = false
+                        pendingImportJson = null
+                        val res = NoteRepository.importColorNoteJson(bridge, raw, null)
+                        bridge.showToast("Imported ${res.importedCount} unencrypted notes (${res.lockedSkippedOrFailedCount} locked skipped)")
+                    }
+                ) {
+                    Text("Skip Locked", color = mutedText)
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun NoteGridCard(
     note: NoteItem,
     isDark: Boolean,
+    isSelected: Boolean = false,
+    isDragging: Boolean = false,
     isStickyMounted: Boolean,
+    dragModifier: Modifier = Modifier,
     onClick: () -> Unit,
     onTogglePin: () -> Unit,
     onToggleSticky: () -> Unit,
@@ -604,11 +1125,16 @@ private fun NoteGridCard(
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = cardBg),
-        border = BorderStroke(1.dp, accent.copy(alpha = if (isDark) 0.45f else 0.7f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 0.dp),
+        border = BorderStroke(
+            if (isSelected || isDragging) 2.dp else 1.dp,
+            if (isSelected) Color(0xFFE5A93C) else accent.copy(alpha = if (isDark) 0.45f else 0.7f)
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 135.dp)
             .clip(RoundedCornerShape(12.dp))
+            .then(dragModifier)
             .clickable(onClick = onClick)
     ) {
         Column {
@@ -739,7 +1265,10 @@ private fun NoteRowCard(
     note: NoteItem,
     isDark: Boolean,
     showDetails: Boolean,
+    isSelected: Boolean = false,
+    isDragging: Boolean = false,
     isStickyMounted: Boolean,
+    dragModifier: Modifier = Modifier,
     onClick: () -> Unit,
     onToggleSticky: () -> Unit,
     onRestore: () -> Unit,
@@ -759,10 +1288,15 @@ private fun NoteRowCard(
     Card(
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = cardBg),
-        border = BorderStroke(1.dp, accent.copy(alpha = if (isDark) 0.35f else 0.65f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 10.dp else 0.dp),
+        border = BorderStroke(
+            if (isSelected || isDragging) 2.dp else 1.dp,
+            if (isSelected) Color(0xFFE5A93C) else accent.copy(alpha = if (isDark) 0.35f else 0.65f)
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
+            .then(dragModifier)
             .clickable(onClick = onClick)
     ) {
         Row(
