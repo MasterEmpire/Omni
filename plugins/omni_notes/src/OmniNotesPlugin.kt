@@ -56,7 +56,9 @@ class OmniNotesPlugin : PluginEntry() {
 
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
         createNotificationChannel(context)
-        NoteRepository.load(bridge)
+        if (!NoteRepository.isLoaded) {
+            pluginScope.launch { NoteRepository.load(bridge) }
+        }
         startReminderSentinel(context, bridge)
 
         return ComposeView(context).apply {
@@ -88,7 +90,7 @@ class OmniNotesPlugin : PluginEntry() {
 
     override fun onStart(context: Context, bridge: HostBridge, baseDir: String) {
         createNotificationChannel(context)
-        NoteRepository.load(bridge)
+        pluginScope.launch { NoteRepository.load(bridge) }
         startReminderSentinel(context, bridge)
         bridge.log("OMNI_NOTES", "📝 Omni Notes reminder sentinel armed.")
     }
