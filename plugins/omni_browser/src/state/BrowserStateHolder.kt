@@ -414,9 +414,6 @@ class BrowserStateHolder(
             if (loaded.isNotEmpty()) systemPresets = loaded
         }
 
-        coroutineScope.launch(Dispatchers.IO) {
-            refreshSmartNotes(force = true)
-        }
         checkAndConsumePendingUrl()
 
         vaultManager.loadTabGroups()?.let { loaded ->
@@ -2237,13 +2234,31 @@ class BrowserStateHolder(
         }
     }
 
+    fun trimMemory(level: Int) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            if (!showSmartNotesDialog) {
+                smartNotes = emptyList()
+                smartNoteFolders = emptyList()
+                unifiedNotesStore.releaseCache()
+            }
+            poolManager.evictColdTabsOnTrim(
+                keepTabId = activeTabId,
+                tabs = tabs,
+                onTabStateSaved = { id, b ->
+                    tabs = tabs.map { if (it.id == id) it.copy(stateBundle = b) else it }
+                },
+                containerLayout = containerLayout,
+                maxNonAiTabs = if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) 1 else 2
+            )
+        }
+    }
+
     fun openSmartNotes() {
         showSmartNotesDialog = true
         coroutineScope.launch {
             refreshSmartNotes(force = false)
         }
     }
-
     fun verifySmartNotePin(note: SmartNote, pin: String): Boolean {
         val ok = unifiedNotesStore.verifyPin(pin, note)
         if (ok && !unlockedSmartNoteIds.contains(note.id)) {
