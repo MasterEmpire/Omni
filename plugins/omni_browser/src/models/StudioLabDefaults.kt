@@ -146,6 +146,53 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                 if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.gptClose();
             }
         },
+        gemini: {
+            createSession: function(opts) {
+                opts = opts || {};
+                var profile = opts.profile || opts.profileId || 'default';
+                var model = opts.model || '';
+                var temporaryChat = !!opts.temporaryChat;
+                return rpcCall('geminiCreateSession', [profile, model, temporaryChat]).then(function(res) {
+                    var sId = res.sessionId;
+                    return {
+                        id: sId,
+                        profile: profile,
+                        configure: function(configOpts) {
+                            return rpcCall('geminiConfigureSession', [sId, JSON.stringify(configOpts || {})]);
+                        },
+                        send: function(turnOpts, onProgress) {
+                            return rpcCall('geminiSendSessionTurn', [sId, JSON.stringify(turnOpts || {})], onProgress);
+                        },
+                        newChat: function(newChatOpts) {
+                            var tc = (newChatOpts && typeof newChatOpts.temporaryChat === 'boolean') ? String(newChatOpts.temporaryChat) : 'null';
+                            return rpcCall('geminiNewChatSession', [sId, tc]);
+                        },
+                        close: function() {
+                            return rpcCall('geminiCloseSession', [sId]);
+                        }
+                    };
+                });
+            },
+            init: function(profileId, model, temporaryChat) {
+                return rpcCall('geminiInit', [profileId || 'default', model || '', !!temporaryChat]);
+            },
+            configure: function(opts) {
+                return rpcCall('geminiConfigure', [JSON.stringify(opts || {})]);
+            },
+            send: function(opts, onProgress) {
+                return rpcCall('geminiSendTurn', [JSON.stringify(opts || {})], onProgress);
+            },
+            newChat: function(opts) {
+                var tc = (opts && typeof opts.temporaryChat === 'boolean') ? String(opts.temporaryChat) : 'null';
+                return rpcCall('geminiNewChat', [tc]);
+            },
+            abort: function() {
+                if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.geminiAbort();
+            },
+            close: function() {
+                if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.geminiClose();
+            }
+        },
         python: {
             run: function(code, onProgress) {
                 return rpcCall('pythonRun', [code], onProgress);
