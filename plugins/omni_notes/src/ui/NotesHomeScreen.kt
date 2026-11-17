@@ -1,23 +1,26 @@
 package com.omni.plugin.notes.ui
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,9 +52,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.notes.OmniNotesPlugin
+import com.omni.plugin.notes.model.DefaultCreateAction
 import com.omni.plugin.notes.model.NoteColor
 import com.omni.plugin.notes.model.NoteFolder
 import com.omni.plugin.notes.model.NoteItem
+import com.omni.plugin.notes.model.formatNoteByteSize
 import com.omni.plugin.notes.model.NoteSection
 import com.omni.plugin.notes.model.NoteSecurity
 import com.omni.plugin.notes.model.NoteSortOrder
@@ -61,6 +66,7 @@ import com.omni.plugin.notes.model.NoteType
 import com.omni.plugin.notes.model.NoteViewMode
 import com.omni.plugin.notes.storage.NoteRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,11 +78,16 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun NotesHomeScreen(
     context: Context,
     bridge: HostBridge,
+    lazyGridState: LazyGridState,
+    lazyListState: LazyListState,
+    cachedNotes: List<NoteItem>,
+    onCacheNotesChanged: (List<NoteItem>) -> Unit,
+    onOpenSettings: () -> Unit,
     registerBackInterceptor: ((() -> Boolean)?) -> Unit,
     onOpenNote: (NoteItem) -> Unit,
     onCreateNote: (type: NoteType, colorId: String, folderId: String?) -> Unit
@@ -99,7 +110,6 @@ fun NotesHomeScreen(
     var searchQuery by remember { mutableStateOf("") }
     var showSortMenu by remember { mutableStateOf(false) }
     var showFabMenu by remember { mutableStateOf(false) }
-    var standaloneWindowEnabled by remember { mutableStateOf(bridge.isStandaloneWindowEnabled()) }
 
     var selectedNoteIds by remember { mutableStateOf(setOf<String>()) }
     val isSelectionMode = selectedNoteIds.isNotEmpty()
@@ -109,10 +119,6 @@ fun NotesHomeScreen(
     var editingFolder by remember { mutableStateOf<NoteFolder?>(null) }
     var showMasterPinDialog by remember { mutableStateOf(false) }
     var pendingBatchLockIds by remember { mutableStateOf<Set<String>?>(null) }
-
-    var pendingImportJson by remember { mutableStateOf<String?>(null) }
-    var pendingImportEncryptedCount by remember { mutableIntStateOf(0) }
-    var showColorNoteDecryptDialog by remember { mutableStateOf(false) }
 
     DisposableEffect(drawerState.isOpen, isSearchOpen, showFabMenu, selectedColorFilter, isSelectionMode, activeFolderId, unfiledOnly, selectedSection) {
         registerBackInterceptor {
@@ -166,7 +172,7 @@ fun NotesHomeScreen(
         }
     }
 
-    var displayNotes by remember { mutableStateOf<List<NoteItem>>(emptyList()) }
+    var displayNotes by remember { mutableStateOf(cachedNotes) }
     var displayFolders by remember { mutableStateOf<List<NoteFolder>>(emptyList()) }
     var folderCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var folderLabels by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -239,6 +245,7 @@ fun NotesHomeScreen(
             Tuple4(base.sortedWith(comparator), filteredFolders, activeCounts, labels)
         }
         displayNotes = computedNotes
+        onCacheNotesChanged(computedNotes)
         displayFolders = computedFolders
         folderCounts = countsMap
         folderLabels = labelsMap
@@ -369,178 +376,38 @@ fun NotesHomeScreen(
                     HorizontalDivider(color = mutedText.copy(alpha = 0.2f))
                     Spacer(Modifier.height(12.dp))
 
-                    // Decoupled App Theme Switch (Dark vs Light)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                val next = if (isDark) NoteThemeMode.LIGHT else NoteThemeMode.DARK
-                                NoteRepository.updateSettings(bridge, settings.copy(themeMode = next))
-                            }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Light Theme", color = primaryText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text(if (isDark) "Dark slate UI" else "Bright pastel UI", color = mutedText, fontSize = 10.sp)
-                        }
-                        Switch(
-                            checked = !isDark,
-                            onCheckedChange = { light ->
-                                val next = if (light) NoteThemeMode.LIGHT else NoteThemeMode.DARK
-                                NoteRepository.updateSettings(bridge, settings.copy(themeMode = next))
-                            }
-                        )
-                    }
-
-                    // Independent Ruled Paper Mode Switch
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                NoteRepository.updateSettings(bridge, settings.copy(isPaperMode = !settings.isPaperMode))
-                            }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Paper Mode (Ruled Lines)", color = primaryText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("Notebook lines inside editor", color = mutedText, fontSize = 10.sp)
-                        }
-                        Switch(
-                            checked = settings.isPaperMode,
-                            onCheckedChange = { enabled ->
-                                NoteRepository.updateSettings(bridge, settings.copy(isPaperMode = enabled))
-                            }
-                        )
-                    }
-
-                    // Global Master Lock PIN Row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                scope.launch { drawerState.close() }
-                                showMasterPinDialog = true
-                            }
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                if (settings.masterPinHash.isNullOrBlank()) "🔒 Set Master Lock PIN" else "🔐 Master Lock PIN Active",
-                                color = primaryText,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
-                            )
-                            Text("One global password locks any note", color = mutedText, fontSize = 10.sp)
-                        }
-                    }
-
-                    // Granular Standalone OS Window Toggle
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Standalone OS Window", color = primaryText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("Show separately in phone Recents", color = mutedText, fontSize = 10.sp)
-                        }
-                        Switch(
-                            checked = standaloneWindowEnabled,
-                            onCheckedChange = { enabled ->
-                                standaloneWindowEnabled = enabled
-                                bridge.setStandaloneWindowEnabled(enabled)
-                            }
-                        )
-                    }
-
                     Spacer(Modifier.weight(1f))
                     HorizontalDivider(color = mutedText.copy(alpha = 0.2f))
-                    Spacer(Modifier.height(10.dp))
-
-                    Text("Vault Backup", fontSize = 11.sp, color = mutedText, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    val path = withContext(Dispatchers.IO) { NoteRepository.exportVaultBackup(bridge) }
-                                    bridge.showToast(if (path != null) "Backed up ${NoteRepository.notes.size} notes!" else "Backup failed")
-                                }
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Text("💾 Save", fontSize = 11.sp)
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    val count = withContext(Dispatchers.IO) { NoteRepository.importVaultBackup(bridge) }
-                                    val msg = when {
-                                        count > 0 -> "Restored $count notes from Vault!"
-                                        count == 0 -> "All Vault notes already up to date"
-                                        count == -1 -> "No Vault backup found yet"
-                                        else -> "Restore failed"
-                                    }
-                                    bridge.showToast(msg)
-                                }
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Text("📥 Restore", fontSize = 11.sp)
-                        }
-                    }
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            bridge.pickFiles("application/json", false) { uris ->
-                                val uri = uris.firstOrNull() ?: return@pickFiles
-                                scope.launch {
-                                    try {
-                                        val (raw, encCount) = withContext(Dispatchers.IO) {
-                                            val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                                            if (text.isNullOrBlank()) Pair(null, 0)
-                                            else Pair(text, NoteRepository.countEncryptedInColorNoteJson(text))
-                                        }
-                                        if (raw.isNullOrBlank()) {
-                                            bridge.showToast("Selected file is empty")
-                                            return@launch
-                                        }
-                                        if (encCount > 0) {
-                                            pendingImportJson = raw
-                                            pendingImportEncryptedCount = encCount
-                                            showColorNoteDecryptDialog = true
-                                        } else {
-                                            val res = withContext(Dispatchers.IO) { NoteRepository.importColorNoteJson(bridge, raw, null) }
-                                            bridge.showToast("Imported ${res.importedCount} ColorNote notes!")
-                                        }
-                                    } catch (e: Exception) {
-                                        bridge.showToast("Import error: ${e.message}")
-                                    }
+
+                    val vaultOk = remember { NoteRepository.hasExternalVaultPermission() }
+                    NavigationDrawerItem(
+                        icon = { Text("⚙️", fontSize = 17.sp) },
+                        label = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("Settings", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("Theme, Paper, Markdown, Backup", fontSize = 10.sp, color = mutedText)
                                 }
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (vaultOk) Color(0xFF3FB950) else Color(0xFFF85149))
+                                )
                             }
                         },
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
-                    ) {
-                        Text("📒 Import ColorNote JSON", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
+                        selected = false,
+                        colors = NavigationDrawerItemDefaults.colors(unselectedTextColor = primaryText),
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            onOpenSettings()
+                        }
+                    )
                 }
             }
         }
@@ -677,23 +544,41 @@ fun NotesHomeScreen(
                             }
                         }
 
-                        FloatingActionButton(
-                            onClick = {
-                                if (selectedSection == NoteSection.FOLDERS) {
-                                    editingFolder = null
-                                    showFolderEditorDialog = true
-                                } else {
-                                    showFabMenu = !showFabMenu
-                                }
-                            },
-                            containerColor = Color(0xFFE5A93C),
-                            contentColor = Color.Black,
-                            shape = CircleShape
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFFE5A93C),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .combinedClickable(
+                                    onClick = {
+                                        if (selectedSection == NoteSection.FOLDERS) {
+                                            editingFolder = null
+                                            showFolderEditorDialog = true
+                                        } else {
+                                            when (settings.defaultCreateAction) {
+                                                DefaultCreateAction.TEXT -> onCreateNote(NoteType.TEXT, selectedColorFilter ?: NoteColor.YELLOW.id, activeFolderId)
+                                                DefaultCreateAction.CHECKLIST -> onCreateNote(NoteType.CHECKLIST, selectedColorFilter ?: NoteColor.BLUE.id, activeFolderId)
+                                                DefaultCreateAction.ASK -> showFabMenu = !showFabMenu
+                                            }
+                                        }
+                                    },
+                                    onLongClick = {
+                                        if (selectedSection != NoteSection.FOLDERS) {
+                                            bridge.vibrate(25L)
+                                            showFabMenu = !showFabMenu
+                                        }
+                                    }
+                                )
                         ) {
-                            Icon(
-                                if (showFabMenu && selectedSection != NoteSection.FOLDERS) Icons.Default.Close else Icons.Default.Add,
-                                contentDescription = if (selectedSection == NoteSection.FOLDERS) "New Folder" else "New Note"
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    if (showFabMenu && selectedSection != NoteSection.FOLDERS) Icons.Default.Close else Icons.Default.Add,
+                                    contentDescription = if (selectedSection == NoteSection.FOLDERS) "New Folder" else "New Note",
+                                    tint = Color.Black
+                                )
+                            }
                         }
                     }
                 }
@@ -797,6 +682,33 @@ fun NotesHomeScreen(
                                         ) {
                                             Text("🪟 Float", fontSize = 12.sp)
                                         }
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            val unlocked = selectedNotes.filter { !it.isLocked }
+                                            if (unlocked.isEmpty()) {
+                                                bridge.showToast("🔒 Locked notes cannot be batch-shared")
+                                            } else {
+                                                val combined = unlocked.joinToString("\n\n──────────\n\n") { n ->
+                                                    val body = if (n.type == NoteType.CHECKLIST) {
+                                                        n.checklist.joinToString("\n") { "${if (it.isChecked) "[x]" else "[ ]"} ${it.text}" }
+                                                    } else n.content
+                                                    if (n.title.isNotBlank()) "${n.title}\n\n$body" else body
+                                                }
+                                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_TEXT, combined.trim())
+                                                }
+                                                context.startActivity(Intent.createChooser(sendIntent, "Share Notes").apply {
+                                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                })
+                                                selectedNoteIds = emptySet()
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("📤 Share", fontSize = 12.sp)
                                     }
                                     FilledTonalButton(
                                         onClick = {
@@ -1069,7 +981,6 @@ fun NotesHomeScreen(
                 } else {
                     when (settings.viewMode) {
                         NoteViewMode.GRID -> {
-                            val lazyGridState = rememberLazyGridState()
                             val reorderableGridState = rememberReorderableLazyGridState(lazyGridState) { from, to ->
                                 if (from.index != to.index) {
                                     val list = displayNotes.toMutableList()
@@ -1147,6 +1058,7 @@ fun NotesHomeScreen(
                                     totalItems = gridInfo.totalItemsCount,
                                     visibleItems = gridInfo.visibleItemsInfo.size,
                                     firstVisibleIndex = lazyGridState.firstVisibleItemIndex,
+                                    isListScrolling = lazyGridState.isScrollInProgress,
                                     accentColor = Color(0xFFE5A93C),
                                     surfaceColor = surfaceColor,
                                     textColor = primaryText,
@@ -1155,7 +1067,7 @@ fun NotesHomeScreen(
                                         if (item != null) "${NoteDateFormats.formatShort(item.updatedAtMs)} • ${idx + 1}/${displayNotes.size}" else "${idx + 1}"
                                     },
                                     onScrollToIndex = { idx ->
-                                        scope.launch { lazyGridState.scrollToItem(idx) }
+                                        lazyGridState.scrollToItem(idx)
                                     },
                                     modifier = Modifier.align(Alignment.CenterEnd)
                                 )
@@ -1163,7 +1075,6 @@ fun NotesHomeScreen(
                         }
                         NoteViewMode.LIST, NoteViewMode.DETAILS -> {
                             val showDetails = settings.viewMode == NoteViewMode.DETAILS
-                            val lazyListState = rememberLazyListState()
                             val reorderableListState = rememberReorderableLazyListState(lazyListState) { from, to ->
                                 if (from.index != to.index) {
                                     val list = displayNotes.toMutableList()
@@ -1240,6 +1151,7 @@ fun NotesHomeScreen(
                                     totalItems = listInfo.totalItemsCount,
                                     visibleItems = listInfo.visibleItemsInfo.size,
                                     firstVisibleIndex = lazyListState.firstVisibleItemIndex,
+                                    isListScrolling = lazyListState.isScrollInProgress,
                                     accentColor = Color(0xFFE5A93C),
                                     surfaceColor = surfaceColor,
                                     textColor = primaryText,
@@ -1248,7 +1160,7 @@ fun NotesHomeScreen(
                                         if (item != null) "${NoteDateFormats.formatShort(item.updatedAtMs)} • ${idx + 1}/${displayNotes.size}" else "${idx + 1}"
                                     },
                                     onScrollToIndex = { idx ->
-                                        scope.launch { lazyListState.scrollToItem(idx) }
+                                        lazyListState.scrollToItem(idx)
                                     },
                                     modifier = Modifier.align(Alignment.CenterEnd)
                                 )
@@ -1392,66 +1304,7 @@ fun NotesHomeScreen(
         )
     }
 
-    if (showColorNoteDecryptDialog && pendingImportJson != null) {
-        var passwordInput by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = {
-                showColorNoteDecryptDialog = false
-                pendingImportJson = null
-            },
-            containerColor = surfaceColor,
-            title = { Text("🔒 Locked Notes Detected", color = primaryText, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Found $pendingImportEncryptedCount locked note(s) in this ColorNote export. Enter your password to decrypt them (or skip locked notes).",
-                        color = mutedText,
-                        fontSize = 12.sp
-                    )
-                    OutlinedTextField(
-                        value = passwordInput,
-                        onValueChange = { passwordInput = it },
-                        label = { Text("ColorNote Password / PIN") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = primaryText, unfocusedTextColor = primaryText)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val raw = pendingImportJson!!
-                        val pw = passwordInput
-                        showColorNoteDecryptDialog = false
-                        pendingImportJson = null
-                        scope.launch {
-                            val res = withContext(Dispatchers.IO) { NoteRepository.importColorNoteJson(bridge, raw, pw) }
-                            bridge.showToast("Imported ${res.importedCount} notes (${res.decryptedCount} decrypted, ${res.lockedSkippedOrFailedCount} skipped)")
-                        }
-                    },
-                    enabled = passwordInput.isNotEmpty()
-                ) {
-                    Text("Decrypt & Import")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        val raw = pendingImportJson!!
-                        showColorNoteDecryptDialog = false
-                        pendingImportJson = null
-                        scope.launch {
-                            val res = withContext(Dispatchers.IO) { NoteRepository.importColorNoteJson(bridge, raw, null) }
-                            bridge.showToast("Imported ${res.importedCount} unencrypted notes (${res.lockedSkippedOrFailedCount} locked skipped)")
-                        }
-                    }
-                ) {
-                    Text("Skip Locked", color = mutedText)
-                }
-            }
-        )
-    }
+
 
     if (showBatchMoveFolderDialog) {
         val allFolders = remember(NoteRepository.dataRevision) {
@@ -1811,11 +1664,12 @@ private fun EdgeFastScroller(
     totalItems: Int,
     visibleItems: Int,
     firstVisibleIndex: Int,
+    isListScrolling: Boolean,
     accentColor: Color,
     surfaceColor: Color,
     textColor: Color,
     getPreviewLabel: (Int) -> String,
-    onScrollToIndex: (Int) -> Unit,
+    onScrollToIndex: suspend (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (totalItems <= visibleItems || totalItems <= 12) return
@@ -1823,8 +1677,45 @@ private fun EdgeFastScroller(
     val density = LocalDensity.current
     var trackHeightPx by remember { mutableIntStateOf(1) }
     var isDragging by remember { mutableStateOf(false) }
+    var showBubble by remember { mutableStateOf(false) }
+    var showThumb by remember { mutableStateOf(true) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
     var previewIndex by remember { mutableIntStateOf(0) }
+
+    val scrollChannel = remember { Channel<Int>(Channel.CONFLATED) }
+    LaunchedEffect(scrollChannel) {
+        var lastIdx = -1
+        for (targetIdx in scrollChannel) {
+            if (targetIdx != lastIdx) {
+                lastIdx = targetIdx
+                onScrollToIndex(targetIdx)
+            }
+            withFrameNanos { }
+        }
+    }
+
+    LaunchedEffect(isListScrolling, isDragging) {
+        if (isListScrolling && !isDragging) {
+            showBubble = false
+            showThumb = true
+        }
+    }
+
+    LaunchedEffect(isDragging, isListScrolling, firstVisibleIndex) {
+        if (isDragging) {
+            showThumb = true
+            showBubble = true
+        } else {
+            if (showBubble) {
+                delay(750L)
+                showBubble = false
+            }
+            if (!isListScrolling && showThumb) {
+                delay(1400L)
+                showThumb = false
+            }
+        }
+    }
 
     val thumbHeightPx = with(density) { 46.dp.toPx() }
     val usableHeightPx = (trackHeightPx - thumbHeightPx).coerceAtLeast(1f)
@@ -1843,7 +1734,7 @@ private fun EdgeFastScroller(
             .padding(vertical = 8.dp)
             .onSizeChanged { trackHeightPx = it.height }
     ) {
-        if (isDragging) {
+        if (showBubble) {
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = surfaceColor,
@@ -1866,49 +1757,51 @@ private fun EdgeFastScroller(
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .width(24.dp)
+                .width(26.dp)
                 .fillMaxHeight()
                 .pointerInput(totalItems, maxFirstIndex, usableHeightPx) {
-                    detectTapGestures { offset ->
-                        val frac = ((offset.y - thumbHeightPx / 2f) / usableHeightPx).coerceIn(0f, 1f)
-                        val target = (frac * maxFirstIndex).roundToInt().coerceIn(0, totalItems - 1)
-                        previewIndex = target
-                        onScrollToIndex(target)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
+                        isDragging = true
+                        showThumb = true
+                        showBubble = true
+                        try {
+                            var frac = ((down.position.y - thumbHeightPx / 2f) / usableHeightPx).coerceIn(0f, 1f)
+                            dragFraction = frac
+                            var target = (frac * maxFirstIndex).roundToInt().coerceIn(0, totalItems - 1)
+                            previewIndex = target
+                            scrollChannel.trySend(target)
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                change.consume()
+                                frac = ((change.position.y - thumbHeightPx / 2f) / usableHeightPx).coerceIn(0f, 1f)
+                                dragFraction = frac
+                                target = (frac * maxFirstIndex).roundToInt().coerceIn(0, totalItems - 1)
+                                previewIndex = target
+                                scrollChannel.trySend(target)
+                            }
+                        } finally {
+                            isDragging = false
+                        }
                     }
                 }
-                .pointerInput(totalItems, maxFirstIndex, usableHeightPx) {
-                    detectVerticalDragGestures(
-                        onDragStart = { offset ->
-                            isDragging = true
-                            val frac = ((offset.y - thumbHeightPx / 2f) / usableHeightPx).coerceIn(0f, 1f)
-                            dragFraction = frac
-                            val target = (frac * maxFirstIndex).roundToInt().coerceIn(0, totalItems - 1)
-                            previewIndex = target
-                            onScrollToIndex(target)
-                        },
-                        onDragEnd = { isDragging = false },
-                        onDragCancel = { isDragging = false },
-                        onVerticalDrag = { change, _ ->
-                            change.consume()
-                            val frac = ((change.position.y - thumbHeightPx / 2f) / usableHeightPx).coerceIn(0f, 1f)
-                            dragFraction = frac
-                            val target = (frac * maxFirstIndex).roundToInt().coerceIn(0, totalItems - 1)
-                            previewIndex = target
-                            onScrollToIndex(target)
-                        }
-                    )
-                }
         ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 3.dp)
-                    .offset { IntOffset(0, thumbOffsetY) }
-                    .width(if (isDragging) 8.dp else 5.dp)
-                    .height(46.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(if (isDragging) accentColor else accentColor.copy(alpha = 0.6f))
-            )
+            if (showThumb || isDragging) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(end = 3.dp)
+                        .offset { IntOffset(0, thumbOffsetY) }
+                        .width(if (isDragging) 8.dp else 5.dp)
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isDragging) accentColor else accentColor.copy(alpha = 0.65f))
+                )
+            }
         }
     }
 }
@@ -2036,8 +1929,9 @@ private fun NoteGridCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val dateStr = remember(note.updatedAtMs) { NoteDateFormats.formatShort(note.updatedAtMs) }
+                        val sizeStr = remember(note.id, note.updatedAtMs) { formatNoteByteSize(note) }
                         Text(
-                            if (folderLabel != null) "$dateStr • $folderLabel" else dateStr,
+                            if (folderLabel != null) "$dateStr • $sizeStr • $folderLabel" else "$dateStr • $sizeStr",
                             color = subColor,
                             fontSize = 10.sp,
                             maxLines = 1,
@@ -2180,8 +2074,9 @@ private fun NoteRowCard(
                         if (note.isLocked) Text("🔒", fontSize = 12.sp)
                         if (note.reminderAtMs != null && !note.reminderTriggered) Text("⏰", fontSize = 12.sp)
                         if (isStickyMounted) Text("🪟", fontSize = 12.sp)
+                        val sizeStr = remember(note.id, note.updatedAtMs) { formatNoteByteSize(note) }
                         Text(
-                            if (folderLabel != null) "$folderLabel • $dateStr" else dateStr,
+                            if (folderLabel != null) "$folderLabel • $dateStr • $sizeStr" else "$dateStr • $sizeStr",
                             color = subColor,
                             fontSize = 11.sp,
                             maxLines = 1,
