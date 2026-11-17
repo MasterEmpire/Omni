@@ -819,7 +819,7 @@ class HostBridgeImpl(
     }
 
     override fun showRecents() {
-        if (context.javaClass.name == "com.omni.hub.container.PluginContainerActivity") {
+        if (context.javaClass.name.startsWith("com.omni.hub.container.")) {
             try {
                 val intent = Intent().apply {
                     setClassName(context.packageName, "com.omni.hub.MainActivity")
@@ -1411,7 +1411,7 @@ class HostBridgeImpl(
     }
 
     override fun showDiagnostics() {
-        if (context.javaClass.name == "com.omni.hub.container.PluginContainerActivity") {
+        if (context.javaClass.name.startsWith("com.omni.hub.container.")) {
             try {
                 val intent = Intent().apply {
                     setClassName(context.packageName, "com.omni.hub.MainActivity")
