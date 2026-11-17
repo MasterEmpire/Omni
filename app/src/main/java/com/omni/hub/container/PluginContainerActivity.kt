@@ -49,7 +49,7 @@ import kotlin.math.abs
 /**
  * Standalone Document Activity hosting an individual dynamic plugin as its own OS Recents task.
  */
-class PluginContainerActivity : ComponentActivity() {
+open class PluginContainerActivity : ComponentActivity() {
 
     private var currentPluginId: String? = null
     private var currentSessionStartedAt: Long = 0L
@@ -108,6 +108,9 @@ class PluginContainerActivity : ComponentActivity() {
 
         if (pluginId != currentPluginId || isBytecodeNewer) {
             OmniLogger.log("CONTAINER", "Refreshing standalone window for [$pluginId] (bytecodeNewer=$isBytecodeNewer)")
+            if (currentPluginId != null && currentPluginId != pluginId) {
+                OmniTaskManager.onStandaloneActivityDestroyed(currentPluginId!!, this)
+            }
             if (isBytecodeNewer) {
                 PluginLoader.invalidate(pluginId)
             }
@@ -373,3 +376,16 @@ class PluginContainerActivity : ComponentActivity() {
             .build()
     }
 }
+
+class PluginSlot0Activity : PluginContainerActivity()
+class PluginSlot1Activity : PluginContainerActivity()
+class PluginSlot2Activity : PluginContainerActivity()
+class PluginSlot3Activity : PluginContainerActivity()
+class PluginSlot4Activity : PluginContainerActivity()
+class PluginSlot5Activity : PluginContainerActivity()
+class PluginSlot6Activity : PluginContainerActivity()
+class PluginSlot7Activity : PluginContainerActivity()
+class PluginSlot8Activity : PluginContainerActivity()
+class PluginSlot9Activity : PluginContainerActivity()
+class PluginSlot10Activity : PluginContainerActivity()
+class PluginSlot11Activity : PluginContainerActivity()
