@@ -32,6 +32,12 @@ enum class NoteThemeMode(val label: String) {
     LIGHT("Light")
 }
 
+enum class DefaultCreateAction(val label: String) {
+    ASK("Ask Every Time"),
+    TEXT("Text Note"),
+    CHECKLIST("Checklist")
+}
+
 enum class NoteSection(val label: String, val icon: String) {
     ALL("All Notes", "📝"),
     FOLDERS("All Folders", "📁"),
@@ -86,6 +92,7 @@ data class NoteItem(
     val id: String,
     val title: String,
     val content: String = "",
+    val marginContent: String = "",
     val type: NoteType = NoteType.TEXT,
     val checklist: List<ChecklistEntry> = emptyList(),
     val colorId: String = NoteColor.YELLOW.id,
@@ -108,8 +115,27 @@ data class NotesSettings(
     val sortOrder: NoteSortOrder = NoteSortOrder.MODIFIED_DESC,
     val themeMode: NoteThemeMode = NoteThemeMode.DARK,
     val isPaperMode: Boolean = false,
+    val defaultCreateAction: DefaultCreateAction = DefaultCreateAction.ASK,
+    val isMarkdownEnabled: Boolean = true,
     val masterPinHash: String? = null
 )
+
+fun formatBytesHuman(bytes: Int): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024.0) return String.format(java.util.Locale.US, "%.1f KB", kb)
+    return String.format(java.util.Locale.US, "%.2f MB", kb / 1024.0)
+}
+
+fun formatNoteByteSize(note: NoteItem): String {
+    var total = note.title.toByteArray(Charsets.UTF_8).size +
+        note.content.toByteArray(Charsets.UTF_8).size +
+        note.marginContent.toByteArray(Charsets.UTF_8).size
+    if (note.type == NoteType.CHECKLIST) {
+        note.checklist.forEach { total += it.text.toByteArray(Charsets.UTF_8).size + 4 }
+    }
+    return formatBytesHuman(total)
+}
 
 object NoteSecurity {
     fun hashPin(pin: String): String {
