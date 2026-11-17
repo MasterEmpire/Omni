@@ -88,6 +88,8 @@ data class CloudModule(
 )
 
 class MainActivity : ComponentActivity() {
+    private var openDiagnosticsSignal by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleOpenPluginIntent(intent)
@@ -99,9 +101,23 @@ class MainActivity : ComponentActivity() {
                     primary = Color(0xFF58A6FF)
                 )
             ) {
-                DashboardScreen(this)
+                DashboardScreen(this, openDiagnosticsSignal)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        PermissionDispatcher.setActiveOwner(this)
+        FilePickerDispatcher.setActiveOwner(this)
+        com.omni.hub.api.ScreenCaptureDispatcher.setActiveOwner(this)
+    }
+
+    override fun onDestroy() {
+        PermissionDispatcher.unregisterLauncher(this)
+        FilePickerDispatcher.unregisterLauncher(this)
+        com.omni.hub.api.ScreenCaptureDispatcher.unregisterLauncher(this)
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -111,6 +127,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleOpenPluginIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("extra_open_recents", false) == true) {
+            intent.removeExtra("extra_open_recents")
+            OmniTaskManager.openRecents()
+        }
+        if (intent?.getBooleanExtra("extra_open_diagnostics", false) == true) {
+            intent.removeExtra("extra_open_diagnostics")
+            openDiagnosticsSignal++
+        }
         val targetId = intent?.getStringExtra("extra_open_plugin_id") ?: return
         intent.removeExtra("extra_open_plugin_id")
         val plugins = PluginManager.getInstalledPlugins(this)
@@ -170,7 +194,7 @@ private suspend fun fetchCloudModules(): Pair<Boolean, List<CloudModule>> = with
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(context: Context) {
+fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
@@ -290,12 +314,18 @@ fun DashboardScreen(context: Context) {
         activeProjectionCallback = null
     }
 
+    LaunchedEffect(openDiagnosticsSignal) {
+        if (openDiagnosticsSignal > 0) {
+            showLogModal = true
+        }
+    }
+
     LaunchedEffect(Unit) {
-        PermissionDispatcher.registerLauncher { perms, cb ->
+        PermissionDispatcher.registerLauncher(context) { perms, cb ->
             activePermissionCallback = cb
             permissionLauncher.launch(perms)
         }
-        FilePickerDispatcher.registerLauncher { mimeType, allowMultiple, cb ->
+        FilePickerDispatcher.registerLauncher(context) { mimeType, allowMultiple, cb ->
             activeFilePickerCallback = cb
             if (allowMultiple) {
                 multipleFilePicker.launch(mimeType)
@@ -303,7 +333,7 @@ fun DashboardScreen(context: Context) {
                 singleFilePicker.launch(mimeType)
             }
         }
-        com.omni.hub.api.ScreenCaptureDispatcher.registerLauncher { cb ->
+        com.omni.hub.api.ScreenCaptureDispatcher.registerLauncher(context) { cb ->
             activeProjectionCallback = cb
             projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
         }
@@ -833,7 +863,7 @@ fun DashboardScreen(context: Context) {
         TaskManagerDialog(
             sessions = OmniTaskManager.activeSessions,
             onResumeTask = { session ->
-                OmniTaskManager.resumeSession(session)
+                OmniTaskManager.resumeSession(context, session)
                 OmniTaskManager.closeRecents()
             },
             onKillTask = { taskId ->
