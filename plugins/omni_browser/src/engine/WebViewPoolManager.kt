@@ -231,6 +231,42 @@ class WebViewPoolManager(
         CookieManager.getInstance().flush()
     }
 
+    fun evictColdTabsOnTrim(
+        keepTabId: String,
+        tabs: List<BrowserTab>,
+        onTabStateSaved: (String, Bundle) -> Unit,
+        containerLayout: FrameLayout?,
+        maxNonAiTabs: Int
+    ) {
+        val nonAiTabsInPool = tabs.filter {
+            it.id in pool.keys &&
+            it.id != keepTabId &&
+            !it.url.contains("aistudio.google.com") &&
+            !it.url.contains("chatgpt.com")
+        }.sortedBy { it.lastAccessedTime }
+
+        var numToEvict = nonAiTabsInPool.size - maxNonAiTabs.coerceAtLeast(0)
+        if (numToEvict <= 0) return
+
+        for (tabToEvict in nonAiTabsInPool) {
+            if (numToEvict <= 0) break
+            val wv = pool.remove(tabToEvict.id)
+            if (wv != null) {
+                val bundle = Bundle()
+                wv.saveState(bundle)
+                onTabStateSaved(tabToEvict.id, bundle)
+
+                wv.stopLoading()
+                wv.onPause()
+                containerLayout?.removeView(wv)
+                wv.destroy()
+                numToEvict--
+                bridge.log("HOT_POOL_TRIM", "Evicted cold tab on trim: ${tabToEvict.id} (${tabToEvict.title})")
+            }
+        }
+        CookieManager.getInstance().flush()
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     fun createConfiguredWebView(
         tabId: String,
