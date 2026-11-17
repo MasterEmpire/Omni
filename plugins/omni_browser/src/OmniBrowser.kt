@@ -1,8 +1,11 @@
 package com.omni.plugin.browser
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.graphics.Color as AndroidColor
 import android.view.View
 import android.view.ViewGroup
@@ -351,6 +354,35 @@ class OmniBrowser : PluginEntry() {
         LaunchedEffect(Unit) {
             bridge.log("OMNI_TRACE", "🌐 [BROWSER_MOUNT] ChromeBrowserScreen mounted & state.init() running!")
             state.init()
+        }
+
+        val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(c: Context?, intent: Intent?) {
+                    state.checkAndConsumePendingUrl()
+                }
+            }
+            val filter = IntentFilter("com.omni.hub.action.BROWSER_OPEN_URL")
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    context.registerReceiver(receiver, filter)
+                }
+            } catch (_: Exception) {}
+
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                    state.checkAndConsumePendingUrl()
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
+            }
         }
 
         LaunchedEffect(state.trackedDownloadIds.size, state.showDownloadsDialog) {
