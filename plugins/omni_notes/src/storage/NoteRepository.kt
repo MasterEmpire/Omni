@@ -1,14 +1,18 @@
 package com.omni.plugin.notes.storage
 
+import android.os.Build
 import android.os.Environment
 import android.util.Base64
+import android.util.JsonReader
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.notes.model.ChecklistEntry
+import com.omni.plugin.notes.model.DefaultCreateAction
 import com.omni.plugin.notes.model.NoteFolder
 import com.omni.plugin.notes.model.NoteItem
 import com.omni.plugin.notes.model.NoteSecurity
@@ -49,7 +53,9 @@ object NoteRepository {
     private const val FOLDERS_FILE = "notes_folders.json"
     private const val SETTINGS_FILE = "notes_settings.json"
     private const val VAULT_BACKUP_NAME = "omni_notes_backup.json"
+    private const val VAULT_PREV_BACKUP_NAME = "omni_notes_backup.prev.json"
     private const val VAULT_FOLDERS_BACKUP_NAME = "omni_notes_folders_backup.json"
+    private const val VAULT_SETTINGS_BACKUP_NAME = "omni_notes_settings_backup.json"
 
     private val dbLock = Any()
     private val ioExecutor = Executors.newSingleThreadExecutor()
@@ -57,9 +63,16 @@ object NoteRepository {
     val folders = mutableStateListOf<NoteFolder>()
     var settings by mutableStateOf(NotesSettings())
     var dataRevision by mutableIntStateOf(0)
+    var lastAutoVaultBackupMs by mutableLongStateOf(0L)
     @Volatile var isLoaded = false
     @Volatile private var lastKnownDbModifiedMs = 0L
     @Volatile private var lastKnownFoldersModifiedMs = 0L
+    private val backupScheduler = Executors.newSingleThreadScheduledExecutor()
+    @Volatile private var pendingBackupFuture: java.util.concurrent.ScheduledFuture<*>? = null
+
+    fun hasExternalVaultPermission(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+    }
 
     fun snapshotNotes(): List<NoteItem> = synchronized(dbLock) { notes.toList() }
     fun snapshotFolders(): List<NoteFolder> = synchronized(dbLock) { folders.toList() }
@@ -100,7 +113,15 @@ object NoteRepository {
 
     private fun loadSettingsInternal(bridge: HostBridge) {
         try {
-            val bytes = bridge.readFile(SETTINGS_FILE) ?: return
+            var bytes = bridge.readFile(SETTINGS_FILE)
+            if (bytes == null && hasExternalVaultPermission()) {
+                val vaultSettings = getVaultSettingsBackupFile()
+                if (vaultSettings.exists() && vaultSettings.length() > 0L) {
+                    bytes = vaultSettings.readBytes()
+                    bridge.saveFile(SETTINGS_FILE, bytes)
+                }
+            }
+            if (bytes == null) return
             val obj = JSONObject(String(bytes, Charsets.UTF_8))
             val viewMode = runCatching { NoteViewMode.valueOf(obj.optString("viewMode", "GRID")) }
                 .getOrDefault(NoteViewMode.GRID)
@@ -113,15 +134,43 @@ object NoteRepository {
                 runCatching { NoteThemeMode.valueOf(rawTheme) }.getOrDefault(NoteThemeMode.DARK)
             }
             val isPaperMode = obj.optBoolean("isPaperMode", rawTheme == "PAPER")
+            val defaultCreateAction = runCatching {
+                DefaultCreateAction.valueOf(obj.optString("defaultCreateAction", "ASK"))
+            }.getOrDefault(DefaultCreateAction.ASK)
+            val isMarkdownEnabled = obj.optBoolean("isMarkdownEnabled", true)
             val masterPinHash = obj.optString("masterPinHash", "").takeIf { it.isNotBlank() && !it.equals("null", true) }
-            settings = NotesSettings(viewMode, sortOrder, themeMode, isPaperMode, masterPinHash)
+            settings = NotesSettings(
+                viewMode = viewMode,
+                sortOrder = sortOrder,
+                themeMode = themeMode,
+                isPaperMode = isPaperMode,
+                defaultCreateAction = defaultCreateAction,
+                isMarkdownEnabled = isMarkdownEnabled,
+                masterPinHash = masterPinHash
+            )
         } catch (_: Exception) {}
     }
 
     private fun loadNotesInternal(bridge: HostBridge) {
         try {
             val file = File(bridge.getPluginDir(), NOTES_FILE)
-            if (!file.exists() || file.length() == 0L) return
+            if (!file.exists() || file.length() == 0L) {
+                if (hasExternalVaultPermission()) {
+                    val vaultFile = getVaultBackupFile()
+                    if (vaultFile.exists() && vaultFile.length() > 0L) {
+                        val resurrected = readNotesStreaming(vaultFile)
+                        if (resurrected.isNotEmpty()) {
+                            notes.clear()
+                            notes.addAll(resurrected)
+                            writeNotesStreaming(file, resurrected)
+                            lastKnownDbModifiedMs = file.lastModified()
+                            dataRevision++
+                            bridge.log("OMNI_NOTES", "🛡️ Auto-resurrected ${resurrected.size} notes from Vault!")
+                        }
+                    }
+                }
+                return
+            }
             val parsed = readNotesStreaming(file)
             lastKnownDbModifiedMs = file.lastModified()
             notes.clear()
@@ -139,16 +188,23 @@ object NoteRepository {
         }
     }
 
+    private fun buildSettingsJsonBytes(s: NotesSettings): ByteArray {
+        val obj = JSONObject().apply {
+            put("viewMode", s.viewMode.name)
+            put("sortOrder", s.sortOrder.name)
+            put("themeMode", s.themeMode.name)
+            put("isPaperMode", s.isPaperMode)
+            put("defaultCreateAction", s.defaultCreateAction.name)
+            put("isMarkdownEnabled", s.isMarkdownEnabled)
+            if (!s.masterPinHash.isNullOrBlank()) put("masterPinHash", s.masterPinHash)
+        }
+        return obj.toString(2).toByteArray(Charsets.UTF_8)
+    }
+
     private fun saveSettingsInternal(bridge: HostBridge, s: NotesSettings) {
         try {
-            val obj = JSONObject().apply {
-                put("viewMode", s.viewMode.name)
-                put("sortOrder", s.sortOrder.name)
-                put("themeMode", s.themeMode.name)
-                put("isPaperMode", s.isPaperMode)
-                if (!s.masterPinHash.isNullOrBlank()) put("masterPinHash", s.masterPinHash)
-            }
-            bridge.saveFile(SETTINGS_FILE, obj.toString(2).toByteArray(Charsets.UTF_8))
+            bridge.saveFile(SETTINGS_FILE, buildSettingsJsonBytes(s))
+            scheduleAutoVaultBackup(bridge)
         } catch (_: Exception) {}
     }
 
@@ -451,6 +507,29 @@ object NoteRepository {
         ioExecutor.execute {
             writeNotesStreaming(targetFile, snapshot)
         }
+        scheduleAutoVaultBackup(bridge)
+    }
+
+    private fun scheduleAutoVaultBackup(bridge: HostBridge) {
+        if (!hasExternalVaultPermission()) return
+        pendingBackupFuture?.cancel(false)
+        pendingBackupFuture = backupScheduler.schedule({
+            ioExecutor.execute {
+                try {
+                    val notesSnap = snapshotNotes()
+                    val foldersSnap = snapshotFolders()
+                    val settingsBytes = synchronized(dbLock) { buildSettingsJsonBytes(settings) }
+                    val mainFile = getVaultBackupFile()
+                    if (mainFile.exists() && mainFile.length() > 0L) {
+                        mainFile.copyTo(getVaultPrevBackupFile(), overwrite = true)
+                    }
+                    writeNotesStreaming(mainFile, notesSnap)
+                    writeFoldersStreaming(getVaultFoldersBackupFile(), foldersSnap)
+                    getVaultSettingsBackupFile().writeBytes(settingsBytes)
+                    lastAutoVaultBackupMs = System.currentTimeMillis()
+                } catch (_: Exception) {}
+            }
+        }, 1800L, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
     private fun writeNotesStreaming(targetFile: File, items: List<NoteItem>) {
@@ -464,6 +543,7 @@ object NoteRepository {
                     writer.name("id").value(n.id)
                     writer.name("title").value(n.title)
                     writer.name("content").value(n.content)
+                    if (n.marginContent.isNotEmpty()) writer.name("marginContent").value(n.marginContent)
                     writer.name("type").value(n.type.name)
                     writer.name("checklist")
                     writer.beginArray()
@@ -511,6 +591,7 @@ object NoteRepository {
                 var id = ""
                 var title = ""
                 var content = ""
+                var marginContent = ""
                 var type = NoteType.TEXT
                 val checklist = mutableListOf<ChecklistEntry>()
                 var colorId = "yellow"
@@ -536,6 +617,7 @@ object NoteRepository {
                         "id" -> id = reader.nextString()
                         "title" -> title = reader.nextString()
                         "content" -> content = reader.nextString()
+                        "marginContent" -> marginContent = reader.nextString()
                         "type" -> type = runCatching { NoteType.valueOf(reader.nextString()) }.getOrDefault(NoteType.TEXT)
                         "checklist" -> {
                             reader.beginArray()
@@ -705,6 +787,13 @@ object NoteRepository {
         return File(dir, VAULT_BACKUP_NAME)
     }
 
+    private fun getVaultPrevBackupFile(): File {
+        val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val dir = File(File(docsDir, ".omni_runtime"), "notes_backup")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, VAULT_PREV_BACKUP_NAME)
+    }
+
     private fun getVaultFoldersBackupFile(): File {
         val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         val dir = File(File(docsDir, ".omni_runtime"), "notes_backup")
@@ -712,13 +801,26 @@ object NoteRepository {
         return File(dir, VAULT_FOLDERS_BACKUP_NAME)
     }
 
+    private fun getVaultSettingsBackupFile(): File {
+        val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val dir = File(File(docsDir, ".omni_runtime"), "notes_backup")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, VAULT_SETTINGS_BACKUP_NAME)
+    }
+
     fun exportVaultBackup(bridge: HostBridge): String? {
         return try {
             val snapshot = snapshotNotes()
             val folderSnap = snapshotFolders()
+            val settingsBytes = synchronized(dbLock) { buildSettingsJsonBytes(settings) }
             val file = getVaultBackupFile()
+            if (file.exists() && file.length() > 0L) {
+                file.copyTo(getVaultPrevBackupFile(), overwrite = true)
+            }
             writeNotesStreaming(file, snapshot)
             writeFoldersStreaming(getVaultFoldersBackupFile(), folderSnap)
+            getVaultSettingsBackupFile().writeBytes(settingsBytes)
+            lastAutoVaultBackupMs = System.currentTimeMillis()
             bridge.log("OMNI_NOTES", "Exported ${snapshot.size} notes & ${folderSnap.size} folders to vault: ${file.absolutePath}")
             file.absolutePath
         } catch (e: Exception) {
