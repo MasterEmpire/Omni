@@ -8,6 +8,7 @@ import android.webkit.WebView
 import com.omni.hub.api.HostBridge
 import com.omni.plugin.browser.engine.AiStudioAutomator
 import com.omni.plugin.browser.engine.ChatGptAutomator
+import com.omni.plugin.browser.engine.GeminiAutomator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,6 +26,7 @@ class OmniStudioLabBridge(
     private val bridge: HostBridge,
     private val automator: AiStudioAutomator,
     private val chatGptAutomator: ChatGptAutomator = ChatGptAutomator(context, bridge),
+    private val geminiAutomator: GeminiAutomator = GeminiAutomator(context, bridge),
     private val onIdePull: (project: String, files: List<String>, onResult: (String, Int) -> Unit) -> Unit,
     private val onIdeCommit: (xml: String, onResult: (String, String) -> Unit) -> Unit,
     private val scope: CoroutineScope,
@@ -507,6 +509,207 @@ class OmniStudioLabBridge(
     fun gptClose() {
         mainHandler.post {
             chatGptAutomator.closeAllSessions()
+        }
+    }
+
+    // --- 1C. Gemini Puppet Pool Methods (Dedicated Engine) ---
+    @JavascriptInterface
+    fun geminiCreateSession(callId: String, profileId: String, model: String, temporaryChat: Boolean) {
+        mainHandler.post {
+            val resolvedId = resolveProfileId(profileId)
+            geminiAutomator.createSession(resolvedId, model, temporaryChat) { sessionId, err ->
+                if (sessionId != null) {
+                    val res = JSONObject().apply { put("sessionId", sessionId) }
+                    resolve(callId, res)
+                } else {
+                    reject(callId, err ?: "Failed creating Gemini session")
+                }
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiConfigureSession(callId: String, sessionId: String, configJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(configJson)
+                val tempChat: Boolean? = if (json.has("temporaryChat") && !json.isNull("temporaryChat")) json.getBoolean("temporaryChat") else null
+                geminiAutomator.configureSession(
+                    sessionId = sessionId,
+                    model = json.optString("model", ""),
+                    temporaryChat = tempChat,
+                    headlessTurbo = json.optBoolean("headlessTurbo", true)
+                ) { success, err ->
+                    if (success) resolve(callId, "Configured")
+                    else reject(callId, err ?: "Gemini configuration error")
+                }
+            } catch (e: Exception) {
+                reject(callId, "Invalid config JSON: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiSendSessionTurn(callId: String, sessionId: String, turnJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(turnJson)
+                val prompt = json.optString("prompt", "")
+                val label = json.optString("label", "Turn")
+                val attachments = parseAttachmentsFromJson(json.optJSONArray("attachments"))
+
+                geminiAutomator.executeSessionTurn(
+                    sessionId = sessionId,
+                    prompt = prompt,
+                    attachments = attachments,
+                    label = label,
+                    onProgress = { thoughts, output ->
+                        val progObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        progress(callId, progObj)
+                    },
+                    onDelta = { thoughtsDelta, outputDelta, isFirst ->
+                        progressDelta(callId, thoughtsDelta, outputDelta, isFirst)
+                    },
+                    onComplete = { thoughts, output ->
+                        val resObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        resolve(callId, resObj)
+                    },
+                    onError = { err ->
+                        reject(callId, err)
+                    }
+                )
+            } catch (e: Exception) {
+                reject(callId, "Gemini turn error: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiNewChatSession(callId: String, sessionId: String, temporaryChatJson: String) {
+        mainHandler.post {
+            val tempChat: Boolean? = when (temporaryChatJson.trim().lowercase()) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+            geminiAutomator.newChatSession(sessionId, tempChat) { success, err ->
+                if (success) resolve(callId, "Ready")
+                else reject(callId, err ?: "Failed resetting Gemini session")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiCloseSession(callId: String, sessionId: String) {
+        mainHandler.post {
+            geminiAutomator.closeSession(sessionId)
+            resolve(callId, "Closed")
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiInit(callId: String, profileId: String, model: String, temporaryChat: Boolean) {
+        mainHandler.post {
+            val resolvedId = resolveProfileId(profileId)
+            geminiAutomator.prepareSession(resolvedId, model, temporaryChat) { success, err ->
+                if (success) resolve(callId, "Ready")
+                else reject(callId, err ?: "Failed initializing Gemini session")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiConfigure(callId: String, configJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(configJson)
+                val tempChat: Boolean? = if (json.has("temporaryChat") && !json.isNull("temporaryChat")) json.getBoolean("temporaryChat") else null
+                geminiAutomator.configure(
+                    model = json.optString("model", ""),
+                    temporaryChat = tempChat,
+                    headlessTurbo = json.optBoolean("headlessTurbo", true)
+                ) { success, err ->
+                    if (success) resolve(callId, "Configured")
+                    else reject(callId, err ?: "Gemini configuration error")
+                }
+            } catch (e: Exception) {
+                reject(callId, "Invalid config JSON: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiSendTurn(callId: String, turnJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(turnJson)
+                val prompt = json.optString("prompt", "")
+                val label = json.optString("label", "Playbook Turn")
+                val attachments = parseAttachmentsFromJson(json.optJSONArray("attachments"))
+
+                geminiAutomator.executeTurn(
+                    prompt = prompt,
+                    attachments = attachments,
+                    label = label,
+                    onProgress = { thoughts, output ->
+                        val progObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        progress(callId, progObj)
+                    },
+                    onDelta = { thoughtsDelta, outputDelta, isFirst ->
+                        progressDelta(callId, thoughtsDelta, outputDelta, isFirst)
+                    },
+                    onComplete = { thoughts, output ->
+                        val resObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                        }
+                        resolve(callId, resObj)
+                    },
+                    onError = { err ->
+                        reject(callId, err)
+                    }
+                )
+            } catch (e: Exception) {
+                reject(callId, "Gemini turn error: ${e.message}")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiNewChat(callId: String, temporaryChatJson: String) {
+        mainHandler.post {
+            val tempChat: Boolean? = when (temporaryChatJson.trim().lowercase()) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+            geminiAutomator.newChat(tempChat) { success, err ->
+                if (success) resolve(callId, "Ready")
+                else reject(callId, err ?: "Failed resetting Gemini session")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiAbort() {
+        mainHandler.post {
+            geminiAutomator.isAborted = true
+        }
+    }
+
+    @JavascriptInterface
+    fun geminiClose() {
+        mainHandler.post {
+            geminiAutomator.closeAllSessions()
         }
     }
 
