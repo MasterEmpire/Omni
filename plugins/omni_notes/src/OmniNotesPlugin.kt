@@ -197,6 +197,7 @@ class OmniNotesPlugin : PluginEntry() {
         var editingNoteId by remember { mutableStateOf<String?>(null) }
         var creatingNewType by remember { mutableStateOf<NoteType?>(null) }
         var creatingColorId by remember { mutableStateOf("yellow") }
+        var creatingFolderId by remember { mutableStateOf<String?>(null) }
 
         var pendingUnlockNote by remember { mutableStateOf<NoteItem?>(null) }
         var pinInput by remember { mutableStateOf("") }
@@ -230,6 +231,7 @@ class OmniNotesPlugin : PluginEntry() {
                 existingNote = activeEditorNote,
                 initialType = activeEditorNote?.type ?: (creatingNewType ?: NoteType.TEXT),
                 initialColorId = activeEditorNote?.colorId ?: creatingColorId,
+                initialFolderId = activeEditorNote?.folderId ?: creatingFolderId,
                 registerBackInterceptor = { interceptor -> homeBackInterceptor = interceptor },
                 onExitEditor = {
                     editingNoteId = null
@@ -251,8 +253,9 @@ class OmniNotesPlugin : PluginEntry() {
                         creatingNewType = null
                     }
                 },
-                onCreateNote = { type, colorId ->
+                onCreateNote = { type, colorId, folderId ->
                     creatingColorId = colorId
+                    creatingFolderId = folderId
                     creatingNewType = type
                     editingNoteId = null
                 }
