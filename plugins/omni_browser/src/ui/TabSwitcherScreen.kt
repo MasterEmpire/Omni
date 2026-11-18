@@ -463,13 +463,16 @@ fun TabSwitcherScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(18.dp))
-                                    .background(if (activeSegment == "tabs") Color(0xFF21262D) else Color.Transparent)
-                                    .clickable { activeSegment = "tabs" }
+                                    .background(if (activeSegment == "tabs" && !showFavoritesOnly) Color(0xFF21262D) else Color.Transparent)
+                                    .clickable {
+                                        activeSegment = "tabs"
+                                        showFavoritesOnly = false
+                                    }
                                     .padding(horizontal = 10.dp, vertical = 4.dp)
                             ) {
                                 Text(
                                     "Tabs (${tabs.size})",
-                                    color = if (activeSegment == "tabs") Color.White else Color(0xFF8B949E),
+                                    color = if (activeSegment == "tabs" && !showFavoritesOnly) Color.White else Color(0xFF8B949E),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -478,7 +481,10 @@ fun TabSwitcherScreen(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(18.dp))
                                     .background(if (activeSegment == "groups") Color(0xFF1F6FEB).copy(alpha = 0.35f) else Color.Transparent)
-                                    .clickable { activeSegment = "groups" }
+                                    .clickable {
+                                        activeSegment = "groups"
+                                        showFavoritesOnly = false
+                                    }
                                     .padding(horizontal = 10.dp, vertical = 4.dp)
                             ) {
                                 Text(
