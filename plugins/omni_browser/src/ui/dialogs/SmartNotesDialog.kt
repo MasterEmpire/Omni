@@ -350,7 +350,7 @@ fun SmartNotesDialog(
                                         editContent = if (editContent.isEmpty()) clipText else "$editContent\n$clipText"
                                         bridge.showToast("Pasted from clipboard")
                                     }
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {}
                             },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                             shape = RoundedCornerShape(8.dp),
