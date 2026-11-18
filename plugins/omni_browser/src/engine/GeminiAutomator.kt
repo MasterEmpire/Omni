@@ -47,6 +47,7 @@ class GeminiAutomator(
     val sessions = ConcurrentHashMap<String, ActiveGeminiPuppetSession>()
     private var defaultSessionId: String? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val siteCacheManager = com.omni.plugin.browser.services.SiteCacheManager(context, bridge)
 
     val headlessWv: WebView?
         get() = defaultSessionId?.let { sessions[it]?.webView } ?: sessions.values.firstOrNull()?.webView
@@ -243,6 +244,10 @@ class GeminiAutomator(
 
                     if (isJunkHost || isStaticMedia) {
                         return WebResourceResponse("text/plain", "UTF-8", 200, "OK", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                    }
+                    if (!request.isForMainFrame) {
+                        val cachedResp = siteCacheManager.interceptRequest(request, "gemini.google.com", profileId)
+                        if (cachedResp != null) return cachedResp
                     }
                     return super.shouldInterceptRequest(view, request)
                 }
