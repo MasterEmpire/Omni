@@ -209,8 +209,10 @@ class WebViewPoolManager(
             it.id != keepTabId &&
             !it.url.contains("aistudio.google.com") &&
             !it.url.contains("chatgpt.com") &&
-            !it.url.contains("gemini.google.com")
-        }.sortedBy { it.lastAccessedTime }
+            !it.url.contains("gemini.google.com") &&
+            !it.url.contains("localhost:$localPort") &&
+            !it.url.contains("127.0.0.1:$localPort")
+        }.sortedWith(compareBy<BrowserTab> { it.isFavorite }.thenBy { it.lastAccessedTime })
 
         var numToEvict = pool.size - maxHotTabs
         for (tabToEvict in tabsInPool) {
@@ -244,8 +246,10 @@ class WebViewPoolManager(
             it.id != keepTabId &&
             !it.url.contains("aistudio.google.com") &&
             !it.url.contains("chatgpt.com") &&
-            !it.url.contains("gemini.google.com")
-        }.sortedBy { it.lastAccessedTime }
+            !it.url.contains("gemini.google.com") &&
+            !it.url.contains("localhost:$localPort") &&
+            !it.url.contains("127.0.0.1:$localPort")
+        }.sortedWith(compareBy<BrowserTab> { it.isFavorite }.thenBy { it.lastAccessedTime })
 
         var numToEvict = nonAiTabsInPool.size - maxNonAiTabs.coerceAtLeast(0)
         if (numToEvict <= 0) return
