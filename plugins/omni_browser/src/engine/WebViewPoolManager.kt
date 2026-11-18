@@ -706,6 +706,9 @@ class WebViewPoolManager(
                 mediaPlaybackRequiresUserGesture = false
                 loadWithOverviewMode = true
                 useWideViewPort = true
+                setSupportZoom(true)
+                builtInZoomControls = true
+                displayZoomControls = false
 
                 try {
                     val method = javaClass.getMethod("setRequestedWithHeaderOriginAllowList", Set::class.java)
