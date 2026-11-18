@@ -283,6 +283,12 @@ class WebViewPoolManager(
         isDesktop: Boolean,
         listener: WebViewEventListener
     ): WebView {
+        fun extractHostSafe(u: String?): String {
+            if (u.isNullOrBlank() || u == "about:blank") return ""
+            return try { Uri.parse(u).host?.lowercase(Locale.US) ?: "" } catch (_: Exception) { "" }
+        }
+        var currentPageHost = extractHostSafe(initialUrl)
+
         val webView = WebView(context).apply {
             setBackgroundColor(if (isForceDarkWebPages) android.graphics.Color.parseColor("#1F2227") else android.graphics.Color.WHITE)
             layoutParams = ViewGroup.LayoutParams(
@@ -556,6 +562,9 @@ class WebViewPoolManager(
                     }
 
                     val isMainFrame = request.isForMainFrame
+                    if (isMainFrame) {
+                        extractHostSafe(url).takeIf { it.isNotEmpty() }?.let { currentPageHost = it }
+                    }
 
                     // Subframes & iframes (such as Conduit IDE live preview) must render in-memory blobs freely
                     if (!isMainFrame) {
@@ -587,7 +596,7 @@ class WebViewPoolManager(
                     // Site Cache Vault Interception (Immutable & ETag-Revalidated Assets)
                     val cacheMgr = siteCacheManager
                     if (cacheMgr != null && !request.isForMainFrame) {
-                        val cachedResp = cacheMgr.interceptRequest(request, host)
+                        val cachedResp = cacheMgr.interceptRequest(request, currentPageHost.ifEmpty { host }, profileId)
                         if (cachedResp != null) {
                             return cachedResp
                         }
@@ -657,12 +666,14 @@ class WebViewPoolManager(
 
                 override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                     if (url != null && url != "about:blank") {
+                        extractHostSafe(url).takeIf { it.isNotEmpty() }?.let { currentPageHost = it }
                         listener.onUrlChanged(tabId, url, view?.canGoBack() ?: false, view?.canGoForward() ?: false)
                     }
                 }
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    extractHostSafe(url).takeIf { it.isNotEmpty() }?.let { currentPageHost = it }
                     if (url != null) listener.onPageStarted(tabId, url)
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
@@ -678,6 +689,7 @@ class WebViewPoolManager(
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    extractHostSafe(url).takeIf { it.isNotEmpty() }?.let { currentPageHost = it }
                     if (url != null) listener.onPageFinished(tabId, url)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
                     view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
