@@ -384,7 +384,7 @@ class OmniBrowser : PluginEntry() {
                 } else {
                     context.registerReceiver(receiver, filter)
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {}
 
             val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                 if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
@@ -395,7 +395,7 @@ class OmniBrowser : PluginEntry() {
 
             onDispose {
                 lifecycleOwner.lifecycle.removeObserver(observer)
-                try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
+                try { context.unregisterReceiver(receiver) } catch (e: Exception) {}
             }
         }
 
@@ -701,7 +701,7 @@ class OmniBrowser : PluginEntry() {
                     state.currentWebView?.evaluateJavascript(DOM_SNAPSHOT_SCRIPT) { html ->
                         if (!html.isNullOrEmpty()) {
                             val rawHtml = if (html.startsWith("\"") && html.endsWith("\"")) {
-                                try { org.json.JSONObject("{\"h\":$html}").getString("h") } catch (_: Exception) { html }
+                                try { org.json.JSONObject("{\"h\":$html}").getString("h") } catch (e: Exception) { html }
                             } else html
                             saveHtmlSnapshot(context, bridge, rawHtml, "DOM_Dump")
                         }
@@ -1105,7 +1105,7 @@ class OmniBrowser : PluginEntry() {
                             val updated = state.shortcuts.filter { it.id != targetItem.id }
                             state.shortcuts = updated
                             state.vaultManager.saveShortcuts(updated)
-                            try { File(bridge.getPluginDir(), "ide/vault_${targetItem.id}").deleteRecursively() } catch (_: Exception) {}
+                            try { File(bridge.getPluginDir(), "ide/vault_${targetItem.id}").deleteRecursively() } catch (e: Exception) {}
                             state.editingShortcut = null
                             bridge.showToast("Shortcut deleted")
                         },
@@ -1242,23 +1242,6 @@ class OmniBrowser : PluginEntry() {
 
             DownloadCompletedPillBanner(
                 visible = state.showDownloadBanner,
-            PageZoomBar(
-                visible = state.showZoomBar,
-                currentDomain = state.getDomainForUrl(state.currentUrl),
-                zoom = state.getCurrentDomainZoom(),
-                onZoomChange = { newZoom ->
-                    state.setDomainZoom(state.getDomainForUrl(state.currentUrl), newZoom)
-                },
-                onReset = {
-                    state.setDomainZoom(state.getDomainForUrl(state.currentUrl), 1.0f)
-                },
-                onDismiss = { state.showZoomBar = false },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 16.dp)
-                    .zIndex(36f)
-            )
                 file = state.latestDownloadedFile,
                 onOpen = { file ->
                     openDownloadedFile(context, file, bridge)
@@ -1275,6 +1258,24 @@ class OmniBrowser : PluginEntry() {
                     .statusBarsPadding()
                     .padding(top = 58.dp)
                     .zIndex(35f)
+            )
+
+            PageZoomBar(
+                visible = state.showZoomBar,
+                currentDomain = state.getDomainForUrl(state.currentUrl),
+                zoom = state.getCurrentDomainZoom(),
+                onZoomChange = { newZoom ->
+                    state.setDomainZoom(state.getDomainForUrl(state.currentUrl), newZoom)
+                },
+                onReset = {
+                    state.setDomainZoom(state.getDomainForUrl(state.currentUrl), 1.0f)
+                },
+                onDismiss = { state.showZoomBar = false },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp)
+                    .zIndex(36f)
             )
 
             CxpIngestionPillBanner(
