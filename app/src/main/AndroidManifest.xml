@@ -174,6 +174,155 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode|density"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
+        <activity
+            android:name=".container.PluginLauncherActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Dynamic App Drawer Aliases (Disabled by default; toggled from Omni Hub) -->
+        <activity-alias
+            android:name=".launcher.OmniBrowserAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Omni Chrome"
+            android:icon="@drawable/ic_drawer_omni_browser"
+            android:roundIcon="@drawable/ic_drawer_omni_browser"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.OmniNotesAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Omni Notes"
+            android:icon="@drawable/ic_drawer_omni_notes"
+            android:roundIcon="@drawable/ic_drawer_omni_notes"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.OmniPlayerAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Omni Player"
+            android:icon="@drawable/ic_drawer_omni_player"
+            android:roundIcon="@drawable/ic_drawer_omni_player"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.FocusShieldAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Focus Shield"
+            android:icon="@drawable/ic_drawer_focus_shield"
+            android:roundIcon="@drawable/ic_drawer_focus_shield"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.ScrollLockAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="ScrollLock"
+            android:icon="@drawable/ic_drawer_scroll_lock"
+            android:roundIcon="@drawable/ic_drawer_scroll_lock"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.EthiopianCalendarAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Ethiopian Calendar"
+            android:icon="@drawable/ic_drawer_ethiopian_calendar"
+            android:roundIcon="@drawable/ic_drawer_ethiopian_calendar"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.OmniKeyboardAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Omni Board"
+            android:icon="@drawable/ic_drawer_omni_keyboard"
+            android:roundIcon="@drawable/ic_drawer_omni_keyboard"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.SpotifyRecorderAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Spotify Recorder"
+            android:icon="@drawable/ic_drawer_spotify_recorder"
+            android:roundIcon="@drawable/ic_drawer_spotify_recorder"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.TeleAlertAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="TeleAlert Sentinel"
+            android:icon="@drawable/ic_drawer_tele_alert"
+            android:roundIcon="@drawable/ic_drawer_tele_alert"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".launcher.SampleUtilityAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:label="Sample Utility"
+            android:icon="@drawable/ic_drawer_sample_utility"
+            android:roundIcon="@drawable/ic_drawer_sample_utility"
+            android:targetActivity=".container.PluginLauncherActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <activity android:name=".container.PluginSlot0Activity" android:exported="false" android:launchMode="singleTask" android:taskAffinity="com.omni.hub.slot0" android:autoRemoveFromRecents="false" android:maxRecents="50" android:supportsPictureInPicture="true" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode|density" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <activity android:name=".container.PluginSlot1Activity" android:exported="false" android:launchMode="singleTask" android:taskAffinity="com.omni.hub.slot1" android:autoRemoveFromRecents="false" android:maxRecents="50" android:supportsPictureInPicture="true" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode|density" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <activity android:name=".container.PluginSlot2Activity" android:exported="false" android:launchMode="singleTask" android:taskAffinity="com.omni.hub.slot2" android:autoRemoveFromRecents="false" android:maxRecents="50" android:supportsPictureInPicture="true" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode|density" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
