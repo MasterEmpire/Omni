@@ -599,6 +599,8 @@ fun BrowserMenuOverlay(
     currentUrl: String,
     dataSaverMode: String = "MEDIUM",
     onToggleDataSaver: () -> Unit = {},
+    currentZoomPercent: Int = 100,
+    onOpenZoom: () -> Unit = {},
     isCurrentTabFavorite: Boolean = false,
     onToggleFavoriteTab: () -> Unit = {},
     forceDarkWebPages: Boolean = false,
@@ -774,6 +776,14 @@ fun BrowserMenuOverlay(
                                 color = dsColor,
                                 isBold = dataSaverMode != "OFF",
                                 onClick = { onToggleDataSaver() }
+                            )
+                        }
+                        "page_zoom" -> {
+                            InLayoutMenuItem(
+                                title = "🔍 Page Zoom ($currentZoomPercent%)",
+                                color = if (currentZoomPercent != 100) Color(0xFF58A6FF) else Color(0xFFE8EAED),
+                                isBold = currentZoomPercent != 100,
+                                onClick = { onOpenZoom() }
                             )
                         }
                         "favorite_tab" -> {
@@ -1152,6 +1162,144 @@ fun OmniboxSuggestionOverlay(
 
 @Composable
 fun UndoBanner(
+@Composable
+fun PageZoomBar(
+    visible: Boolean,
+    currentDomain: String,
+    zoom: Float,
+    onZoomChange: (Float) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+        modifier = modifier
+    ) {
+        val zoomPercent = Math.round(zoom * 100f)
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF161B22),
+            border = BorderStroke(1.2.dp, Color(0xFF58A6FF).copy(alpha = 0.7f)),
+            shadowElevation = 14.dp,
+            modifier = Modifier
+                .padding(horizontal = 14.dp)
+                .fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🔍", fontSize = 14.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Page Zoom",
+                            color = Color(0xFFE8EAED),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (currentDomain.isNotEmpty()) {
+                            Spacer(Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF21262D)
+                            ) {
+                                Text(
+                                    text = currentDomain,
+                                    color = Color(0xFF58A6FF),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (zoomPercent != 100) {
+                            TextButton(
+                                onClick = onReset,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text("Reset (100%)", color = Color(0xFF58A6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color(0xFF8B949E),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(
+                        onClick = { onZoomChange((zoom - 0.05f).coerceAtLeast(0.5f)) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Text("−", color = Color(0xFF58A6FF), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Slider(
+                        value = zoom,
+                        onValueChange = { onZoomChange(it) },
+                        valueRange = 0.5f..2.5f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF58A6FF),
+                            activeTrackColor = Color(0xFF58A6FF),
+                            inactiveTrackColor = Color(0xFF30363D)
+                        ),
+                        modifier = Modifier.weight(1f).height(24.dp)
+                    )
+
+                    IconButton(
+                        onClick = { onZoomChange((zoom + 0.05f).coerceAtMost(2.5f)) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Text("+", color = Color(0xFF58A6FF), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF21262D),
+                        border = BorderStroke(1.dp, Color(0xFF30363D)),
+                        modifier = Modifier.width(52.dp)
+                    ) {
+                        Text(
+                            text = "${zoomPercent}%",
+                            color = Color(0xFFE8EAED),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
     visible: Boolean,
     message: String,
     onUndo: () -> Unit,
