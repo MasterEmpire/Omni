@@ -717,15 +717,47 @@ fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
                     .background(Color(0xFF0D1117))
                     .padding(16.dp)
             ) {
-                Text(
-                    "Installed Modules (${plugins.size})",
-                    color = Color(0xFF8B949E),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
+                val filteredPlugins = remember(plugins, appFilterQuery) {
+                    val q = appFilterQuery.trim()
+                    if (q.isEmpty()) plugins
+                    else plugins.filter { it.name.contains(q, ignoreCase = true) || it.id.contains(q, ignoreCase = true) }
+                }
 
-                if (plugins.isEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Apps (${filteredPlugins.size})",
+                        color = Color(0xFF8B949E),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Long-press tile for options",
+                        color = Color(0xFF484F58),
+                        fontSize = 10.sp
+                    )
+                }
+
+                if (plugins.size > 8) {
+                    OutlinedTextField(
+                        value = appFilterQuery,
+                        onValueChange = { appFilterQuery = it },
+                        placeholder = { Text("Filter apps...", color = Color(0xFF484F58), fontSize = 12.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF58A6FF),
+                            unfocusedBorderColor = Color(0xFF30363D)
+                        ),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    )
+                }
+
+                if (filteredPlugins.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -733,73 +765,40 @@ fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("No dynamic modules loaded", color = Color(0xFF8B949E), fontSize = 16.sp)
+                            Text(
+                                if (plugins.isEmpty()) "No dynamic modules loaded" else "No matching apps",
+                                color = Color(0xFF8B949E),
+                                fontSize = 16.sp
+                            )
                             Spacer(Modifier.height(8.dp))
-                            Text("Import a local bundle or download via Cloud Catalog / OTA URL.", color = Color(0xFF484F58), fontSize = 13.sp)
+                            Text(
+                                if (plugins.isEmpty()) "Import a local bundle or download via Cloud Catalog / OTA URL." else "Try a different filter.",
+                                color = Color(0xFF484F58),
+                                fontSize = 13.sp
+                            )
                         }
                     }
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 84.dp),
+                        modifier = Modifier.weight(1f).fillMaxWidth()
                     ) {
-                        items(plugins) { plugin ->
+                        items(filteredPlugins, key = { it.id }) { plugin ->
                             val isHeadlessRunning = runningStates[plugin.id] == true
-                            val hasAlias = com.omni.hub.loader.AppDrawerManager.hasDrawerAlias(plugin.id)
                             val isInDrawer = drawerStates[plugin.id] == true
-                            PluginCard(
+                            AppLauncherTile(
                                 plugin = plugin,
-                                isHeadlessRunning = isHeadlessRunning,
-                                hasDrawerAlias = hasAlias,
+                                isDaemonRunning = isHeadlessRunning,
                                 isInDrawer = isInDrawer,
-                                onToggleDrawer = {
-                                    if (hasAlias) {
-                                        val nextEnabled = !isInDrawer
-                                        if (com.omni.hub.loader.AppDrawerManager.setDrawerEnabled(context, plugin.id, nextEnabled)) {
-                                            refreshRunningStates()
-                                            Toast.makeText(
-                                                context,
-                                                if (nextEnabled) "📲 Added ${plugin.name} to App Drawer!" else "Removed ${plugin.name} from App Drawer",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    } else {
-                                        com.omni.hub.loader.AppDrawerManager.pinHomeShortcutFallback(context, plugin)
-                                    }
-                                },
-                                onLaunchUI = {
-                                    OmniLogger.log("OMNI_TRACE", "🚀 [HOST] User tapped 'Open UI' for ${plugin.name} (${plugin.id})")
+                                onLaunch = {
+                                    OmniLogger.log("OMNI_TRACE", "🚀 [HOST] User tapped '${plugin.name}' (${plugin.id})")
                                     OmniTaskManager.launchOrResume(context, plugin.id, plugin.name, plugin.entryClass)
                                 },
-                                onToggleHeadless = {
-                                    if (plugin.id == "scroll_lock" || plugin.id == "focus_shield") {
-                                        Toast.makeText(context, "🛡️ ${plugin.name} has God-Mode Immunity: Cannot be stopped!", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        val willRun = !isHeadlessRunning
-                                        PluginTaskEngine.setDaemonEnabled(context, plugin.id, plugin.entryClass, willRun)
-                                        Toast.makeText(
-                                            context,
-                                            if (willRun) "Daemon Armed: ${plugin.name} active in background" else "Daemon Stopped: ${plugin.name}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        refreshRunningStates()
-                                    }
-                                },
-                                onDelete = {
-                                    if (plugin.id == "scroll_lock" || plugin.id == "focus_shield") {
-                                        Toast.makeText(context, "🛡️ ${plugin.name} has God-Mode Immunity: Cannot be deleted!", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        com.omni.hub.loader.AppDrawerManager.setDrawerEnabled(context, plugin.id, false)
-                                        PluginTaskEngine.stopTask(context, plugin.id)
-                                        val activeSession = OmniTaskManager.activeSessions.find { it.pluginId == plugin.id }
-                                        if (activeSession != null) {
-                                            OmniTaskManager.killTask(context, activeSession.taskId)
-                                        }
-                                        PluginManager.deletePlugin(context, plugin.id)
-                                        plugins = PluginManager.getInstalledPlugins(context)
-                                        refreshRunningStates()
-                                        Toast.makeText(context, "Deleted ${plugin.name}", Toast.LENGTH_SHORT).show()
-                                    }
+                                onLongPress = {
+                                    selectedPluginForOptions = plugin
                                 }
                             )
                         }
