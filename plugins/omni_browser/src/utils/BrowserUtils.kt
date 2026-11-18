@@ -145,6 +145,23 @@ val BOT_BYPASS_POLYFILL = """
         }
     } catch(e) {}
 
+            // 🛡️ Viewport Zoom Unchoker: Force-enable pinch zoom on sites using user-scalable=no
+        try {
+            function unchokeViewport() {
+                var metas = document.querySelectorAll('meta[name="viewport"]');
+                metas.forEach(function(m) {
+                    var c = m.getAttribute('content') || '';
+                    if (c.indexOf('user-scalable=no') !== -1 || c.indexOf('user-scalable=0') !== -1 || c.indexOf('maximum-scale=1') !== -1) {
+                        c = c.replace(/user-scalable\s*=\s*(?:no|0)/gi, 'user-scalable=yes')
+                             .replace(/maximum-scale\s*=\s*1(?:\.0)?/gi, 'maximum-scale=5.0');
+                        m.setAttribute('content', c);
+                    }
+                });
+            }
+            unchokeViewport();
+            document.addEventListener('DOMContentLoaded', unchokeViewport);
+            window.addEventListener('load', unchokeViewport);
+        } catch(_) {}
             // 🛡️ Intelligent Keyboard & Focus Viewport Guard (Scrolls inputs into view above IME)
         try {
             function scrollActiveInputIntoView(element) {
