@@ -131,7 +131,7 @@ class BrowserStateHolder(
     var activeMediaTabId by mutableStateOf<String?>(null)
 
     // Menu Layout State
-    val defaultActiveMenu = listOf("force_dark", "data_saver", "favorite_tab", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
+    val defaultActiveMenu = listOf("force_dark", "data_saver", "page_zoom", "favorite_tab", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
     var activeMenuItems by mutableStateOf(defaultActiveMenu)
     var isDumpingSource by mutableStateOf(false)
     var sourceDumpStatus by mutableStateOf("")
@@ -168,6 +168,9 @@ class BrowserStateHolder(
     // AI Studio Profile Analytics & Health
     var aiAnalytics by mutableStateOf<Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>>(emptyMap())
     val domainUploadPaths = mutableStateMapOf<String, String>()
+    // Domain Page Zoom State
+    val domainZoomLevels = mutableStateMapOf<String, Float>()
+    var showZoomBar by mutableStateOf(false)
 
     // Live On-Screen Auto-Pilot State (In-Memory Only, Defaults to Off)
     var isAutoPilotUserArmed by mutableStateOf(false)
@@ -437,6 +440,7 @@ class BrowserStateHolder(
 
         aiAnalytics = vaultManager.loadAiAnalytics()
         vaultManager.loadDomainUploadPaths()?.let { domainUploadPaths.putAll(it) }
+        vaultManager.loadDomainZoomLevels()?.let { domainZoomLevels.putAll(it) }
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId, savedProfileId) ->
             val cleanedTabs = loadedTabs.filter { !it.id.startsWith("tab_landing_") }
@@ -466,6 +470,36 @@ class BrowserStateHolder(
         checkAndConsumePendingUrl()
     }
 
+    fun getDomainForUrl(url: String): String {
+        if (url.isEmpty() || url == "about:blank") return ""
+        return extractDomain(url)
+    }
+
+    fun getCurrentDomainZoom(): Float {
+        val domain = getDomainForUrl(currentUrl)
+        if (domain.isEmpty()) return 1.0f
+        return domainZoomLevels[domain] ?: 1.0f
+    }
+
+    fun setDomainZoom(domain: String, zoom: Float) {
+        if (domain.isEmpty()) return
+        val clamped = (Math.round(zoom.coerceIn(0.5f, 2.5f) * 100f) / 100f)
+        if (clamped in 0.98f..1.02f) {
+            domainZoomLevels.remove(domain)
+        } else {
+            domainZoomLevels[domain] = clamped
+        }
+        vaultManager.saveDomainZoomLevels(domainZoomLevels)
+        applyCurrentDomainZoom(currentWebView)
+    }
+
+    fun applyCurrentDomainZoom(wv: WebView?) {
+        if (wv == null || currentUrl == "about:blank") return
+        val zoom = getCurrentDomainZoom()
+        val zoomPercent = Math.round(zoom * 100f)
+        val script = "try { document.documentElement.style.zoom = '${zoomPercent}%'; } catch(_) {}"
+        wv.evaluateJavascript(script, null)
+    }
     fun changeSelectedProfile(newProfileId: String) {
         selectedProfileId = newProfileId
         val currentTab = tabs.find { it.id == activeTabId }
@@ -598,6 +632,7 @@ class BrowserStateHolder(
         targetWv.onResume()
         targetWv.visibility = android.view.View.VISIBLE
         container.visibility = android.view.View.VISIBLE
+        applyCurrentDomainZoom(targetWv)
 
         // Safely manage sibling views: keep AI Studio, ChatGPT & Gemini WebViews attached in background (INVISIBLE)
         for (i in container.childCount - 1 downTo 0) {
@@ -2747,6 +2782,7 @@ class BrowserStateHolder(
             showAutomationResultDialog -> { showAutomationResultDialog = false; true }
             showAutomationDialog -> { showAutomationDialog = false; true }
             showDownloadsDialog -> { showDownloadsDialog = false; true }
+            showZoomBar -> { showZoomBar = false; true }
             editingShortcut != null -> { editingShortcut = null; true }
             isAddingShortcut -> { isAddingShortcut = false; true }
             editingProfile != null -> { editingProfile = null; true }
@@ -2941,6 +2977,7 @@ class BrowserStateHolder(
         if (isErudaEnabled && url != "about:blank") {
             injectEruda()
         }
+        applyCurrentDomainZoom(poolManager.pool[tabId] ?: currentWebView)
         if (url != "about:blank" && !url.startsWith("chrome://") && !url.contains("localhost:$localServerPort")) {
             val titleToRecord = pageTitle.ifEmpty { extractDomain(url) }
             val existing = history.find { it.url == url }
