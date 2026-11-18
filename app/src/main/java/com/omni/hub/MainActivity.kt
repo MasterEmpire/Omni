@@ -209,6 +209,7 @@ fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
     var showLogModal by remember { mutableStateOf(false) }
     var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
     var runningStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
+    var drawerStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
 
     val keepAlivePrefs = remember { context.getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE) }
     var isKeepAliveEnabled by remember { mutableStateOf(keepAlivePrefs.getBoolean("key_keep_alive", false)) }
@@ -268,6 +269,7 @@ fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
 
     fun refreshRunningStates() {
         runningStates = plugins.associate { it.id to (PluginTaskEngine.isTaskRunning(it.id) || PluginTaskEngine.isDaemonEnabled(context, it.id)) }
+        drawerStates = plugins.associate { it.id to com.omni.hub.loader.AppDrawerManager.isInDrawer(context, it.id) }
     }
 
     fun loadCloudCatalog() {
@@ -736,9 +738,28 @@ fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
                     ) {
                         items(plugins) { plugin ->
                             val isHeadlessRunning = runningStates[plugin.id] == true
+                            val hasAlias = com.omni.hub.loader.AppDrawerManager.hasDrawerAlias(plugin.id)
+                            val isInDrawer = drawerStates[plugin.id] == true
                             PluginCard(
                                 plugin = plugin,
                                 isHeadlessRunning = isHeadlessRunning,
+                                hasDrawerAlias = hasAlias,
+                                isInDrawer = isInDrawer,
+                                onToggleDrawer = {
+                                    if (hasAlias) {
+                                        val nextEnabled = !isInDrawer
+                                        if (com.omni.hub.loader.AppDrawerManager.setDrawerEnabled(context, plugin.id, nextEnabled)) {
+                                            refreshRunningStates()
+                                            Toast.makeText(
+                                                context,
+                                                if (nextEnabled) "📲 Added ${plugin.name} to App Drawer!" else "Removed ${plugin.name} from App Drawer",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    } else {
+                                        com.omni.hub.loader.AppDrawerManager.pinHomeShortcutFallback(context, plugin)
+                                    }
+                                },
                                 onLaunchUI = {
                                     OmniLogger.log("OMNI_TRACE", "🚀 [HOST] User tapped 'Open UI' for ${plugin.name} (${plugin.id})")
                                     OmniTaskManager.launchOrResume(context, plugin.id, plugin.name, plugin.entryClass)
@@ -761,6 +782,7 @@ fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
                                     if (plugin.id == "scroll_lock" || plugin.id == "focus_shield") {
                                         Toast.makeText(context, "🛡️ ${plugin.name} has God-Mode Immunity: Cannot be deleted!", Toast.LENGTH_SHORT).show()
                                     } else {
+                                        com.omni.hub.loader.AppDrawerManager.setDrawerEnabled(context, plugin.id, false)
                                         PluginTaskEngine.stopTask(context, plugin.id)
                                         val activeSession = OmniTaskManager.activeSessions.find { it.pluginId == plugin.id }
                                         if (activeSession != null) {
@@ -1247,6 +1269,9 @@ fun DynamicAppIcon(
 fun PluginCard(
     plugin: PluginMetadata,
     isHeadlessRunning: Boolean,
+    hasDrawerAlias: Boolean = false,
+    isInDrawer: Boolean = false,
+    onToggleDrawer: () -> Unit = {},
     onLaunchUI: () -> Unit,
     onToggleHeadless: () -> Unit,
     onDelete: () -> Unit
@@ -1353,39 +1378,69 @@ fun PluginCard(
                     color = Color(0xFF484F58)
                 )
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(
-                        onClick = onToggleHeadless,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        border = BorderStroke(
-                            1.dp,
-                            if (isHeadlessRunning) Color(0xFFF85149).copy(alpha = 0.6f) else Color(0xFF30363D)
-                        ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = if (isHeadlessRunning) Color(0xFFF85149) else Color(0xFF8B949E)
-                        ),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Text(
-                            if (isHeadlessRunning) "Daemon Active" else "Run as Daemon",
-                            fontSize = 11.sp
-                        )
-                    }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isInDrawer) Color(0xFF238636).copy(alpha = 0.2f) else Color(0xFF0D1117),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isInDrawer) Color(0xFF3FB950) else Color(0xFF30363D)
+                    ),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onToggleDrawer() }
+                ) {
+                    Text(
+                        text = when {
+                            !hasDrawerAlias -> "📌 Pin to Home"
+                            isInDrawer -> "✅ In Drawer"
+                            else -> "📲 Add to Drawer"
+                        },
+                        color = if (isInDrawer) Color(0xFF3FB950) else Color(0xFF58A6FF),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
 
-                    Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.height(10.dp))
 
-                    Button(
-                        onClick = onLaunchUI,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Open UI", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onToggleHeadless,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isHeadlessRunning) Color(0xFFF85149).copy(alpha = 0.6f) else Color(0xFF30363D)
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = if (isHeadlessRunning) Color(0xFFF85149) else Color(0xFF8B949E)
+                    ),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text(
+                        if (isHeadlessRunning) "Daemon Active" else "Run as Daemon",
+                        fontSize = 11.sp
+                    )
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                Button(
+                    onClick = onLaunchUI,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Open UI", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
