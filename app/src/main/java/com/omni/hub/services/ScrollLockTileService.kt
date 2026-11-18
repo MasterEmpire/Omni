@@ -35,7 +35,13 @@ class ScrollLockTileService : TileService() {
             Toast.makeText(this, "🔒 1-Hour Focus Lock Engaged! Target apps locked.", Toast.LENGTH_SHORT).show()
             OmniLogger.log("SCROLL_LOCK_TILE", "Quick Tile engaged 1-hour focus lock until $newUntil")
 
-            // Ensure background sentinel is awake
+            // Ensure both ScrollLock and Focus Shield daemons are registered and awake
+            if (!PluginTaskEngine.isDaemonEnabled(this, "scroll_lock")) {
+                PluginTaskEngine.setDaemonEnabled(this, "scroll_lock", "com.omni.plugin.scrolllock.ScrollLockPlugin", true)
+            }
+            if (!PluginTaskEngine.isDaemonEnabled(this, "focus_shield")) {
+                PluginTaskEngine.setDaemonEnabled(this, "focus_shield", "com.omni.plugin.focus.FocusShieldPlugin", true)
+            }
             PluginTaskEngine.resurrectDaemons(this)
         }
     }
@@ -68,11 +74,19 @@ class ScrollLockTileService : TileService() {
 
     private fun readManualLockUntil(): Long {
         return try {
-            val stateFile = File(getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
-            if (stateFile.exists()) {
-                val json = JSONObject(stateFile.readText(Charsets.UTF_8))
-                json.optLong("manual_lock_until_ms", 0L)
-            } else 0L
+            var maxLock = 0L
+            val candidates = listOf(
+                File(getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json"),
+                File(getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                File(getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (f in candidates) {
+                if (f.exists()) {
+                    val json = JSONObject(f.readText(Charsets.UTF_8))
+                    maxLock = maxOf(maxLock, json.optLong("manual_lock_until_ms", 0L))
+                }
+            }
+            maxLock
         } catch (_: Exception) {
             0L
         }
@@ -80,13 +94,19 @@ class ScrollLockTileService : TileService() {
 
     private fun setManualLockUntil(untilMs: Long) {
         try {
-            val stateFile = File(getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
-            stateFile.parentFile?.mkdirs()
-            val json = if (stateFile.exists()) {
-                try { JSONObject(stateFile.readText(Charsets.UTF_8)) } catch (_: Exception) { JSONObject() }
-            } else JSONObject()
-            json.put("manual_lock_until_ms", untilMs)
-            stateFile.writeText(json.toString(2), Charsets.UTF_8)
+            val targets = listOf(
+                File(getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json"),
+                File(getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
+                File(getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+            )
+            for (stateFile in targets) {
+                stateFile.parentFile?.mkdirs()
+                val json = if (stateFile.exists()) {
+                    try { JSONObject(stateFile.readText(Charsets.UTF_8)) } catch (_: Exception) { JSONObject() }
+                } else JSONObject()
+                json.put("manual_lock_until_ms", untilMs)
+                stateFile.writeText(json.toString(2), Charsets.UTF_8)
+            }
         } catch (_: Exception) {}
     }
 
