@@ -483,7 +483,10 @@ class OmniBrowser : PluginEntry() {
                         state.bridge.log("OMNI_TRACE", "📂 [TAB_BTN_CLICK] state.isTabSwitcherOpen flipped to TRUE!")
                     },
                     showMenu = state.showMenu,
-                    onMenuToggle = { state.showMenu = !state.showMenu },
+                    onMenuToggle = {
+                        state.refreshSiteCacheSize()
+                        state.showMenu = !state.showMenu
+                    },
                     isAutoPilotActive = state.isLiveAutoPilotEnabled,
                     isDataSaverActive = state.isEffectiveDataSaver(),
                     onTopBarDragStart = { state.onTopBarDragStart() },
