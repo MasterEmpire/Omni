@@ -155,6 +155,11 @@ fun TabSwitcherScreen(
     Column(
         modifier = modifier
             .background(Color(0xFF1F2227))
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
             .statusBarsPadding()
     ) {
         if (isSelectionMode) {
