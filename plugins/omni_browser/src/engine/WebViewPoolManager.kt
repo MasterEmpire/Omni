@@ -58,6 +58,7 @@ class WebViewPoolManager(
     val pool = mutableMapOf<String, WebView>()
     val pendingPurge = mutableMapOf<String, WebView>()
     val tabDesktopModes = mutableMapOf<String, Boolean>()
+    var siteCacheManager: com.omni.plugin.browser.services.SiteCacheManager? = null
 
     var mobileUA: String = ""
         private set
@@ -583,6 +584,14 @@ class WebViewPoolManager(
                         return interceptLocalhostRequest(reqUri, request)
                     }
 
+                    // Site Cache Vault Interception (Immutable & ETag-Revalidated Assets)
+                    val cacheMgr = siteCacheManager
+                    if (cacheMgr != null && !request.isForMainFrame) {
+                        val cachedResp = cacheMgr.interceptRequest(request, host)
+                        if (cachedResp != null) {
+                            return cachedResp
+                        }
+                    }
                     if (isDataSaverActive) {
                         val reqUrl = reqUri.toString().lowercase(Locale.US)
                         // God-Mode VIP: Never throttle or block AI Studio, ChatGPT or Gemini streaming traffic
