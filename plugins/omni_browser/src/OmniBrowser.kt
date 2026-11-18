@@ -667,6 +667,8 @@ class OmniBrowser : PluginEntry() {
                     currentUrl = state.currentUrl,
                                         dataSaverMode = state.dataSaverMode,
                     onToggleDataSaver = { state.toggleDataSaver() },
+                    isCurrentTabFavorite = activeTab?.isFavorite == true,
+                    onToggleFavoriteTab = { state.toggleTabFavorite(state.activeTabId) },
                     forceDarkWebPages = state.forceDarkWebPages,
                     onToggleForceDark = { state.toggleForceDark() },
                     isFocusLockActive = isFocusLockActive(context),
@@ -787,6 +789,8 @@ class OmniBrowser : PluginEntry() {
                         state.clearSelectionMode()
                         state.isTabSwitcherOpen = false
                     },
+                    onToggleFavorite = { state.toggleTabFavorite(it) },
+                    onFavoriteSelectedTabs = { state.favoriteSelectedTabs() },
                     onReorderTabs = { from, to -> state.reorderTabs(from, to) },
                     onSaveTabOrder = { state.saveCurrentTabOrder() },
                     modifier = Modifier.fillMaxSize().zIndex(10f)
