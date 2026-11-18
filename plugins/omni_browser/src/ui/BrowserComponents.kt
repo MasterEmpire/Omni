@@ -601,6 +601,10 @@ fun BrowserMenuOverlay(
     onToggleDataSaver: () -> Unit = {},
     currentZoomPercent: Int = 100,
     onOpenZoom: () -> Unit = {},
+    isSiteCached: Boolean = false,
+    siteCacheSizeText: String = "0 B",
+    onToggleSiteCache: () -> Unit = {},
+    onClearSiteCache: () -> Unit = {},
     isCurrentTabFavorite: Boolean = false,
     onToggleFavoriteTab: () -> Unit = {},
     forceDarkWebPages: Boolean = false,
@@ -778,7 +782,64 @@ fun BrowserMenuOverlay(
                                 onClick = { onToggleDataSaver() }
                             )
                         }
-                        "page_zoom" -> {
+                                                "site_cache" -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        onDismiss()
+                                        onToggleSiteCache()
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "📦 Cache This Site",
+                                            color = if (isSiteCached) Color(0xFF3FB950) else Color(0xFFE8EAED),
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isSiteCached) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                        if (isSiteCached) {
+                                            Spacer(Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = Color(0xFF238636).copy(alpha = 0.25f)
+                                            ) {
+                                                Text(
+                                                    "ACTIVE",
+                                                    color = Color(0xFF3FB950),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = if (siteCacheSizeText.isNotEmpty() && siteCacheSizeText != "0 B") "$siteCacheSizeText saved on disk" else "Saves data on immutable assets",
+                                        color = Color(0xFF8B949E),
+                                        fontSize = 10.sp
+                                    )
+                                }
+
+                                if (siteCacheSizeText.isNotEmpty() && siteCacheSizeText != "0 B") {
+                                    IconButton(
+                                        onClick = {
+                                            onDismiss()
+                                            onClearSiteCache()
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Text("🗑️", fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
+"page_zoom" -> {
                             InLayoutMenuItem(
                                 title = "🔍 Page Zoom ($currentZoomPercent%)",
                                 color = if (currentZoomPercent != 100) Color(0xFF58A6FF) else Color(0xFFE8EAED),
