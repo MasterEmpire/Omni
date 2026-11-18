@@ -859,6 +859,7 @@ fun MenuCustomizerDialog(
             val names = mapOf(
             "force_dark" to "☀️/🌙 Dark Mode Toggle",
             "data_saver" to "🛡️ Data-saver Mode",
+            "page_zoom" to "🔍 Page Zoom Slider",
             "favorite_tab" to "⭐ Favorite Tab",
             "focus_lock" to "🔒 Focus Lock Toggle",
             "copy_url" to "🔗 Copy Clean URL",
