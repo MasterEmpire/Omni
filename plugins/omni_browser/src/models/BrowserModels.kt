@@ -113,7 +113,8 @@ data class BrowserTab(
     val thumbnail: Bitmap? = null,
     val lastAccessedTime: Long = System.currentTimeMillis(),
     val profileId: String = "default",
-    val isDesktop: Boolean = false
+    val isDesktop: Boolean = false,
+    val isFavorite: Boolean = false
 )
 
 class OmniMediaBridge(
