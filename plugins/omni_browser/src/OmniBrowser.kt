@@ -667,6 +667,8 @@ class OmniBrowser : PluginEntry() {
                     currentUrl = state.currentUrl,
                                         dataSaverMode = state.dataSaverMode,
                     onToggleDataSaver = { state.toggleDataSaver() },
+                    currentZoomPercent = Math.round(state.getCurrentDomainZoom() * 100f),
+                    onOpenZoom = { state.showZoomBar = true },
                     isCurrentTabFavorite = activeTab?.isFavorite == true,
                     onToggleFavoriteTab = { state.toggleTabFavorite(state.activeTabId) },
                     forceDarkWebPages = state.forceDarkWebPages,
@@ -1240,6 +1242,23 @@ class OmniBrowser : PluginEntry() {
 
             DownloadCompletedPillBanner(
                 visible = state.showDownloadBanner,
+            PageZoomBar(
+                visible = state.showZoomBar,
+                currentDomain = state.getDomainForUrl(state.currentUrl),
+                zoom = state.getCurrentDomainZoom(),
+                onZoomChange = { newZoom ->
+                    state.setDomainZoom(state.getDomainForUrl(state.currentUrl), newZoom)
+                },
+                onReset = {
+                    state.setDomainZoom(state.getDomainForUrl(state.currentUrl), 1.0f)
+                },
+                onDismiss = { state.showZoomBar = false },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp)
+                    .zIndex(36f)
+            )
                 file = state.latestDownloadedFile,
                 onOpen = { file ->
                     openDownloadedFile(context, file, bridge)
