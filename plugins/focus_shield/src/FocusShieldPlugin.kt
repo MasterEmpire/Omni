@@ -188,9 +188,21 @@ class FocusShieldPlugin : PluginEntry() {
     override fun onStart(context: Context, bridge: HostBridge, baseDir: String) {
         activeContext = context
         activeBridge = bridge
+        val daemonPrefs = context.getSharedPreferences("omni_daemon_registry", Context.MODE_PRIVATE)
+        val daemonJson = try {
+            JSONObject(daemonPrefs.getString("active_daemons", "{}") ?: "{}")
+        } catch (_: Exception) {
+            JSONObject()
+        }
+        if (!daemonJson.has("focus_shield")) {
+            daemonJson.put("focus_shield", "com.omni.plugin.focus.FocusShieldPlugin")
+            daemonPrefs.edit().putString("active_daemons", daemonJson.toString()).apply()
+        }
         loadPersistedState(bridge)
+        syncDiskState(context, bridge)
         ensureMonitoringRunning(context, bridge)
         AccessibilityDispatcher.addListener(accessibilityListener)
+        checkImmediateEviction(context, bridge)
         bridge.log("FOCUS_SHIELD", "Focus Shield background sentinel armed with pop-up killer.")
     }
 
@@ -282,7 +294,7 @@ class FocusShieldPlugin : PluginEntry() {
 
                 val pkg = root.packageName?.toString() ?: continue
                 if (pkg != context.packageName && pkg != "com.omni.hub" &&
-                    (KNOWN_BROWSER_PACKAGES.contains(pkg) || customPkgs.contains(pkg) ||
+                    (KNOWN_BROWSER_PACKAGES.contains(pkg) || CURFEW_APP_PACKAGES.contains(pkg) || customPkgs.contains(pkg) ||
                      isSettingsPackage(pkg) ||
                      TelegramDetector.isTelegram(context, pkg))) {
                     val rect = Rect()
@@ -311,7 +323,7 @@ class FocusShieldPlugin : PluginEntry() {
                 if (rootPkg != context.packageName && rootPkg != "com.omni.hub" &&
                     rootPkg != "com.sec.android.app.launcher" && rootPkg != "com.android.systemui" &&
                     !rootPkg.contains("inputmethod") &&
-                    (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg) ||
+                    (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || CURFEW_APP_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg) ||
                      isSettingsPackage(rootPkg) ||
                      TelegramDetector.isTelegram(context, rootPkg))) {
                     val rect = Rect()
@@ -815,11 +827,12 @@ class FocusShieldPlugin : PluginEntry() {
 
         val customPkgs = customLockedApps.map { it.packageName }.toSet()
         val isBrowser = KNOWN_BROWSER_PACKAGES.contains(fgPkg)
+        val isCurfewApp = CURFEW_APP_PACKAGES.contains(fgPkg)
         val isCustomBlocked = customPkgs.contains(fgPkg)
         val isSettings = isSettingsPackage(fgPkg)
         val isTelegram = TelegramDetector.isTelegram(context, fgPkg)
 
-        val isTargetBlocked = isBrowser || isCustomBlocked || isSettings || isTelegram
+        val isTargetBlocked = isBrowser || isCurfewApp || isCustomBlocked || isSettings || isTelegram
 
         if (isTargetBlocked) {
             val appLabel = try {
@@ -1562,6 +1575,10 @@ class FocusShieldPlugin : PluginEntry() {
         @Volatile var lastTapAttemptTimeMs = 0L
         @Volatile var lastFullDeflectTimeMs = 0L
         @Volatile var lastAccessibilityDiskSyncMs = 0L
+
+        val CURFEW_APP_PACKAGES = setOf(
+            "com.community.moviebox"               // MovieBox (1-Hour Lockout & 10 PM - 6 AM Curfew)
+        )
 
         val KNOWN_BROWSER_PACKAGES = setOf(
             "com.sec.android.app.sbrowser",        // Samsung Internet
