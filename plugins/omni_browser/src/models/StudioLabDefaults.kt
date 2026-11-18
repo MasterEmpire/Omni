@@ -61,6 +61,11 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
     }
 
     window.Omni = {
+        profiles: {
+            list: function() {
+                return rpcCall('profilesList', []);
+            }
+        },
         studio: {
             createSession: function(opts) {
                 opts = opts || {};
