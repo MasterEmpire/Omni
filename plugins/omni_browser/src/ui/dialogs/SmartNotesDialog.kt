@@ -96,6 +96,8 @@ fun SmartNotesDialog(
     var editColorId by remember { mutableStateOf("yellow") }
     var editFolderId by remember { mutableStateOf<String?>(null) }
 
+    var viewingNote by remember { mutableStateOf<SmartNote?>(null) }
+
     var searchQuery by remember { mutableStateOf("") }
     var debouncedQuery by remember { mutableStateOf("") }
     var selectedFolderFilter by remember { mutableStateOf<String?>(null) }
@@ -149,12 +151,16 @@ fun SmartNotesDialog(
                     Spacer(Modifier.width(8.dp))
                     Column {
                         Text(
-                            if (isEditing) (if (editingNoteId != null) "Edit Note" else "New Note") else "Omni Brain Notes",
+                            when {
+                                isEditing -> if (editingNoteId != null) "Edit Note" else "New Note"
+                                viewingNote != null -> "View Note"
+                                else -> "Omni Brain Notes"
+                            },
                             color = Color(0xFFE8EAED),
                             fontWeight = FontWeight.Bold,
                             fontSize = 17.sp
                         )
-                        if (!isEditing) {
+                        if (!isEditing && viewingNote == null) {
                             Text(
                                 "${filteredNotes.size} synced notes",
                                 color = Color(0xFF8B949E),
@@ -164,7 +170,7 @@ fun SmartNotesDialog(
                     }
                 }
 
-                if (!isEditing) {
+                if (!isEditing && viewingNote == null) {
                     Button(
                         onClick = {
                             editingNoteId = null
@@ -187,7 +193,114 @@ fun SmartNotesDialog(
             }
         },
         text = {
-            if (isEditing) {
+            if (viewingNote != null) {
+                val note = viewingNote!!
+                val isUnlocked = !note.isLocked || unlockedNoteIds.contains(note.id)
+                val accent = accentColorFor(note.colorId)
+                val folder = note.folderId?.let { folderMap[it] }
+                val dateStr = SmartNoteDates.format(note.updatedAt)
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(accent))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = note.title.ifBlank { if (note.type == "CHECKLIST") "Checklist" else "Untitled Note" },
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            text = if (folder != null) "${folder.icon} ${folder.name} • $dateStr" else dateStr,
+                            color = Color(0xFF8B949E),
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF16181D),
+                        border = BorderStroke(1.dp, accent.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth().weight(1f)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                    item {
+                                        Text(
+                                            text = formatNoteTextForAction(note).ifBlank { "(Empty note)" },
+                                            color = Color(0xFFE8EAED),
+                                            fontSize = 13.sp,
+                                            lineHeight = 18.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val actionPayload = formatNoteTextForAction(note)
+                            Button(
+                                onClick = { onInjectToPage(actionPayload) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("⚡ Inject", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    bridge.copyToClipboard(actionPayload)
+                                    bridge.showToast("Copied to clipboard")
+                                },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8)),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("📋 Copy", fontSize = 11.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                editingNoteId = note.id
+                                editTitle = note.title
+                                editContent = formatNoteTextForAction(note)
+                                editColorId = note.colorId
+                                editFolderId = note.folderId
+                                viewingNote = null
+                                isEditing = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text("✏️ Edit", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            } else if (isEditing) {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)
@@ -434,7 +547,18 @@ fun SmartNotesDialog(
                                     shape = RoundedCornerShape(10.dp),
                                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
                                     border = BorderStroke(1.dp, accent.copy(alpha = 0.45f)),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            if (!isUnlocked) {
+                                                pinInput = ""
+                                                pinErr = null
+                                                pendingUnlockNote = note
+                                            } else {
+                                                viewingNote = note
+                                            }
+                                        }
                                 ) {
                                     Box(
                                         modifier = Modifier
@@ -536,12 +660,18 @@ fun SmartNotesDialog(
 
                                                     IconButton(
                                                         onClick = {
-                                                            editingNoteId = note.id
-                                                            editTitle = note.title
-                                                            editContent = formatNoteTextForAction(note)
-                                                            editColorId = note.colorId
-                                                            editFolderId = note.folderId
-                                                            isEditing = true
+                                                            if (!isUnlocked) {
+                                                                pinInput = ""
+                                                                pinErr = null
+                                                                pendingUnlockNote = note
+                                                            } else {
+                                                                editingNoteId = note.id
+                                                                editTitle = note.title
+                                                                editContent = formatNoteTextForAction(note)
+                                                                editColorId = note.colorId
+                                                                editFolderId = note.folderId
+                                                                isEditing = true
+                                                            }
                                                         },
                                                         modifier = Modifier.size(28.dp)
                                                     ) {
@@ -566,23 +696,34 @@ fun SmartNotesDialog(
             }
         },
         confirmButton = {
-            if (isEditing) {
-                Button(
-                    onClick = {
-                        onSaveNote(editTitle, editContent, editingNoteId, editColorId, editFolderId)
-                        isEditing = false
-                    },
-                    enabled = editContent.trim().isNotEmpty() || editTitle.trim().isNotEmpty(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
-                ) {
-                    Text("Save", fontWeight = FontWeight.Bold)
+            when {
+                isEditing -> {
+                    Button(
+                        onClick = {
+                            onSaveNote(editTitle, editContent, editingNoteId, editColorId, editFolderId)
+                            isEditing = false
+                        },
+                        enabled = editContent.trim().isNotEmpty() || editTitle.trim().isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
+                    ) {
+                        Text("Save", fontWeight = FontWeight.Bold)
+                    }
                 }
-            } else {
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C4043))
-                ) {
-                    Text("Close")
+                viewingNote != null -> {
+                    Button(
+                        onClick = { viewingNote = null },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D))
+                    ) {
+                        Text("Back to Notes")
+                    }
+                }
+                else -> {
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C4043))
+                    ) {
+                        Text("Close")
+                    }
                 }
             }
         },
