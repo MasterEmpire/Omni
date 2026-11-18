@@ -66,6 +66,7 @@ class AiStudioAutomator(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var legacyBatchCallback: AutomationCallback? = null
+    private val siteCacheManager = com.omni.plugin.browser.services.SiteCacheManager(context, bridge)
 
     private fun normalizeModelSlug(rawModel: String): String {
         val trimmed = rawModel.trim()
@@ -291,6 +292,10 @@ class AiStudioAutomator(
 
                     if (isJunkHost || isStaticWeight) {
                         return WebResourceResponse("text/plain", "UTF-8", 200, "OK", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                    }
+                    if (!request.isForMainFrame) {
+                        val cachedResp = siteCacheManager.interceptRequest(request, "aistudio.google.com", profileId)
+                        if (cachedResp != null) return cachedResp
                     }
                     return super.shouldInterceptRequest(view, request)
                 }
