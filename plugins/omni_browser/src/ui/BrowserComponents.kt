@@ -1161,8 +1161,6 @@ fun OmniboxSuggestionOverlay(
 }
 
 @Composable
-fun UndoBanner(
-@Composable
 fun PageZoomBar(
     visible: Boolean,
     currentDomain: String,
@@ -1300,6 +1298,8 @@ fun PageZoomBar(
         }
     }
 }
+@Composable
+fun UndoBanner(
     visible: Boolean,
     message: String,
     onUndo: () -> Unit,
