@@ -599,6 +599,8 @@ fun BrowserMenuOverlay(
     currentUrl: String,
     dataSaverMode: String = "MEDIUM",
     onToggleDataSaver: () -> Unit = {},
+    isCurrentTabFavorite: Boolean = false,
+    onToggleFavoriteTab: () -> Unit = {},
     forceDarkWebPages: Boolean = false,
     onToggleForceDark: () -> Unit = {},
     isFocusLockActive: Boolean = false,
@@ -772,6 +774,14 @@ fun BrowserMenuOverlay(
                                 color = dsColor,
                                 isBold = dataSaverMode != "OFF",
                                 onClick = { onToggleDataSaver() }
+                            )
+                        }
+                        "favorite_tab" -> {
+                            InLayoutMenuItem(
+                                title = if (isCurrentTabFavorite) "★ Favorited Tab" else "☆ Favorite This Tab",
+                                color = if (isCurrentTabFavorite) Color(0xFFFFD600) else Color(0xFFE8EAED),
+                                isBold = isCurrentTabFavorite,
+                                onClick = { onToggleFavoriteTab() }
                             )
                         }
                         "focus_lock" -> {
