@@ -31,6 +31,32 @@ class OmniForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+        if (action == ACTION_ACTIVATE_FOCUS_SHIELDS) {
+            com.omni.hub.api.OmniLogger.log("FOREGROUND", "🛡️ ACTION_ACTIVATE_FOCUS_SHIELDS received: waking ScrollLock & Focus Shield daemons.")
+            try {
+                if (!com.omni.hub.loader.PluginTaskEngine.isDaemonEnabled(this, "scroll_lock")) {
+                    com.omni.hub.loader.PluginTaskEngine.setDaemonEnabled(
+                        this,
+                        "scroll_lock",
+                        "com.omni.plugin.scrolllock.ScrollLockPlugin",
+                        true
+                    )
+                }
+                if (!com.omni.hub.loader.PluginTaskEngine.isDaemonEnabled(this, "focus_shield")) {
+                    com.omni.hub.loader.PluginTaskEngine.setDaemonEnabled(
+                        this,
+                        "focus_shield",
+                        "com.omni.plugin.focus.FocusShieldPlugin",
+                        true
+                    )
+                }
+                com.omni.hub.loader.PluginTaskEngine.resurrectDaemons(this)
+            } catch (e: Exception) {
+                com.omni.hub.api.OmniLogger.log("FOREGROUND_ERR", "Failed activating focus shields: ${e.message}")
+            }
+            return START_STICKY
+        }
+
         if (action == ACTION_STOP) {
             val keepAlivePrefs = getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE)
             val isKeepAliveEnabled = keepAlivePrefs.getBoolean("key_keep_alive", false)
@@ -328,6 +354,7 @@ class OmniForegroundService : Service() {
         private const val CHANNEL_ID = "omni_automation_channel"
         private const val NOTIFICATION_ID = 8842
         const val ACTION_START = "com.omni.hub.action.START_FOREGROUND"
+        const val ACTION_ACTIVATE_FOCUS_SHIELDS = "com.omni.hub.action.ACTIVATE_FOCUS_SHIELDS"
         const val ACTION_START_PROJECTION = "com.omni.hub.action.START_PROJECTION"
         const val ACTION_STOP_PROJECTION = "com.omni.hub.action.STOP_PROJECTION"
         const val ACTION_STOP = "com.omni.hub.action.STOP_FOREGROUND"
