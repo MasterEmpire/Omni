@@ -131,7 +131,7 @@ class BrowserStateHolder(
     var activeMediaTabId by mutableStateOf<String?>(null)
 
     // Menu Layout State
-    val defaultActiveMenu = listOf("force_dark", "data_saver", "page_zoom", "favorite_tab", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
+    val defaultActiveMenu = listOf("force_dark", "data_saver", "site_cache", "page_zoom", "favorite_tab", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
     var activeMenuItems by mutableStateOf(defaultActiveMenu)
     var isDumpingSource by mutableStateOf(false)
     var sourceDumpStatus by mutableStateOf("")
@@ -171,6 +171,12 @@ class BrowserStateHolder(
     // Domain Page Zoom State
     val domainZoomLevels = mutableStateMapOf<String, Float>()
     var showZoomBar by mutableStateOf(false)
+
+    // Site Cache Vault
+    val siteCacheManager = com.omni.plugin.browser.services.SiteCacheManager(context, bridge).also {
+        poolManager.siteCacheManager = it
+    }
+    var currentSiteCacheSize by mutableLongStateOf(0L)
 
     // Live On-Screen Auto-Pilot State (In-Memory Only, Defaults to Off)
     var isAutoPilotUserArmed by mutableStateOf(false)
@@ -475,10 +481,13 @@ class BrowserStateHolder(
         return extractDomain(url)
     }
 
-    fun getCurrentDomainZoom(): Float {
-        val domain = getDomainForUrl(currentUrl)
+    fun getDomainZoom(domain: String): Float {
         if (domain.isEmpty()) return 1.0f
         return domainZoomLevels[domain] ?: 1.0f
+    }
+
+    fun getCurrentDomainZoom(): Float {
+        return getDomainZoom(getDomainForUrl(currentUrl))
     }
 
     fun setDomainZoom(domain: String, zoom: Float) {
@@ -490,15 +499,44 @@ class BrowserStateHolder(
             domainZoomLevels[domain] = clamped
         }
         vaultManager.saveDomainZoomLevels(domainZoomLevels)
-        applyCurrentDomainZoom(currentWebView)
+        applyDomainZoom(currentWebView, currentUrl)
     }
 
-    fun applyCurrentDomainZoom(wv: WebView?) {
-        if (wv == null || currentUrl == "about:blank") return
-        val zoom = getCurrentDomainZoom()
+    fun applyDomainZoom(wv: WebView?, targetUrl: String) {
+        if (wv == null || targetUrl.isEmpty() || targetUrl == "about:blank") return
+        val domain = getDomainForUrl(targetUrl)
+        val zoom = getDomainZoom(domain)
         val zoomPercent = Math.round(zoom * 100f)
         val script = "try { document.documentElement.style.zoom = '${zoomPercent}%'; } catch(_) {}"
         wv.evaluateJavascript(script, null)
+    }
+
+    fun isCurrentSiteCached(): Boolean {
+        val domain = getDomainForUrl(currentUrl)
+        return siteCacheManager.isSiteCacheEnabled(domain)
+    }
+
+    fun refreshSiteCacheSize() {
+        val domain = getDomainForUrl(currentUrl)
+        currentSiteCacheSize = if (domain.isNotEmpty()) siteCacheManager.getDomainCacheSize(domain) else 0L
+    }
+
+    fun toggleCurrentSiteCache() {
+        val domain = getDomainForUrl(currentUrl)
+        if (domain.isEmpty()) return
+        val enabled = siteCacheManager.toggleSiteCache(domain)
+        refreshSiteCacheSize()
+        bridge.vibrate(25L)
+        bridge.showToast(if (enabled) "📦 Site cache enabled for $domain" else "Site cache disabled for $domain")
+    }
+
+    fun clearCurrentSiteCache() {
+        val domain = getDomainForUrl(currentUrl)
+        if (domain.isEmpty()) return
+        siteCacheManager.clearDomainCache(domain)
+        refreshSiteCacheSize()
+        bridge.vibrate(30L)
+        bridge.showToast("🗑️ Cleared offline cache for $domain")
     }
     fun changeSelectedProfile(newProfileId: String) {
         selectedProfileId = newProfileId
@@ -632,7 +670,6 @@ class BrowserStateHolder(
         targetWv.onResume()
         targetWv.visibility = android.view.View.VISIBLE
         container.visibility = android.view.View.VISIBLE
-        applyCurrentDomainZoom(targetWv)
 
         // Safely manage sibling views: keep AI Studio, ChatGPT & Gemini WebViews attached in background (INVISIBLE)
         for (i in container.childCount - 1 downTo 0) {
@@ -642,7 +679,6 @@ class BrowserStateHolder(
                 val isChildVipAi = childTab?.url?.contains("aistudio.google.com") == true || childTab?.url?.contains("chatgpt.com") == true || childTab?.url?.contains("gemini.google.com") == true
 
                 if (isChildVipAi) {
-                    // God-Mode VIP: Keep AI Studio, ChatGPT & Gemini attached in ViewTree so DOM updates continue in background
                     child.visibility = android.view.View.INVISIBLE
                 } else {
                     container.removeViewAt(i)
@@ -658,11 +694,15 @@ class BrowserStateHolder(
         }
         currentWebView = targetWv
 
+        // Update target URL state BEFORE zoom injection to eliminate race condition
         currentUrl = targetTab.url
         urlInputText = if (targetTab.url == "about:blank") "" else targetTab.url
         pageTitle = targetTab.title
         canGoBack = targetWv.canGoBack()
         canGoForward = targetWv.canGoForward()
+
+        applyDomainZoom(targetWv, targetTab.url)
+        refreshSiteCacheSize()
 
         targetWv.evaluateJavascript("window.__omniProfileId = '${targetTab.profileId}';", null)
         if (targetTab.url.contains("aistudio.google.com")) {
@@ -2836,9 +2876,11 @@ class BrowserStateHolder(
             currentUrl = safeUrl
             urlInputText = if (isBlocked) "" else safeUrl
             syncAutoPilotStateForCurrentTab(isExplicitUserToggle = false)
+            refreshSiteCacheSize()
         }
         tabs = tabs.map { if (it.id == tabId) it.copy(url = safeUrl, title = if (isBlocked) "Blocked by Shield" else it.title) else it }
         vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
+        applyDomainZoom(poolManager.pool[tabId] ?: currentWebView, safeUrl)
     }
 
     override fun onPageStarted(tabId: String, url: String) {
@@ -2977,7 +3019,8 @@ class BrowserStateHolder(
         if (isErudaEnabled && url != "about:blank") {
             injectEruda()
         }
-        applyCurrentDomainZoom(poolManager.pool[tabId] ?: currentWebView)
+        applyDomainZoom(poolManager.pool[tabId] ?: currentWebView, url)
+        if (activeTabId == tabId) refreshSiteCacheSize()
         if (url != "about:blank" && !url.startsWith("chrome://") && !url.contains("localhost:$localServerPort")) {
             val titleToRecord = pageTitle.ifEmpty { extractDomain(url) }
             val existing = history.find { it.url == url }
