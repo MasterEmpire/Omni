@@ -87,16 +87,23 @@ fun TabSwitcherScreen(
     onNewTab: (String) -> Unit,
     onCloseAll: () -> Unit,
     onCloseSwitcher: () -> Unit,
+    onToggleFavorite: (String) -> Unit = {},
+    onFavoriteSelectedTabs: () -> Unit = {},
     onReorderTabs: (Int, Int) -> Unit = { _, _ -> },
     onSaveTabOrder: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var activeSegment by remember { mutableStateOf("tabs") }
+    var showFavoritesOnly by remember { mutableStateOf(false) }
     var showTabMenu by remember { mutableStateOf(false) }
     var profileMenuExpanded by remember { mutableStateOf(false) }
     var profileToDelete by remember { mutableStateOf<BrowserProfile?>(null) }
     var showHealthDeckDialog by remember { mutableStateOf(false) }
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
+    val favCount = remember(tabs) { tabs.count { it.isFavorite } }
+    val displayedTabs = remember(tabs, showFavoritesOnly) {
+        if (showFavoritesOnly) tabs.filter { it.isFavorite } else tabs
+    }
 
     val initialIndex = remember {
         val idx = tabs.indexOfFirst { it.id == activeTabId }
@@ -218,6 +225,20 @@ fun TabSwitcherScreen(
                                     onClick = {
                                         showTabMenu = false
                                         onPromptGroupSelection()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (selectedTabIds.isNotEmpty()) "⭐ Favorite Selected (${selectedTabIds.size})" else "⭐ Favorite Selected",
+                                            color = if (selectedTabIds.isNotEmpty()) Color(0xFFFFD600) else Color(0xFF5F6368),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    enabled = selectedTabIds.isNotEmpty(),
+                                    onClick = {
+                                        showTabMenu = false
+                                        onFavoriteSelectedTabs()
                                     }
                                 )
                                 DropdownMenuItem(
@@ -471,10 +492,36 @@ fun TabSwitcherScreen(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = onCloseSwitcher) {
-                            Text("Done", color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (showFavoritesOnly) Color(0xFFFFD600).copy(alpha = 0.22f) else Color(0xFF161B22),
+                            border = BorderStroke(
+                                1.dp,
+                                if (showFavoritesOnly) Color(0xFFFFD600) else Color(0xFF30363D)
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    activeSegment = "tabs"
+                                    showFavoritesOnly = !showFavoritesOnly
+                                }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text("⭐", fontSize = 11.sp)
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = if (favCount > 0) "Fav ($favCount)" else "Fav",
+                                    color = if (showFavoritesOnly) Color(0xFFFFD600) else Color(0xFFE8EAED),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
 
+                        val activeIsFav = tabs.find { it.id == activeTabId }?.isFavorite == true
                         Box {
                             IconButton(onClick = { showTabMenu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "Tab Menu", tint = Color(0xFF9AA0A6))
@@ -484,6 +531,19 @@ fun TabSwitcherScreen(
                                 onDismissRequest = { showTabMenu = false },
                                 modifier = Modifier.background(Color(0xFF282C34))
                             ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (activeIsFav) "☆ Unfavorite Current Tab" else "⭐ Favorite Current Tab",
+                                            color = Color(0xFFFFD600),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    onClick = {
+                                        showTabMenu = false
+                                        onToggleFavorite(activeTabId)
+                                    }
+                                )
                                 DropdownMenuItem(
                                     text = { Text("Select Tabs", color = Color(0xFF58A6FF), fontWeight = FontWeight.Bold) },
                                     onClick = {
@@ -496,6 +556,13 @@ fun TabSwitcherScreen(
                                     onClick = {
                                         showTabMenu = false
                                         onNewTab(selectedProfileId)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Done (Exit Switcher)", color = Color(0xFF8AB4F8)) },
+                                    onClick = {
+                                        showTabMenu = false
+                                        onCloseSwitcher()
                                     }
                                 )
                                 DropdownMenuItem(
@@ -523,6 +590,34 @@ fun TabSwitcherScreen(
                 onSwitchToTabs = { activeSegment = "tabs" },
                 modifier = Modifier.weight(1f).fillMaxWidth()
             )
+        } else if (showFavoritesOnly && displayedTabs.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("⭐", fontSize = 42.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Text("No Favorite Tabs Yet", color = Color(0xFFE8EAED), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Tap the ★ icon on any tab card or use the ⋮ menu to pin favorite tabs here.",
+                        color = Color(0xFF8B949E),
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = { showFavoritesOnly = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D))
+                    ) {
+                        Text("Show All Tabs", color = Color(0xFF58A6FF))
+                    }
+                }
+            }
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
@@ -535,7 +630,7 @@ fun TabSwitcherScreen(
                     .fillMaxWidth()
                     .nestedScroll(tabsGridScrollConnection)
             ) {
-                items(tabs, key = { it.id }) { tab ->
+                items(displayedTabs, key = { it.id }) { tab ->
                     val isActive = tab.id == activeTabId
                     val isSelectedInMode = selectedTabIds.contains(tab.id)
                     val tabProfile = profiles.find { it.id == tab.profileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF2979FF)
@@ -581,6 +676,8 @@ fun TabSwitcherScreen(
                                 BorderStroke(2.dp, Color(0xFF58A6FF))
                             } else if (isActive) {
                                 BorderStroke(2.dp, Color(tabProfile.colorValue))
+                            } else if (tab.isFavorite) {
+                                BorderStroke(1.5.dp, Color(0xFFFFD600).copy(alpha = 0.75f))
                             } else null,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -594,7 +691,7 @@ fun TabSwitcherScreen(
                                     clip = true
                                 }
                                 .longPressDraggableHandle(
-                                    enabled = !isSelectionMode && !isClosing,
+                                    enabled = !isSelectionMode && !isClosing && !showFavoritesOnly,
                                     onDragStarted = {
                                         bridge?.vibrate(25L)
                                     },
@@ -639,20 +736,33 @@ fun TabSwitcherScreen(
                                     )
 
                                     if (!isSelectionMode) {
-                                        IconButton(
-                                            onClick = {
-                                                if (!closingTabIds.contains(tab.id)) {
-                                                    closingTabIds.add(tab.id)
-                                                }
-                                            },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = "Close Tab",
-                                                tint = Color(0xFF9AA0A6),
-                                                modifier = Modifier.size(14.dp)
-                                            )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            IconButton(
+                                                onClick = { onToggleFavorite(tab.id) },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (tab.isFavorite) "★" else "☆",
+                                                    color = if (tab.isFavorite) Color(0xFFFFD600) else Color(0xFF8B949E),
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    if (!closingTabIds.contains(tab.id)) {
+                                                        closingTabIds.add(tab.id)
+                                                    }
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Close Tab",
+                                                    tint = Color(0xFF9AA0A6),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
