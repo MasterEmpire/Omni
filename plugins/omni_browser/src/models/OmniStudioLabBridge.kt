@@ -132,6 +132,39 @@ class OmniStudioLabBridge(
         return attachments
     }
 
+    // --- 0. Profile Discovery & Quota Health ---
+    @JavascriptInterface
+    fun profilesList(callId: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val vault = com.omni.plugin.browser.storage.VaultManager(context, bridge)
+                val profiles = (vault.loadProfiles() ?: emptyList()).ifEmpty {
+                    listOf(BrowserProfile("default", "Default", 0xFF2979FF))
+                }
+                val analytics = vault.loadAiAnalytics()
+                val now = System.currentTimeMillis()
+                val arr = JSONArray()
+                profiles.forEach { prof ->
+                    val a = analytics[prof.id]
+                    val qTime = a?.lastQuotaHitTimestamp ?: 0L
+                    val isExhausted = qTime > 0L && (now - qTime) < 24 * 60 * 60 * 1000L
+                    arr.put(
+                        JSONObject().apply {
+                            put("id", prof.id)
+                            put("name", prof.name)
+                            put("color", String.format("#%06X", (0xFFFFFF and prof.colorValue.toInt())))
+                            put("promptsSentToday", a?.promptsSentToday ?: 0)
+                            put("lastQuotaHitTimestamp", qTime)
+                            put("isQuotaExhausted", isExhausted)
+                        }
+                    )
+                }
+                resolve(callId, arr)
+            } catch (e: Exception) {
+                reject(callId, e.message ?: "Failed listing profiles")
+            }
+        }
+    }
     // --- 1. Multi-Session Puppet Pool Methods (Uncapped Concurrent Sessions) ---
     @JavascriptInterface
     fun studioCreateSession(callId: String, profileId: String, model: String) {
