@@ -1426,10 +1426,10 @@ class BrowserStateHolder(
                                 window.OmniIdeBridge.reportPatchResult('FAILED', 'Error executing ingest: ' + err.message);
                             }
                         }
-                    } else if (attempts < 20) {
+                    } else if (attempts < 40) {
                         attempts++;
                         if (attempts % 4 === 0 && window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                            window.OmniIdeBridge.log('AUTOPILOT_PROBE', '⏳ Waiting for window.' + fnName + ' (attempt ' + attempts + '/20, typeof=' + fnType + ', loc=' + window.location.href + ')...');
+                            window.OmniIdeBridge.log('AUTOPILOT_PROBE', '⏳ Waiting for window.' + fnName + ' (attempt ' + attempts + '/40, typeof=' + fnType + ', loc=' + window.location.href + ')...');
                         }
                         setTimeout(tryIngest, 250);
                     } else {
@@ -1437,10 +1437,10 @@ class BrowserStateHolder(
                         const iframesCount = document.querySelectorAll('iframe').length;
                         const diagDetails = 'loc=' + window.location.href + ' | fnType=' + fnType + ' | matchingKeys=[' + matchingKeys.join(', ') + '] | iframes=' + iframesCount;
                         if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                            window.OmniIdeBridge.log('AUTOPILOT_PROBE_ERR', '❌ Failed after 20 attempts (5s). Diag: ' + diagDetails);
+                            window.OmniIdeBridge.log('AUTOPILOT_PROBE_ERR', '❌ Failed after 40 attempts (10s). Diag: ' + diagDetails);
                         }
                         if (window.OmniIdeBridge && window.OmniIdeBridge.reportPatchResult) {
-                            window.OmniIdeBridge.reportPatchResult('FAILED', 'Conduit IDE not ready after 5s (' + diagDetails + ')');
+                            window.OmniIdeBridge.reportPatchResult('FAILED', 'Conduit IDE not ready after 10s (' + diagDetails + ')');
                         }
                     }
                 }
@@ -1448,14 +1448,35 @@ class BrowserStateHolder(
             })();
         """.trimIndent()
 
-        val ideWv = poolManager.pool[targetTabId]
+        var ideWv = poolManager.pool[targetTabId]
+        if (ideWv == null && ideTab != null) {
+            bridge.log("AUTOPILOT_DEBUG", "🔥 [COLD HYDRATE] Target IDE tab '$targetTabId' is cold. Hydrating WebView silently...")
+            val hydratedWv = poolManager.createConfiguredWebView(
+                tabId = ideTab.id,
+                initialUrl = ideTab.url,
+                savedState = ideTab.stateBundle,
+                profileId = ideTab.profileId,
+                isDesktop = ideTab.isDesktop,
+                listener = this
+            )
+            poolManager.pool[ideTab.id] = hydratedWv
+            if (ideTab.url.isNotEmpty() && ideTab.url != "about:blank" &&
+                (hydratedWv.url == null || hydratedWv.url == "about:blank")) {
+                hydratedWv.loadUrl(ideTab.url)
+            }
+            ideWv = hydratedWv
+        }
+
         if (ideWv != null) {
-            bridge.log("AUTOPILOT_DEBUG", "📱 [POOL MATCH] Target WebView found in pool for '$targetTabId'. wv.url='${ideWv.url}', wv.originalUrl='${ideWv.originalUrl}', wv.progress=${ideWv.progress}")
+            bridge.log("AUTOPILOT_DEBUG", "📱 [POOL MATCH] Target WebView ready for '$targetTabId'. wv.url='${ideWv.url}', wv.progress=${ideWv.progress}")
             ideWv.onResume()
             containerLayout?.let { container ->
                 if (ideWv.parent !== container) {
                     bridge.log("AUTOPILOT_DEBUG", "📦 [HIERARCHY] Attaching target WebView to container layout at index 0.")
                     (ideWv.parent as? android.view.ViewGroup)?.removeView(ideWv)
+                    if (targetTabId != activeTabId) {
+                        ideWv.visibility = android.view.View.INVISIBLE
+                    }
                     container.addView(ideWv, 0)
                 }
             }
@@ -1465,20 +1486,7 @@ class BrowserStateHolder(
                 bridge.log("AUTOPILOT_DEBUG", "📝 evaluateJavascript callback returned: $evalResult")
             }
         } else {
-            bridge.log("AUTOPILOT_DEBUG", "⏳ [POOL MISS] Target tab '$targetTabId' is NOT in poolManager.pool. Keys in pool: ${poolManager.pool.keys}. Waiting 600ms...")
-            coroutineScope.launch {
-                delay(600)
-                val wv = poolManager.pool[targetTabId]
-                bridge.log("AUTOPILOT_DEBUG", "⏳ [POST DELAY] Re-checked pool for '$targetTabId': wv is ${if (wv != null) "FOUND (url='${wv.url}')" else "STILL NULL"}")
-                if (wv != null) {
-                    wv.onResume()
-                    wv.evaluateJavascript(probeScript) { evalResult ->
-                        bridge.log("AUTOPILOT_DEBUG", "📝 Post-delay evaluateJavascript callback returned: $evalResult")
-                    }
-                } else {
-                    onPatchReported("FAILED", "Conduit IDE tab failed to initialize")
-                }
-            }
+            onPatchReported("FAILED", "Conduit IDE tab failed to initialize")
         }
     }
 
@@ -1540,7 +1548,24 @@ class BrowserStateHolder(
         }
 
         val targetTabId = ideTab?.id ?: return
-        val ideWv = poolManager.pool[targetTabId]
+        var ideWv = poolManager.pool[targetTabId]
+        if (ideWv == null && ideTab != null) {
+            val hydratedWv = poolManager.createConfiguredWebView(
+                tabId = ideTab.id,
+                initialUrl = ideTab.url,
+                savedState = ideTab.stateBundle,
+                profileId = ideTab.profileId,
+                isDesktop = ideTab.isDesktop,
+                listener = this
+            )
+            poolManager.pool[ideTab.id] = hydratedWv
+            if (ideTab.url.isNotEmpty() && ideTab.url != "about:blank" &&
+                (hydratedWv.url == null || hydratedWv.url == "about:blank")) {
+                hydratedWv.loadUrl(ideTab.url)
+            }
+            ideWv = hydratedWv
+        }
+
         val escapedXml = org.json.JSONObject.quote(xml)
         val pullScript = """
             (function() {
@@ -1549,7 +1574,7 @@ class BrowserStateHolder(
                 function tryPull() {
                     if (window.__conduitPullFiles) {
                         window.__conduitPullFiles(req);
-                    } else if (attempts < 20) {
+                    } else if (attempts < 40) {
                         attempts++;
                         setTimeout(tryPull, 250);
                     } else {
@@ -1567,17 +1592,13 @@ class BrowserStateHolder(
             containerLayout?.let { container ->
                 if (ideWv.parent !== container) {
                     (ideWv.parent as? android.view.ViewGroup)?.removeView(ideWv)
+                    if (targetTabId != activeTabId) {
+                        ideWv.visibility = android.view.View.INVISIBLE
+                    }
                     container.addView(ideWv, 0)
                 }
             }
             ideWv.evaluateJavascript(pullScript, null)
-        } else {
-            coroutineScope.launch {
-                delay(600)
-                val wv = poolManager.pool[targetTabId]
-                wv?.onResume()
-                wv?.evaluateJavascript(pullScript, null)
-            }
         }
     }
 
@@ -2886,7 +2907,7 @@ class BrowserStateHolder(
             vaultManager.saveHistory(updatedHistory)
         }
         if (url != null && url.contains("aistudio.google.com")) {
-            com.omni.plugin.browser.engine.LiveAutoPilotEngine.syncOnPageFinished(currentWebView, url, isLiveAutoPilotEnabled)
+            com.omni.plugin.browser.engine.LiveAutoPilotEngine.syncOnPageFinished(poolManager.pool[tabId] ?: currentWebView, url, isLiveAutoPilotEnabled)
         }
         if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != "about:blank") {
             solveCurrentCaptcha()
