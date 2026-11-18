@@ -1117,6 +1117,20 @@ class BrowserStateHolder(
                 }
             } catch (_: Exception) {}
 
+            try {
+                val wakeIntent = Intent().apply {
+                    setClassName(context.packageName, "com.omni.hub.services.OmniForegroundService")
+                    action = "com.omni.hub.action.ACTIVATE_FOCUS_SHIELDS"
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(wakeIntent)
+                } else {
+                    context.startService(wakeIntent)
+                }
+            } catch (e: Exception) {
+                bridge.log("FOCUS_SHIELD_WARN", "Could not wake Focus Shield service: ${e.message}")
+            }
+
             resetFocusLockCache()
             bridge.showToast("🔒 1-Hour Focus Lock Engaged! Irreversible until timer expires.")
             bridge.vibrate(180L)
