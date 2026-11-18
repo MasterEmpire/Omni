@@ -453,7 +453,7 @@ class OmniBrowser : PluginEntry() {
                     isHomeOverlayOpen = state.isHomeOverlayOpen,
                     isSearchFocused = state.isSearchFocused,
                     onSearchFocusChange = { focused ->
-                        if (focused) {
+                        if (focused && !state.isTabSwitcherOpen) {
                             state.isSearchFocused = true
                             state.onSearchInputChanged(state.urlInputText)
                         } else {
@@ -469,6 +469,10 @@ class OmniBrowser : PluginEntry() {
                     onLongToggleTab = { state.switchToThirdRecentTab() },
                     onTabSwitcherClick = {
                         state.bridge.log("OMNI_TRACE", "🔘 [TAB_BTN_CLICK] User tapped tab count button (${state.tabs.size} tabs open)!")
+                        if (state.isSearchFocused) {
+                            state.dismissSearch()
+                        }
+                        focusManager.clearFocus()
                         val thumb = state.currentWebView?.captureThumbnail()
                         val bundle = android.os.Bundle()
                         state.currentWebView?.saveState(bundle)
