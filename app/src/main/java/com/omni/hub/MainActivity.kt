@@ -25,8 +25,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -210,6 +215,8 @@ fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
     var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
     var runningStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
     var drawerStates by remember { mutableStateOf(mapOf<String, Boolean>()) }
+    var selectedPluginForOptions by remember { mutableStateOf<PluginMetadata?>(null) }
+    var appFilterQuery by remember { mutableStateOf("") }
 
     val keepAlivePrefs = remember { context.getSharedPreferences("omni_hub_prefs", Context.MODE_PRIVATE) }
     var isKeepAliveEnabled by remember { mutableStateOf(keepAlivePrefs.getBoolean("key_keep_alive", false)) }
@@ -833,6 +840,70 @@ fun DashboardScreen(context: Context, openDiagnosticsSignal: Int = 0) {
     val hostActivity = context as? android.app.Activity
     val isHostAlive = hostActivity == null || (!hostActivity.isFinishing && !hostActivity.isDestroyed)
 
+    if (isHostAlive && selectedPluginForOptions != null) {
+        val target = selectedPluginForOptions!!
+        val isHeadless = runningStates[target.id] == true
+        val hasAlias = com.omni.hub.loader.AppDrawerManager.hasDrawerAlias(target.id)
+        val inDrawer = drawerStates[target.id] == true
+
+        AppManagementDialog(
+            plugin = target,
+            isDaemonRunning = isHeadless,
+            hasDrawerAlias = hasAlias,
+            isInDrawer = inDrawer,
+            onLaunch = {
+                OmniLogger.log("OMNI_TRACE", "🚀 [LAUNCH] User opened ${target.name} from options sheet")
+                OmniTaskManager.launchOrResume(context, target.id, target.name, target.entryClass)
+            },
+            onToggleDrawer = {
+                if (hasAlias) {
+                    val nextEnabled = !inDrawer
+                    if (com.omni.hub.loader.AppDrawerManager.setDrawerEnabled(context, target.id, nextEnabled)) {
+                        refreshRunningStates()
+                        Toast.makeText(
+                            context,
+                            if (nextEnabled) "📲 Added ${target.name} to App Drawer!" else "Removed ${target.name} from App Drawer",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } else {
+                    com.omni.hub.loader.AppDrawerManager.pinHomeShortcutFallback(context, target)
+                }
+            },
+            onToggleDaemon = {
+                if (target.id == "scroll_lock" || target.id == "focus_shield") {
+                    Toast.makeText(context, "🛡️ ${target.name} has God-Mode Immunity: Cannot be stopped!", Toast.LENGTH_SHORT).show()
+                } else {
+                    val willRun = !isHeadless
+                    PluginTaskEngine.setDaemonEnabled(context, target.id, target.entryClass, willRun)
+                    Toast.makeText(
+                        context,
+                        if (willRun) "Daemon Armed: ${target.name} active in background" else "Daemon Stopped: ${target.name}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    refreshRunningStates()
+                }
+            },
+            onDelete = {
+                if (target.id == "scroll_lock" || target.id == "focus_shield") {
+                    Toast.makeText(context, "🛡️ ${target.name} has God-Mode Immunity: Cannot be deleted!", Toast.LENGTH_SHORT).show()
+                } else {
+                    com.omni.hub.loader.AppDrawerManager.setDrawerEnabled(context, target.id, false)
+                    PluginTaskEngine.stopTask(context, target.id)
+                    val activeSession = OmniTaskManager.activeSessions.find { it.pluginId == target.id }
+                    if (activeSession != null) {
+                        OmniTaskManager.killTask(context, activeSession.taskId)
+                    }
+                    PluginManager.deletePlugin(context, target.id)
+                    plugins = PluginManager.getInstalledPlugins(context)
+                    refreshRunningStates()
+                    Toast.makeText(context, "Deleted ${target.name}", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { selectedPluginForOptions = null }
+        )
+    }
+
     if (isHostAlive && showUrlDialog) {
         DownloadUrlDialog(
             onDismiss = { showUrlDialog = false },
@@ -1265,186 +1336,266 @@ fun DynamicAppIcon(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PluginCard(
+fun AppLauncherTile(
     plugin: PluginMetadata,
-    isHeadlessRunning: Boolean,
-    hasDrawerAlias: Boolean = false,
-    isInDrawer: Boolean = false,
-    onToggleDrawer: () -> Unit = {},
-    onLaunchUI: () -> Unit,
-    onToggleHeadless: () -> Unit,
-    onDelete: () -> Unit
+    isDaemonRunning: Boolean,
+    isInDrawer: Boolean,
+    onLaunch: () -> Unit,
+    onLongPress: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(
+                onClick = onLaunch,
+                onLongClick = onLongPress
+            )
+            .padding(vertical = 4.dp, horizontal = 2.dp)
+    ) {
+        Box(
+            modifier = Modifier.size(56.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            DynamicAppIcon(
+                id = plugin.id,
+                name = plugin.name,
+                iconSource = plugin.icon,
+                size = 54.dp,
+                shape = RoundedCornerShape(15.dp),
+                fallbackFontSize = 24.sp
+            )
+
+            // Active Daemon Badge (Green Pulse Dot)
+            if (isDaemonRunning) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 3.dp, y = (-3).dp)
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF0D1117))
+                        .padding(2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(Color(0xFF3FB950))
+                    )
+                }
+            }
+
+            // Installed in App Drawer Indicator (Cyan Badge)
+            if (isInDrawer) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 3.dp, y = 3.dp)
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF0D1117))
+                        .padding(1.5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(Color(0xFF1F6FEB)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("✓", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        Text(
+            text = plugin.name,
+            color = Color(0xFFE8EAED),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+        )
+    }
+}
+
+@Composable
+fun AppManagementDialog(
+    plugin: PluginMetadata,
+    isDaemonRunning: Boolean,
+    hasDrawerAlias: Boolean,
+    isInDrawer: Boolean,
+    onLaunch: () -> Unit,
+    onToggleDrawer: () -> Unit,
+    onToggleDaemon: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
 ) {
     val dateStr = remember(plugin.installedAt) {
-        SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date(plugin.installedAt))
+        SimpleDateFormat("MMM d, yyyy • HH:mm", Locale.US).format(Date(plugin.installedAt))
     }
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
-        border = BorderStroke(
-            1.dp,
-            if (isHeadlessRunning) Color(0xFF238636).copy(alpha = 0.8f) else Color.White.copy(alpha = 0.08f)
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF161B22),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 DynamicAppIcon(
                     id = plugin.id,
                     name = plugin.name,
                     iconSource = plugin.icon,
-                    size = 44.dp,
+                    size = 42.dp,
                     shape = RoundedCornerShape(12.dp),
-                    fallbackFontSize = 22.sp
+                    fallbackFontSize = 20.sp
                 )
-
                 Spacer(Modifier.width(12.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = plugin.name,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFE8EAED)
-                        )
-                        if (isHeadlessRunning) {
-                            Spacer(Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF238636).copy(alpha = 0.2f),
-                                border = BorderStroke(1.dp, Color(0xFF238636))
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF3FB950))
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        "ACTIVE",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF3FB950)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = plugin.description.ifEmpty { plugin.entryClass.substringAfterLast(".") },
-                        fontSize = 12.sp,
-                        color = Color(0xFF8B949E),
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
-                }
-
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = Color(0xFFF85149).copy(alpha = 0.7f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                Column {
+                    Text(plugin.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(plugin.id, color = Color(0xFF58A6FF), fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 }
             }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = plugin.description.ifEmpty { "Dynamic Omni Hub Plugin" },
+                    color = Color(0xFFC9D1D9),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
 
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
                 Text(
                     text = "Installed $dateStr",
-                    fontSize = 11.sp,
-                    color = Color(0xFF484F58)
+                    color = Color(0xFF8B949E),
+                    fontSize = 10.sp
                 )
 
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isInDrawer) Color(0xFF238636).copy(alpha = 0.2f) else Color(0xFF0D1117),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isInDrawer) Color(0xFF3FB950) else Color(0xFF30363D)
-                    ),
+                HorizontalDivider(color = Color(0xFF30363D))
+
+                // Drawer Toggle Row
+                Row(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .clickable { onToggleDrawer() }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = when {
-                            !hasDrawerAlias -> "📌 Pin to Home"
-                            isInDrawer -> "✅ In Drawer"
-                            else -> "📲 Add to Drawer"
-                        },
-                        color = if (isInDrawer) Color(0xFF3FB950) else Color(0xFF58A6FF),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (hasDrawerAlias) "App Drawer Launcher" else "Home Screen Shortcut",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = when {
+                                !hasDrawerAlias -> "Pin shortcut to your phone's home screen"
+                                isInDrawer -> "Visible in your phone's app drawer"
+                                else -> "Hidden (launchable only inside Omni Hub)"
+                            },
+                            color = Color(0xFF8B949E),
+                            fontSize = 10.sp
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isInDrawer) Color(0xFF238636).copy(alpha = 0.2f) else Color(0xFF21262D),
+                        border = BorderStroke(1.dp, if (isInDrawer) Color(0xFF3FB950) else Color(0xFF30363D))
+                    ) {
+                        Text(
+                            text = when {
+                                !hasDrawerAlias -> "📌 Pin"
+                                isInDrawer -> "✅ In Drawer"
+                                else -> "📲 Add"
+                            },
+                            color = if (isInDrawer) Color(0xFF3FB950) else Color(0xFF58A6FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                // Daemon Toggle Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onToggleDaemon() }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Background Daemon Engine",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (isDaemonRunning) "Active in background continuously" else "Inactive (runs only when opened)",
+                            color = Color(0xFF8B949E),
+                            fontSize = 10.sp
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isDaemonRunning) Color(0xFF238636).copy(alpha = 0.2f) else Color(0xFF21262D),
+                        border = BorderStroke(1.dp, if (isDaemonRunning) Color(0xFF3FB950) else Color(0xFF30363D))
+                    ) {
+                        Text(
+                            text = if (isDaemonRunning) "🟢 Running" else "⚪ Stopped",
+                            color = if (isDaemonRunning) Color(0xFF3FB950) else Color(0xFF8B949E),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
-
-            Spacer(Modifier.height(10.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedButton(
-                    onClick = onToggleHeadless,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isHeadlessRunning) Color(0xFFF85149).copy(alpha = 0.6f) else Color(0xFF30363D)
-                    ),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = if (isHeadlessRunning) Color(0xFFF85149) else Color(0xFF8B949E)
-                    ),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Text(
-                        if (isHeadlessRunning) "Daemon Active" else "Run as Daemon",
-                        fontSize = 11.sp
-                    )
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (plugin.id != "scroll_lock" && plugin.id != "focus_shield") {
+                    TextButton(
+                        onClick = {
+                            onDelete()
+                            onDismiss()
+                        }
+                    ) {
+                        Text("Uninstall", color = Color(0xFFF85149), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-
-                Spacer(Modifier.width(8.dp))
 
                 Button(
-                    onClick = onLaunchUI,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp)
+                    onClick = {
+                        onDismiss()
+                        onLaunch()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Open UI", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Open App", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFF8B949E))
+            }
         }
-    }
+    )
 }
 
 @Composable
