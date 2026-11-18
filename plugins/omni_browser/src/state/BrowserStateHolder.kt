@@ -131,7 +131,7 @@ class BrowserStateHolder(
     var activeMediaTabId by mutableStateOf<String?>(null)
 
     // Menu Layout State
-    val defaultActiveMenu = listOf("force_dark", "data_saver", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
+    val defaultActiveMenu = listOf("force_dark", "data_saver", "favorite_tab", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
     var activeMenuItems by mutableStateOf(defaultActiveMenu)
     var isDumpingSource by mutableStateOf(false)
     var sourceDumpStatus by mutableStateOf("")
@@ -910,13 +910,48 @@ class BrowserStateHolder(
         }
     }
 
+    fun toggleTabFavorite(tabId: String) {
+        val target = tabs.find { it.id == tabId } ?: return
+        val nextFav = !target.isFavorite
+        tabs = tabs.map { if (it.id == tabId) it.copy(isFavorite = nextFav) else it }
+        vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
+        bridge.vibrate(25L)
+        bridge.showToast(if (nextFav) "⭐ Added tab to Favorites" else "Removed tab from Favorites")
+    }
+
+    fun favoriteSelectedTabs() {
+        if (selectedTabIds.isEmpty()) return
+        val selected = tabs.filter { selectedTabIds.contains(it.id) }
+        val allAlreadyFav = selected.isNotEmpty() && selected.all { it.isFavorite }
+        val targetState = !allAlreadyFav
+        tabs = tabs.map { if (selectedTabIds.contains(it.id)) it.copy(isFavorite = targetState) else it }
+        vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
+        bridge.vibrate(30L)
+        bridge.showToast(
+            if (targetState) "⭐ Favorited ${selected.size} tab(s)" else "Unfavorited ${selected.size} tab(s)"
+        )
+        clearSelectionMode()
+    }
+
     fun closeAllTabs() {
+        val preservedFavorites = tabs.filter { it.isFavorite }
+        val tabsToClose = tabs.filter { !it.isFavorite }
+
+        if (tabsToClose.isEmpty()) {
+            bridge.showToast("⭐ All open tabs are favorited! Unfavorite first to close all.")
+            return
+        }
+
         poolManager.purgePending(containerLayout)
 
-        val count = tabs.size
+        val count = tabsToClose.size
         lastClosedTabsSnapshot = tabs
         lastActiveTabIdSnapshot = activeTabId
-        undoMessage = "$count tabs closed"
+        undoMessage = if (preservedFavorites.isNotEmpty()) {
+            "$count tabs closed (Favorites kept)"
+        } else {
+            "$count tabs closed"
+        }
         showUndoBanner = true
         undoJob?.cancel()
         undoJob = coroutineScope.launch {
@@ -927,21 +962,32 @@ class BrowserStateHolder(
         }
 
         previousActiveTabId = null
-        tabProgressMap.clear()
-        poolManager.pool.forEach { (id, wv) ->
-            wv.onPause()
-            poolManager.pendingPurge[id] = wv
+        tabsToClose.forEach { t ->
+            tabProgressMap.remove(t.id)
+            poolManager.pool.remove(t.id)?.let { wv ->
+                wv.onPause()
+                containerLayout?.removeView(wv)
+                poolManager.pendingPurge[t.id] = wv
+            }
         }
-        poolManager.pool.clear()
-        containerLayout?.removeAllViews()
 
-        val newId = "tab_${System.currentTimeMillis()}"
-        tabs = listOf(BrowserTab(id = newId, title = "New Tab", url = "about:blank", profileId = selectedProfileId))
-        activeTabId = newId
-        isTabSwitcherOpen = false
+        if (preservedFavorites.isNotEmpty()) {
+            tabs = preservedFavorites
+            val nextActiveId = if (preservedFavorites.any { it.id == activeTabId }) activeTabId else preservedFavorites.first().id
+            activeTabId = nextActiveId
+            isTabSwitcherOpen = false
+            vaultManager.saveSession(tabs, nextActiveId, selectedProfileId)
+            attachTabWebView(nextActiveId)
+        } else {
+            containerLayout?.removeAllViews()
+            val newId = "tab_${System.currentTimeMillis()}"
+            tabs = listOf(BrowserTab(id = newId, title = "New Tab", url = "about:blank", profileId = selectedProfileId))
+            activeTabId = newId
+            isTabSwitcherOpen = false
 
-        vaultManager.saveSession(tabs, newId)
-        attachTabWebView(newId)
+            vaultManager.saveSession(tabs, newId)
+            attachTabWebView(newId)
+        }
     }
 
     fun reorderTabs(fromIndex: Int, toIndex: Int) {
