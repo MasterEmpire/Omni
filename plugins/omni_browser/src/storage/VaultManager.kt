@@ -187,6 +187,7 @@ class VaultManager(
                 mirrorFile("config/history.json", "history.json")
                 mirrorFile("config/ai_studio_analytics.json", "ai_studio_analytics.json")
                 mirrorFile("config/domain_upload_paths.json", "domain_upload_paths.json")
+                mirrorFile("config/domain_zoom_levels.json", "domain_zoom_levels.json")
 
                 val ideDir = File(bridge.getPluginDir(), "ide")
                 if (ideDir.exists() && ideDir.isDirectory) {
@@ -220,6 +221,7 @@ class VaultManager(
                 restoreIfMissing("config/history.json", "history.json")
                 restoreIfMissing("config/ai_studio_analytics.json", "ai_studio_analytics.json")
                 restoreIfMissing("config/domain_upload_paths.json", "domain_upload_paths.json")
+                restoreIfMissing("config/domain_zoom_levels.json", "domain_zoom_levels.json")
 
                                     val vaultIdeDir = File(vaultDir, "ide")
                     if (vaultIdeDir.exists() && vaultIdeDir.isDirectory) {
@@ -468,6 +470,26 @@ class VaultManager(
         }
     }
 
+    fun saveDomainZoomLevels(levels: Map<String, Float>) {
+        try {
+            val json = JSONObject()
+            levels.forEach { (domain, zoom) -> json.put(domain, zoom.toDouble()) }
+            bridge.saveFile("config/domain_zoom_levels.json", json.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadDomainZoomLevels(): Map<String, Float>? {
+        return try {
+            val bytes = bridge.readFile("config/domain_zoom_levels.json") ?: return null
+            val json = JSONObject(String(bytes, Charsets.UTF_8))
+            val map = mutableMapOf<String, Float>()
+            json.keys().forEach { k -> map[k] = json.getDouble(k).toFloat() }
+            map
+        } catch (_: Exception) {
+            null
+        }
+    }
     fun saveAiAnalytics(analyticsMap: Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>) {
         try {
             val arr = JSONArray()
