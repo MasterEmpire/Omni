@@ -491,7 +491,7 @@ object LiveAutoPilotEngine {
                         tempDiv.style.pointerEvents = 'none';
 
                         const clone = contentContainer.cloneNode(true);
-                        clone.querySelectorAll('ms-thought-chunk, .author-label, .header, .timestamp, .info-container, .turn-information, loading-indicator, .turn-footer, button, .actions-container, ms-run-button').forEach(el => el.remove());
+                        clone.querySelectorAll('ms-thought-chunk, .author-label, .header, .timestamp, .info-container, .turn-information, loading-indicator, .turn-footer, button, .actions-container, ms-run-button, [data-omni-voice-btn]').forEach(el => el.remove());
                         tempDiv.appendChild(clone);
                         document.body.appendChild(tempDiv);
 
