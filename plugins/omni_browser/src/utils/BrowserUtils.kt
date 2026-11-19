@@ -1107,7 +1107,6 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
 
     function getModelTurns() {
         const raw = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
-        // Deduplicate nested matches if any
         return raw.filter((el, idx) => raw.indexOf(el) === idx && !raw.some(other => other !== el && other.contains(el)));
     }
 
@@ -1137,7 +1136,6 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
     function cleanSpeechString(raw) {
         if (!raw) return '';
         let txt = String(raw);
-        // Strip CXP / tool XML tags safely
         txt = txt.replace(new RegExp('<' + '(?:cxp|omni_cxp|patch)\\b[\\s\\S]*?<' + '\\/(?:cxp|omni_cxp|patch)>', 'gi'), ' [patch omitted] ');
         txt = txt.replace(new RegExp('<' + '(?:pull_files|execute_python|omni_action)\\b[\\s\\S]*?(?:\\/>|<' + '\\/(?:pull_files|execute_python|omni_action)>)', 'gi'), ' ');
         txt = txt.replace(/```[\s\S]*?```/g, ' [code block skipped] ');
@@ -1157,10 +1155,8 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
             const contentContainer = turnEl.querySelector('.chat-turn-content, ms-chat-turn-content, .turn-content') || turnEl;
             const clone = contentContainer.cloneNode(true);
 
-            // Strip internal thinking, buttons, footers, and our own Read Aloud button
             clone.querySelectorAll('ms-thought-chunk, .author-label, .header, .timestamp, .info-container, .turn-information, loading-indicator, .turn-footer, button, .actions-container, ms-run-button, [data-omni-voice-btn]').forEach(el => el.remove());
 
-            // Replace large code blocks and pre tags with a short spoken marker
             clone.querySelectorAll('ms-code-block, pre').forEach(codeEl => {
                 const placeholder = document.createElement('span');
                 placeholder.textContent = ' [code block skipped] ';
@@ -1201,15 +1197,16 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
 
     function styleVoiceButton(btn, turnId) {
         const isThisTurn = (window.__omniVoiceActiveTurnId === turnId) && (window.__omniVoiceState !== 'IDLE');
-        const isConnecting = isThisTurn && window.__omniVoiceState === 'CONNECTING';
-        const isSpeaking = isThisTurn && window.__omniVoiceState === 'SPEAKING';
+        const targetState = isThisTurn ? window.__omniVoiceState : 'IDLE';
+        if (btn.getAttribute('data-omni-btn-state') === targetState) return;
+        btn.setAttribute('data-omni-btn-state', targetState);
 
-        if (isSpeaking) {
+        if (targetState === 'SPEAKING') {
             btn.textContent = '⏹ Stop';
             btn.style.background = 'rgba(248, 81, 73, 0.22)';
             btn.style.borderColor = '#F85149';
             btn.style.color = '#FF7B72';
-        } else if (isConnecting) {
+        } else if (targetState === 'CONNECTING') {
             btn.textContent = '⏳ Connecting';
             btn.style.background = 'rgba(0, 229, 255, 0.16)';
             btn.style.borderColor = '#00E5FF';
@@ -1229,6 +1226,9 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
             const turnId = ensureTurnId(turn);
             let btn = turn.querySelector('[data-omni-voice-btn="true"]');
             if (!btn) {
+                const footer = turn.querySelector('.turn-footer .actions-container, .actions-container, .turn-footer');
+                const mountTarget = footer || turn;
+
                 btn = document.createElement('button');
                 btn.type = 'button';
                 btn.setAttribute('data-omni-voice-btn', 'true');
@@ -1257,19 +1257,12 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
                     }
                 });
 
-                const footer = turn.querySelector('.turn-footer .actions-container, .actions-container, .turn-footer');
-                if (footer) {
-                    footer.appendChild(btn);
-                } else {
-                    const host = turn.querySelector('.chat-turn-content, ms-chat-turn-content, .turn-content') || turn;
-                    host.appendChild(btn);
-                }
+                mountTarget.appendChild(btn);
             }
             styleVoiceButton(btn, turnId);
         }
     }
 
-    // Mark pre-existing turns on initial mount so Auto-Read only triggers on genuinely new turns
     getModelTurns().forEach(t => {
         ensureTurnId(t);
         t.setAttribute('data-omni-voice-auto-read', 'init');
@@ -1337,30 +1330,26 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
         setTimeout(function() {
             injectTurnButtons();
             triggerAutoReadIfEligible(rec.output);
-        }, 350);
+        }, 400);
     });
 
+    if (window.__omniVoicePollInterval) clearInterval(window.__omniVoicePollInterval);
     let wasGenerating = false;
-    setInterval(function() {
-        injectTurnButtons();
+    window.__omniVoicePollInterval = setInterval(function() {
         const isGen = checkUiGenerating();
         if (isGen) {
             wasGenerating = true;
-        } else if (wasGenerating) {
+            return;
+        }
+        injectTurnButtons();
+        if (wasGenerating) {
             wasGenerating = false;
             setTimeout(function() {
                 injectTurnButtons();
                 triggerAutoReadIfEligible('');
             }, 500);
         }
-    }, 900);
-
-    try {
-        const voiceObserver = new MutationObserver(function() {
-            injectTurnButtons();
-        });
-        voiceObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
-    } catch(_) {}
+    }, 1200);
 
     injectTurnButtons();
 })();
