@@ -1007,7 +1007,8 @@ class OmniBrowser : PluginEntry() {
                                 state.solverApiKey, state.autoSolveEnabled, state.forceDarkWebPages,
                                 state.localServerPort, state.isErudaEnabled, state.isDesktopMode,
                                 state.isBackgroundAudioEnabled, state.dataSaverMode, state.filePickerProvider,
-                                state.blockAiStudioBack, aMenu, hMenu
+                                state.blockAiStudioBack, aMenu, hMenu,
+                                state.geminiApiKey, state.autoReadAloud, state.geminiVoiceName
                             )
                             bridge.showToast("Menu layout updated!")
                             state.showMenuCustomizerDialog = false
@@ -1048,6 +1049,9 @@ class OmniBrowser : PluginEntry() {
                         dataSaverMode = state.dataSaverMode,
                         filePickerProvider = state.filePickerProvider,
                         blockAiStudioBack = state.blockAiStudioBack,
+                        geminiApiKey = state.geminiApiKey,
+                        autoReadAloud = state.autoReadAloud,
+                        geminiVoiceName = state.geminiVoiceName,
                         onExportBackup = { state.exportBackup() },
                         onRestoreBackup = {
                             restoreCallback = { uri -> state.restoreBackup(uri) }
@@ -1063,7 +1067,7 @@ class OmniBrowser : PluginEntry() {
                             state.showSettingsDialog = false
                             state.showMenuCustomizerDialog = true
                         },
-                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack ->
+                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack, gemKey, autoRead, gemVoice ->
                             state.solverApiKey = key
                             state.autoSolveEnabled = auto
                             state.forceDarkWebPages = dark
@@ -1073,16 +1077,23 @@ class OmniBrowser : PluginEntry() {
                             state.dataSaverMode = mode
                             state.filePickerProvider = picker
                             state.blockAiStudioBack = blockBack
+                            state.geminiApiKey = gemKey
+                            state.autoReadAloud = autoRead
+                            state.geminiVoiceName = gemVoice
                             state.poolManager.localPort = port
                             state.poolManager.updateForceDark(dark)
                             state.syncDataSaver()
+                            state.syncVoiceStateToActiveWebView()
                             if (desktop != state.tabs.find { it.id == state.activeTabId }?.isDesktop) {
                                 state.toggleDesktopMode()
                             }
                             if (eruda) {
                                 state.injectEruda()
                             }
-                            state.vaultManager.saveSolverConfig(key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack)
+                            state.vaultManager.saveSolverConfig(
+                                key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack,
+                                state.activeMenuItems, state.hiddenMenuItems, gemKey, autoRead, gemVoice
+                            )
                             bridge.showToast("Settings saved!")
                             state.showSettingsDialog = false
                         },
@@ -1306,6 +1317,19 @@ class OmniBrowser : PluginEntry() {
                     .statusBarsPadding()
                     .padding(top = 58.dp)
                     .zIndex(40f)
+            )
+            ReadAloudPillBanner(
+                visible = !state.isTabSwitcherOpen && !state.isHomeOverlayOpen &&
+                    (state.currentUrl.contains("aistudio.google.com") || state.voicePlaybackState != "IDLE"),
+                playbackState = state.voicePlaybackState,
+                chunkProgress = state.voiceChunkProgress,
+                autoReadAloud = state.autoReadAloud,
+                onReadOrStop = { state.triggerReadLastBubble() },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 58.dp, end = 10.dp)
+                    .zIndex(34f)
             )
 
             UndoBanner(
