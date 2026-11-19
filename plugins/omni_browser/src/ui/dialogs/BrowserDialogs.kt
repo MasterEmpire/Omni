@@ -322,12 +322,15 @@ fun SettingsBackupDialog(
     dataSaverMode: String = "MEDIUM",
     filePickerProvider: String = "NEXUS",
     blockAiStudioBack: Boolean = true,
+    geminiApiKey: String = "",
+    autoReadAloud: Boolean = false,
+    geminiVoiceName: String = "Default",
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
     onCustomizeMenu: () -> Unit,
-    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String, String, Boolean) -> Unit,
+    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String, String, Boolean, String, Boolean, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
@@ -340,6 +343,9 @@ fun SettingsBackupDialog(
     var tempDataSaverMode by remember { mutableStateOf(dataSaverMode) }
     var tempPickerProvider by remember { mutableStateOf(filePickerProvider) }
     var tempBlockAiStudioBack by remember { mutableStateOf(blockAiStudioBack) }
+    var tempGeminiApiKey by remember { mutableStateOf(geminiApiKey) }
+    var tempAutoReadAloud by remember { mutableStateOf(autoReadAloud) }
+    var tempGeminiVoiceName by remember { mutableStateOf(geminiVoiceName) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF282C34),
@@ -446,6 +452,68 @@ fun SettingsBackupDialog(
                         onCheckedChange = { tempBlockAiStudioBack = it },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF8AB4F8))
                     )
+                }
+                HorizontalDivider(color = Color(0xFF3C4043))
+
+                Text("🎙️ Gemini Live Read Aloud (3.8 Live)", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+                OutlinedTextField(
+                    value = tempGeminiApiKey,
+                    onValueChange = { tempGeminiApiKey = it },
+                    label = { Text("Gemini API Key") },
+                    placeholder = { Text("AIza...", color = Color(0xFF5F6368), fontSize = 11.sp) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFFE8EAED),
+                        unfocusedTextColor = Color(0xFFE8EAED),
+                        focusedBorderColor = Color(0xFF00E5FF),
+                        unfocusedBorderColor = Color(0xFF5F6368)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("🔊 Auto-Read Aloud", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Automatically read new AI Studio responses aloud when they arrive", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempAutoReadAloud,
+                        onCheckedChange = { tempAutoReadAloud = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00E5FF))
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Voice Persona", color = Color(0xFF9AA0A6), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("Default", "Aoede", "Puck", "Kore", "Fenrir").forEach { vName ->
+                            val isSel = tempGeminiVoiceName == vName
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) Color(0xFF00E5FF).copy(alpha = 0.22f) else Color(0xFF1F2227),
+                                border = BorderStroke(1.dp, if (isSel) Color(0xFF00E5FF) else Color(0xFF3C4043)),
+                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { tempGeminiVoiceName = vName }
+                            ) {
+                                Box(modifier = Modifier.padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = vName,
+                                        color = if (isSel) Color(0xFF00E5FF) else Color(0xFF9AA0A6),
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -673,7 +741,11 @@ fun SettingsBackupDialog(
             Button(
                 onClick = {
                     val portNum = tempPortText.toIntOrNull() ?: 8080
-                    onSave(tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio, tempDataSaverMode, tempPickerProvider, tempBlockAiStudioBack)
+                    onSave(
+                        tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio,
+                        tempDataSaverMode, tempPickerProvider, tempBlockAiStudioBack,
+                        tempGeminiApiKey.trim(), tempAutoReadAloud, tempGeminiVoiceName
+                    )
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
