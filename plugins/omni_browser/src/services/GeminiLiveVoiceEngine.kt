@@ -334,9 +334,8 @@ class GeminiLiveVoiceEngine(
 
     private fun openWebSocket(apiKey: String): SSLSocket {
         val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
-        val socket = (factory.createSocket() as SSLSocket).apply {
+        val socket = (factory.createSocket(HOST, PORT) as SSLSocket).apply {
             soTimeout = 45000
-            connect(InetSocketAddress(HOST, PORT), 12000)
             startHandshake()
         }
 
