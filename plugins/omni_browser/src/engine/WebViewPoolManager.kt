@@ -48,7 +48,10 @@ interface WebViewEventListener {
     fun onFocusViolation(tabId: String)
     fun onPlaybookFilePullRequested(project: String, files: List<String>, onResult: (String, Int) -> Unit)
     fun onPlaybookCxpCommitRequested(xml: String, onResult: (String, String) -> Unit)
+    fun onVoiceReadRequested(tabId: String, text: String, turnId: String, isAuto: Boolean)
+    fun onVoiceStopRequested()
 }
+
 
 class WebViewPoolManager(
     private val context: Context,
@@ -445,6 +448,20 @@ class WebViewPoolManager(
                 onLog = { tag, msg -> bridge.log(tag, msg) }
             )
             addJavascriptInterface(ideBridge, "OmniIdeBridge")
+            val voiceBridge = com.omni.plugin.browser.models.OmniVoiceBridge(
+                onSpeak = { text, turnId, isAuto ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onVoiceReadRequested(tabId, text, turnId, isAuto)
+                    }
+                },
+                onStop = {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onVoiceStopRequested()
+                    }
+                },
+                onLog = { tag, msg -> bridge.log(tag, msg) }
+            )
+            addJavascriptInterface(voiceBridge, "OmniVoiceBridge")
 
             val rawUA = settings.userAgentString
             val cleanMobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
@@ -691,6 +708,9 @@ class WebViewPoolManager(
                     super.onPageFinished(view, url)
                     extractHostSafe(url).takeIf { it.isNotEmpty() }?.let { currentPageHost = it }
                     if (url != null) listener.onPageFinished(tabId, url)
+                    if (url != null && url.contains("aistudio.google.com")) {
+                        view?.evaluateJavascript(AI_STUDIO_READ_ALOUD_SCRIPT, null)
+                    }
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
                     view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
                     if (tabDesktopModes[tabId] == true) {
