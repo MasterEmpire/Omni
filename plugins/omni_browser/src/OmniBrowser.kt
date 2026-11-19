@@ -1326,9 +1326,8 @@ class OmniBrowser : PluginEntry() {
                 autoReadAloud = state.autoReadAloud,
                 onReadOrStop = { state.triggerReadLastBubble() },
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(top = 58.dp, end = 10.dp)
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 10.dp)
                     .zIndex(34f)
             )
 
