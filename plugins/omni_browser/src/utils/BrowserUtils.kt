@@ -1093,6 +1093,278 @@ val AI_STUDIO_HEADLESS_TURBO_SCRIPT = """
     };
 })();
 """.trimIndent()
+val AI_STUDIO_READ_ALOUD_SCRIPT = """
+(function() {
+    if (window.__omniVoiceInstalled) {
+        if (window.__omniVoiceSyncButtons) window.__omniVoiceSyncButtons();
+        return;
+    }
+    window.__omniVoiceInstalled = true;
+    window.__omniVoiceState = window.__omniVoiceState || 'IDLE';
+    window.__omniVoiceActiveTurnId = window.__omniVoiceActiveTurnId || null;
+    window.__omniVoiceTurnSeq = window.__omniVoiceTurnSeq || 1;
+    window.__omniLastAutoReadWireId = (window.__omniWire && window.__omniWire.getLatest && window.__omniWire.getLatest()) ? window.__omniWire.getLatest().id : 0;
+
+    function getModelTurns() {
+        const raw = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"]'));
+        // Deduplicate nested matches if any
+        return raw.filter((el, idx) => raw.indexOf(el) === idx && !raw.some(other => other !== el && other.contains(el)));
+    }
+
+    function hasRealAnswer(turnEl) {
+        if (!turnEl) return false;
+        return Array.from(turnEl.querySelectorAll('ms-text-chunk, ms-code-block, ms-cmark-node, pre code, .rendered-markdown'))
+            .some(el => !el.closest('ms-thought-chunk'));
+    }
+
+    function checkUiGenerating() {
+        const runBtn = document.querySelector('ms-run-button button, button.ctrl-enter-submits, button[aria-label*="Stop"], button.stoppable');
+        if (runBtn) {
+            const aria = (runBtn.getAttribute('aria-label') || '').toLowerCase();
+            const label = (runBtn.querySelector('.run-button-label')?.textContent || '').toLowerCase();
+            if (runBtn.classList.contains('stoppable') ||
+                runBtn.querySelector('.stoppable-spinner, .stoppable-stop, svg[class*="stoppable"]') ||
+                aria.includes('stop') || label.includes('stop')) {
+                return true;
+            }
+        }
+        if (document.querySelector('.run-button.stoppable, ms-run-button .stoppable-spinner, ms-run-button .stoppable-stop, button.stoppable')) return true;
+        if (document.querySelector('.thinking-progress-icon.in-progress, ms-thought-chunk .in-progress')) return true;
+        if (document.querySelector('ms-chat-turn loading-indicator, ms-chat-turn .loading-indicator, ms-chat-turn mat-spinner, ms-chat-turn mat-progress-bar')) return true;
+        return false;
+    }
+
+    function cleanSpeechString(raw) {
+        if (!raw) return '';
+        let txt = String(raw);
+        // Strip CXP / tool XML tags safely
+        txt = txt.replace(new RegExp('<' + '(?:cxp|omni_cxp|patch)\\b[\\s\\S]*?<' + '\\/(?:cxp|omni_cxp|patch)>', 'gi'), ' [patch omitted] ');
+        txt = txt.replace(new RegExp('<' + '(?:pull_files|execute_python|omni_action)\\b[\\s\\S]*?(?:\\/>|<' + '\\/(?:pull_files|execute_python|omni_action)>)', 'gi'), ' ');
+        txt = txt.replace(/```[\s\S]*?```/g, ' [code block skipped] ');
+        txt = txt.replace(/`([^`]{36,})`/g, ' [code snippet] ');
+        txt = txt.replace(/`/g, '');
+        txt = txt.replace(/https?:\/\/([^\/\s)]+)[^\s)]*/gi, '$1');
+        txt = txt.replace(/^[|\s:-]+$/gm, ' ');
+        txt = txt.replace(/^#{1,6}\s*/gm, '');
+        txt = txt.replace(/[*_~]{1,3}/g, '');
+        txt = txt.replace(/\s+/g, ' ').trim();
+        return txt;
+    }
+
+    function extractBubbleForSpeech(turnEl) {
+        if (!turnEl || !hasRealAnswer(turnEl)) return '';
+        try {
+            const contentContainer = turnEl.querySelector('.chat-turn-content, ms-chat-turn-content, .turn-content') || turnEl;
+            const clone = contentContainer.cloneNode(true);
+
+            // Strip internal thinking, buttons, footers, and our own Read Aloud button
+            clone.querySelectorAll('ms-thought-chunk, .author-label, .header, .timestamp, .info-container, .turn-information, loading-indicator, .turn-footer, button, .actions-container, ms-run-button, [data-omni-voice-btn]').forEach(el => el.remove());
+
+            // Replace large code blocks and pre tags with a short spoken marker
+            clone.querySelectorAll('ms-code-block, pre').forEach(codeEl => {
+                const placeholder = document.createElement('span');
+                placeholder.textContent = ' [code block skipped] ';
+                codeEl.replaceWith(placeholder);
+            });
+            clone.querySelectorAll('code').forEach(inlineCode => {
+                const len = (inlineCode.textContent || '').trim().length;
+                if (len > 36) {
+                    inlineCode.textContent = ' [code snippet] ';
+                }
+            });
+
+            const tempDiv = document.createElement('div');
+            tempDiv.style.position = 'fixed';
+            tempDiv.style.left = '-99999px';
+            tempDiv.style.top = '-99999px';
+            tempDiv.style.opacity = '0';
+            tempDiv.style.pointerEvents = 'none';
+            tempDiv.appendChild(clone);
+            document.body.appendChild(tempDiv);
+
+            let text = (tempDiv.innerText || tempDiv.textContent || '').trim();
+            document.body.removeChild(tempDiv);
+            return cleanSpeechString(text);
+        } catch(e) {
+            return '';
+        }
+    }
+
+    function ensureTurnId(turnEl) {
+        let id = turnEl.getAttribute('data-omni-voice-id');
+        if (!id) {
+            id = 'turn_' + Date.now() + '_' + (window.__omniVoiceTurnSeq++);
+            turnEl.setAttribute('data-omni-voice-id', id);
+        }
+        return id;
+    }
+
+    function styleVoiceButton(btn, turnId) {
+        const isThisTurn = (window.__omniVoiceActiveTurnId === turnId) && (window.__omniVoiceState !== 'IDLE');
+        const isConnecting = isThisTurn && window.__omniVoiceState === 'CONNECTING';
+        const isSpeaking = isThisTurn && window.__omniVoiceState === 'SPEAKING';
+
+        if (isSpeaking) {
+            btn.textContent = '⏹ Stop';
+            btn.style.background = 'rgba(248, 81, 73, 0.22)';
+            btn.style.borderColor = '#F85149';
+            btn.style.color = '#FF7B72';
+        } else if (isConnecting) {
+            btn.textContent = '⏳ Connecting';
+            btn.style.background = 'rgba(0, 229, 255, 0.16)';
+            btn.style.borderColor = '#00E5FF';
+            btn.style.color = '#00E5FF';
+        } else {
+            btn.textContent = '🔊 Read';
+            btn.style.background = 'rgba(138, 180, 248, 0.14)';
+            btn.style.borderColor = 'rgba(138, 180, 248, 0.45)';
+            btn.style.color = '#8AB4F8';
+        }
+    }
+
+    function injectTurnButtons() {
+        const turns = getModelTurns();
+        for (const turn of turns) {
+            if (!hasRealAnswer(turn)) continue;
+            const turnId = ensureTurnId(turn);
+            let btn = turn.querySelector('[data-omni-voice-btn="true"]');
+            if (!btn) {
+                btn = document.createElement('button');
+                btn.type = 'button';
+                btn.setAttribute('data-omni-voice-btn', 'true');
+                btn.setAttribute('data-omni-target-turn', turnId);
+                btn.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 10px;margin:4px 6px;border-radius:14px;border:1px solid rgba(138,180,248,0.45);font-size:11px;font-weight:600;cursor:pointer;line-height:1.2;z-index:20;';
+
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const tId = btn.getAttribute('data-omni-target-turn');
+                    if (window.__omniVoiceActiveTurnId === tId && window.__omniVoiceState !== 'IDLE') {
+                        if (window.OmniVoiceBridge && window.OmniVoiceBridge.stop) {
+                            window.OmniVoiceBridge.stop();
+                        }
+                        return;
+                    }
+                    const txt = extractBubbleForSpeech(turn);
+                    if (!txt) {
+                        if (window.OmniVoiceBridge && window.OmniVoiceBridge.log) {
+                            window.OmniVoiceBridge.log('GEMINI_VOICE', 'Bubble contained no speakable prose.');
+                        }
+                        return;
+                    }
+                    if (window.OmniVoiceBridge && window.OmniVoiceBridge.speak) {
+                        window.OmniVoiceBridge.speak(txt, tId, false);
+                    }
+                });
+
+                const footer = turn.querySelector('.turn-footer .actions-container, .actions-container, .turn-footer');
+                if (footer) {
+                    footer.appendChild(btn);
+                } else {
+                    const host = turn.querySelector('.chat-turn-content, ms-chat-turn-content, .turn-content') || turn;
+                    host.appendChild(btn);
+                }
+            }
+            styleVoiceButton(btn, turnId);
+        }
+    }
+
+    // Mark pre-existing turns on initial mount so Auto-Read only triggers on genuinely new turns
+    getModelTurns().forEach(t => {
+        ensureTurnId(t);
+        t.setAttribute('data-omni-voice-auto-read', 'init');
+    });
+
+    window.__omniVoiceSyncButtons = injectTurnButtons;
+
+    window.__omniUpdateVoiceUi = function(state, activeTurnId) {
+        window.__omniVoiceState = state || 'IDLE';
+        window.__omniVoiceActiveTurnId = activeTurnId || null;
+        document.querySelectorAll('[data-omni-voice-btn="true"]').forEach(btn => {
+            styleVoiceButton(btn, btn.getAttribute('data-omni-target-turn'));
+        });
+    };
+
+    window.__omniReadLastBubble = function() {
+        const turns = getModelTurns().filter(hasRealAnswer);
+        let text = '';
+        let turnId = 'last_' + Date.now();
+        if (turns.length > 0) {
+            const lastTurn = turns[turns.length - 1];
+            turnId = ensureTurnId(lastTurn);
+            text = extractBubbleForSpeech(lastTurn);
+        }
+        if (!text && window.__omniWire && window.__omniWire.getLatest) {
+            const latest = window.__omniWire.getLatest();
+            if (latest && latest.output) text = cleanSpeechString(latest.output);
+        }
+        if (text && window.OmniVoiceBridge && window.OmniVoiceBridge.speak) {
+            window.OmniVoiceBridge.speak(text, turnId, false);
+            return true;
+        }
+        return false;
+    };
+
+    function triggerAutoReadIfEligible(wireOutput) {
+        if (!window.__omniAutoReadAloud) return;
+        const turns = getModelTurns().filter(hasRealAnswer);
+        const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+        if (lastTurn) {
+            if (lastTurn.getAttribute('data-omni-voice-auto-read')) return;
+            const turnId = ensureTurnId(lastTurn);
+            const domText = extractBubbleForSpeech(lastTurn);
+            const wireClean = wireOutput ? cleanSpeechString(wireOutput) : '';
+            const finalText = (domText.length >= wireClean.length) ? domText : wireClean;
+            if (finalText) {
+                lastTurn.setAttribute('data-omni-voice-auto-read', 'true');
+                if (window.OmniVoiceBridge && window.OmniVoiceBridge.speak) {
+                    window.OmniVoiceBridge.speak(finalText, turnId, true);
+                }
+            }
+        } else if (wireOutput) {
+            const wireClean = cleanSpeechString(wireOutput);
+            if (wireClean && window.OmniVoiceBridge && window.OmniVoiceBridge.speak) {
+                window.OmniVoiceBridge.speak(wireClean, 'wire_' + Date.now(), true);
+            }
+        }
+    }
+
+    window.addEventListener('__omniWireUpdate', function(ev) {
+        const rec = ev && ev.detail;
+        if (!rec || !rec.done || rec.statusCode !== 0 || !rec.output || !rec.output.trim()) return;
+        if (rec.id <= window.__omniLastAutoReadWireId) return;
+        window.__omniLastAutoReadWireId = rec.id;
+        setTimeout(function() {
+            injectTurnButtons();
+            triggerAutoReadIfEligible(rec.output);
+        }, 350);
+    });
+
+    let wasGenerating = false;
+    setInterval(function() {
+        injectTurnButtons();
+        const isGen = checkUiGenerating();
+        if (isGen) {
+            wasGenerating = true;
+        } else if (wasGenerating) {
+            wasGenerating = false;
+            setTimeout(function() {
+                injectTurnButtons();
+                triggerAutoReadIfEligible('');
+            }, 500);
+        }
+    }, 900);
+
+    try {
+        const voiceObserver = new MutationObserver(function() {
+            injectTurnButtons();
+        });
+        voiceObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    } catch(_) {}
+
+    injectTurnButtons();
+})();
+""".trimIndent()
 
 val DOM_SNAPSHOT_SCRIPT = """
 (function() {
