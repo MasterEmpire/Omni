@@ -33,6 +33,9 @@ data class BrowserConfig(
     val dataSaverMode: String = "MEDIUM",
     val filePickerProvider: String = "NEXUS",
     val blockAiStudioBack: Boolean = true,
+    val geminiApiKey: String = "",
+    val autoReadAloud: Boolean = false,
+    val geminiVoiceName: String = "Default",
     val activeMenuItems: List<String> = emptyList(),
     val hiddenMenuItems: List<String> = emptyList()
 )
@@ -390,7 +393,10 @@ class VaultManager(
         filePickerProvider: String = "NEXUS",
         blockAiStudioBack: Boolean = true,
         activeMenuItems: List<String> = emptyList(),
-        hiddenMenuItems: List<String> = emptyList()
+        hiddenMenuItems: List<String> = emptyList(),
+        geminiApiKey: String = "",
+        autoReadAloud: Boolean = false,
+        geminiVoiceName: String = "Default"
     ) {
         try {
             val cfg = JSONObject().apply {
@@ -405,6 +411,9 @@ class VaultManager(
                 put("dataSaver", dataSaverMode != "OFF")
                 put("filePickerProvider", filePickerProvider)
                 put("blockAiStudioBack", blockAiStudioBack)
+                put("geminiApiKey", geminiApiKey)
+                put("autoReadAloud", autoReadAloud)
+                put("geminiVoiceName", geminiVoiceName)
                 put("activeMenuItems", JSONArray(activeMenuItems))
                 put("hiddenMenuItems", JSONArray(hiddenMenuItems))
             }
@@ -441,6 +450,9 @@ class VaultManager(
                 dataSaverMode = mode,
                 filePickerProvider = json.optString("filePickerProvider", "NEXUS"),
                 blockAiStudioBack = json.optBoolean("blockAiStudioBack", true),
+                geminiApiKey = json.optString("geminiApiKey", ""),
+                autoReadAloud = json.optBoolean("autoReadAloud", false),
+                geminiVoiceName = json.optString("geminiVoiceName", "Default"),
                 activeMenuItems = aMenu,
                 hiddenMenuItems = hMenu
             )
