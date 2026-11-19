@@ -1009,6 +1009,70 @@ fun CxpIngestionPillBanner(
         }
     }
 }
+@Composable
+fun ReadAloudPillBanner(
+    visible: Boolean,
+    playbackState: String,
+    chunkProgress: String,
+    autoReadAloud: Boolean,
+    onReadOrStop: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
+        modifier = modifier
+    ) {
+        val isIdle = playbackState == "IDLE"
+        val isConnecting = playbackState == "CONNECTING"
+        val borderColor = when (playbackState) {
+            "SPEAKING" -> Color(0xFF00E5FF)
+            "CONNECTING" -> Color(0xFFD29922)
+            else -> Color(0xFF58A6FF).copy(alpha = 0.65f)
+        }
+
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF161B22).copy(alpha = 0.94f),
+            border = BorderStroke(1.2.dp, borderColor),
+            shadowElevation = 10.dp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .clickable { onReadOrStop() }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = when {
+                        isConnecting -> "⏳"
+                        !isIdle -> "⏹"
+                        else -> "🔊"
+                    },
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = when {
+                        isConnecting -> "Connecting..."
+                        !isIdle -> if (chunkProgress.isNotEmpty()) "Stop ($chunkProgress)" else "Stop"
+                        autoReadAloud -> "Read Last • Auto"
+                        else -> "Read Last"
+                    },
+                    color = when {
+                        isConnecting -> Color(0xFFD29922)
+                        !isIdle -> Color(0xFFF85149)
+                        else -> Color(0xFFE8EAED)
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun DownloadCompletedPillBanner(
