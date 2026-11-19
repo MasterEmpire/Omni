@@ -1018,11 +1018,19 @@ fun ReadAloudPillBanner(
     onReadOrStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var dragOffsetX by remember { mutableFloatStateOf(0f) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
         exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
-        modifier = modifier
+        modifier = modifier.offset {
+            androidx.compose.ui.unit.IntOffset(
+                kotlin.math.round(dragOffsetX).toInt(),
+                kotlin.math.round(dragOffsetY).toInt()
+            )
+        }
     ) {
         val isIdle = playbackState == "IDLE"
         val isConnecting = playbackState == "CONNECTING"
@@ -1039,6 +1047,13 @@ fun ReadAloudPillBanner(
             shadowElevation = 10.dp,
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
+                .pointerInput(Unit) {
+                    androidx.compose.foundation.gestures.detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        dragOffsetX += dragAmount.x
+                        dragOffsetY += dragAmount.y
+                    }
+                }
                 .clickable { onReadOrStop() }
         ) {
             Row(
