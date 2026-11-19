@@ -148,6 +148,24 @@ class BrowserStateHolder(
     val isDataSaverEnabled: Boolean get() = dataSaverMode != "OFF"
     var blockAiStudioBack by mutableStateOf(true)
     var lastAiStudioBackPressTimestamp = 0L
+    // Gemini Live Read Aloud States
+    var geminiApiKey by mutableStateOf("")
+    var autoReadAloud by mutableStateOf(false)
+    var geminiVoiceName by mutableStateOf("Default")
+    var voicePlaybackState by mutableStateOf("IDLE")
+    var voiceActiveTurnId by mutableStateOf<String?>(null)
+    var voiceChunkProgress by mutableStateOf("")
+
+    val voiceEngine = com.omni.plugin.browser.services.GeminiLiveVoiceEngine(
+        bridge = bridge,
+        scope = coroutineScope,
+        onStateChanged = { state, turnId, progress ->
+            voicePlaybackState = state
+            voiceActiveTurnId = turnId
+            voiceChunkProgress = progress
+            syncVoiceStateToActiveWebView()
+        }
+    )
 
     // Automator States
     var showAutomationDialog by mutableStateOf(false)
@@ -366,6 +384,9 @@ class BrowserStateHolder(
             filePickerProvider = config.filePickerProvider
             blockAiStudioBack = config.blockAiStudioBack
             poolManager.localPort = config.localPort
+            geminiApiKey = config.geminiApiKey
+            autoReadAloud = config.autoReadAloud
+            geminiVoiceName = config.geminiVoiceName
             poolManager.updateForceDark(config.forceDark)
             syncDataSaver()
             
@@ -708,6 +729,9 @@ class BrowserStateHolder(
         if (targetTab.url.contains("aistudio.google.com")) {
             recordAiStudioTabOpened(targetTab.profileId)
             targetWv.evaluateJavascript("if (typeof window.__omniAuditPendingCxp === 'function') window.__omniAuditPendingCxp();", null)
+        }
+        if (targetTab.url.contains("aistudio.google.com")) {
+            syncVoiceStateToWebView(targetWv)
         }
 
         val recordedProg = tabProgressMap[targetTabId] ?: targetWv.progress
@@ -1165,7 +1189,13 @@ class BrowserStateHolder(
             desktopMode = isDesktopMode,
             backgroundAudio = isBackgroundAudioEnabled,
             dataSaverMode = dataSaverMode,
-            filePickerProvider = filePickerProvider
+            filePickerProvider = filePickerProvider,
+            blockAiStudioBack = blockAiStudioBack,
+            activeMenuItems = activeMenuItems,
+            hiddenMenuItems = hiddenMenuItems,
+            geminiApiKey = geminiApiKey,
+            autoReadAloud = autoReadAloud,
+            geminiVoiceName = geminiVoiceName
         )
         val statusMsg = if (forceDarkWebPages) "🌙 Dark Mode Enabled" else "☀️ Light Mode Enabled"
         bridge.showToast(statusMsg)
@@ -1279,7 +1309,14 @@ class BrowserStateHolder(
             erudaEnabled = isErudaEnabled,
             desktopMode = isDesktopMode,
             backgroundAudio = isBackgroundAudioEnabled,
-            dataSaverMode = dataSaverMode
+            dataSaverMode = dataSaverMode,
+            filePickerProvider = filePickerProvider,
+            blockAiStudioBack = blockAiStudioBack,
+            activeMenuItems = activeMenuItems,
+            hiddenMenuItems = hiddenMenuItems,
+            geminiApiKey = geminiApiKey,
+            autoReadAloud = autoReadAloud,
+            geminiVoiceName = geminiVoiceName
         )
         syncDataSaver()
         val effective = getEffectiveDataSaverMode()
@@ -3035,6 +3072,9 @@ class BrowserStateHolder(
         if (url != null && url.contains("aistudio.google.com")) {
             com.omni.plugin.browser.engine.LiveAutoPilotEngine.syncOnPageFinished(poolManager.pool[tabId] ?: currentWebView, url, isLiveAutoPilotEnabled)
         }
+        if (url != null && url.contains("aistudio.google.com")) {
+            syncVoiceStateToWebView(poolManager.pool[tabId] ?: currentWebView)
+        }
         if (autoSolveEnabled && solverApiKey.isNotEmpty() && url != "about:blank") {
             solveCurrentCaptcha()
         }
@@ -3254,5 +3294,68 @@ class BrowserStateHolder(
         automationError = err
         automationStatus = "Failed"
         isAutomating = false
+    }
+
+    // --- Gemini Live Read Aloud Controls ---
+    fun syncVoiceStateToWebView(wv: WebView?) {
+        if (wv == null) return
+        val escapedState = org.json.JSONObject.quote(voicePlaybackState)
+        val escapedTurn = if (voiceActiveTurnId != null) org.json.JSONObject.quote(voiceActiveTurnId) else "null"
+        wv.evaluateJavascript(
+            "window.__omniAutoReadAloud = $autoReadAloud; if (window.__omniUpdateVoiceUi) window.__omniUpdateVoiceUi($escapedState, $escapedTurn);",
+            null
+        )
+    }
+
+    fun syncVoiceStateToActiveWebView() {
+        poolManager.pool.values.forEach { wv ->
+            val u = wv.url ?: ""
+            if (u.contains("aistudio.google.com")) {
+                syncVoiceStateToWebView(wv)
+            }
+        }
+    }
+
+    fun triggerReadLastBubble() {
+        val wv = currentWebView ?: return
+        if (voicePlaybackState != "IDLE") {
+            stopVoiceReadAloud()
+            return
+        }
+        if (geminiApiKey.isBlank()) {
+            bridge.showToast("⚠️ Paste your Gemini API Key in General Settings first")
+            showSettingsDialog = true
+            return
+        }
+        wv.evaluateJavascript("window.__omniReadLastBubble ? window.__omniReadLastBubble() : false;") { result ->
+            if (result != "true") {
+                bridge.showToast("No generated response found on page yet")
+            }
+        }
+    }
+
+    fun stopVoiceReadAloud() {
+        voiceEngine.stop()
+    }
+
+    override fun onVoiceReadRequested(tabId: String, text: String, turnId: String, isAuto: Boolean) {
+        if (isAuto && !autoReadAloud) return
+        if (geminiApiKey.isBlank()) {
+            if (!isAuto) {
+                bridge.showToast("⚠️ Set your Gemini API Key in General Settings first")
+                showSettingsDialog = true
+            }
+            return
+        }
+        voiceEngine.speak(
+            rawText = text,
+            apiKey = geminiApiKey,
+            voiceName = geminiVoiceName,
+            turnId = turnId
+        )
+    }
+
+    override fun onVoiceStopRequested() {
+        stopVoiceReadAloud()
     }
 }
