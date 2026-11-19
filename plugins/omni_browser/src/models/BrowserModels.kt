@@ -311,3 +311,23 @@ data class StudioPlaybook(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
+class OmniVoiceBridge(
+    private val onSpeak: (text: String, turnId: String, isAuto: Boolean) -> Unit,
+    private val onStop: () -> Unit,
+    private val onLog: (tag: String, msg: String) -> Unit
+) {
+    @JavascriptInterface
+    fun speak(text: String, turnId: String, isAuto: Boolean) {
+        onSpeak(text, turnId, isAuto)
+    }
+
+    @JavascriptInterface
+    fun stop() {
+        onStop()
+    }
+
+    @JavascriptInterface
+    fun log(tag: String, msg: String) {
+        onLog(tag, msg)
+    }
+}
