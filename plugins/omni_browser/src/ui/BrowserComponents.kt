@@ -5,6 +5,9 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -1026,10 +1029,7 @@ fun ReadAloudPillBanner(
         enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
         exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
         modifier = modifier.offset {
-            androidx.compose.ui.unit.IntOffset(
-                kotlin.math.round(dragOffsetX).toInt(),
-                kotlin.math.round(dragOffsetY).toInt()
-            )
+            IntOffset(dragOffsetX.roundToInt(), dragOffsetY.roundToInt())
         }
     ) {
         val isIdle = playbackState == "IDLE"
@@ -1048,7 +1048,7 @@ fun ReadAloudPillBanner(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
                 .pointerInput(Unit) {
-                    androidx.compose.foundation.gestures.detectDragGestures { change, dragAmount ->
+                    detectDragGestures { change, dragAmount ->
                         change.consume()
                         dragOffsetX += dragAmount.x
                         dragOffsetY += dragAmount.y
