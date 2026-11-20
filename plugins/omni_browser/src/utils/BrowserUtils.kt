@@ -1222,6 +1222,24 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
         return id;
     }
 
+    function setVoiceBtnVisual(btn, pathD, labelText) {
+        while (btn.firstChild) btn.removeChild(btn.firstChild);
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '16');
+        svg.setAttribute('height', '16');
+        svg.setAttribute('fill', 'currentColor');
+        svg.style.flexShrink = '0';
+        const path = document.createElementNS(svgNS, 'path');
+        path.setAttribute('d', pathD);
+        svg.appendChild(path);
+        const span = document.createElement('span');
+        span.textContent = labelText;
+        btn.appendChild(svg);
+        btn.appendChild(span);
+    }
+
     function styleVoiceButton(btn, turnId) {
         const isThisTurn = (window.__omniVoiceActiveTurnId === turnId) && (window.__omniVoiceState !== 'IDLE');
         const targetState = isThisTurn ? window.__omniVoiceState : 'IDLE';
@@ -1229,17 +1247,17 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
         btn.setAttribute('data-omni-btn-state', targetState);
 
         if (targetState === 'SPEAKING') {
-            btn.textContent = '⏹ Stop';
+            setVoiceBtnVisual(btn, 'M6 6h12v12H6z', 'Stop');
             btn.style.background = 'rgba(248, 81, 73, 0.22)';
             btn.style.borderColor = '#F85149';
             btn.style.color = '#FF7B72';
         } else if (targetState === 'CONNECTING') {
-            btn.textContent = '⏳ Connecting';
+            setVoiceBtnVisual(btn, 'M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-8-8V2z', 'Connecting');
             btn.style.background = 'rgba(0, 229, 255, 0.16)';
             btn.style.borderColor = '#00E5FF';
             btn.style.color = '#00E5FF';
         } else {
-            btn.textContent = '🔊 Read';
+            setVoiceBtnVisual(btn, 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z', 'Read');
             btn.style.background = 'rgba(138, 180, 248, 0.14)';
             btn.style.borderColor = 'rgba(138, 180, 248, 0.45)';
             btn.style.color = '#8AB4F8';
