@@ -1003,14 +1003,7 @@ class OmniBrowser : PluginEntry() {
                         onSave = { aMenu, hMenu ->
                             state.activeMenuItems = aMenu
                             state.hiddenMenuItems = hMenu
-                            state.vaultManager.saveSolverConfig(
-                                state.solverApiKey, state.autoSolveEnabled, state.forceDarkWebPages,
-                                state.localServerPort, state.isErudaEnabled, state.isDesktopMode,
-                                state.isBackgroundAudioEnabled, state.dataSaverMode, state.filePickerProvider,
-                                state.blockAiStudioBack, aMenu, hMenu,
-                                state.geminiApiKey, state.autoReadAloud, state.geminiVoiceName,
-                                state.readAloudEnabled, state.showReadAloudPill
-                            )
+                            state.vaultManager.saveMenuLayout(aMenu, hMenu)
                             bridge.showToast("Menu layout updated!")
                             state.showMenuCustomizerDialog = false
                         },
