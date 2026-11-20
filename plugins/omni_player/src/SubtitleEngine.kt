@@ -588,7 +588,7 @@ object OmniAiBridgeClient {
     }
 
     fun getTemporaryChat(context: Context): Boolean =
-        prefs(context).getBoolean("omni_temp_chat", true)
+        prefs(context).getBoolean("omni_temp_chat", false)
 
     fun saveTemporaryChat(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean("omni_temp_chat", enabled).apply()
