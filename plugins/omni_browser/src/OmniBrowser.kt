@@ -603,7 +603,7 @@ class OmniBrowser : PluginEntry() {
                                 }
                             },
                             update = { frame ->
-                                val targetVisibility = if (state.isTabSwitcherOpen) android.view.View.INVISIBLE else android.view.View.VISIBLE
+                                val targetVisibility = if (state.isTabSwitcherOpen || state.showSettingsDialog) android.view.View.INVISIBLE else android.view.View.VISIBLE
                                 if (frame.visibility != targetVisibility) {
                                     frame.visibility = targetVisibility
                                     state.bridge.log("TOUCH_SHIELD", "WebView container visibility -> ${if (state.isTabSwitcherOpen) "INVISIBLE (Shielded from touch)" else "VISIBLE"}")
@@ -906,6 +906,89 @@ class OmniBrowser : PluginEntry() {
                     modifier = Modifier.fillMaxSize().zIndex(10f)
                 )
             }
+            if (state.showSettingsDialog) {
+                SettingsScreen(
+                    bridge = bridge,
+                    apiKey = state.solverApiKey,
+                    autoSolve = state.autoSolveEnabled,
+                    forceDark = state.forceDarkWebPages,
+                    localPort = state.localServerPort,
+                    isErudaEnabled = state.isErudaEnabled,
+                    isDesktopMode = state.isDesktopMode,
+                    isBackgroundAudioEnabled = state.isBackgroundAudioEnabled,
+                    dataSaverMode = state.dataSaverMode,
+                    filePickerProvider = state.filePickerProvider,
+                    blockAiStudioBack = state.blockAiStudioBack,
+                    geminiApiKey = state.geminiApiKey,
+                    autoReadAloud = state.autoReadAloud,
+                    geminiVoiceName = state.geminiVoiceName,
+                    readAloudEnabled = state.readAloudEnabled,
+                    showReadAloudPill = state.showReadAloudPill,
+                    onExportBackup = { state.exportBackup() },
+                    onRestoreBackup = {
+                        restoreCallback = { uri -> state.restoreBackup(uri) }
+                        backupPickerLauncher.launch("application/zip")
+                    },
+                    onSolveNow = { state.solveCurrentCaptcha() },
+                    onClearCookiesAndCache = {
+                        CookieManager.getInstance().removeAllCookies(null)
+                        state.currentWebView?.clearCache(true)
+                        bridge.showToast("Cookies and Cache cleared.")
+                    },
+                    onCustomizeMenu = {
+                        state.showSettingsDialog = false
+                        state.showMenuCustomizerDialog = true
+                    },
+                    onApplyAll = { key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack, gemKey, autoRead, gemVoice, readEnabled, showPill ->
+                        val darkChanged = dark != state.forceDarkWebPages
+                        val erudaTurnedOn = eruda && !state.isErudaEnabled
+                        val audioTurnedOff = !audio && state.isBackgroundAudioEnabled
+
+                        state.solverApiKey = key
+                        state.autoSolveEnabled = auto
+                        state.forceDarkWebPages = dark
+                        state.localServerPort = port
+                        state.isErudaEnabled = eruda
+                        state.isDesktopMode = desktop
+                        state.isBackgroundAudioEnabled = audio
+                        state.dataSaverMode = mode
+                        state.filePickerProvider = picker
+                        state.blockAiStudioBack = blockBack
+                        state.geminiApiKey = gemKey
+                        state.autoReadAloud = autoRead
+                        state.geminiVoiceName = gemVoice
+                        state.readAloudEnabled = readEnabled
+                        state.showReadAloudPill = showPill
+
+                        if (!readEnabled) {
+                            state.stopVoiceReadAloud()
+                        }
+                        if (audioTurnedOff) {
+                            bridge.stopMediaPlayback()
+                            state.isMediaPlaying = false
+                        }
+                        state.poolManager.localPort = port
+                        if (darkChanged) {
+                            state.poolManager.updateForceDark(dark)
+                        }
+                        state.syncDataSaver()
+                        state.syncVoiceStateToActiveWebView()
+                        if (desktop != state.tabs.find { it.id == state.activeTabId }?.isDesktop) {
+                            state.toggleDesktopMode()
+                        }
+                        if (erudaTurnedOn) {
+                            state.injectEruda()
+                        }
+                        state.vaultManager.saveSolverConfig(
+                            key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack,
+                            state.activeMenuItems, state.hiddenMenuItems, gemKey, autoRead, gemVoice,
+                            readEnabled, showPill
+                        )
+                    },
+                    onClose = { state.showSettingsDialog = false },
+                    modifier = Modifier.fillMaxSize().zIndex(45f)
+                )
+            }
 
         // --- Modals & Dialogs ---
         val hostActivity = context as? android.app.Activity
@@ -1140,77 +1223,7 @@ class OmniBrowser : PluginEntry() {
                     )
                 }
 
-                if (state.showSettingsDialog) {
-                    SettingsBackupDialog(
-                        apiKey = state.solverApiKey,
-                        autoSolve = state.autoSolveEnabled,
-                        forceDark = state.forceDarkWebPages,
-                        localPort = state.localServerPort,
-                        isErudaEnabled = state.isErudaEnabled,
-                        isDesktopMode = state.isDesktopMode,
-                        isBackgroundAudioEnabled = state.isBackgroundAudioEnabled,
-                        dataSaverMode = state.dataSaverMode,
-                        filePickerProvider = state.filePickerProvider,
-                        blockAiStudioBack = state.blockAiStudioBack,
-                        geminiApiKey = state.geminiApiKey,
-                        autoReadAloud = state.autoReadAloud,
-                        geminiVoiceName = state.geminiVoiceName,
-                        readAloudEnabled = state.readAloudEnabled,
-                        showReadAloudPill = state.showReadAloudPill,
-                        onExportBackup = { state.exportBackup() },
-                        onRestoreBackup = {
-                            restoreCallback = { uri -> state.restoreBackup(uri) }
-                            backupPickerLauncher.launch("application/zip")
-                        },
-                        onSolveNow = { state.solveCurrentCaptcha() },
-                        onClearCookiesAndCache = {
-                            CookieManager.getInstance().removeAllCookies(null)
-                            state.currentWebView?.clearCache(true)
-                            bridge.showToast("Cookies and Cache cleared.")
-                        },
-                        onCustomizeMenu = {
-                            state.showSettingsDialog = false
-                            state.showMenuCustomizerDialog = true
-                        },
-                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack, gemKey, autoRead, gemVoice, readEnabled, showPill ->
-                            state.solverApiKey = key
-                            state.autoSolveEnabled = auto
-                            state.forceDarkWebPages = dark
-                            state.localServerPort = port
-                            state.isDesktopMode = desktop
-                            state.isBackgroundAudioEnabled = audio
-                            state.dataSaverMode = mode
-                            state.filePickerProvider = picker
-                            state.blockAiStudioBack = blockBack
-                            state.geminiApiKey = gemKey
-                            state.autoReadAloud = autoRead
-                            state.geminiVoiceName = gemVoice
-                            state.readAloudEnabled = readEnabled
-                            state.showReadAloudPill = showPill
-                            if (!readEnabled) {
-                                state.stopVoiceReadAloud()
-                            }
-                            state.poolManager.localPort = port
-                            state.poolManager.updateForceDark(dark)
-                            state.syncDataSaver()
-                            state.syncVoiceStateToActiveWebView()
-                            if (desktop != state.tabs.find { it.id == state.activeTabId }?.isDesktop) {
-                                state.toggleDesktopMode()
-                            }
-                            if (eruda) {
-                                state.injectEruda()
-                            }
-                            state.vaultManager.saveSolverConfig(
-                                key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack,
-                                state.activeMenuItems, state.hiddenMenuItems, gemKey, autoRead, gemVoice,
-                                readEnabled, showPill
-                            )
-                            bridge.showToast("Settings saved!")
-                            state.showSettingsDialog = false
-                        },
-                        onDismiss = { state.showSettingsDialog = false }
-                    )
-                }
+
 
                 if (state.editingShortcut != null) {
                     val targetItem = state.editingShortcut!!
@@ -1431,7 +1444,7 @@ class OmniBrowser : PluginEntry() {
             )
             ReadAloudPillBanner(
                 visible = state.readAloudEnabled && state.showReadAloudPill &&
-                    !state.isTabSwitcherOpen && !state.isHomeOverlayOpen &&
+                    !state.isTabSwitcherOpen && !state.isHomeOverlayOpen && !state.showSettingsDialog &&
                     (state.currentUrl.contains("aistudio.google.com") || state.voicePlaybackState != "IDLE"),
                 playbackState = state.voicePlaybackState,
                 chunkProgress = state.voiceChunkProgress,
@@ -1443,7 +1456,7 @@ class OmniBrowser : PluginEntry() {
                     .zIndex(34f)
             )
             BottomBarExpandFab(
-                visible = state.isBottomBarCollapsed && !isImeVisible && !state.isTabSwitcherOpen,
+                visible = state.isBottomBarCollapsed && !isImeVisible && !state.isTabSwitcherOpen && !state.showSettingsDialog,
                 profColor = profColor,
                 isAutoPilotActive = state.isLiveAutoPilotEnabled,
                 onExpand = { state.isBottomBarCollapsed = false },
