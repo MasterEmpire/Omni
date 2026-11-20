@@ -3038,6 +3038,21 @@ class BrowserStateHolder(
         val profName = profiles.find { it.id == profileId }?.name ?: profileId
         bridge.showToast("✅ Active quota flag cleared for '$profName' (history preserved)")
     }
+    override fun onAiVerificationLock(profileId: String, reason: String) {
+        val (newlyLocked, newMap) = VaultManager.recordVerificationLock(context, bridge, profileId, reason)
+        aiAnalytics = newMap
+        if (newlyLocked) {
+            val profName = profiles.find { it.id == profileId }?.name ?: profileId
+            bridge.showToast("🔒 '$profName' requires Google verification! Halted until approved.")
+            bridge.log("AI_ANALYTICS_VERIFY", "Verification lock set on '$profileId' ($profName): $reason")
+        }
+    }
+
+    fun clearVerificationLock(profileId: String) {
+        aiAnalytics = VaultManager.clearVerificationLock(context, bridge, profileId)
+        val profName = profiles.find { it.id == profileId }?.name ?: profileId
+        bridge.showToast("✅ Approved & unlocked '$profName' for missions")
+    }
 
     private var isBackgroundGeneratingActive by mutableStateOf(false)
 
