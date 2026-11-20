@@ -10,6 +10,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.omni.plugin.browser.utils.getAnalyticsTodayKey
+import com.omni.plugin.browser.utils.getLastNDaysKeys
+import com.omni.plugin.browser.utils.getNextPacificMidnightMs
+import com.omni.plugin.browser.utils.isQuotaCurrentlyActive
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -363,25 +371,28 @@ fun TabSwitcherScreen(
                                                     )
                                                     val aData = aiAnalytics[prof.id]
                                                     val now = System.currentTimeMillis()
+                                                    val today = getAnalyticsTodayKey(now)
                                                     val qTime = aData?.lastQuotaHitTimestamp ?: 0L
-                                                    val isQuotaActive = qTime > 0L && (now - qTime) < 24 * 60 * 60 * 1000L
+                                                    val isQuotaActive = isQuotaCurrentlyActive(qTime, now)
+                                                    val todayCount = aData?.effectivePromptsToday(today) ?: 0
+                                                    val totalCount = aData?.totalPromptsLifetime ?: 0
                                                     val healthText = when {
                                                         isQuotaActive -> {
                                                             val diffH = ((now - qTime) / 3_600_000L).coerceAtLeast(0)
-                                                            if (diffH == 0L) {
-                                                                val diffM = ((now - qTime) / 60_000L).coerceAtLeast(1)
-                                                                "🔴 Quota Hit (${diffM}m ago)"
+                                                            val agoStr = if (diffH == 0L) {
+                                                                "${((now - qTime) / 60_000L).coerceAtLeast(1)}m"
                                                             } else {
-                                                                "🔴 Quota Hit (${diffH}h ago)"
+                                                                "${diffH}h"
                                                             }
+                                                            "🔴 Quota Hit ($agoStr ago) • $todayCount today ($totalCount total)"
                                                         }
-                                                        (aData?.promptsSentToday ?: 0) >= 40 -> "🟡 Busy • ${aData?.promptsSentToday} prompts"
-                                                        (aData?.promptsSentToday ?: 0) > 0 -> "🟢 Fresh • ${aData?.promptsSentToday} prompts"
-                                                        else -> "🟢 Fresh • Ready"
+                                                        todayCount >= 40 -> "🟡 Busy • $todayCount today ($totalCount total)"
+                                                        todayCount > 0 -> "🟢 Fresh • $todayCount today ($totalCount total)"
+                                                        else -> "🟢 Ready • 0 today" + if (totalCount > 0) " ($totalCount total)" else ""
                                                     }
                                                     val healthColor = when {
                                                         isQuotaActive -> Color(0xFFF85149)
-                                                        (aData?.promptsSentToday ?: 0) >= 40 -> Color(0xFFD29922)
+                                                        todayCount >= 40 -> Color(0xFFD29922)
                                                         else -> Color(0xFF3FB950)
                                                     }
                                                     Text(
@@ -906,130 +917,13 @@ fun TabSwitcherScreen(
     }
 
     if (showHealthDeckDialog) {
-        val now = System.currentTimeMillis()
-        val totalToday = aiAnalytics.values.sumOf { it.promptsSentToday }
-        val totalLifetime = aiAnalytics.values.sumOf { it.totalPromptsLifetime }
-
-        AlertDialog(
-            onDismissRequest = { showHealthDeckDialog = false },
-            containerColor = Color(0xFF282C34),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("📊", fontSize = 20.sp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("AI Studio Health", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                    }
-                    Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF1F2227)) {
-                        Text("$totalToday prompts today", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                    }
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text("Daily quota resets at midnight Pacific Time (or 24h rolling cycle). Track exhausted accounts and swap effortlessly.", color = Color(0xFF9AA0A6), fontSize = 11.sp)
-
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(profiles, key = { it.id }) { prof ->
-                            val a = aiAnalytics[prof.id]
-                            val qTime = a?.lastQuotaHitTimestamp ?: 0L
-                            val isQuotaActive = qTime > 0L && (now - qTime) < 24 * 60 * 60 * 1000L
-                            val diffH = ((now - qTime) / 3_600_000L).coerceAtLeast(0)
-                            val resetH = (24 - diffH).coerceAtLeast(1)
-
-                            Card(
-                                shape = RoundedCornerShape(10.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2227)),
-                                border = BorderStroke(1.dp, if (isQuotaActive) Color(0xFFF85149).copy(alpha = 0.6f) else Color(prof.colorValue).copy(alpha = 0.4f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Box(modifier = Modifier.size(9.dp).clip(CircleShape).background(Color(prof.colorValue)))
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(prof.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        }
-
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (isQuotaActive) Color(0xFFF85149).copy(alpha = 0.2f) else Color(0xFF3FB950).copy(alpha = 0.2f)
-                                        ) {
-                                            Text(
-                                                if (isQuotaActive) "🔴 EXHAUSTED" else "🟢 READY",
-                                                color = if (isQuotaActive) Color(0xFFF85149) else Color(0xFF3FB950),
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(Modifier.height(6.dp))
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text("Today: ${a?.promptsSentToday ?: 0} prompts • ${a?.tabsOpenedToday ?: 0} tabs", color = Color(0xFFC9D1D9), fontSize = 11.sp)
-                                        Text("All-Time: ${a?.totalPromptsLifetime ?: 0}", color = Color(0xFF8B949E), fontSize = 10.sp)
-                                    }
-
-                                    if (isQuotaActive) {
-                                        Spacer(Modifier.height(4.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                "Hit ${diffH}h ago • Resets ~${resetH}h",
-                                                color = Color(0xFFF85149),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-
-                                            TextButton(
-                                                onClick = { onClearQuotaHit(prof.id) },
-                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                                modifier = Modifier.height(24.dp)
-                                            ) {
-                                                Text("Reset Flag", color = Color(0xFF58A6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { showHealthDeckDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D))
-                ) {
-                    Text("Close", color = Color(0xFFC9D1D9))
-                }
-            }
+        AiStudioHealthDashboardDialog(
+            profiles = profiles,
+            aiAnalytics = aiAnalytics,
+            onClearQuotaHit = onClearQuotaHit,
+            onDismiss = { showHealthDeckDialog = false }
         )
     }
-
     if (profileToDelete != null) {
         val target = profileToDelete!!
         AlertDialog(
@@ -1327,6 +1221,779 @@ fun TabGroupsListView(
                     }
                 }
             }
+        }
+    }
+}
+@Composable
+fun AiStudioHealthDashboardDialog(
+    profiles: List<BrowserProfile>,
+    aiAnalytics: Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>,
+    onClearQuotaHit: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val now = remember { System.currentTimeMillis() }
+    val today = remember(now) { getAnalyticsTodayKey(now) }
+    val weekKeys = remember(now) { getLastNDaysKeys(7, now) }
+    val nextResetMs = remember(now) { getNextPacificMidnightMs(now) }
+    val resetDiffMs = (nextResetMs - now).coerceAtLeast(0L)
+    val resetH = resetDiffMs / 3_600_000L
+    val resetM = (resetDiffMs % 3_600_000L) / 60_000L
+
+    var activeTab by remember { mutableStateOf("overview") }
+    var selectedDayKey by remember { mutableStateOf(today) }
+    var historyProfileFilter by remember { mutableStateOf<String?>(null) }
+
+    val profileMap = remember(profiles) { profiles.associateBy { it.id } }
+
+    // Aggregate KPI metrics across all profiles (including any archived profiles)
+    val allAnalyticsList = remember(aiAnalytics, profiles) {
+        val knownIds = profiles.map { it.id }.toSet()
+        val extraIds = aiAnalytics.keys.filter { it !in knownIds }
+        (profiles.map { it.id } + extraIds).map { id ->
+            id to (aiAnalytics[id] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = id))
+        }
+    }
+
+    val totalTodayPrompts = remember(allAnalyticsList, today) {
+        allAnalyticsList.sumOf { it.second.effectivePromptsToday(today) }
+    }
+    val totalTodayTabs = remember(allAnalyticsList, today) {
+        allAnalyticsList.sumOf { it.second.effectiveTabsToday(today) }
+    }
+    val totalWeekPrompts = remember(allAnalyticsList, weekKeys) {
+        allAnalyticsList.sumOf { it.second.promptsInDays(weekKeys) }
+    }
+    val totalWeekQuotaHits = remember(allAnalyticsList, weekKeys) {
+        allAnalyticsList.sumOf { it.second.quotaHitsInDays(weekKeys) }
+    }
+    val totalLifetimePrompts = remember(allAnalyticsList) {
+        allAnalyticsList.sumOf { it.second.totalPromptsLifetime }
+    }
+    val totalLifetimeQuotas = remember(allAnalyticsList) {
+        allAnalyticsList.sumOf { it.second.totalQuotaHitsLifetime }
+    }
+    val readyAccountsCount = remember(profiles, aiAnalytics, now) {
+        profiles.count { prof ->
+            val qTime = aiAnalytics[prof.id]?.lastQuotaHitTimestamp ?: 0L
+            !isQuotaCurrentlyActive(qTime, now)
+        }
+    }
+
+    // All historical days sorted newest -> oldest (never deleted)
+    val allRecordedDays = remember(allAnalyticsList, today) {
+        val set = sortedSetOf<String>(reverseOrder())
+        set.add(today)
+        weekKeys.forEach { set.add(it) }
+        allAnalyticsList.forEach { (_, a) -> set.addAll(a.dailyHistory.keys) }
+        set.toList()
+    }
+
+    // All quota hit events sorted newest -> oldest (never deleted)
+    val allQuotaEvents = remember(allAnalyticsList) {
+        allAnalyticsList.flatMap { (profId, a) ->
+            a.quotaHistory.map { ev -> profId to ev }
+        }.sortedByDescending { it.second.timestamp }
+    }
+
+    fun formatShortDay(dateKey: String): String {
+        if (dateKey == today) return "Today"
+        return try {
+            val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateKey)
+            if (parsed != null) SimpleDateFormat("EEE\nM/d", Locale.US).format(parsed) else dateKey.takeLast(5)
+        } catch (_: Exception) {
+            dateKey.takeLast(5)
+        }
+    }
+
+    fun formatFullDayLabel(dateKey: String): String {
+        if (dateKey == today) return "Today ($dateKey)"
+        return try {
+            val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateKey)
+            if (parsed != null) SimpleDateFormat("EEE, MMM d, yyyy", Locale.US).format(parsed) else dateKey
+        } catch (_: Exception) {
+            dateKey
+        }
+    }
+
+    fun formatTimeAgo(ts: Long): String {
+        if (ts <= 0L) return "Never"
+        val diff = (now - ts).coerceAtLeast(0L)
+        val mins = diff / 60_000L
+        val hrs = diff / 3_600_000L
+        val days = diff / 86_400_000L
+        return when {
+            mins < 1L -> "Just now"
+            hrs < 1L -> "${mins}m ago"
+            days < 1L -> "${hrs}h ${mins % 60}m ago"
+            else -> "${days}d ago"
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            color = Color(0xFF16181D),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header
+                Surface(
+                    color = Color(0xFF1B1F26),
+                    tonalElevation = 4.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = Color(0xFFE8EAED))
+                            }
+                            Column {
+                                Text("AI Studio Health", color = Color(0xFFE8EAED), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                Text("Permanent Analytics • Never Deleted", color = Color(0xFF8B949E), fontSize = 10.sp)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF1F6FEB).copy(alpha = 0.18f),
+                            border = BorderStroke(1.dp, Color(0xFF58A6FF).copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = "PT Reset: ${resetH}h ${resetM}m",
+                                color = Color(0xFF58A6FF),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                // 4-Card KPI Strip
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DashboardKpiCard(
+                        label = "Today",
+                        value = "$totalTodayPrompts",
+                        sub = "$totalTodayTabs tabs",
+                        accent = Color(0xFF58A6FF),
+                        modifier = Modifier.weight(1f)
+                    )
+                    DashboardKpiCard(
+                        label = "7 Days",
+                        value = "$totalWeekPrompts",
+                        sub = "${totalWeekPrompts / 7}/day avg",
+                        accent = Color(0xFFBC8CFF),
+                        modifier = Modifier.weight(1f)
+                    )
+                    DashboardKpiCard(
+                        label = "All-Time",
+                        value = "$totalLifetimePrompts",
+                        sub = "$totalLifetimeQuotas hits",
+                        accent = Color(0xFF3FB950),
+                        modifier = Modifier.weight(1f)
+                    )
+                    DashboardKpiCard(
+                        label = "Fleet",
+                        value = "$readyAccountsCount/${profiles.size}",
+                        sub = if (readyAccountsCount == profiles.size) "All Ready" else "${profiles.size - readyAccountsCount} Exhausted",
+                        accent = if (readyAccountsCount == profiles.size) Color(0xFF3FB950) else Color(0xFFF85149),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Sub-Navigation Tabs
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF1E222A))
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf(
+                        Triple("overview", "Overview", Color(0xFF58A6FF)),
+                        Triple("history", "Daily Archive (${allRecordedDays.size})", Color(0xFF3FB950)),
+                        Triple("quotas", "Quota Ledger (${allQuotaEvents.size})", Color(0xFFF85149))
+                    ).forEach { (tabKey, tabTitle, tabCol) ->
+                        val isSel = activeTab == tabKey
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSel) tabCol.copy(alpha = 0.2f) else Color.Transparent,
+                            border = if (isSel) BorderStroke(1.dp, tabCol) else null,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { activeTab = tabKey }
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 7.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = tabTitle,
+                                    color = if (isSel) tabCol else Color(0xFF8B949E),
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                when (activeTab) {
+                    "overview" -> {
+                        val maxWeekDayPrompts = weekKeys.maxOfOrNull { k ->
+                            allAnalyticsList.sumOf { it.second.dailyHistory[k]?.prompts ?: 0 }
+                        }?.coerceAtLeast(1) ?: 1
+
+                        LazyColumn(
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        ) {
+                            // Weekly Activity Chart Card
+                            item(key = "weekly_chart") {
+                                Card(
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E222A)),
+                                    border = BorderStroke(1.dp, Color(0xFF2E333D)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Weekly Prompt Activity", color = Color(0xFFE8EAED), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "7d: $totalWeekPrompts prompts • $totalWeekQuotaHits quota hits",
+                                                color = Color(0xFF8B949E),
+                                                fontSize = 10.sp
+                                            )
+                                        }
+                                        Spacer(Modifier.height(12.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().height(110.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.Bottom
+                                        ) {
+                                            weekKeys.forEach { dKey ->
+                                                val dayPrompts = allAnalyticsList.sumOf { it.second.dailyHistory[dKey]?.prompts ?: 0 }
+                                                val dayQuotas = allAnalyticsList.sumOf { it.second.dailyHistory[dKey]?.quotaHits ?: 0 }
+                                                val isSel = selectedDayKey == dKey
+                                                val frac = (dayPrompts.toFloat() / maxWeekDayPrompts.toFloat()).coerceIn(0.05f, 1f)
+
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.Bottom,
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .fillMaxHeight()
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(if (isSel) Color(0xFF282E38) else Color.Transparent)
+                                                        .clickable { selectedDayKey = dKey }
+                                                        .padding(vertical = 4.dp, horizontal = 2.dp)
+                                                ) {
+                                                    if (dayQuotas > 0) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(6.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color(0xFFF85149))
+                                                        )
+                                                        Spacer(Modifier.height(2.dp))
+                                                    }
+                                                    Text(
+                                                        text = "$dayPrompts",
+                                                        color = if (isSel) Color.White else Color(0xFF9AA0A6),
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Spacer(Modifier.height(3.dp))
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth(0.55f)
+                                                            .weight(1f, fill = false)
+                                                            .height((56f * if (dayPrompts == 0) 0.06f else frac).dp)
+                                                            .clip(RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp))
+                                                            .background(
+                                                                when {
+                                                                    dayPrompts == 0 -> Color(0xFF2E333D)
+                                                                    dayQuotas > 0 -> Color(0xFFF85149)
+                                                                    isSel -> Color(0xFF58A6FF)
+                                                                    else -> Color(0xFF388BFD).copy(alpha = 0.72f)
+                                                                }
+                                                            )
+                                                    )
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Text(
+                                                        text = formatShortDay(dKey),
+                                                        color = if (isSel) Color(0xFF58A6FF) else Color(0xFF8B949E),
+                                                        fontSize = 8.sp,
+                                                        lineHeight = 10.sp,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Selected Day Per-Profile Breakdown
+                                        val selectedDayTotal = allAnalyticsList.sumOf { it.second.dailyHistory[selectedDayKey]?.prompts ?: 0 }
+                                        HorizontalDivider(color = Color(0xFF2B303A), modifier = Modifier.padding(vertical = 8.dp))
+                                        Text(
+                                            text = "${formatFullDayLabel(selectedDayKey)} • $selectedDayTotal total prompts",
+                                            color = Color(0xFF58A6FF),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            allAnalyticsList.forEach { (id, a) ->
+                                                val p = profileMap[id]
+                                                val pColor = Color(p?.colorValue ?: 0xFF8B949E)
+                                                val pName = p?.name ?: id
+                                                val dStats = a.dailyHistory[selectedDayKey]
+                                                val pPrompts = dStats?.prompts ?: 0
+                                                val pHits = dStats?.quotaHits ?: 0
+                                                Surface(
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = Color(0xFF16181D),
+                                                    border = BorderStroke(1.dp, if (pHits > 0) Color(0xFFF85149).copy(alpha = 0.6f) else pColor.copy(alpha = 0.4f))
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    ) {
+                                                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(pColor))
+                                                        Spacer(Modifier.width(5.dp))
+                                                        Text(
+                                                            text = "$pName: $pPrompts" + if (pHits > 0) " (🔴$pHits)" else "",
+                                                            color = Color(0xFFE8EAED),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Per-Profile Detailed Breakdown Cards
+                            items(profiles, key = { it.id }) { prof ->
+                                val a = aiAnalytics[prof.id] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = prof.id)
+                                val qTime = a.lastQuotaHitTimestamp
+                                val isQuotaActive = isQuotaCurrentlyActive(qTime, now)
+                                val todayPrompts = a.effectivePromptsToday(today)
+                                val todayTabs = a.effectiveTabsToday(today)
+                                val todayHeadless = a.dailyHistory[today]?.headlessPrompts ?: 0
+                                val weekPrompts = a.promptsInDays(weekKeys)
+                                val weekHits = a.quotaHitsInDays(weekKeys)
+                                val maxProfDay = weekKeys.maxOfOrNull { a.dailyHistory[it]?.prompts ?: 0 }?.coerceAtLeast(1) ?: 1
+
+                                Card(
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E222A)),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isQuotaActive) Color(0xFFF85149).copy(alpha = 0.65f) else Color(prof.colorValue).copy(alpha = 0.45f)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(prof.colorValue)))
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(prof.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            }
+
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                if (isQuotaActive) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = Color(0xFF58A6FF).copy(alpha = 0.16f),
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .clickable { onClearQuotaHit(prof.id) }
+                                                    ) {
+                                                        Text(
+                                                            "Reset Flag",
+                                                            color = Color(0xFF58A6FF),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                        )
+                                                    }
+                                                }
+                                                Surface(
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = when {
+                                                        isQuotaActive -> Color(0xFFF85149).copy(alpha = 0.2f)
+                                                        todayPrompts >= 40 -> Color(0xFFD29922).copy(alpha = 0.2f)
+                                                        else -> Color(0xFF3FB950).copy(alpha = 0.2f)
+                                                    }
+                                                ) {
+                                                    Text(
+                                                        text = when {
+                                                            isQuotaActive -> "🔴 QUOTA HIT ($todayPrompts today)"
+                                                            todayPrompts >= 40 -> "🟡 BUSY ($todayPrompts today)"
+                                                            else -> "🟢 READY ($todayPrompts today)"
+                                                        },
+                                                        color = when {
+                                                            isQuotaActive -> Color(0xFFF85149)
+                                                            todayPrompts >= 40 -> Color(0xFFD29922)
+                                                            else -> Color(0xFF3FB950)
+                                                        },
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(Modifier.height(10.dp))
+
+                                        // 4-Metric Row
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            ProfileStatPill("Today", "$todayPrompts", if (todayHeadless > 0) "${todayHeadless} auto" else "$todayTabs tabs", Color(0xFF58A6FF), Modifier.weight(1f))
+                                            ProfileStatPill("7 Days", "$weekPrompts", "${weekHits} quota", Color(0xFFBC8CFF), Modifier.weight(1f))
+                                            ProfileStatPill("All-Time", "${a.totalPromptsLifetime}", "${a.totalTabsLifetime} tabs", Color(0xFF3FB950), Modifier.weight(1f))
+                                            ProfileStatPill("Quota Hits", "${a.totalQuotaHitsLifetime}", if (qTime > 0L) formatTimeAgo(qTime) else "Clean", if (a.totalQuotaHitsLifetime > 0) Color(0xFFF85149) else Color(0xFF8B949E), Modifier.weight(1f))
+                                        }
+
+                                        Spacer(Modifier.height(8.dp))
+
+                                        // Mini 7-Day Spark Bars
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().height(22.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.Bottom
+                                        ) {
+                                            weekKeys.forEach { dKey ->
+                                                val pCount = a.dailyHistory[dKey]?.prompts ?: 0
+                                                val pHits = a.dailyHistory[dKey]?.quotaHits ?: 0
+                                                val hFrac = (pCount.toFloat() / maxProfDay.toFloat()).coerceIn(0.15f, 1f)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height((18f * if (pCount == 0) 0.15f else hFrac).dp)
+                                                        .clip(RoundedCornerShape(3.dp))
+                                                        .background(
+                                                            when {
+                                                                pCount == 0 -> Color(0xFF2B303A)
+                                                                pHits > 0 -> Color(0xFFF85149)
+                                                                else -> Color(prof.colorValue)
+                                                            }
+                                                        )
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(Modifier.height(6.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                "Last prompt: ${formatTimeAgo(a.lastPromptTimestamp)}",
+                                                color = Color(0xFF8B949E),
+                                                fontSize = 10.sp
+                                            )
+                                            if (qTime > 0L) {
+                                                Text(
+                                                    if (isQuotaActive) "Resets in ${resetH}h ${resetM}m (PT)" else "Last hit ${formatTimeAgo(qTime)} (Reset)",
+                                                    color = if (isQuotaActive) Color(0xFFF85149) else Color(0xFF8B949E),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = if (isQuotaActive) FontWeight.SemiBold else FontWeight.Normal
+                                                )
+                                            }
+                                        }
+
+                                        if (isQuotaActive && a.lastQuotaReason.isNotBlank()) {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                "Reason: ${a.lastQuotaReason}",
+                                                color = Color(0xFFF28B82),
+                                                fontSize = 10.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    "history" -> {
+                        Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            // Profile Filter Chips
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (historyProfileFilter == null) Color(0xFF58A6FF) else Color(0xFF1E222A),
+                                    border = BorderStroke(1.dp, if (historyProfileFilter == null) Color(0xFF58A6FF) else Color(0xFF2E333D)),
+                                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { historyProfileFilter = null }
+                                ) {
+                                    Text(
+                                        "All Accounts",
+                                        color = if (historyProfileFilter == null) Color.Black else Color(0xFFE8EAED),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                                profiles.forEach { prof ->
+                                    val isSel = historyProfileFilter == prof.id
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSel) Color(prof.colorValue).copy(alpha = 0.25f) else Color(0xFF1E222A),
+                                        border = BorderStroke(1.dp, if (isSel) Color(prof.colorValue) else Color(0xFF2E333D)),
+                                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable {
+                                            historyProfileFilter = if (isSel) null else prof.id
+                                        }
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        ) {
+                                            Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color(prof.colorValue)))
+                                            Spacer(Modifier.width(5.dp))
+                                            Text(prof.name, color = Color(0xFFE8EAED), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                        }
+                                    }
+                                }
+                            }
+
+                            LazyColumn(
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f).fillMaxWidth()
+                            ) {
+                                items(allRecordedDays, key = { it }) { dayKey ->
+                                    val dayPairs = allAnalyticsList.mapNotNull { (id, a) ->
+                                        if (historyProfileFilter != null && id != historyProfileFilter) return@mapNotNull null
+                                        val stats = a.dailyHistory[dayKey] ?: return@mapNotNull null
+                                        Triple(id, stats, profileMap[id])
+                                    }
+                                    val dayPrompts = dayPairs.sumOf { it.second.prompts }
+                                    val dayHeadless = dayPairs.sumOf { it.second.headlessPrompts }
+                                    val dayTabs = dayPairs.sumOf { it.second.tabsOpened }
+                                    val dayQuotas = dayPairs.sumOf { it.second.quotaHits }
+
+                                    Card(
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E222A)),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (dayQuotas > 0) Color(0xFFF85149).copy(alpha = 0.5f) else Color(0xFF2E333D)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = formatFullDayLabel(dayKey),
+                                                    color = if (dayKey == today) Color(0xFF58A6FF) else Color(0xFFE8EAED),
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = "$dayPrompts prompts" + if (dayQuotas > 0) " • 🔴 $dayQuotas" else "",
+                                                    color = if (dayQuotas > 0) Color(0xFFF85149) else Color(0xFF3FB950),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = "Tabs opened: $dayTabs • Automated/Headless: $dayHeadless • Interactive: ${(dayPrompts - dayHeadless).coerceAtLeast(0)}",
+                                                color = Color(0xFF8B949E),
+                                                fontSize = 10.sp
+                                            )
+                                            if (dayPairs.isNotEmpty()) {
+                                                Spacer(Modifier.height(6.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    dayPairs.forEach { (id, stats, prof) ->
+                                                        val pCol = Color(prof?.colorValue ?: 0xFF8B949E)
+                                                        Surface(
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            color = Color(0xFF16181D),
+                                                            border = BorderStroke(1.dp, pCol.copy(alpha = 0.45f))
+                                                        ) {
+                                                            Text(
+                                                                text = "${prof?.name ?: id}: ${stats.prompts}p / ${stats.tabsOpened}t" + if (stats.quotaHits > 0) " / 🔴${stats.quotaHits}" else "",
+                                                                color = Color(0xFFE8EAED),
+                                                                fontSize = 10.sp,
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    else -> {
+                        if (allQuotaEvents.isEmpty()) {
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("🟢", fontSize = 36.sp)
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("No Quota Hits Recorded Yet", color = Color(0xFFE8EAED), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text("Every 429 or resource-exhausted hit is archived here permanently.", color = Color(0xFF8B949E), fontSize = 11.sp)
+                                }
+                            }
+                        } else {
+                            val fmt = remember { SimpleDateFormat("MMM d, HH:mm:ss", Locale.US) }
+                            LazyColumn(
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f).fillMaxWidth()
+                            ) {
+                                items(allQuotaEvents.size, key = { idx -> "${allQuotaEvents[idx].first}_${allQuotaEvents[idx].second.timestamp}_$idx" }) { idx ->
+                                    val (profId, ev) = allQuotaEvents[idx]
+                                    val prof = profileMap[profId]
+                                    val pColor = Color(prof?.colorValue ?: 0xFFF85149)
+                                    Card(
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E222A)),
+                                        border = BorderStroke(1.dp, Color(0xFFF85149).copy(alpha = 0.45f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(pColor))
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(prof?.name ?: profId, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                                Text(
+                                                    text = fmt.format(Date(ev.timestamp)),
+                                                    color = Color(0xFF8B949E),
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                            if (ev.reason.isNotBlank()) {
+                                                Spacer(Modifier.height(4.dp))
+                                                Text(
+                                                    text = ev.reason,
+                                                    color = Color(0xFFF28B82),
+                                                    fontSize = 11.sp,
+                                                    maxLines = 3,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardKpiCard(
+    label: String,
+    value: String,
+    sub: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF1E222A),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+            Text(label, color = Color(0xFF8B949E), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Spacer(Modifier.height(2.dp))
+            Text(value, color = accent, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+            Text(sub, color = Color(0xFFC9D1D9), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun ProfileStatPill(
+    label: String,
+    value: String,
+    sub: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF16181D),
+        border = BorderStroke(1.dp, Color(0xFF2B303A)),
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
+            Text(label, color = Color(0xFF8B949E), fontSize = 9.sp, maxLines = 1)
+            Text(value, color = accent, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(sub, color = Color(0xFF9AA0A6), fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
