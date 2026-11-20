@@ -82,6 +82,9 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                         send: function(turnOpts, onProgress) {
                             return rpcCall('studioSendSessionTurn', [sId, JSON.stringify(turnOpts || {})], onProgress);
                         },
+                        newChat: function() {
+                            return rpcCall('studioNewChatSession', [sId]);
+                        },
                         close: function() {
                             return rpcCall('studioCloseSession', [sId]);
                         }
