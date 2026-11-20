@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.omni.plugin.browser.models.BrowserProfile
+import kotlinx.coroutines.launch
 import com.omni.plugin.browser.models.ShortcutItem
 import com.omni.plugin.browser.utils.extractDomain
 
