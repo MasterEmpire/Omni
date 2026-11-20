@@ -675,27 +675,6 @@ object LiveAutoPilotEngine {
                         await delay(300);
                         readyWait++;
                     }
-                }
-            };
-                if (promptArea) {
-                    safeInjectText(promptArea, textResult);
-                    if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
-                        window.OmniPythonBridge.log('LIVE_AUTO_JS', 'Injected text into prompt textarea. Polling Run button...');
-                    }
-                    await delay(800);
-                    let readyWait = 0;
-                    while (readyWait < 25) {
-                        const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
-                        if (submitBtn && isRunButtonReady(submitBtn)) {
-                            submitBtn.click();
-                            if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
-                                window.OmniPythonBridge.log('LIVE_AUTO_JS', 'Successfully clicked Run button!');
-                            }
-                            break;
-                        }
-                        await delay(300);
-                        readyWait++;
-                    }
                 } else {
                     if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
                         window.OmniPythonBridge.log('LIVE_AUTO_JS_ERR', 'Prompt textarea not found in DOM.');
