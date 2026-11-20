@@ -403,25 +403,6 @@ object PluginEventDispatcher {
         return h(appContext, sourcePluginId, targetPluginId, event, payload)
     }
 }
-object PluginEventDispatcher {
-    @Volatile
-    private var handler: ((Context, String, String, String, Map<String, Any>) -> Boolean)? = null
-
-    fun registerHandler(block: ((Context, String, String, String, Map<String, Any>) -> Boolean)?) {
-        handler = block
-    }
-
-    fun dispatch(
-        appContext: Context,
-        sourcePluginId: String,
-        targetPluginId: String,
-        event: String,
-        payload: Map<String, Any>
-    ): Boolean {
-        val h = handler ?: return false
-        return h(appContext, sourcePluginId, targetPluginId, event, payload)
-    }
-}
 
 /**
  * Client-side IPC controller connecting Omni Hub to the Nexus Python Engine.
