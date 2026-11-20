@@ -47,6 +47,7 @@ class ChatGptAutomator(
     val sessions = ConcurrentHashMap<String, ActiveGptPuppetSession>()
     private var defaultSessionId: String? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val nextBootSlotAtMs = java.util.concurrent.atomic.AtomicLong(0L)
     private val siteCacheManager = com.omni.plugin.browser.services.SiteCacheManager(context, bridge)
 
     val headlessWv: WebView?
@@ -79,8 +80,8 @@ class ChatGptAutomator(
         }
 
         val displayMetrics = context.resources.displayMetrics
-        val viewWidth = displayMetrics.widthPixels.coerceAtLeast(1080)
-        val viewHeight = displayMetrics.heightPixels.coerceAtLeast(2400)
+        val viewWidth = displayMetrics.widthPixels.coerceAtMost(720).coerceAtLeast(480)
+        val viewHeight = displayMetrics.heightPixels.coerceAtMost(1280).coerceAtLeast(800)
 
         val sessionInstance = ActiveGptPuppetSession(
             sessionId = sessionId,
@@ -90,12 +91,10 @@ class ChatGptAutomator(
         )
 
         val autoWv = sessionInstance.webView.apply {
+            setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
             translationX = 0f
             alpha = 1f
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
+            layoutParams = ViewGroup.LayoutParams(viewWidth, viewHeight)
             measure(
                 android.view.View.MeasureSpec.makeMeasureSpec(viewWidth, android.view.View.MeasureSpec.EXACTLY),
                 android.view.View.MeasureSpec.makeMeasureSpec(viewHeight, android.view.View.MeasureSpec.EXACTLY)
@@ -121,6 +120,9 @@ class ChatGptAutomator(
                 allowContentAccess = true
                 useWideViewPort = true
                 loadWithOverviewMode = true
+                blockNetworkImage = true
+                mediaPlaybackRequiresUserGesture = true
+                setGeolocationEnabled(false)
                 setSupportMultipleWindows(true)
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
@@ -291,9 +293,22 @@ class ChatGptAutomator(
         bridge.log("CHATGPT_POOL", "Initialized ChatGPT Session [$sessionId] for Profile '$profileId' (Active: ${sessions.size})")
 
         val targetUrl = if (temporaryChat) "https://chatgpt.com/?temporary-chat=true" else "https://chatgpt.com/"
-        autoWv.onResume()
+        val now = System.currentTimeMillis()
+        val scheduledAt = nextBootSlotAtMs.updateAndGet { prev -> maxOf(now, prev + 900L) }
+        val staggerDelayMs = (scheduledAt - now).coerceAtLeast(0L)
+
         bridge.startForegroundTask("ChatGPT Puppet", "Active puppet sessions: ${sessions.size}")
-        autoWv.loadUrl(targetUrl)
+        if (staggerDelayMs > 0L) {
+            mainHandler.postDelayed({
+                if (!sessionInstance.isAborted && sessions.containsKey(sessionId)) {
+                    autoWv.onResume()
+                    autoWv.loadUrl(targetUrl)
+                }
+            }, staggerDelayMs)
+        } else {
+            autoWv.onResume()
+            autoWv.loadUrl(targetUrl)
+        }
     }
 
     fun configureSession(
