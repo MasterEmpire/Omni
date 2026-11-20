@@ -57,14 +57,18 @@ data class VaultRestoreData(
     val activeMenuItems: List<String>? = null,
     val hiddenMenuItems: List<String>? = null,
     val bottomBarItems: List<String>? = null,
-    val topBarItems: List<String>? = null
+    val topBarItems: List<String>? = null,
+    val topLeftItems: List<String>? = null
 )
 
 data class MenuLayoutConfig(
     val activeMenuItems: List<String> = emptyList(),
     val hiddenMenuItems: List<String> = emptyList(),
     val bottomBarItems: List<String> = emptyList(),
-    val topBarItems: List<String> = emptyList()
+    val topBarItems: List<String> = emptyList(),
+    val topLeftItems: List<String> = emptyList(),
+    val hasTopBar: Boolean = false,
+    val hasTopLeft: Boolean = false
 )
 
 class VaultManager(
@@ -488,7 +492,8 @@ class VaultManager(
         activeMenuItems: List<String>,
         hiddenMenuItems: List<String>,
         bottomBarItems: List<String> = emptyList(),
-        topBarItems: List<String> = emptyList()
+        topBarItems: List<String> = emptyList(),
+        topLeftItems: List<String> = emptyList()
     ) {
         try {
             val json = JSONObject().apply {
@@ -496,6 +501,7 @@ class VaultManager(
                 put("hiddenMenuItems", JSONArray(hiddenMenuItems))
                 put("bottomBarItems", JSONArray(bottomBarItems))
                 put("topBarItems", JSONArray(topBarItems))
+                put("topLeftItems", JSONArray(topLeftItems))
             }
             bridge.saveFile("config/menu_layout.json", json.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
@@ -517,8 +523,11 @@ class VaultManager(
             val hidden = readArr("hiddenMenuItems")
             val bottom = readArr("bottomBarItems")
             val top = readArr("topBarItems")
-            if (active.isEmpty() && hidden.isEmpty() && bottom.isEmpty() && top.isEmpty()) null
-            else MenuLayoutConfig(active, hidden, bottom, top)
+            val topLeft = readArr("topLeftItems")
+            val hasTop = json.has("topBarItems")
+            val hasLeft = json.has("topLeftItems")
+            if (active.isEmpty() && hidden.isEmpty() && bottom.isEmpty() && !hasTop && !hasLeft) null
+            else MenuLayoutConfig(active, hidden, bottom, top, topLeft, hasTop, hasLeft)
         } catch (_: Exception) {
             null
         }
@@ -905,6 +914,7 @@ class VaultManager(
         var loadedHiddenMenu: List<String>? = null
         var loadedBottomMenu: List<String>? = null
         var loadedTopMenu: List<String>? = null
+        var loadedTopLeftMenu: List<String>? = null
         var loadedSystemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
         var loadedSmartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null
 
@@ -994,12 +1004,14 @@ class VaultManager(
                             val hMenu = readArr("hiddenMenuItems")
                             val bMenu = readArr("bottomBarItems")
                             val tMenu = readArr("topBarItems")
+                            val tlMenu = readArr("topLeftItems")
                             if (aMenu.isNotEmpty() || hMenu.isNotEmpty()) {
                                 loadedActiveMenu = aMenu
                                 loadedHiddenMenu = hMenu
                             }
                             if (bMenu.isNotEmpty()) loadedBottomMenu = bMenu
-                            if (tMenu.isNotEmpty()) loadedTopMenu = tMenu
+                            if (json.has("topBarItems")) loadedTopMenu = tMenu
+                            if (json.has("topLeftItems")) loadedTopLeftMenu = tlMenu
                         }
                         "system_presets.json" -> {
                             bridge.saveFile("config/system_presets.json", bytes)
@@ -1062,7 +1074,8 @@ class VaultManager(
             activeMenuItems = loadedActiveMenu,
             hiddenMenuItems = loadedHiddenMenu,
             bottomBarItems = loadedBottomMenu,
-            topBarItems = loadedTopMenu
+            topBarItems = loadedTopMenu,
+            topLeftItems = loadedTopLeftMenu
         )
     }
 }
