@@ -276,7 +276,9 @@ fun buildAiStudioPuppetScript(): String {
                     tempDiv.style.pointerEvents = 'none';
 
                     const clone = contentContainer.cloneNode(true);
+                    clone.style.display = 'block';
                     clone.querySelectorAll('ms-thought-chunk, .author-label, .header, .timestamp, .info-container, .turn-information, loading-indicator, .turn-footer, button, .actions-container, ms-run-button').forEach(el => el.remove());
+                    clone.querySelectorAll('ms-text-chunk, ms-cmark-node, ms-code-block').forEach(el => { el.style.display = 'block'; });
                     tempDiv.appendChild(clone);
                     document.body.appendChild(tempDiv);
 
@@ -371,11 +373,11 @@ fun buildAiStudioPuppetScript(): String {
                     let mountAttempts = 0;
                     let promptArea = null;
 
-                    while (mountAttempts < 700) {
-                        if (mountAttempts % 20 === 0) await dismissInterstitials();
+                    while (mountAttempts < 300) {
+                        if (mountAttempts % 10 === 0) await dismissInterstitials();
                         promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
                         if (promptArea && isElementVisible(promptArea)) break;
-                        await delay(50);
+                        await delay(120);
                         mountAttempts++;
                     }
 
@@ -390,13 +392,13 @@ fun buildAiStudioPuppetScript(): String {
 
                     hostLog('PUPPET_INIT', 'Prompt area mounted. Waiting for AI Studio auth/model boot RPCs to settle...');
                     let warmTicks = 0;
-                    while (warmTicks < 150 && !this.aborted) {
+                    while (warmTicks < 60 && !this.aborted) {
                         const warm = (window.__omniWire && window.__omniWire.isSessionWarm) ? window.__omniWire.isSessionWarm() : null;
                         if (warm && warm.ready) {
-                            hostLog('PUPPET_INIT', 'Boot settled cleanly (' + (warmTicks * 40) + 'ms, accessToken=' + warm.hasAccessToken + ', models=' + warm.hasListModels + ').');
+                            hostLog('PUPPET_INIT', 'Boot settled cleanly (' + (warmTicks * 100) + 'ms, accessToken=' + warm.hasAccessToken + ', models=' + warm.hasListModels + ').');
                             break;
                         }
-                        await delay(40);
+                        await delay(100);
                         warmTicks++;
                     }
                     await delay(30);
@@ -608,6 +610,31 @@ fun buildAiStudioPuppetScript(): String {
                         }
                         return false;
                     }
+                },
+                newChat: async function() {
+                    hostLog('NEW_CHAT', 'Resetting warm AI Studio session to a fresh chat...');
+                    uploadedAttachmentKeys.clear();
+                    this.isConfigured = false;
+                    const newBtn = document.querySelector('a[href="/prompts/new_chat"], button[aria-label*="New chat"], button[data-test-new-chat], ms-nav-bar a[href*="new_chat"]');
+                    if (newBtn && isElementVisible(newBtn)) {
+                        newBtn.click();
+                        await delay(250);
+                        let ticks = 0;
+                        while (ticks < 60) {
+                            const pa = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                            if (pa && isElementVisible(pa) && document.querySelectorAll('ms-chat-turn').length === 0) {
+                                break;
+                            }
+                            await delay(100);
+                            ticks++;
+                        }
+                        if (window.OmniAutomator && window.OmniAutomator.onPuppetNewChat) {
+                            window.OmniAutomator.onPuppetNewChat(true, 'Ready');
+                        }
+                        return true;
+                    }
+                    window.location.href = 'https://aistudio.google.com/prompts/new_chat';
+                    return true;
                 },
 
                 executeTurn: async function(turnOpts) {
