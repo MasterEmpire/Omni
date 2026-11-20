@@ -180,6 +180,28 @@ class OmniStudioLabBridge(
             }
         }
     }
+    @JavascriptInterface
+    fun studioCreateSessionWithOpts(callId: String, optsJson: String) {
+        mainHandler.post {
+            try {
+                val json = JSONObject(optsJson)
+                val rawProfile = json.optString("profile", json.optString("profileId", "default")).ifEmpty { "default" }
+                val resolvedId = resolveProfileId(rawProfile)
+                val model = json.optString("model", "")
+                val tempChat: Boolean? = if (json.has("temporaryChat") && !json.isNull("temporaryChat")) json.optBoolean("temporaryChat") else null
+                automator.createSession(resolvedId, model, tempChat) { sessionId, err ->
+                    if (sessionId != null) {
+                        val res = JSONObject().apply { put("sessionId", sessionId) }
+                        resolve(callId, res)
+                    } else {
+                        reject(callId, err ?: "Failed creating session")
+                    }
+                }
+            } catch (e: Exception) {
+                reject(callId, "Invalid session options: ${e.message}")
+            }
+        }
+    }
 
     @JavascriptInterface
     fun studioConfigureSession(callId: String, sessionId: String, configJson: String) {
