@@ -154,6 +154,13 @@ interface HostBridge {
         onOutput: (String) -> Unit = {},
         onComplete: (success: Boolean, output: String) -> Unit
     )
+    // --- Global Cross-Plugin IPC Bridge ---
+    fun isPluginAvailable(pluginId: String): Boolean
+    fun dispatchPluginEvent(
+        targetPluginId: String,
+        event: String,
+        payload: Map<String, Any> = emptyMap()
+    ): Boolean
 }
 
 object PermissionDispatcher {
@@ -1435,5 +1442,36 @@ class HostBridgeImpl(
         onComplete: (Boolean, String) -> Unit
     ) {
         NexusPythonClient.execute(context, code, onOutput, onComplete)
+    }
+    override fun isPluginAvailable(pluginId: String): Boolean {
+        return try {
+            val targetBaseDir = context.applicationContext.getDir("plugins", Context.MODE_PRIVATE)
+            File(File(targetBaseDir, pluginId), "classes.dex").exists()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    override fun dispatchPluginEvent(
+        targetPluginId: String,
+        event: String,
+        payload: Map<String, Any>
+    ): Boolean {
+        return try {
+            val appCtx = context.applicationContext
+            val loaded = com.omni.hub.loader.PluginLoader.loadFromDir(appCtx, targetPluginId)
+            val targetBridge = HostBridgeImpl(appCtx, loaded.dataDir, targetPluginId) {}
+            val enriched = HashMap<String, Any>(payload.size + 4)
+            enriched.putAll(payload)
+            if (!enriched.containsKey("context")) enriched["context"] = appCtx
+            if (!enriched.containsKey("bridge")) enriched["bridge"] = targetBridge
+            enriched["source_plugin_id"] = pluginId
+            enriched["target_plugin_id"] = targetPluginId
+            loaded.instance.onSystemEvent(event, enriched)
+            true
+        } catch (e: Exception) {
+            OmniLogger.log("PLUGIN_IPC_ERR", "dispatchPluginEvent($targetPluginId, $event) failed: ${e.message}")
+            false
+        }
     }
 }
