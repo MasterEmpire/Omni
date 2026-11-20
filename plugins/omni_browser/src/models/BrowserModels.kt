@@ -257,10 +257,13 @@ data class ProfileAiAnalytics(
     val totalQuotaHitsLifetime: Int = 0,
     val lastPromptTimestamp: Long = 0L,
     val lastQuotaHitTimestamp: Long = 0L,
-    val lastQuotaReason: String = "",
     val lastActiveDay: String = "",
+    val needsVerification: Boolean = false,
+    val verificationRequiredAt: Long = 0L,
+    val verificationReason: String = "",
     val dailyHistory: Map<String, DailyAiStats> = emptyMap(),
     val quotaHistory: List<QuotaEventRecord> = emptyList()
+) {
 ) {
     fun effectivePromptsToday(today: String): Int =
         dailyHistory[today]?.prompts ?: if (lastActiveDay == today) promptsSentToday else 0
