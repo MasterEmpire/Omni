@@ -959,22 +959,34 @@ fun EditShortcutDialog(
 fun MenuCustomizerDialog(
     initialActive: List<String>,
     initialHidden: List<String>,
-    onSave: (List<String>, List<String>) -> Unit,
+    initialBottomBar: List<String> = listOf("smart_notes", "downloads", "home", "tabs", "menu"),
+    initialTopBar: List<String> = listOf("quick_toggle", "tabs"),
+    onSave: (List<String>, List<String>, List<String>, List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var topBar by remember { mutableStateOf(initialTopBar) }
+    var bottomBar by remember { mutableStateOf(initialBottomBar) }
     var active by remember { mutableStateOf(initialActive) }
     var hidden by remember { mutableStateOf(initialHidden) }
 
-            val names = mapOf(
-            "force_dark" to "☀️/🌙 Dark Mode Toggle",
-            "data_saver" to "🛡️ Data-saver Mode",
-            "site_cache" to "📦 Cache This Site Vault",
-            "page_zoom" to "🔍 Page Zoom Slider",
-            "favorite_tab" to "⭐ Favorite Tab",
-            "focus_lock" to "🔒 Focus Lock Toggle",
-            "copy_url" to "🔗 Copy Clean URL",
+    val names = mapOf(
+        "quick_toggle" to "⇄ Quick Toggle Tab",
+        "tabs" to "📑 Tab Switcher",
+        "home" to "🏠 Home / Speed Dial",
+        "menu" to "☰ Hamburger Menu",
+        "back" to "‹ Back",
+        "forward" to "› Forward",
+        "reload" to "↻ Reload",
+        "new_tab" to "＋ New Tab",
+        "force_dark" to "☀️/🌙 Dark Mode Toggle",
+        "data_saver" to "🛡️ Data-saver Mode",
+        "site_cache" to "📦 Cache This Site Vault",
+        "page_zoom" to "🔍 Page Zoom Slider",
+        "favorite_tab" to "⭐ Favorite Tab",
+        "focus_lock" to "🔒 Focus Lock Toggle",
+        "copy_url" to "🔗 Copy Clean URL",
         "dom_snapshot" to "📸 Capture DOM Snapshot",
-        "full_source" to "📦 Export Full Web Source (ZIP)",
+        "full_source" to "🗜️ Export Full Web Source (ZIP)",
         "local_ide" to "💻 Open Local IDE",
         "studio_lab" to "🧪 Studio Lab (Playbooks)",
         "autopilot" to "⚡ Live Auto-Pilot",
@@ -984,8 +996,24 @@ fun MenuCustomizerDialog(
         "recents" to "📱 Recents Deck",
         "diagnostics" to "📋 Diagnostics Console",
         "settings" to "⚙️ General Settings",
-        "exit" to "🚪 Exit Omni Chrome"
+        "exit" to "⏻ Exit Omni Chrome"
     )
+
+    val navCandidates = listOf("quick_toggle", "tabs", "home", "smart_notes", "downloads", "back", "forward", "reload", "new_tab")
+
+    fun moveUp(list: List<String>, idx: Int): List<String> {
+        if (idx <= 0) return list
+        val m = list.toMutableList()
+        val t = m[idx - 1]; m[idx - 1] = m[idx]; m[idx] = t
+        return m
+    }
+
+    fun moveDown(list: List<String>, idx: Int): List<String> {
+        if (idx >= list.lastIndex) return list
+        val m = list.toMutableList()
+        val t = m[idx + 1]; m[idx + 1] = m[idx]; m[idx] = t
+        return m
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -993,19 +1021,149 @@ fun MenuCustomizerDialog(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("⋮", fontSize = 24.sp, color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold)
+                Text("☰", fontSize = 20.sp, color = Color(0xFF8AB4F8), fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
-                Text("Customize Menu", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Customize Bars & Menu", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 17.sp)
             }
         },
         text = {
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                // 1. TOP RIGHT BAR SLOTS
                 item {
-                    Text("ACTIVE ITEMS", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("TOP RIGHT SLOTS (${topBar.size}/3)", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        if (topBar.size < 3) {
+                            val addable = navCandidates.firstOrNull { it !in topBar && it != "menu" }
+                            if (addable != null) {
+                                TextButton(
+                                    onClick = { topBar = topBar + addable },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(24.dp)
+                                ) {
+                                    Text("+ Add", color = Color(0xFF00E5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                items(topBar.size) { index ->
+                    val id = topBar[index]
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF161B22),
+                        border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(names[id] ?: id, color = Color.White, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { topBar = moveUp(topBar, index) }, enabled = index > 0, modifier = Modifier.size(22.dp)) {
+                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Left", tint = if (index > 0) Color(0xFF58A6FF) else Color(0xFF5F6368))
+                                }
+                                IconButton(onClick = { topBar = moveDown(topBar, index) }, enabled = index < topBar.lastIndex, modifier = Modifier.size(22.dp)) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Right", tint = if (index < topBar.lastIndex) Color(0xFF58A6FF) else Color(0xFF5F6368))
+                                }
+                                TextButton(
+                                    onClick = { topBar = topBar.filter { it != id } },
+                                    contentPadding = PaddingValues(horizontal = 4.dp),
+                                    modifier = Modifier.height(22.dp)
+                                ) {
+                                    Text("Remove", color = Color(0xFFF28B82), fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. BOTTOM BAR SLOTS
+                item {
+                    Spacer(Modifier.height(6.dp))
+                    Text("BOTTOM NAV BAR (${bottomBar.size}/6)", color = Color(0xFFD29922), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                items(bottomBar.size) { index ->
+                    val id = bottomBar[index]
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF161B22),
+                        border = BorderStroke(1.dp, Color(0xFFD29922).copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(names[id] ?: id, color = Color.White, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { bottomBar = moveUp(bottomBar, index) }, enabled = index > 0, modifier = Modifier.size(22.dp)) {
+                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Left", tint = if (index > 0) Color(0xFF58A6FF) else Color(0xFF5F6368))
+                                }
+                                IconButton(onClick = { bottomBar = moveDown(bottomBar, index) }, enabled = index < bottomBar.lastIndex, modifier = Modifier.size(22.dp)) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Right", tint = if (index < bottomBar.lastIndex) Color(0xFF58A6FF) else Color(0xFF5F6368))
+                                }
+                                if (id != "menu") {
+                                    TextButton(
+                                        onClick = {
+                                            bottomBar = bottomBar.filter { it != id }
+                                            if (id !in active && id !in hidden) active = active + id
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        modifier = Modifier.height(22.dp)
+                                    ) {
+                                        Text("To Grid", color = Color(0xFF8AB4F8), fontSize = 10.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Quick add extra nav shortcuts (Back, Forward, Reload, New Tab, Quick Toggle)
+                val extraAddable = navCandidates.filter { it !in bottomBar || it !in topBar }
+                if (extraAddable.isNotEmpty()) {
+                    item {
+                        Text("ADD QUICK ACTIONS TO BARS", color = Color(0xFF9AA0A6), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            extraAddable.take(4).forEach { candId ->
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFF1F2227),
+                                    border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                                        if (candId !in bottomBar && bottomBar.size < 6) {
+                                            bottomBar = bottomBar + candId
+                                        } else if (candId !in topBar && topBar.size < 3) {
+                                            topBar = topBar + candId
+                                        }
+                                    }
+                                ) {
+                                    Text(names[candId]?.take(12) ?: candId, color = Color(0xFF81C995), fontSize = 9.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. HAMBURGER 5x2 GRID ITEMS
+                item {
+                    Spacer(Modifier.height(6.dp))
+                    Text("HAMBURGER GRID (10 per page)", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
 
                 items(active.size) { index ->
@@ -1017,52 +1175,38 @@ fun MenuCustomizerDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(names[id] ?: id, color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                IconButton(
-                                    onClick = {
-                                        if (index > 0) {
-                                            val mut = active.toMutableList()
-                                            val temp = mut[index - 1]
-                                            mut[index - 1] = id
-                                            mut[index] = temp
-                                            active = mut
-                                        }
-                                    },
-                                    enabled = index > 0,
-                                    modifier = Modifier.size(24.dp)
-                                ) {
+                            Text(names[id] ?: id, color = Color.White, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { active = moveUp(active, index) }, enabled = index > 0, modifier = Modifier.size(22.dp)) {
                                     Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Up", tint = if (index > 0) Color(0xFF58A6FF) else Color(0xFF5F6368))
                                 }
-                                IconButton(
-                                    onClick = {
-                                        if (index < active.size - 1) {
-                                            val mut = active.toMutableList()
-                                            val temp = mut[index + 1]
-                                            mut[index + 1] = id
-                                            mut[index] = temp
-                                            active = mut
-                                        }
-                                    },
-                                    enabled = index < active.size - 1,
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Down", tint = if (index < active.size - 1) Color(0xFF58A6FF) else Color(0xFF5F6368))
+                                IconButton(onClick = { active = moveDown(active, index) }, enabled = index < active.lastIndex, modifier = Modifier.size(22.dp)) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Down", tint = if (index < active.lastIndex) Color(0xFF58A6FF) else Color(0xFF5F6368))
                                 }
-                                Spacer(Modifier.width(8.dp))
+                                if (bottomBar.size < 6 && id !in bottomBar) {
+                                    TextButton(
+                                        onClick = {
+                                            bottomBar = bottomBar + id
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        modifier = Modifier.height(22.dp)
+                                    ) {
+                                        Text("Pin", color = Color(0xFFD29922), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                                 TextButton(
                                     onClick = {
                                         active = active.filter { it != id }
                                         hidden = hidden + id
                                     },
-                                    contentPadding = PaddingValues(0.dp),
-                                    modifier = Modifier.height(24.dp)
+                                    contentPadding = PaddingValues(horizontal = 4.dp),
+                                    modifier = Modifier.height(22.dp)
                                 ) {
-                                    Text("Hide", color = Color(0xFFF28B82), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Hide", color = Color(0xFFF28B82), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1071,9 +1215,8 @@ fun MenuCustomizerDialog(
 
                 if (hidden.isNotEmpty()) {
                     item {
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(8.dp))
                         Text("HIDDEN ITEMS", color = Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(4.dp))
                     }
 
                     items(hidden.size) { index ->
@@ -1085,20 +1228,20 @@ fun MenuCustomizerDialog(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(names[id] ?: id, color = Color(0xFF9AA0A6), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                Text(names[id] ?: id, color = Color(0xFF9AA0A6), fontSize = 11.sp, modifier = Modifier.weight(1f))
                                 TextButton(
                                     onClick = {
                                         hidden = hidden.filter { it != id }
                                         active = active + id
                                     },
-                                    contentPadding = PaddingValues(0.dp),
-                                    modifier = Modifier.height(24.dp)
+                                    contentPadding = PaddingValues(horizontal = 4.dp),
+                                    modifier = Modifier.height(22.dp)
                                 ) {
-                                    Text("+ Show", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("+ Show", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1108,7 +1251,7 @@ fun MenuCustomizerDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(active, hidden) },
+                onClick = { onSave(active, hidden, bottomBar, topBar) },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
                 Text("Save Layout", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
