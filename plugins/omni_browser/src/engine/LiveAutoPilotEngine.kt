@@ -592,37 +592,91 @@ object LiveAutoPilotEngine {
                     }
                 }
 
-                            window.__omniDeliverPythonResult = async function(textResult, fileName, fileBase64, mimeType) {
+                            function isPythonBinaryFile(name, mime) {
+                const n = (name || '').toLowerCase();
+                const m = (mime || '').toLowerCase();
+                if (m.startsWith('image/') || m.startsWith('audio/') || m.startsWith('video/')) return true;
+                if (m.includes('pdf') || m.includes('zip') || m.includes('tar') || m.includes('gzip') || m.includes('octet-stream')) return true;
+                const binaryExts = ['.zip', '.rar', '.7z', '.tar', '.gz', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp3', '.wav', '.mp4', '.pdf', '.bin', '.wasm'];
+                return binaryExts.some(ext => n.endsWith(ext));
+            }
+
+            window.__omniDeliverPythonResult = async function(textResult, fileName, fileBase64, mimeType) {
                 if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
                     window.OmniPythonBridge.log('LIVE_AUTO_JS', 'Delivering python output to AI Studio (' + (textResult ? textResult.length : 0) + ' chars, file=' + fileName + ')...');
                 }
-                // 1. If a generated file was produced by Python, attach it via DataTransfer
+
+                let effectivePrompt = textResult || '';
+                let needsMediaUpload = false;
+
+                // 1. Direct [AIS_METADATA] for text/code results (0ms upload wait)
                 if (fileName && fileBase64) {
+                    if (!isPythonBinaryFile(fileName, mimeType)) {
+                        try {
+                            const binStr = atob(fileBase64.includes(',') ? fileBase64.split(',')[1] : fileBase64);
+                            const bytes = new Uint8Array(binStr.length);
+                            for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+                            const textBody = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+                            effectivePrompt += '\n\n[AIS_METADATA] [Attached file: name="' + fileName + '", mime_type="' + (mimeType || 'text/plain') + '"]\n--- START OF FILE ' + fileName + ' ---\n\n' + textBody;
+                            if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
+                                window.OmniPythonBridge.log('LIVE_AUTO_JS', '⚡ Delivered Python text file "' + fileName + '" directly via [AIS_METADATA] (0ms wait)');
+                            }
+                        } catch(_) {
+                            needsMediaUpload = true;
+                        }
+                    } else {
+                        needsMediaUpload = true;
+                    }
+                }
+
+                // 2. Binary Media Attachments (Images, audio, video, zip, pdf) via DataTransfer
+                if (needsMediaUpload && fileName && fileBase64) {
                     try {
                         const fileInput = document.querySelector('input[data-test-upload-file-input], input[type="file"].file-input, input[type="file"]');
                         if (fileInput) {
                             const dt = new DataTransfer();
-                            const byteChars = atob(fileBase64);
+                            const byteChars = atob(fileBase64.includes(',') ? fileBase64.split(',')[1] : fileBase64);
                             const byteArray = new Uint8Array(byteChars.length);
-                            for (let i = 0; i < byteChars.length; i++) {
-                                byteArray[i] = byteChars.charCodeAt(i);
-                            }
+                            for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
                             const blob = new Blob([byteArray], { type: mimeType || 'application/octet-stream' });
                             const file = new File([blob], fileName, { type: mimeType || 'application/octet-stream' });
                             dt.items.add(file);
                             fileInput.files = dt.files;
                             fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-                            await delay(1600);
+                            await delay(1200);
+
+                            let upTicks = 0;
+                            while (upTicks < 60) {
+                                const prog = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress');
+                                if (!prog) break;
+                                await delay(500);
+                                upTicks++;
+                            }
                         }
                     } catch(e) {
                         if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
-                            window.OmniPythonBridge.log('LIVE_AUTO_JS_ERR', 'Failed attaching file: ' + e.message);
+                            window.OmniPythonBridge.log('LIVE_AUTO_JS_ERR', 'Failed attaching binary media: ' + e.message);
                         }
                     }
                 }
 
-                // 2. Inject text into textarea
+                // 3. Inject text into textarea and click Run
                 const promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
+                if (promptArea) {
+                    safeInjectText(promptArea, effectivePrompt);
+                    await delay(600);
+                    let readyWait = 0;
+                    while (readyWait < 25) {
+                        const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
+                        if (submitBtn && isRunButtonReady(submitBtn)) {
+                            submitBtn.click();
+                            break;
+                        }
+                        await delay(300);
+                        readyWait++;
+                    }
+                }
+            };
                 if (promptArea) {
                     safeInjectText(promptArea, textResult);
                     if (window.OmniPythonBridge && window.OmniPythonBridge.log) {
