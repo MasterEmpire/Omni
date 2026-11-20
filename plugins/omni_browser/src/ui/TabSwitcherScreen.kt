@@ -90,6 +90,7 @@ fun TabSwitcherScreen(
     onDeleteProfile: (BrowserProfile) -> Unit = {},
     aiAnalytics: Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics> = emptyMap(),
     onClearQuotaHit: (String) -> Unit = {},
+    onClearVerificationLock: (String) -> Unit = {},
     onSelectTab: (String) -> Unit,
     onCloseTab: (String) -> Unit,
     onNewTab: (String) -> Unit,
@@ -373,10 +374,12 @@ fun TabSwitcherScreen(
                                                     val now = System.currentTimeMillis()
                                                     val today = getAnalyticsTodayKey(now)
                                                     val qTime = aData?.lastQuotaHitTimestamp ?: 0L
+                                                    val isVerifyLocked = aData?.needsVerification ?: false
                                                     val isQuotaActive = isQuotaCurrentlyActive(qTime, now)
                                                     val todayCount = aData?.effectivePromptsToday(today) ?: 0
                                                     val totalCount = aData?.totalPromptsLifetime ?: 0
                                                     val healthText = when {
+                                                        isVerifyLocked -> "🔒 Verify Required • $todayCount today ($totalCount total)"
                                                         isQuotaActive -> {
                                                             val diffH = ((now - qTime) / 3_600_000L).coerceAtLeast(0)
                                                             val agoStr = if (diffH == 0L) {
@@ -391,6 +394,7 @@ fun TabSwitcherScreen(
                                                         else -> "🟢 Ready • 0 today" + if (totalCount > 0) " ($totalCount total)" else ""
                                                     }
                                                     val healthColor = when {
+                                                        isVerifyLocked -> Color(0xFFFF6D00)
                                                         isQuotaActive -> Color(0xFFF85149)
                                                         todayCount >= 40 -> Color(0xFFD29922)
                                                         else -> Color(0xFF3FB950)
@@ -921,6 +925,7 @@ fun TabSwitcherScreen(
             profiles = profiles,
             aiAnalytics = aiAnalytics,
             onClearQuotaHit = onClearQuotaHit,
+            onClearVerificationLock = onClearVerificationLock,
             onDismiss = { showHealthDeckDialog = false }
         )
     }
@@ -1229,6 +1234,7 @@ fun AiStudioHealthDashboardDialog(
     profiles: List<BrowserProfile>,
     aiAnalytics: Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>,
     onClearQuotaHit: (String) -> Unit,
+    onClearVerificationLock: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val now = remember { System.currentTimeMillis() }
@@ -1274,9 +1280,13 @@ fun AiStudioHealthDashboardDialog(
     }
     val readyAccountsCount = remember(profiles, aiAnalytics, now) {
         profiles.count { prof ->
-            val qTime = aiAnalytics[prof.id]?.lastQuotaHitTimestamp ?: 0L
-            !isQuotaCurrentlyActive(qTime, now)
+            val a = aiAnalytics[prof.id]
+            val qTime = a?.lastQuotaHitTimestamp ?: 0L
+            !(a?.needsVerification ?: false) && !isQuotaCurrentlyActive(qTime, now)
         }
+    }
+    val verifyLockedCount = remember(profiles, aiAnalytics) {
+        profiles.count { aiAnalytics[it.id]?.needsVerification ?: false }
     }
 
     // All historical days sorted newest -> oldest (never deleted)
@@ -1411,8 +1421,16 @@ fun AiStudioHealthDashboardDialog(
                     DashboardKpiCard(
                         label = "Fleet",
                         value = "$readyAccountsCount/${profiles.size}",
-                        sub = if (readyAccountsCount == profiles.size) "All Ready" else "${profiles.size - readyAccountsCount} Exhausted",
-                        accent = if (readyAccountsCount == profiles.size) Color(0xFF3FB950) else Color(0xFFF85149),
+                        sub = when {
+                            readyAccountsCount == profiles.size -> "All Ready"
+                            verifyLockedCount > 0 -> "$verifyLockedCount Verify Lock"
+                            else -> "${profiles.size - readyAccountsCount} Exhausted"
+                        },
+                        accent = when {
+                            readyAccountsCount == profiles.size -> Color(0xFF3FB950)
+                            verifyLockedCount > 0 -> Color(0xFFFF6D00)
+                            else -> Color(0xFFF85149)
+                        },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -1607,6 +1625,7 @@ fun AiStudioHealthDashboardDialog(
                             items(profiles, key = { it.id }) { prof ->
                                 val a = aiAnalytics[prof.id] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = prof.id)
                                 val qTime = a.lastQuotaHitTimestamp
+                                val isVerifyLocked = a.needsVerification
                                 val isQuotaActive = isQuotaCurrentlyActive(qTime, now)
                                 val todayPrompts = a.effectivePromptsToday(today)
                                 val todayTabs = a.effectiveTabsToday(today)
@@ -1620,7 +1639,11 @@ fun AiStudioHealthDashboardDialog(
                                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1E222A)),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isQuotaActive) Color(0xFFF85149).copy(alpha = 0.65f) else Color(prof.colorValue).copy(alpha = 0.45f)
+                                        when {
+                                            isVerifyLocked -> Color(0xFFFF6D00).copy(alpha = 0.85f)
+                                            isQuotaActive -> Color(0xFFF85149).copy(alpha = 0.65f)
+                                            else -> Color(prof.colorValue).copy(alpha = 0.45f)
+                                        }
                                     ),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -1637,7 +1660,23 @@ fun AiStudioHealthDashboardDialog(
                                             }
 
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                if (isQuotaActive) {
+                                                if (isVerifyLocked) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = Color(0xFF238636),
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .clickable { onClearVerificationLock(prof.id) }
+                                                    ) {
+                                                        Text(
+                                                            "✅ Approve & Unlock",
+                                                            color = Color.White,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                        )
+                                                    }
+                                                } else if (isQuotaActive) {
                                                     Surface(
                                                         shape = RoundedCornerShape(8.dp),
                                                         color = Color(0xFF58A6FF).copy(alpha = 0.16f),
@@ -1657,6 +1696,7 @@ fun AiStudioHealthDashboardDialog(
                                                 Surface(
                                                     shape = RoundedCornerShape(8.dp),
                                                     color = when {
+                                                        isVerifyLocked -> Color(0xFFFF6D00).copy(alpha = 0.22f)
                                                         isQuotaActive -> Color(0xFFF85149).copy(alpha = 0.2f)
                                                         todayPrompts >= 40 -> Color(0xFFD29922).copy(alpha = 0.2f)
                                                         else -> Color(0xFF3FB950).copy(alpha = 0.2f)
@@ -1664,11 +1704,13 @@ fun AiStudioHealthDashboardDialog(
                                                 ) {
                                                     Text(
                                                         text = when {
+                                                            isVerifyLocked -> "🔒 VERIFY LOCKED ($todayPrompts today)"
                                                             isQuotaActive -> "🔴 QUOTA HIT ($todayPrompts today)"
                                                             todayPrompts >= 40 -> "🟡 BUSY ($todayPrompts today)"
                                                             else -> "🟢 READY ($todayPrompts today)"
                                                         },
                                                         color = when {
+                                                            isVerifyLocked -> Color(0xFFFF6D00)
                                                             isQuotaActive -> Color(0xFFF85149)
                                                             todayPrompts >= 40 -> Color(0xFFD29922)
                                                             else -> Color(0xFF3FB950)
@@ -1747,6 +1789,16 @@ fun AiStudioHealthDashboardDialog(
                                             Text(
                                                 "Reason: ${a.lastQuotaReason}",
                                                 color = Color(0xFFF28B82),
+                                                fontSize = 10.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        if (isVerifyLocked) {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                "🔒 Halted (${formatTimeAgo(a.verificationRequiredAt)}): ${a.verificationReason.ifBlank { "Google account verification required" }}. Verify in Chrome then tap Approve & Unlock.",
+                                                color = Color(0xFFFFAB40),
                                                 fontSize = 10.sp,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis
