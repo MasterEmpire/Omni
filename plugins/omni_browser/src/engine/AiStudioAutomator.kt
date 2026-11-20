@@ -34,6 +34,7 @@ data class ActivePuppetSession(
     val webView: WebView,
     var onReadyCallback: ((Boolean, String?) -> Unit)? = null,
     var onConfigCallback: ((Boolean, String?) -> Unit)? = null,
+    var onNewChatCallback: ((Boolean, String?) -> Unit)? = null,
     var onTurnProgressCallback: ((String, String) -> Unit)? = null,
     var onTurnDeltaCallback: ((String, String, Boolean) -> Unit)? = null,
     var onTurnCompleteCallback: ((String, String) -> Unit)? = null,
@@ -65,6 +66,7 @@ class AiStudioAutomator(
         }
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val nextBootSlotAtMs = java.util.concurrent.atomic.AtomicLong(0L)
     private var legacyBatchCallback: AutomationCallback? = null
     private val siteCacheManager = com.omni.plugin.browser.services.SiteCacheManager(context, bridge)
 
@@ -95,8 +97,8 @@ class AiStudioAutomator(
         }
 
         val displayMetrics = context.resources.displayMetrics
-        val viewWidth = displayMetrics.widthPixels.coerceAtLeast(1080)
-        val viewHeight = displayMetrics.heightPixels.coerceAtLeast(2400)
+        val viewWidth = displayMetrics.widthPixels.coerceAtMost(720).coerceAtLeast(480)
+        val viewHeight = displayMetrics.heightPixels.coerceAtMost(1280).coerceAtLeast(800)
 
         val sessionInstance = ActivePuppetSession(
             sessionId = sessionId,
@@ -106,12 +108,10 @@ class AiStudioAutomator(
         )
 
         val autoWv = sessionInstance.webView.apply {
+            setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
             translationX = 0f
             alpha = 1f
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
+            layoutParams = ViewGroup.LayoutParams(viewWidth, viewHeight)
             measure(
                 android.view.View.MeasureSpec.makeMeasureSpec(viewWidth, android.view.View.MeasureSpec.EXACTLY),
                 android.view.View.MeasureSpec.makeMeasureSpec(viewHeight, android.view.View.MeasureSpec.EXACTLY)
@@ -138,6 +138,9 @@ class AiStudioAutomator(
                 allowContentAccess = true
                 useWideViewPort = true
                 loadWithOverviewMode = true
+                blockNetworkImage = true
+                mediaPlaybackRequiresUserGesture = true
+                setGeolocationEnabled(false)
                 setSupportMultipleWindows(true)
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
@@ -217,6 +220,8 @@ class AiStudioAutomator(
                     mainHandler.post {
                         sessionInstance.onReadyCallback?.invoke(success, message)
                         sessionInstance.onReadyCallback = null
+                        sessionInstance.onNewChatCallback?.invoke(success, message)
+                        sessionInstance.onNewChatCallback = null
                     }
                 }
 
@@ -225,6 +230,14 @@ class AiStudioAutomator(
                     mainHandler.post {
                         sessionInstance.onConfigCallback?.invoke(success, message)
                         sessionInstance.onConfigCallback = null
+                    }
+                }
+
+                @JavascriptInterface
+                fun onPuppetNewChat(success: Boolean, message: String) {
+                    mainHandler.post {
+                        sessionInstance.onNewChatCallback?.invoke(success, message)
+                        sessionInstance.onNewChatCallback = null
                     }
                 }
 
@@ -273,6 +286,12 @@ class AiStudioAutomator(
                         host.contains("google-analytics.com") ||
                         host.contains("analytics.google.com") ||
                         host.contains("doubleclick.net") ||
+                        host.contains("googleadservices.com") ||
+                        host.contains("googlesyndication.com") ||
+                        host.contains("fonts.googleapis.com") ||
+                        host.contains("fonts.gstatic.com") ||
+                        host.contains("csp.withgoogle.com") ||
+                        host.contains("ogads-pa.clients6.google.com") ||
                         urlStr.contains("play.google.com/log") ||
                         urlStr.contains("console.cloud.google.com/onboarding/auth_warmup") ||
                         urlStr.contains("cookienotificationbar") ||
@@ -288,7 +307,13 @@ class AiStudioAutomator(
                         path.endsWith(".jpg") ||
                         path.endsWith(".jpeg") ||
                         path.endsWith(".webp") ||
-                        path.endsWith(".gif")
+                        path.endsWith(".gif") ||
+                        path.endsWith(".svg") ||
+                        path.endsWith(".ico") ||
+                        path.endsWith(".mp4") ||
+                        path.endsWith(".webm") ||
+                        path.endsWith(".mp3") ||
+                        path.endsWith(".wav")
 
                     if (isJunkHost || isStaticWeight) {
                         return WebResourceResponse("text/plain", "UTF-8", 200, "OK", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
@@ -346,9 +371,36 @@ class AiStudioAutomator(
             "https://aistudio.google.com/prompts/new_chat"
         }
 
-        autoWv.onResume()
+        val now = System.currentTimeMillis()
+        val scheduledAt = nextBootSlotAtMs.updateAndGet { prev -> maxOf(now, prev + 900L) }
+        val staggerDelayMs = (scheduledAt - now).coerceAtLeast(0L)
+
         bridge.startForegroundTask("AI Studio Puppet", "Active puppet sessions: ${sessions.size}")
-        autoWv.loadUrl(targetUrl)
+        if (staggerDelayMs > 0L) {
+            bridge.log("AI_STUDIO_POOL", "⏱️ Staggering Session [$sessionId] boot by ${staggerDelayMs}ms to protect RAM/CPU")
+            mainHandler.postDelayed({
+                if (!sessionInstance.isAborted && sessions.containsKey(sessionId)) {
+                    autoWv.onResume()
+                    autoWv.loadUrl(targetUrl)
+                }
+            }, staggerDelayMs)
+        } else {
+            autoWv.onResume()
+            autoWv.loadUrl(targetUrl)
+        }
+    }
+
+    fun newChatSession(
+        sessionId: String,
+        onDone: (Boolean, String?) -> Unit
+    ) {
+        val session = sessions[sessionId]
+        if (session == null) {
+            onDone(false, "Session '$sessionId' is not active.")
+            return
+        }
+        session.onNewChatCallback = onDone
+        session.webView.evaluateJavascript("if (window.__omniPuppet && window.__omniPuppet.newChat) { window.__omniPuppet.newChat(); }", null)
     }
 
     fun configureSession(
@@ -590,6 +642,7 @@ class AiStudioAutomator(
             defaultSessionId = sId
             val wv = sessions[sId]?.webView
             if (containerLayout != null && wv != null) {
+                wv.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                 containerLayout.removeAllViews()
                 containerLayout.addView(wv)
             }
