@@ -433,7 +433,7 @@ class BrowserStateHolder(
             vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems, bottomBarItems, topBarItems, topLeftItems)
         }
 
-        val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems && it !in bottomBarItems }
+        val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems && it !in bottomBarItems && it !in topBarItems && it !in topLeftItems }
         if (missing.isNotEmpty()) {
             val updatedList = activeMenuItems.toMutableList()
             val remaining = missing.toMutableList()
