@@ -298,7 +298,8 @@ class OmniFocusBridge(
 class OmniAnalyticsBridge(
     private val onPromptSent: (profileId: String) -> Unit,
     private val onQuotaHit: (profileId: String, reason: String) -> Unit,
-    private val onLog: (tag: String, message: String) -> Unit
+    private val onLog: (tag: String, message: String) -> Unit,
+    private val onVerificationLock: (profileId: String, reason: String) -> Unit = { _, _ -> }
 ) {
     @android.webkit.JavascriptInterface
     fun recordPrompt(profileId: String) {
@@ -308,6 +309,11 @@ class OmniAnalyticsBridge(
     @android.webkit.JavascriptInterface
     fun reportQuotaHit(profileId: String, reason: String) {
         onQuotaHit(profileId, reason)
+    }
+
+    @android.webkit.JavascriptInterface
+    fun reportVerificationLock(profileId: String, reason: String) {
+        onVerificationLock(profileId, reason)
     }
 
     @android.webkit.JavascriptInterface
