@@ -506,6 +506,11 @@ class BrowserStateHolder(
             vaultManager.savePlaybooks(playbooks)
         }
 
+        VaultManager.onAnalyticsUpdatedListener = { updated ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                aiAnalytics = updated
+            }
+        }
         aiAnalytics = vaultManager.loadAiAnalytics()
         vaultManager.loadDomainUploadPaths()?.let { domainUploadPaths.putAll(it) }
         vaultManager.loadDomainZoomLevels()?.let { domainZoomLevels.putAll(it) }
@@ -792,6 +797,7 @@ class BrowserStateHolder(
         insertAtIndex: Int? = null
     ) {
         previousActiveTabId = activeTabId
+        aiAnalytics = vaultManager.loadAiAnalytics()
         val thumb = currentWebView?.captureThumbnail()
         val bundle = Bundle()
         currentWebView?.saveState(bundle)
@@ -2980,7 +2986,7 @@ class BrowserStateHolder(
         }
     }
 
-    private fun getTodayDateString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    private fun getTodayDateString(): String = getAnalyticsTodayKey()
 
     fun recordDomainUploadPath(url: String, dataIntent: Intent?) {
         if (url.isEmpty() || url == "about:blank") return
@@ -3007,58 +3013,30 @@ class BrowserStateHolder(
     }
 
     fun recordAiStudioTabOpened(profileId: String) {
-        val today = getTodayDateString()
-        val current = aiAnalytics[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
-        val isNewDay = current.lastActiveDay != today
-        val updated = current.copy(
-            tabsOpenedToday = if (isNewDay) 1 else current.tabsOpenedToday + 1,
-            promptsSentToday = if (isNewDay) 0 else current.promptsSentToday,
-            lastActiveDay = today
-        )
-        val newMap = aiAnalytics + (profileId to updated)
-        aiAnalytics = newMap
-        vaultManager.saveAiAnalytics(newMap)
+        aiAnalytics = VaultManager.recordTabOpened(context, bridge, profileId)
     }
 
     override fun onAiPromptSent(profileId: String) {
-        val today = getTodayDateString()
-        val current = aiAnalytics[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
-        val isNewDay = current.lastActiveDay != today
-        val updated = current.copy(
-            promptsSentToday = if (isNewDay) 1 else current.promptsSentToday + 1,
-            totalPromptsLifetime = current.totalPromptsLifetime + 1,
-            lastPromptTimestamp = System.currentTimeMillis(),
-            lastActiveDay = today
-        )
-        val newMap = aiAnalytics + (profileId to updated)
+        val newMap = VaultManager.recordPrompt(context, bridge, profileId, isHeadless = false)
         aiAnalytics = newMap
-        vaultManager.saveAiAnalytics(newMap)
-        bridge.log("AI_ANALYTICS", "Prompt recorded on profile '$profileId': today=${updated.promptsSentToday}, total=${updated.totalPromptsLifetime}")
+        val updated = newMap[profileId]
+        bridge.log("AI_ANALYTICS", "Prompt recorded on profile '$profileId': today=${updated?.promptsSentToday ?: 0}, total=${updated?.totalPromptsLifetime ?: 0}")
     }
 
     override fun onAiQuotaHit(profileId: String, reason: String) {
-        val today = getTodayDateString()
-        val current = aiAnalytics[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
-        val updated = current.copy(
-            lastQuotaHitTimestamp = System.currentTimeMillis(),
-            lastActiveDay = today
-        )
-        val newMap = aiAnalytics + (profileId to updated)
+        val (recorded, newMap) = VaultManager.recordQuotaHit(context, bridge, profileId, reason)
         aiAnalytics = newMap
-        vaultManager.saveAiAnalytics(newMap)
-        val profName = profiles.find { it.id == profileId }?.name ?: profileId
-        bridge.showToast("⚠️ AI Studio Quota reached on '$profName'! Rotate profiles.")
-        bridge.log("AI_ANALYTICS_QUOTA", "Quota exceeded flagged on profile '$profileId' ($profName): $reason")
+        if (recorded) {
+            val profName = profiles.find { it.id == profileId }?.name ?: profileId
+            bridge.showToast("⚠️ AI Studio Quota reached on '$profName'! Rotate profiles.")
+            bridge.log("AI_ANALYTICS_QUOTA", "Quota exceeded flagged on profile '$profileId' ($profName): $reason")
+        }
     }
 
     fun clearQuotaHit(profileId: String) {
-        val current = aiAnalytics[profileId] ?: return
-        val updated = current.copy(lastQuotaHitTimestamp = 0L)
-        val newMap = aiAnalytics + (profileId to updated)
-        aiAnalytics = newMap
-        vaultManager.saveAiAnalytics(newMap)
+        aiAnalytics = VaultManager.clearActiveQuotaFlag(context, bridge, profileId)
         val profName = profiles.find { it.id == profileId }?.name ?: profileId
-        bridge.showToast("✅ Quota status reset for '$profName'")
+        bridge.showToast("✅ Active quota flag cleared for '$profName' (history preserved)")
     }
 
     private var isBackgroundGeneratingActive by mutableStateOf(false)
