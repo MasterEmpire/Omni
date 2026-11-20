@@ -1084,6 +1084,7 @@ val AI_STUDIO_HEADLESS_TURBO_SCRIPT = """
                 });
             } catch(_) {}
 
+            const throttleMs = window.__omniHeadlessTurbo ? 350 : 180;
             const timeoutId = setTimeout(function() {
                 if (!executed) {
                     executed = true;
@@ -1091,7 +1092,7 @@ val AI_STUDIO_HEADLESS_TURBO_SCRIPT = """
                     try { if (nativeId !== null) origCancelRaf.call(window, nativeId); } catch(_) {}
                     cb(performance.now());
                 }
-            }, 18);
+            }, throttleMs);
 
             pendingCallbacks.set(id, { nativeId: nativeId, timeoutId: timeoutId });
             return id;
@@ -1115,7 +1116,7 @@ val AI_STUDIO_HEADLESS_TURBO_SCRIPT = """
                 style.id = 'omni-headless-turbo-css';
                 style.textContent = [
                     '*, *::before, *::after { animation-duration: 0.001ms !important; animation-delay: 0ms !important; transition-duration: 0.001ms !important; transition-delay: 0ms !important; }',
-                    'ms-chat-turn, .chat-turn-container.model, ms-thought-chunk, ms-text-chunk { content-visibility: hidden !important; contain: strict !important; }'
+                    'ms-chat-turn, .chat-turn-container, ms-thought-chunk, ms-text-chunk, ms-cmark-node, ms-code-block, ms-image-chunk, ms-video-chunk, ms-audio-chunk, ms-grounding-sources, ms-search-entry-point, ms-announcement-modal, ms-banner, ms-global-banner, img { display: none !important; }'
                 ].join('\n');
                 (document.head || document.documentElement).appendChild(style);
             }
