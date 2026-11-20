@@ -316,7 +316,14 @@ class AiStudioAutomator(
                         path.endsWith(".wav")
 
                     if (isJunkHost || isStaticWeight) {
-                        return WebResourceResponse("text/plain", "UTF-8", 200, "OK", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                        val origin = request.requestHeaders?.get("Origin") ?: "https://aistudio.google.com"
+                        val corsHeaders = mapOf(
+                            "Access-Control-Allow-Origin" to origin,
+                            "Access-Control-Allow-Credentials" to "true",
+                            "Access-Control-Allow-Methods" to "GET, POST, OPTIONS",
+                            "Access-Control-Allow-Headers" to "*"
+                        )
+                        return WebResourceResponse("text/plain", "UTF-8", 200, "OK", corsHeaders, java.io.ByteArrayInputStream(ByteArray(0)))
                     }
                     if (!request.isForMainFrame) {
                         val cachedResp = siteCacheManager.interceptRequest(request, "aistudio.google.com", profileId)
