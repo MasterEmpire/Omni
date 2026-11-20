@@ -141,6 +141,9 @@ class BrowserStateHolder(
     var bottomBarItems by mutableStateOf(defaultBottomBar)
     val defaultTopBar = listOf("quick_toggle", "tabs")
     var topBarItems by mutableStateOf(defaultTopBar)
+    val defaultTopLeft = listOf("home")
+    var topLeftItems by mutableStateOf(defaultTopLeft)
+    var isBottomBarCollapsed by mutableStateOf(false)
 
     // Solver & Data-saver States
     var solverApiKey by mutableStateOf("")
@@ -417,12 +420,17 @@ class BrowserStateHolder(
                     dedicatedLayout.bottomBarItems + "menu"
                 }
             }
-            if (dedicatedLayout.topBarItems.isNotEmpty()) {
+            if (dedicatedLayout.hasTopBar) {
                 topBarItems = dedicatedLayout.topBarItems
+            } else if (dedicatedLayout.topBarItems.isNotEmpty()) {
+                topBarItems = dedicatedLayout.topBarItems
+            }
+            if (dedicatedLayout.hasTopLeft) {
+                topLeftItems = dedicatedLayout.topLeftItems
             }
         } else if (activeMenuItems != defaultActiveMenu || hiddenMenuItems.isNotEmpty()) {
             // One-time migration from legacy solver.json into dedicated menu_layout.json
-            vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems, bottomBarItems, topBarItems)
+            vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems, bottomBarItems, topBarItems, topLeftItems)
         }
 
         val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems && it !in bottomBarItems }
@@ -445,7 +453,7 @@ class BrowserStateHolder(
             }
             activeMenuItems = updatedList + remaining
             if (dedicatedLayout != null) {
-                vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems, bottomBarItems, topBarItems)
+                vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems, bottomBarItems, topBarItems, topLeftItems)
             }
         }
 
@@ -2852,6 +2860,7 @@ class BrowserStateHolder(
             }
             result.bottomBarItems?.let { if (it.isNotEmpty()) bottomBarItems = it }
             result.topBarItems?.let { topBarItems = it }
+            result.topLeftItems?.let { topLeftItems = it }
             if (!result.tabs.isNullOrEmpty()) {
                 tabs = result.tabs
                 val targetId = if (!result.activeTabId.isNullOrEmpty() && result.tabs.any { it.id == result.activeTabId }) result.activeTabId else result.tabs.first().id
