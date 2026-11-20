@@ -12,6 +12,40 @@ class OmniApp : Application() {
         OmniLogger.init(this)
         OmniLogger.logProcessExitReasons(this)
         OmniLogger.logTelemetry("APP_INIT", "Omni Hub Application process booted")
+        com.omni.hub.api.PluginEventDispatcher.registerHandler { appCtx, sourcePluginId, targetPluginId, event, payload ->
+            try {
+                val loaded = com.omni.hub.loader.PluginLoader.loadFromDir(appCtx, targetPluginId)
+                val targetBridge = com.omni.hub.api.HostBridgeImpl(appCtx, loaded.dataDir, targetPluginId) {}
+                val enriched = java.util.HashMap<String, Any>(payload.size + 4)
+                enriched.putAll(payload)
+                if (!enriched.containsKey("context")) enriched["context"] = appCtx
+                if (!enriched.containsKey("bridge")) enriched["bridge"] = targetBridge
+                enriched["source_plugin_id"] = sourcePluginId
+                enriched["target_plugin_id"] = targetPluginId
+                loaded.instance.onSystemEvent(event, enriched)
+                true
+            } catch (e: Exception) {
+                OmniLogger.log("PLUGIN_IPC_ERR", "dispatchPluginEvent($targetPluginId, $event) failed: ${e.message}")
+                false
+            }
+        }
+        com.omni.hub.api.PluginEventDispatcher.registerHandler { appCtx, sourcePluginId, targetPluginId, event, payload ->
+            try {
+                val loaded = com.omni.hub.loader.PluginLoader.loadFromDir(appCtx, targetPluginId)
+                val targetBridge = com.omni.hub.api.HostBridgeImpl(appCtx, loaded.dataDir, targetPluginId) {}
+                val enriched = java.util.HashMap<String, Any>(payload.size + 4)
+                enriched.putAll(payload)
+                if (!enriched.containsKey("context")) enriched["context"] = appCtx
+                if (!enriched.containsKey("bridge")) enriched["bridge"] = targetBridge
+                enriched["source_plugin_id"] = sourcePluginId
+                enriched["target_plugin_id"] = targetPluginId
+                loaded.instance.onSystemEvent(event, enriched)
+                true
+            } catch (e: Exception) {
+                OmniLogger.log("PLUGIN_IPC_ERR", "dispatchPluginEvent($targetPluginId, $event) failed: ${e.message}")
+                false
+            }
+        }
 
         registerComponentCallbacks(object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
