@@ -58,45 +58,34 @@ fun convertLocalFileToLocalhost(rawUrl: String, port: Int): String {
 val BOT_BYPASS_POLYFILL = """
 (function() {
     try { delete Object.getPrototypeOf(navigator).webdriver; } catch(e) {}
-    try {
-        if (!window.chrome) {
-            window.chrome = { app: { isInstalled: false }, runtime: { connect: function(){}, sendMessage: function(){} }, csi: function(){}, loadTimes: function(){} };
-            window.chrome.runtime.connect.toString = function() { return "function connect() { [native code] }"; };
-            window.chrome.runtime.sendMessage.toString = function() { return "function sendMessage() { [native code] }"; };
-        }
-    } catch(e) {}
-    try {
-        const originalCreateElement = document.createElement;
-        document.createElement = function(tagName) {
-            const el = originalCreateElement.call(document, tagName);
-            if (tagName.toLowerCase() === 'iframe') {
-                el.addEventListener('load', function() {
-                    try { delete Object.getPrototypeOf(this.contentWindow.navigator).webdriver; } catch(e) {}
-                    try { this.contentWindow.chrome = window.chrome; } catch(e) {}
-                });
+    const isAndroidUa = /Android/i.test(navigator.userAgent || '');
+    if (!isAndroidUa) {
+        try {
+            if (!window.chrome) {
+                window.chrome = { app: { isInstalled: false }, runtime: { connect: function(){}, sendMessage: function(){} }, csi: function(){}, loadTimes: function(){} };
+                window.chrome.runtime.connect.toString = function() { return "function connect() { [native code] }"; };
+                window.chrome.runtime.sendMessage.toString = function() { return "function sendMessage() { [native code] }"; };
             }
-            return el;
-        };
-        document.createElement.toString = function() { return "function createElement() { [native code] }"; };
-    } catch(e) {}
-    try {
-        if (navigator.plugins.length === 0) {
-            const mockP = [
-                { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-                { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Google Chrome PDF' },
-                { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Chromium PDF' },
-                { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Edge PDF' },
-                { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'WebKit PDF' }
-            ];
-            const pArr = [];
-            mockP.forEach(p => { const pl = Object.create(Plugin.prototype); Object.assign(pl, p); pArr.push(pl); });
-            Object.setPrototypeOf(pArr, PluginArray.prototype);
-            const pGetter = function() { return pArr; };
-            pGetter.toString = function() { return "function get plugins() { [native code] }"; };
-            Object.defineProperty(Object.getPrototypeOf(navigator), 'plugins', { get: pGetter, configurable: true });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        }
-    } catch(e) {}
+        } catch(e) {}
+        try {
+            if (navigator.plugins.length === 0) {
+                const mockP = [
+                    { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                    { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Google Chrome PDF' },
+                    { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Chromium PDF' },
+                    { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Edge PDF' },
+                    { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'WebKit PDF' }
+                ];
+                const pArr = [];
+                mockP.forEach(p => { const pl = Object.create(Plugin.prototype); Object.assign(pl, p); pArr.push(pl); });
+                Object.setPrototypeOf(pArr, PluginArray.prototype);
+                const pGetter = function() { return pArr; };
+                pGetter.toString = function() { return "function get plugins() { [native code] }"; };
+                Object.defineProperty(Object.getPrototypeOf(navigator), 'plugins', { get: pGetter, configurable: true });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            }
+        } catch(e) {}
+    }
     try {
         if (!window.Notification) window.Notification = { permission: 'default', requestPermission: function() { return Promise.resolve('default'); } };
         if (window.navigator.permissions) {
@@ -480,6 +469,23 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
             }
         } catch(_) {}
     }
+    function isVerificationLockMsg(lowerMsg) {
+        if (!lowerMsg) return false;
+        return lowerMsg.indexOf('verify-account') !== -1 ||
+               lowerMsg.indexOf('must be verified') !== -1 ||
+               lowerMsg.indexOf('unusual activity') !== -1 ||
+               lowerMsg.indexOf('account verification is required') !== -1;
+    }
+
+    function reportWireVerificationLock(rec, reasonText) {
+        try {
+            if (!rec || rec.__omniVerifyReported) return;
+            rec.__omniVerifyReported = true;
+            if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.reportVerificationLock) {
+                window.OmniAnalyticsBridge.reportVerificationLock(window.__omniProfileId || 'default', String(reasonText || 'Account verification required').slice(0, 180));
+            }
+        } catch(_) {}
+    }
 
     function wireLog(tag, msg) {
         try {
@@ -843,14 +849,18 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
             rec.error = 'HTTP Error ' + rec.httpStatus;
         }
         var lowerWireErr = String(rec.error || rec.statusDetails || '').toLowerCase();
-        var isQuotaHit = rec.httpStatus === 429 || rec.statusCode === 8 ||
-            lowerWireErr.indexOf('quota') !== -1 ||
-            lowerWireErr.indexOf('resource exhausted') !== -1 ||
-            lowerWireErr.indexOf('resource_exhausted') !== -1 ||
-            lowerWireErr.indexOf('rate limit') !== -1 ||
-            lowerWireErr.indexOf('429') !== -1;
-        if (isQuotaHit) {
-            reportWireQuota(rec, rec.error || rec.statusDetails || ('Quota Exhausted (' + (rec.httpStatus || rec.statusCode) + ')'));
+        if (isVerificationLockMsg(lowerWireErr)) {
+            reportWireVerificationLock(rec, rec.error || rec.statusDetails || 'Account verification required');
+        } else {
+            var isQuotaHit = rec.httpStatus === 429 || rec.statusCode === 8 ||
+                lowerWireErr.indexOf('quota') !== -1 ||
+                lowerWireErr.indexOf('resource exhausted') !== -1 ||
+                lowerWireErr.indexOf('resource_exhausted') !== -1 ||
+                lowerWireErr.indexOf('rate limit') !== -1 ||
+                lowerWireErr.indexOf('429') !== -1;
+            if (isQuotaHit) {
+                reportWireQuota(rec, rec.error || rec.statusDetails || ('Quota Exhausted (' + (rec.httpStatus || rec.statusCode) + ')'));
+            }
         }
         wireLog('WIRE_STREAM_END', 'Stream #' + rec.id + ' (' + rec.transport + ') ended | http=' + rec.httpStatus + ' statusCode=' + rec.statusCode + ' chunks=' + rec.chunkCount + ' out=' + rec.output.length + 'c stitched=' + (rec.stitchedOutput ? rec.stitchedOutput.length : rec.output.length) + 'c thoughts=' + rec.thoughts.length + 'c err=' + rec.error + ' | ms=' + (rec.endedAt - rec.startedAt));
         emitUpdate(rec);
