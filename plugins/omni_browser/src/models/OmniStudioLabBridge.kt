@@ -43,11 +43,13 @@ class OmniStudioLabBridge(
             }
             val analytics = vault.loadAiAnalytics()
             val now = System.currentTimeMillis()
-            val healthy = profiles.filter { prof ->
+            val unverifiedFiltered = profiles.filter { !(analytics[it.id]?.needsVerification ?: false) }
+            val candidateBase = if (unverifiedFiltered.isNotEmpty()) unverifiedFiltered else profiles
+            val healthy = candidateBase.filter { prof ->
                 val qTime = analytics[prof.id]?.lastQuotaHitTimestamp ?: 0L
-                qTime == 0L || (now - qTime) >= 24 * 60 * 60 * 1000L
+                !com.omni.plugin.browser.utils.isQuotaCurrentlyActive(qTime, now)
             }
-            val pool = if (healthy.isNotEmpty()) healthy else profiles
+            val pool = if (healthy.isNotEmpty()) healthy else candidateBase
             val chosen = pool.random()
             bridge.log("STUDIO_LAB", "🎲 [RANDOM PROFILE] Selected '${chosen.name}' (${chosen.id}) from ${pool.size} profile(s)")
             return chosen.id
@@ -143,19 +145,26 @@ class OmniStudioLabBridge(
                 }
                 val analytics = vault.loadAiAnalytics()
                 val now = System.currentTimeMillis()
+                val today = com.omni.plugin.browser.utils.getAnalyticsTodayKey(now)
                 val arr = JSONArray()
                 profiles.forEach { prof ->
                     val a = analytics[prof.id]
                     val qTime = a?.lastQuotaHitTimestamp ?: 0L
-                    val isExhausted = qTime > 0L && (now - qTime) < 24 * 60 * 60 * 1000L
+                    val isExhausted = com.omni.plugin.browser.utils.isQuotaCurrentlyActive(qTime, now)
+                    val needsVerify = a?.needsVerification ?: false
                     arr.put(
                         JSONObject().apply {
                             put("id", prof.id)
                             put("name", prof.name)
                             put("color", String.format("#%06X", (0xFFFFFF and prof.colorValue.toInt())))
-                            put("promptsSentToday", a?.promptsSentToday ?: 0)
+                            put("promptsSentToday", a?.effectivePromptsToday(today) ?: 0)
+                            put("totalPromptsLifetime", a?.totalPromptsLifetime ?: 0)
                             put("lastQuotaHitTimestamp", qTime)
                             put("isQuotaExhausted", isExhausted)
+                            put("needsVerification", needsVerify)
+                            put("verificationRequiredAt", a?.verificationRequiredAt ?: 0L)
+                            put("verificationReason", a?.verificationReason ?: "")
+                            put("isAvailable", !isExhausted && !needsVerify)
                         }
                     )
                 }
