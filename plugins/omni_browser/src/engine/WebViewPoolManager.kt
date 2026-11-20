@@ -692,6 +692,9 @@ class WebViewPoolManager(
                     super.onPageStarted(view, url, favicon)
                     extractHostSafe(url).takeIf { it.isNotEmpty() }?.let { currentPageHost = it }
                     if (url != null) listener.onPageStarted(tabId, url)
+                    if (url != null && url.contains("aistudio.google.com")) {
+                        view?.evaluateJavascript("window.__omniProfileId = ${org.json.JSONObject.quote(profileId)};", null)
+                    }
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
                     view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
@@ -709,6 +712,7 @@ class WebViewPoolManager(
                     extractHostSafe(url).takeIf { it.isNotEmpty() }?.let { currentPageHost = it }
                     if (url != null) listener.onPageFinished(tabId, url)
                     if (url != null && url.contains("aistudio.google.com")) {
+                        view?.evaluateJavascript("window.__omniProfileId = ${org.json.JSONObject.quote(profileId)};", null)
                         view?.evaluateJavascript(AI_STUDIO_READ_ALOUD_SCRIPT, null)
                     }
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
