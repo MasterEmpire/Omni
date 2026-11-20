@@ -2728,23 +2728,28 @@ fun getFileEmoji(filename: String): String {
 
 fun resolveMimeType(file: java.io.File): String {
     val ext = file.extension.lowercase(Locale.US)
-    val defaultMime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
-    if (!defaultMime.isNullOrEmpty()) return defaultMime
-
     return when (ext) {
         "pdf" -> "application/pdf"
         "zip" -> "application/zip"
         "apk" -> "application/vnd.android.package-archive"
         "json" -> "application/json"
         "html", "htm" -> "text/html"
-        "txt", "log", "md" -> "text/plain"
+        "txt", "log", "md", "kt", "py", "js", "ts", "xml", "yaml", "yml", "csv" -> "text/plain"
         "png" -> "image/png"
         "jpg", "jpeg" -> "image/jpeg"
         "webp" -> "image/webp"
         "gif" -> "image/gif"
-        "mp4", "mkv", "webm" -> "video/*"
-        "mp3", "wav", "m4a", "flac" -> "audio/*"
-        else -> "*/*"
+        "mp4" -> "video/mp4"
+        "webm" -> "video/webm"
+        "mov" -> "video/quicktime"
+        "mkv" -> "video/x-matroska"
+        "mp3" -> "audio/mpeg"
+        "wav" -> "audio/wav"
+        "m4a" -> "audio/mp4"
+        "flac" -> "audio/flac"
+        "ogg" -> "audio/ogg"
+        "aac" -> "audio/aac"
+        else -> android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
     }
 }
 
