@@ -1634,6 +1634,12 @@ class OmniPlayerPlugin : PluginEntry() {
         var isDelayWidgetVisible by remember { mutableStateOf(false) }
 
         var inspectingCueText by remember { mutableStateOf("") }
+        var inlineCueText by remember { mutableStateOf("") }
+        var inlineTranslationText by remember { mutableStateOf("") }
+        var inlineTranslationStatus by remember { mutableStateOf("") }
+        var inlineIsLoading by remember { mutableStateOf(false) }
+        var inlineError by remember { mutableStateOf<String?>(null) }
+        var inlineRequestSeq by remember { mutableIntStateOf(0) }
 
         val scope = rememberCoroutineScope()
 
@@ -1778,6 +1784,11 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
                 bridge.setImmersiveMode(false)
                 bridge.setScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+            }
+        }
+        DisposableEffect(Unit) {
+            onDispose {
+                OmniAiBridgeClient.closeSession(bridge)
             }
         }
 
@@ -2707,13 +2718,103 @@ class OmniPlayerPlugin : PluginEntry() {
                 }
             }
 
-            // --- LIVE ON-VIDEO SUBTITLE CUE OVERLAY (TAP TO AI-INSPECT, HOLD & DRAG TO MOVE) ---
+            // --- LIVE ON-VIDEO SUBTITLE CUE OVERLAY (1ST TAP: INLINE ABOVE SUBTITLE, 2ND TAP: FULL MODAL) ---
             val activeCueText = remember(currentPos, subtitleState.delaySec, subtitleState.cues.size, subtitleState.isEnabled) {
                 subtitleState.getCurrentCue(currentPos)
             }
+
+            fun startInlineTranslation(targetCue: String) {
+                val provider = OmniAiBridgeClient.getProvider(context)
+                if (provider == OmniAiBridgeClient.PROVIDER_GROQ && !GroqAiService.isKeyConfigured(context)) {
+                    inspectingCueText = targetCue
+                    activeSubtitleModal = "GROQ_KEY"
+                    return
+                }
+                val mySeq = ++inlineRequestSeq
+                inlineCueText = targetCue
+                inlineTranslationText = ""
+                inlineError = null
+                inlineIsLoading = true
+                inlineTranslationStatus = if (provider == OmniAiBridgeClient.PROVIDER_OMNI_BROWSER) {
+                    if (OmniAiBridgeClient.warmState == "WARM") "Translating..." else "Warming AI Studio..."
+                } else {
+                    "Thinking..."
+                }
+
+                if (provider == OmniAiBridgeClient.PROVIDER_OMNI_BROWSER) {
+                    val prompt = "Subtitle line: \"$targetCue\"\nState directly and plainly what this exact line means."
+                    OmniAiBridgeClient.askStreaming(
+                        context = context,
+                        bridge = bridge,
+                        prompt = prompt,
+                        label = "Subtitle",
+                        onStatus = { st ->
+                            if (inlineRequestSeq == mySeq) inlineTranslationStatus = st
+                        },
+                        onDelta = { delta ->
+                            if (inlineRequestSeq == mySeq) inlineTranslationText += delta
+                        },
+                        onComplete = { finalOut ->
+                            if (inlineRequestSeq == mySeq) {
+                                inlineTranslationText = finalOut
+                                inlineIsLoading = false
+                            }
+                        },
+                        onError = { err ->
+                            if (inlineRequestSeq == mySeq) {
+                                inlineError = err
+                                inlineIsLoading = false
+                            }
+                        }
+                    )
+                } else {
+                    scope.launch {
+                        try {
+                            val res = GroqAiService.explainDialogue(context, targetCue)
+                            if (inlineRequestSeq == mySeq) {
+                                inlineTranslationText = res
+                                inlineIsLoading = false
+                            }
+                        } catch (e: Exception) {
+                            if (inlineRequestSeq == mySeq) {
+                                inlineError = e.message ?: "Failed to translate"
+                                inlineIsLoading = false
+                            }
+                        }
+                    }
+                }
+            }
+
+            LaunchedEffect(activeCueText, isPlaying) {
+                if (isPlaying || activeCueText.isNullOrBlank() || (inlineCueText.isNotEmpty() && inlineCueText != activeCueText)) {
+                    if (activeSubtitleModal != "AI_INSPECT" && inlineCueText.isNotEmpty()) {
+                        inlineCueText = ""
+                        inlineTranslationText = ""
+                        inlineError = null
+                        inlineIsLoading = false
+                    }
+                }
+            }
+
+            val isInlineVisibleForCue = !isInPip &&
+                activeSubtitleModal != "AI_INSPECT" &&
+                !activeCueText.isNullOrBlank() &&
+                inlineCueText == activeCueText
+
             SubtitleOnVideoOverlay(
                 cueText = activeCueText,
                 subtitleState = subtitleState,
+                inlineVisible = isInlineVisibleForCue,
+                inlineText = inlineTranslationText,
+                inlineStatus = inlineTranslationStatus,
+                inlineIsLoading = inlineIsLoading,
+                inlineError = inlineError,
+                onTapInlineBox = {
+                    if (!activeCueText.isNullOrBlank()) {
+                        inspectingCueText = activeCueText
+                        activeSubtitleModal = "AI_INSPECT"
+                    }
+                },
                 onPositionChanged = { newFraction ->
                     bridge.vibrate(30L)
                     PlaybackHistoryManager.saveVideoState(
@@ -2732,10 +2833,10 @@ class OmniPlayerPlugin : PluginEntry() {
                         player.pause()
                         bridge.vibrate(35L)
                         inspectingCueText = activeCueText
-                        if (!GroqAiService.isKeyConfigured(context)) {
-                            activeSubtitleModal = "GROQ_KEY"
-                        } else {
+                        if (inlineCueText == activeCueText && (inlineIsLoading || inlineTranslationText.isNotBlank() || inlineError != null)) {
                             activeSubtitleModal = "AI_INSPECT"
+                        } else {
+                            startInlineTranslation(activeCueText)
                         }
                     }
                 },
@@ -2760,8 +2861,21 @@ class OmniPlayerPlugin : PluginEntry() {
             // --- SUBTITLE SUITE MODALS ---
             when (if (isInPip) null else activeSubtitleModal) {
                 "HUB" -> {
+                    val provider = OmniAiBridgeClient.getProvider(context)
+                    val engineSummary = if (provider == OmniAiBridgeClient.PROVIDER_OMNI_BROWSER) {
+                        val statusTag = when (OmniAiBridgeClient.warmState) {
+                            "WARM" -> "🟢 Warm"
+                            "WARMING" -> "🟡 Warming"
+                            "ERROR" -> "🔴 Error"
+                            else -> "⚪ Cold"
+                        }
+                        "Omni Browser (${OmniAiBridgeClient.getModel(context)}) • $statusTag"
+                    } else {
+                        "Groq (Qwen 3.8 27B)"
+                    }
                     SubtitleHubSheet(
                         subtitleState = subtitleState,
+                        aiEngineSummary = engineSummary,
                         onOpenFile = {
                             activeSubtitleModal = null
                             openSubtitleFilePicker()
@@ -2775,6 +2889,9 @@ class OmniPlayerPlugin : PluginEntry() {
                         onOpenDelay = {
                             activeSubtitleModal = null
                             isDelayWidgetVisible = true
+                        },
+                        onOpenAiSettings = {
+                            activeSubtitleModal = "GROQ_KEY"
                         },
                         onStateChanged = { persistSubtitleImmediately() },
                         onClose = { activeSubtitleModal = null }
@@ -2825,7 +2942,17 @@ class OmniPlayerPlugin : PluginEntry() {
                 "AI_INSPECT" -> {
                     AiDialogueInspectorSheet(
                         context = context,
+                        bridge = bridge,
                         currentCue = inspectingCueText,
+                        lineText = if (inlineCueText == inspectingCueText) inlineTranslationText else "",
+                        lineStatus = if (inlineCueText == inspectingCueText) inlineTranslationStatus else "",
+                        lineIsLoading = if (inlineCueText == inspectingCueText) inlineIsLoading else false,
+                        lineError = if (inlineCueText == inspectingCueText) inlineError else null,
+                        onRetryLine = {
+                            if (inspectingCueText.isNotBlank()) {
+                                startInlineTranslation(inspectingCueText)
+                            }
+                        },
                         onConfigureKey = { activeSubtitleModal = "GROQ_KEY" },
                         onResumeMovie = {
                             activeSubtitleModal = null
@@ -2837,10 +2964,12 @@ class OmniPlayerPlugin : PluginEntry() {
                 "GROQ_KEY" -> {
                     GroqKeyConfigDialog(
                         context = context,
+                        bridge = bridge,
                         onKeySaved = {
-                            bridge.showToast("Groq AI Settings Saved!")
+                            bridge.showToast("AI Settings Saved!")
                             if (inspectingCueText.isNotBlank()) {
-                                activeSubtitleModal = "AI_INSPECT"
+                                startInlineTranslation(inspectingCueText)
+                                activeSubtitleModal = null
                             } else {
                                 activeSubtitleModal = null
                             }
