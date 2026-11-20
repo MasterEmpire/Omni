@@ -212,7 +212,7 @@ object LiveAutoPilotEngine {
                             if (window.__omniWire && window.__omniWire.notifyUserPrompt) {
                                 window.__omniWire.notifyUserPrompt();
                             }
-                            if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
+                            if (!window.__omniWireHooked && window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
                                 window.OmniAnalyticsBridge.recordPrompt(window.__omniProfileId || 'default');
                             }
                         }, true);
@@ -225,7 +225,7 @@ object LiveAutoPilotEngine {
                                 if (window.__omniWire && window.__omniWire.notifyUserPrompt) {
                                     window.__omniWire.notifyUserPrompt();
                                 }
-                                if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
+                                if (!window.__omniWireHooked && window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
                                     window.OmniAnalyticsBridge.recordPrompt(window.__omniProfileId || 'default');
                                 }
                             }
@@ -234,14 +234,22 @@ object LiveAutoPilotEngine {
                 }
 
                 function checkQuotaErrors() {
-                    const errorTargets = document.querySelectorAll('ms-banner .error-banner-message, ms-global-banner, .chat-turn-container.model .model-error, ms-chat-turn .model-error, .cdk-overlay-container .mat-mdc-simple-snack-bar, .model-error');
+                    const errorTargets = document.querySelectorAll('ms-banner .error-banner-message, ms-global-banner, .chat-turn-container.model .model-error, ms-chat-turn .model-error, .cdk-overlay-container .mat-mdc-simple-snack-bar, .cdk-overlay-container mat-snack-bar-container, .mat-mdc-snack-bar-label, .model-error');
+                    const now = Date.now();
                     for (const el of errorTargets) {
-                        const txt = (el.innerText || el.textContent || '').toLowerCase();
-                        if (txt.includes('quota') || txt.includes('resource has been exhausted') || txt.includes('resource_exhausted') || txt.includes('rate limit') || txt.includes('429')) {
+                        const txt = (el.innerText || el.textContent || '').trim();
+                        const lower = txt.toLowerCase();
+                        if (lower.includes('quota') || lower.includes('resource has been exhausted') || lower.includes('resource_exhausted') || lower.includes('rate limit') || lower.includes('429')) {
+                            const snippet = txt.slice(0, 140);
                             if (el.getAttribute('data-omni-quota-logged') !== 'true') {
                                 el.setAttribute('data-omni-quota-logged', 'true');
+                                if (window.__omniLastDomQuotaTxt === snippet && (now - (window.__omniLastDomQuotaAt || 0)) < 10000) {
+                                    continue;
+                                }
+                                window.__omniLastDomQuotaTxt = snippet;
+                                window.__omniLastDomQuotaAt = now;
                                 if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.reportQuotaHit) {
-                                    window.OmniAnalyticsBridge.reportQuotaHit(window.__omniProfileId || 'default', txt.slice(0, 120));
+                                    window.OmniAnalyticsBridge.reportQuotaHit(window.__omniProfileId || 'default', snippet);
                                 }
                             }
                         }
