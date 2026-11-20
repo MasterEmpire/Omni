@@ -260,7 +260,7 @@ class OmniBrowser : PluginEntry() {
             val profileId = (payload["profile_id"] as? String)?.ifBlank { "default" } ?: "default"
             val model = (payload["model"] as? String) ?: "Gemini 3.8 Flash"
             val thinkingLevel = (payload["thinking_level"] as? String)?.ifBlank { "Default" } ?: "Default"
-            val temporaryChat = (payload["temporary_chat"] as? Boolean) ?: true
+            val temporaryChat = (payload["temporary_chat"] as? Boolean) ?: false
             val sysTitle = (payload["system_title"] as? String) ?: "Omni Assistant"
             val sysPrompt = (payload["system_prompt"] as? String) ?: ""
             @Suppress("UNCHECKED_CAST")
@@ -344,8 +344,10 @@ class OmniBrowser : PluginEntry() {
                                 if (session.turnSeq == mySeq) onComplete?.invoke(thoughts, output)
                             },
                             onError = { turnErr ->
-                                if (turnErr.contains("Verification Required", ignoreCase = true) ||
-                                    turnErr.contains("Quota Exhausted", ignoreCase = true)) {
+                                val isFatalSession = turnErr.contains("Verification Required", ignoreCase = true) ||
+                                    turnErr.contains("Quota Exhausted", ignoreCase = true) ||
+                                    turnErr.contains("permission", ignoreCase = true)
+                                if (isFatalSession) {
                                     session.automator.closeSession(session.sessionId)
                                     ipcAiSessions.remove(sessionKey)
                                 }
