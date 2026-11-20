@@ -36,6 +36,8 @@ data class BrowserConfig(
     val geminiApiKey: String = "",
     val autoReadAloud: Boolean = false,
     val geminiVoiceName: String = "Default",
+    val readAloudEnabled: Boolean = true,
+    val showReadAloudPill: Boolean = true,
     val activeMenuItems: List<String> = emptyList(),
     val hiddenMenuItems: List<String> = emptyList()
 )
@@ -396,7 +398,9 @@ class VaultManager(
         hiddenMenuItems: List<String> = emptyList(),
         geminiApiKey: String = "",
         autoReadAloud: Boolean = false,
-        geminiVoiceName: String = "Default"
+        geminiVoiceName: String = "Default",
+        readAloudEnabled: Boolean = true,
+        showReadAloudPill: Boolean = true
     ) {
         try {
             val cfg = JSONObject().apply {
@@ -414,6 +418,8 @@ class VaultManager(
                 put("geminiApiKey", geminiApiKey)
                 put("autoReadAloud", autoReadAloud)
                 put("geminiVoiceName", geminiVoiceName)
+                put("readAloudEnabled", readAloudEnabled)
+                put("showReadAloudPill", showReadAloudPill)
                 put("activeMenuItems", JSONArray(activeMenuItems))
                 put("hiddenMenuItems", JSONArray(hiddenMenuItems))
             }
@@ -453,6 +459,8 @@ class VaultManager(
                 geminiApiKey = json.optString("geminiApiKey", ""),
                 autoReadAloud = json.optBoolean("autoReadAloud", false),
                 geminiVoiceName = json.optString("geminiVoiceName", "Default"),
+                readAloudEnabled = json.optBoolean("readAloudEnabled", true),
+                showReadAloudPill = json.optBoolean("showReadAloudPill", true),
                 activeMenuItems = aMenu,
                 hiddenMenuItems = hMenu
             )
