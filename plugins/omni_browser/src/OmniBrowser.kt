@@ -428,7 +428,22 @@ class OmniBrowser : PluginEntry() {
         val activeTab = state.tabs.find { it.id == state.activeTabId }
         val activeProf = state.profiles.find { it.id == activeTab?.profileId } ?: state.profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF2979FF)
         val profColor = remember(activeProf.colorValue) { Color(activeProf.colorValue) }
-        val isImeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+        val rootView = androidx.compose.ui.platform.LocalView.current
+        var isImeLayoutVisible by remember { mutableStateOf(false) }
+        DisposableEffect(rootView) {
+            val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener {
+                val rect = android.graphics.Rect()
+                rootView.getWindowVisibleDisplayFrame(rect)
+                val screenHeight = rootView.rootView.height
+                val keypadHeight = screenHeight - rect.bottom
+                isImeLayoutVisible = screenHeight > 0 && keypadHeight > screenHeight * 0.15f
+            }
+            rootView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+            onDispose {
+                rootView.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+            }
+        }
+        val isImeVisible = isImeLayoutVisible || (WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0)
 
         fun dispatchSlotAction(slotId: String) {
             when (slotId) {
@@ -474,6 +489,10 @@ class OmniBrowser : PluginEntry() {
 
         fun dispatchSlotLongClick(slotId: String) {
             when (slotId) {
+                "menu" -> {
+                    bridge.vibrate(25L)
+                    state.isBottomBarCollapsed = !state.isBottomBarCollapsed
+                }
                 "quick_toggle" -> state.switchToThirdRecentTab()
                 "tabs" -> state.togglePreviousTab()
                 "site_cache" -> state.clearCurrentSiteCache()
@@ -501,6 +520,7 @@ class OmniBrowser : PluginEntry() {
                     },
                     profColor = profColor,
                     tabCount = state.tabs.size,
+                    topLeftItems = state.topLeftItems,
                     topBarItems = state.topBarItems,
                     isHomeOverlayOpen = state.isHomeOverlayOpen,
                     isSearchFocused = state.isSearchFocused,
@@ -512,12 +532,17 @@ class OmniBrowser : PluginEntry() {
                             state.dismissSearch()
                         }
                     },
-                    onReloadClick = { state.reloadCurrentPage() },
                     onActionClick = { dispatchSlotAction(it) },
                     onActionLongClick = { dispatchSlotLongClick(it) },
                     isAutoPilotActive = state.isLiveAutoPilotEnabled,
                     isDataSaverActive = state.isEffectiveDataSaver(),
+                    forceDarkWebPages = state.forceDarkWebPages,
+                    dataSaverMode = state.dataSaverMode,
+                    isCurrentTabFavorite = activeTab?.isFavorite == true,
+                    isFocusLockActive = isFocusLockActive(context),
                     activeDownloadsCount = state.trackedDownloadIds.size,
+                    canGoBack = state.canGoBack,
+                    canGoForward = state.canGoForward,
                     onTopBarDragStart = { state.onTopBarDragStart() },
                     onTopBarDrag = { state.onTopBarDrag(it) },
                     onTopBarDragEnd = { state.onTopBarDragEnd() },
@@ -689,7 +714,7 @@ class OmniBrowser : PluginEntry() {
                     }
                 }
 
-                if (!isImeVisible) {
+                if (!isImeVisible && !state.isBottomBarCollapsed) {
                     OmniBottomBar(
                         bottomBarItems = state.bottomBarItems,
                         profColor = profColor,
@@ -700,6 +725,9 @@ class OmniBrowser : PluginEntry() {
                         isHomeOverlayOpen = state.isHomeOverlayOpen,
                         isAutoPilotActive = state.isLiveAutoPilotEnabled,
                         forceDarkWebPages = state.forceDarkWebPages,
+                        dataSaverMode = state.dataSaverMode,
+                        isCurrentTabFavorite = activeTab?.isFavorite == true,
+                        isFocusLockActive = isFocusLockActive(context),
                         activeDownloadsCount = state.trackedDownloadIds.size,
                         showMenu = state.showMenu,
                         onItemClick = { dispatchSlotAction(it) },
@@ -1057,12 +1085,16 @@ class OmniBrowser : PluginEntry() {
                         initialHidden = state.hiddenMenuItems,
                         initialBottomBar = state.bottomBarItems,
                         initialTopBar = state.topBarItems,
-                        onSave = { aMenu, hMenu, bMenu, tMenu ->
+                        initialTopLeft = state.topLeftItems,
+                        onSave = { aMenu, hMenu, bMenu, tMenu, tlMenu ->
+                            val hasAnyMenuTrigger = ("menu" in bMenu) || ("menu" in tMenu) || ("menu" in tlMenu)
+                            val safeBottom = if (hasAnyMenuTrigger) bMenu else (bMenu + "menu")
                             state.activeMenuItems = aMenu
                             state.hiddenMenuItems = hMenu
-                            state.bottomBarItems = if ("menu" in bMenu) bMenu else (bMenu + "menu")
+                            state.bottomBarItems = safeBottom
                             state.topBarItems = tMenu
-                            state.vaultManager.saveMenuLayout(aMenu, hMenu, state.bottomBarItems, tMenu)
+                            state.topLeftItems = tlMenu
+                            state.vaultManager.saveMenuLayout(aMenu, hMenu, safeBottom, tMenu, tlMenu)
                             bridge.showToast("Bars & menu layout updated!")
                             state.showMenuCustomizerDialog = false
                         },
@@ -1391,6 +1423,21 @@ class OmniBrowser : PluginEntry() {
                     .align(Alignment.CenterEnd)
                     .padding(end = 10.dp)
                     .zIndex(34f)
+            )
+            BottomBarExpandFab(
+                visible = state.isBottomBarCollapsed && !isImeVisible && !state.isTabSwitcherOpen,
+                profColor = profColor,
+                isAutoPilotActive = state.isLiveAutoPilotEnabled,
+                onExpand = { state.isBottomBarCollapsed = false },
+                onOpenMenu = {
+                    state.refreshSiteCacheSize()
+                    state.showMenu = true
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 12.dp, bottom = 12.dp)
+                    .zIndex(33f)
             )
 
             UndoBanner(
