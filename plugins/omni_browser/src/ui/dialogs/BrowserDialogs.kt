@@ -325,12 +325,14 @@ fun SettingsBackupDialog(
     geminiApiKey: String = "",
     autoReadAloud: Boolean = false,
     geminiVoiceName: String = "Default",
+    readAloudEnabled: Boolean = true,
+    showReadAloudPill: Boolean = true,
     onExportBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onSolveNow: () -> Unit,
     onClearCookiesAndCache: () -> Unit,
     onCustomizeMenu: () -> Unit,
-    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String, String, Boolean, String, Boolean, String) -> Unit,
+    onSave: (String, Boolean, Boolean, Int, Boolean, Boolean, Boolean, String, String, Boolean, String, Boolean, String, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var tempKey by remember { mutableStateOf(apiKey) }
@@ -346,6 +348,8 @@ fun SettingsBackupDialog(
     var tempGeminiApiKey by remember { mutableStateOf(geminiApiKey) }
     var tempAutoReadAloud by remember { mutableStateOf(autoReadAloud) }
     var tempGeminiVoiceName by remember { mutableStateOf(geminiVoiceName) }
+    var tempReadAloudEnabled by remember { mutableStateOf(readAloudEnabled) }
+    var tempShowReadAloudPill by remember { mutableStateOf(showReadAloudPill) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF282C34),
@@ -456,6 +460,38 @@ fun SettingsBackupDialog(
                 HorizontalDivider(color = Color(0xFF3C4043))
 
                 Text("🎙️ Gemini Live Read Aloud (3.8 Live)", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("🎙️ Enable Read Aloud", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Injects Read buttons on AI Studio bubbles and enables voice playback", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempReadAloudEnabled,
+                        onCheckedChange = { tempReadAloudEnabled = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00E5FF))
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("💊 Show Floating Read Pill", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Displays the draggable Read Last pill over AI Studio", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = tempShowReadAloudPill,
+                        enabled = tempReadAloudEnabled,
+                        onCheckedChange = { tempShowReadAloudPill = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00E5FF))
+                    )
+                }
 
                 OutlinedTextField(
                     value = tempGeminiApiKey,
@@ -744,7 +780,8 @@ fun SettingsBackupDialog(
                     onSave(
                         tempKey.trim(), tempAuto, tempForceDark, portNum, tempEruda, tempDesktop, tempAudio,
                         tempDataSaverMode, tempPickerProvider, tempBlockAiStudioBack,
-                        tempGeminiApiKey.trim(), tempAutoReadAloud, tempGeminiVoiceName
+                        tempGeminiApiKey.trim(), tempAutoReadAloud, tempGeminiVoiceName,
+                        tempReadAloudEnabled, tempShowReadAloudPill
                     )
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
