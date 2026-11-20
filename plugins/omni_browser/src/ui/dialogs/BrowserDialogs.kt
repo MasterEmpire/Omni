@@ -13,6 +13,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -969,24 +978,24 @@ fun MenuCustomizerDialog(
     onSave: (List<String>, List<String>, List<String>, List<String>, List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var topLeft by remember { mutableStateOf(initialTopLeft) }
-    var topBar by remember { mutableStateOf(initialTopBar) }
-    var bottomBar by remember { mutableStateOf(initialBottomBar) }
-    var active by remember { mutableStateOf(initialActive) }
-    var hidden by remember { mutableStateOf(initialHidden) }
-    var addPickerZone by remember { mutableStateOf<String?>(null) } // "TOP_LEFT", "TOP_RIGHT", "BOTTOM", "GRID"
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
 
-    fun moveUp(list: List<String>, idx: Int): List<String> {
-        if (idx <= 0) return list
-        val m = list.toMutableList()
-        val t = m[idx - 1]; m[idx - 1] = m[idx]; m[idx] = t
-        return m
-    }
+    var topLeft by remember { mutableStateOf(initialTopLeft.distinct()) }
+    var topBar by remember { mutableStateOf(initialTopBar.distinct()) }
+    var bottomBar by remember { mutableStateOf(initialBottomBar.distinct()) }
+    var active by remember { mutableStateOf(initialActive.distinct()) }
+    var hidden by remember { mutableStateOf(initialHidden.distinct()) }
+    var activeZone by remember { mutableStateOf("BOTTOM") } // "TOP_LEFT", "TOP_RIGHT", "BOTTOM", "GRID"
+    var addPickerZone by remember { mutableStateOf<String?>(null) }
 
-    fun moveDown(list: List<String>, idx: Int): List<String> {
-        if (idx >= list.lastIndex) return list
+    fun reorderByKey(list: List<String>, fromKey: Any?, toKey: Any?): List<String> {
+        val fromIdx = list.indexOfFirst { it == fromKey }
+        val toIdx = list.indexOfFirst { it == toKey }
+        if (fromIdx == -1 || toIdx == -1 || fromIdx == toIdx) return list
         val m = list.toMutableList()
-        val t = m[idx + 1]; m[idx + 1] = m[idx]; m[idx] = t
+        val item = m.removeAt(fromIdx)
+        m.add(toIdx, item)
         return m
     }
 
@@ -995,6 +1004,20 @@ fun MenuCustomizerDialog(
         val inRight = if (removingZone == "TOP_RIGHT") 0 else topBar.count { it == "menu" }
         val inBottom = if (removingZone == "BOTTOM") 0 else bottomBar.count { it == "menu" }
         return (inLeft + inRight + inBottom) > 0
+    }
+
+    val zoneTabs = listOf(
+        Triple("TOP_LEFT", "Top Left", Color(0xFFBC8CFF)),
+        Triple("TOP_RIGHT", "Top Right", Color(0xFF00E5FF)),
+        Triple("BOTTOM", "Bottom", Color(0xFFD29922)),
+        Triple("GRID", "Grid", Color(0xFF81C995))
+    )
+
+    val (currentItems, zoneMax, zoneAccent) = when (activeZone) {
+        "TOP_LEFT" -> Triple(topLeft, 3, Color(0xFFBC8CFF))
+        "TOP_RIGHT" -> Triple(topBar, 3, Color(0xFF00E5FF))
+        "BOTTOM" -> Triple(bottomBar, 7, Color(0xFFD29922))
+        else -> Triple(active, 99, Color(0xFF81C995))
     }
 
     AlertDialog(
@@ -1009,284 +1032,254 @@ fun MenuCustomizerDialog(
             }
         },
         text = {
-            LazyColumn(
+            Column(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 1. TOP LEFT SLOTS
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("TOP LEFT SLOTS (${topLeft.size}/3)", color = Color(0xFFBC8CFF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        if (topLeft.size < 3) {
-                            TextButton(
-                                onClick = { addPickerZone = "TOP_LEFT" },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                modifier = Modifier.height(24.dp)
-                            ) {
-                                Text("+ Add", color = Color(0xFFBC8CFF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-
-                items(topLeft.size) { index ->
-                    val id = topLeft[index]
-                    val canRemoveMenu = id != "menu" || isMenuAvailableSomewhere("TOP_LEFT")
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF161B22),
-                        border = BorderStroke(1.dp, Color(0xFFBC8CFF).copy(alpha = 0.35f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Icon(getBrowserIconForSlot(id), contentDescription = null, tint = Color(0xFFBC8CFF), modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(BROWSER_SLOT_LABEL_MAP[id] ?: id, color = Color.White, fontSize = 11.sp)
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { topLeft = moveUp(topLeft, index) }, enabled = index > 0, modifier = Modifier.size(22.dp)) {
-                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Left", tint = if (index > 0) Color(0xFF58A6FF) else Color(0xFF5F6368))
-                                }
-                                IconButton(onClick = { topLeft = moveDown(topLeft, index) }, enabled = index < topLeft.lastIndex, modifier = Modifier.size(22.dp)) {
-                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Right", tint = if (index < topLeft.lastIndex) Color(0xFF58A6FF) else Color(0xFF5F6368))
-                                }
-                                if (canRemoveMenu) {
-                                    TextButton(
-                                        onClick = { topLeft = topLeft.filterIndexed { i, _ -> i != index } },
-                                        contentPadding = PaddingValues(horizontal = 4.dp),
-                                        modifier = Modifier.height(22.dp)
-                                    ) {
-                                        Text("Remove", color = Color(0xFFF28B82), fontSize = 10.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 2. TOP RIGHT SLOTS
-                item {
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("TOP RIGHT SLOTS (${topBar.size}/3)", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        if (topBar.size < 3) {
-                            TextButton(
-                                onClick = { addPickerZone = "TOP_RIGHT" },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                modifier = Modifier.height(24.dp)
-                            ) {
-                                Text("+ Add", color = Color(0xFF00E5FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-
-                items(topBar.size) { index ->
-                    val id = topBar[index]
-                    val canRemoveMenu = id != "menu" || isMenuAvailableSomewhere("TOP_RIGHT")
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF161B22),
-                        border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.35f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Icon(getBrowserIconForSlot(id), contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(BROWSER_SLOT_LABEL_MAP[id] ?: id, color = Color.White, fontSize = 11.sp)
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { topBar = moveUp(topBar, index) }, enabled = index > 0, modifier = Modifier.size(22.dp)) {
-                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Left", tint = if (index > 0) Color(0xFF58A6FF) else Color(0xFF5F6368))
-                                }
-                                IconButton(onClick = { topBar = moveDown(topBar, index) }, enabled = index < topBar.lastIndex, modifier = Modifier.size(22.dp)) {
-                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Right", tint = if (index < topBar.lastIndex) Color(0xFF58A6FF) else Color(0xFF5F6368))
-                                }
-                                if (canRemoveMenu) {
-                                    TextButton(
-                                        onClick = { topBar = topBar.filterIndexed { i, _ -> i != index } },
-                                        contentPadding = PaddingValues(horizontal = 4.dp),
-                                        modifier = Modifier.height(22.dp)
-                                    ) {
-                                        Text("Remove", color = Color(0xFFF28B82), fontSize = 10.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 3. BOTTOM NAV BAR
-                item {
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("BOTTOM NAV BAR (${bottomBar.size}/6)", color = Color(0xFFD29922), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        if (bottomBar.size < 6) {
-                            TextButton(
-                                onClick = { addPickerZone = "BOTTOM" },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                modifier = Modifier.height(24.dp)
-                            ) {
-                                Text("+ Add", color = Color(0xFFD29922), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-
-                items(bottomBar.size) { index ->
-                    val id = bottomBar[index]
-                    val canRemoveMenu = id != "menu" || isMenuAvailableSomewhere("BOTTOM")
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF161B22),
-                        border = BorderStroke(1.dp, Color(0xFFD29922).copy(alpha = 0.4f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Icon(getBrowserIconForSlot(id), contentDescription = null, tint = Color(0xFFD29922), modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(BROWSER_SLOT_LABEL_MAP[id] ?: id, color = Color.White, fontSize = 11.sp)
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { bottomBar = moveUp(bottomBar, index) }, enabled = index > 0, modifier = Modifier.size(22.dp)) {
-                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Left", tint = if (index > 0) Color(0xFF58A6FF) else Color(0xFF5F6368))
-                                }
-                                IconButton(onClick = { bottomBar = moveDown(bottomBar, index) }, enabled = index < bottomBar.lastIndex, modifier = Modifier.size(22.dp)) {
-                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Right", tint = if (index < bottomBar.lastIndex) Color(0xFF58A6FF) else Color(0xFF5F6368))
-                                }
-                                if (canRemoveMenu) {
-                                    TextButton(
-                                        onClick = { bottomBar = bottomBar.filterIndexed { i, _ -> i != index } },
-                                        contentPadding = PaddingValues(horizontal = 4.dp),
-                                        modifier = Modifier.height(22.dp)
-                                    ) {
-                                        Text("Remove", color = Color(0xFFF28B82), fontSize = 10.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 4. HAMBURGER 5x2 GRID
-                item {
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("HAMBURGER GRID (10 per page)", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        TextButton(
-                            onClick = { addPickerZone = "GRID" },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            modifier = Modifier.height(24.dp)
-                        ) {
-                            Text("+ Add", color = Color(0xFF81C995), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                items(active.size) { index ->
-                    val id = active[index]
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF1F2227),
-                        border = BorderStroke(1.dp, Color(0xFF3C4043)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Icon(getBrowserIconForSlot(id), contentDescription = null, tint = Color(0xFF81C995), modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(BROWSER_SLOT_LABEL_MAP[id] ?: id, color = Color.White, fontSize = 11.sp)
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { active = moveUp(active, index) }, enabled = index > 0, modifier = Modifier.size(22.dp)) {
-                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Up", tint = if (index > 0) Color(0xFF58A6FF) else Color(0xFF5F6368))
-                                }
-                                IconButton(onClick = { active = moveDown(active, index) }, enabled = index < active.lastIndex, modifier = Modifier.size(22.dp)) {
-                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Down", tint = if (index < active.lastIndex) Color(0xFF58A6FF) else Color(0xFF5F6368))
-                                }
-                                TextButton(
-                                    onClick = {
-                                        active = active.filter { it != id }
-                                        if (id !in hidden) hidden = hidden + id
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 4.dp),
-                                    modifier = Modifier.height(22.dp)
-                                ) {
-                                    Text("Hide", color = Color(0xFFF28B82), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (hidden.isNotEmpty()) {
-                    item {
-                        Spacer(Modifier.height(6.dp))
-                        Text("HIDDEN ITEMS", color = Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    items(hidden.size) { index ->
-                        val id = hidden[index]
+                // 4-Tab Zone Switcher
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF161B22))
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    zoneTabs.forEach { (zId, zLabel, zCol) ->
+                        val isSel = activeZone == zId
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF161B22),
-                            border = BorderStroke(1.dp, Color(0xFF3C4043)),
-                            modifier = Modifier.fillMaxWidth()
+                            color = if (isSel) zCol.copy(alpha = 0.2f) else Color.Transparent,
+                            border = if (isSel) BorderStroke(1.dp, zCol) else null,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { activeZone = zId }
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                    Icon(getBrowserIconForSlot(id), contentDescription = null, tint = Color(0xFF9AA0A6), modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(BROWSER_SLOT_LABEL_MAP[id] ?: id, color = Color(0xFF9AA0A6), fontSize = 11.sp)
+                            Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = zLabel,
+                                    color = if (isSel) zCol else Color(0xFF9AA0A6),
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Header + Always-Visible Add Button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val countLabel = if (activeZone == "GRID") {
+                        "HAMBURGER GRID (${currentItems.size} items)"
+                    } else {
+                        "DRAG TO REORDER (${currentItems.size}/$zoneMax)"
+                    }
+                    Text(countLabel, color = zoneAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = zoneAccent.copy(alpha = 0.16f),
+                        border = BorderStroke(1.dp, zoneAccent.copy(alpha = 0.65f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                if (activeZone != "GRID" && currentItems.size >= zoneMax) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Max $zoneMax items here — remove one first",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    addPickerZone = activeZone
                                 }
-                                TextButton(
-                                    onClick = {
-                                        hidden = hidden.filter { it != id }
-                                        if (id !in active) active = active + id
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 4.dp),
-                                    modifier = Modifier.height(22.dp)
-                                ) {
-                                    Text("+ Show", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                    ) {
+                        Text(
+                            text = "+ Add",
+                            color = zoneAccent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                // Drag-and-Drop Reorderable List for Selected Zone
+                key(activeZone) {
+                    val listState = rememberLazyListState()
+                    val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+                        when (activeZone) {
+                            "TOP_LEFT" -> topLeft = reorderByKey(topLeft, from.key, to.key)
+                            "TOP_RIGHT" -> topBar = reorderByKey(topBar, from.key, to.key)
+                            "BOTTOM" -> bottomBar = reorderByKey(bottomBar, from.key, to.key)
+                            "GRID" -> active = reorderByKey(active, from.key, to.key)
+                        }
+                    }
+
+                    if (currentItems.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF161B22)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No items in this zone. Tap + Add above.", color = Color(0xFF8B949E), fontSize = 12.sp)
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        ) {
+                            items(currentItems, key = { it }) { id ->
+                                ReorderableItem(reorderableState, key = id) { isDragging ->
+                                    val elevation by animateDpAsState(if (isDragging) 12.dp else 0.dp)
+                                    val canRemove = id != "menu" || (activeZone != "GRID" && isMenuAvailableSomewhere(activeZone))
+
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isDragging) Color(0xFF21262D) else Color(0xFF161B22),
+                                        border = BorderStroke(
+                                            if (isDragging) 1.5.dp else 1.dp,
+                                            if (isDragging) zoneAccent else zoneAccent.copy(alpha = 0.35f)
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .graphicsLayer { shadowElevation = elevation.toPx() }
+                                            .longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                }
+                                            )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 7.dp, bottom = 7.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .draggableHandle(
+                                                            onDragStarted = {
+                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                            }
+                                                        )
+                                                ) {
+                                                    Icon(
+                                                        BrowserIcons.DragHandle,
+                                                        contentDescription = "Drag",
+                                                        tint = if (isDragging) zoneAccent else Color(0xFF8B949E),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                                Spacer(Modifier.width(6.dp))
+                                                Icon(
+                                                    getBrowserIconForSlot(id),
+                                                    contentDescription = null,
+                                                    tint = zoneAccent,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    BROWSER_SLOT_LABEL_MAP[id] ?: id,
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+
+                                            if (canRemove) {
+                                                TextButton(
+                                                    onClick = {
+                                                        when (activeZone) {
+                                                            "TOP_LEFT" -> topLeft = topLeft.filter { it != id }
+                                                            "TOP_RIGHT" -> topBar = topBar.filter { it != id }
+                                                            "BOTTOM" -> bottomBar = bottomBar.filter { it != id }
+                                                            "GRID" -> {
+                                                                active = active.filter { it != id }
+                                                                if (id !in hidden) hidden = hidden + id
+                                                            }
+                                                        }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 6.dp),
+                                                    modifier = Modifier.height(24.dp)
+                                                ) {
+                                                    Text(
+                                                        if (activeZone == "GRID") "Hide" else "Remove",
+                                                        color = Color(0xFFF28B82),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Hidden Items Strip inside Grid Tab
+                if (activeZone == "GRID" && hidden.isNotEmpty()) {
+                    HorizontalDivider(color = Color(0xFF3C4043))
+                    Text("HIDDEN ITEMS (${hidden.size}) — Tap to restore", color = Color(0xFF9AA0A6), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 84.dp)
+                            .verticalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+                            hidden.chunked(2).forEach { pair ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                    pair.forEach { hId ->
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFF161B22),
+                                            border = BorderStroke(1.dp, Color(0xFF3C4043)),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    hidden = hidden.filter { it != hId }
+                                                    if (hId !in active) active = active + hId
+                                                }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    BROWSER_SLOT_LABEL_MAP[hId] ?: hId,
+                                                    color = Color(0xFF9AA0A6),
+                                                    fontSize = 10.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Text("+ Show", color = Color(0xFF81C995), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                                 }
                             }
                         }
@@ -1346,7 +1339,7 @@ fun MenuCustomizerDialog(
                                     when (zone) {
                                         "TOP_LEFT" -> if (!alreadyInZone && topLeft.size < 3) topLeft = topLeft + slotId
                                         "TOP_RIGHT" -> if (!alreadyInZone && topBar.size < 3) topBar = topBar + slotId
-                                        "BOTTOM" -> if (!alreadyInZone && bottomBar.size < 6) bottomBar = bottomBar + slotId
+                                        "BOTTOM" -> if (!alreadyInZone && bottomBar.size < 7) bottomBar = bottomBar + slotId
                                         "GRID" -> {
                                             if (!alreadyInZone) {
                                                 active = active + slotId
