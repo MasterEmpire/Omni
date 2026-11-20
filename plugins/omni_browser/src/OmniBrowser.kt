@@ -688,9 +688,7 @@ class OmniBrowser : PluginEntry() {
                         }
                     }
                 }
-            }
 
-            // --- Overlays & Screens ---
                 if (!isImeVisible) {
                     OmniBottomBar(
                         bottomBarItems = state.bottomBarItems,
@@ -708,6 +706,9 @@ class OmniBrowser : PluginEntry() {
                         onItemLongClick = { dispatchSlotLongClick(it) }
                     )
                 }
+            }
+
+            // --- Overlays & Screens ---
                             BrowserMenuOverlay(
                     showMenu = state.showMenu,
                     onDismiss = { state.showMenu = false },
@@ -1352,7 +1353,7 @@ class OmniBrowser : PluginEntry() {
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 16.dp)
+                    .padding(bottom = if (!isImeVisible) 58.dp else 16.dp)
                     .zIndex(36f)
             )
 
@@ -1420,7 +1421,7 @@ class OmniBrowser : PluginEntry() {
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 20.dp)
+                    .padding(bottom = if (!isImeVisible) 58.dp else 20.dp)
                     .zIndex(30f)
             )
         }
