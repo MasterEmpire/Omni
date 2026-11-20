@@ -15,6 +15,7 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.EOFException
 import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
 import java.net.URLEncoder
 import java.security.SecureRandom
 import javax.net.ssl.SSLSocket
@@ -112,6 +113,7 @@ class GeminiLiveVoiceEngine(
                 var setupDone = false
                 var chunkIndex = 0
                 var receivedAudioInTurn = false
+                var consecutiveTimeouts = 0
                 val fragBuffer = ByteArrayOutputStream()
                 var fragOpcode = -1
 
@@ -121,6 +123,23 @@ class GeminiLiveVoiceEngine(
                     try {
                         b0 = dis.readUnsignedByte()
                         b1 = dis.readUnsignedByte()
+                        consecutiveTimeouts = 0
+                    } catch (ste: SocketTimeoutException) {
+                        consecutiveTimeouts++
+                        if (consecutiveTimeouts < 3) {
+                            try {
+                                sendFrame(out, 0x09, byteArrayOf())
+                                bridge.log("GEMINI_VOICE", "Sent WS keepalive PING (idle ${consecutiveTimeouts * 20}s)")
+                                continue
+                            } catch (_: Exception) {
+                                throw ste
+                            }
+                        }
+                        if (receivedAudioInTurn) {
+                            bridge.log("GEMINI_VOICE_WARN", "Server silent for 60s after audio; draining cleanly.")
+                            break
+                        }
+                        throw ste
                     } catch (_: EOFException) {
                         break
                     }
@@ -335,7 +354,7 @@ class GeminiLiveVoiceEngine(
     private fun openWebSocket(apiKey: String): SSLSocket {
         val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
         val socket = (factory.createSocket(HOST, PORT) as SSLSocket).apply {
-            soTimeout = 45000
+            soTimeout = 20000
             startHandshake()
         }
 
