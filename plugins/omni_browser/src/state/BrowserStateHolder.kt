@@ -398,25 +398,38 @@ class BrowserStateHolder(
                 activeMenuItems = config.activeMenuItems
                 hiddenMenuItems = config.hiddenMenuItems
             }
-            val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems }
-            if (missing.isNotEmpty()) {
-                val updatedList = activeMenuItems.toMutableList()
-                val remaining = missing.toMutableList()
-                if ("studio_lab" in remaining) {
-                    val autoIdx = updatedList.indexOf("ai_automator")
-                    if (autoIdx >= 0) {
-                        updatedList.add(autoIdx, "studio_lab")
-                        remaining.remove("studio_lab")
-                    }
+        }
+
+        val dedicatedLayout = vaultManager.loadMenuLayout()
+        if (dedicatedLayout != null) {
+            activeMenuItems = dedicatedLayout.first
+            hiddenMenuItems = dedicatedLayout.second
+        } else if (activeMenuItems != defaultActiveMenu || hiddenMenuItems.isNotEmpty()) {
+            // One-time migration from legacy solver.json into dedicated menu_layout.json
+            vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems)
+        }
+
+        val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems }
+        if (missing.isNotEmpty()) {
+            val updatedList = activeMenuItems.toMutableList()
+            val remaining = missing.toMutableList()
+            if ("studio_lab" in remaining) {
+                val autoIdx = updatedList.indexOf("ai_automator")
+                if (autoIdx >= 0) {
+                    updatedList.add(autoIdx, "studio_lab")
+                    remaining.remove("studio_lab")
                 }
-                if ("full_source" in remaining) {
-                    val snapIdx = updatedList.indexOf("dom_snapshot")
-                    if (snapIdx >= 0) {
-                        updatedList.add(snapIdx + 1, "full_source")
-                        remaining.remove("full_source")
-                    }
+            }
+            if ("full_source" in remaining) {
+                val snapIdx = updatedList.indexOf("dom_snapshot")
+                if (snapIdx >= 0) {
+                    updatedList.add(snapIdx + 1, "full_source")
+                    remaining.remove("full_source")
                 }
-                activeMenuItems = updatedList + remaining
+            }
+            activeMenuItems = updatedList + remaining
+            if (dedicatedLayout != null) {
+                vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems)
             }
         }
 
@@ -2816,6 +2829,10 @@ class BrowserStateHolder(
             result.localPort?.let {
                 localServerPort = it
                 poolManager.localPort = it
+            }
+            if (result.activeMenuItems != null || result.hiddenMenuItems != null) {
+                activeMenuItems = result.activeMenuItems ?: emptyList()
+                hiddenMenuItems = result.hiddenMenuItems ?: emptyList()
             }
             if (!result.tabs.isNullOrEmpty()) {
                 tabs = result.tabs
