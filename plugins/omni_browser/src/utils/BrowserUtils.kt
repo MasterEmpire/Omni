@@ -461,6 +461,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     var pendingBootRpcs = 0;
     var hasAccessToken = false;
     var hasListModels = false;
+    var lastUserPromptAt = 0;
 
     function wireLog(tag, msg) {
         try {
@@ -525,8 +526,23 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     }
 
     function createStreamRecord(url, transport) {
+        var prev = latestStreamId > 0 ? (streamsById[latestStreamId] || null) : null;
+        var now = Date.now();
+        var isContinuation = false;
+        if (prev && prev.output && prev.output.length > 0) {
+            var gapMs = now - (prev.endedAt || prev.startedAt);
+            var promptSincePrev = lastUserPromptAt > prev.startedAt;
+            var prevText = prev.stitchedOutput || prev.output;
+            var prevHasUnclosedCxp = /<(?:cxp|omni_cxp|patch)\b/i.test(prevText) &&
+                !/<\/(?:cxp|omni_cxp|patch)>/i.test(prevText);
+            if (!promptSincePrev && (gapMs < 4000 || prev.finishReason === 2 || prevHasUnclosedCxp)) {
+                isContinuation = true;
+            }
+        }
+
         var id = ++latestStreamId;
         var turnTok = activeTurnToken;
+        var prefix = isContinuation ? (prev.stitchedOutput || prev.output || '') : '';
         var rec = {
             id: id,
             turnToken: turnTok,
@@ -534,6 +550,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
             transport: transport,
             active: true,
             done: false,
+            isContinuation: isContinuation,
             error: null,
             httpStatus: 0,
             statusCode: 0,
@@ -542,8 +559,10 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
             chunkCount: 0,
             thoughts: '',
             output: '',
+            prefixOutput: prefix,
+            stitchedOutput: prefix,
             rawSample: '',
-            startedAt: Date.now(),
+            startedAt: now,
             firstThoughtAt: 0,
             firstOutputAt: 0,
             endedAt: 0
@@ -551,6 +570,9 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
         streamsById[id] = rec;
         if (turnTok > 0) {
             streamsByTurn[turnTok] = rec;
+        }
+        if (isContinuation) {
+            wireLog('WIRE_STITCH', 'Stream #' + id + ' stitched as continuation of #' + prev.id + ' (prefix=' + prefix.length + 'c)');
         }
         return rec;
     }
@@ -608,6 +630,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                     } else {
                         if (!rec.firstOutputAt) rec.firstOutputAt = Date.now();
                         rec.output += txt;
+                        rec.stitchedOutput = (rec.prefixOutput || '') + rec.output;
                     }
                 }
             }
@@ -796,7 +819,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
         } else if (rec.httpStatus >= 400 && !rec.error) {
             rec.error = 'HTTP Error ' + rec.httpStatus;
         }
-        wireLog('WIRE_STREAM_END', 'Stream #' + rec.id + ' (' + rec.transport + ') ended | http=' + rec.httpStatus + ' statusCode=' + rec.statusCode + ' chunks=' + rec.chunkCount + ' out=' + rec.output.length + 'c thoughts=' + rec.thoughts.length + 'c err=' + rec.error + ' | ms=' + (rec.endedAt - rec.startedAt));
+        wireLog('WIRE_STREAM_END', 'Stream #' + rec.id + ' (' + rec.transport + ') ended | http=' + rec.httpStatus + ' statusCode=' + rec.statusCode + ' chunks=' + rec.chunkCount + ' out=' + rec.output.length + 'c stitched=' + (rec.stitchedOutput ? rec.stitchedOutput.length : rec.output.length) + 'c thoughts=' + rec.thoughts.length + 'c err=' + rec.error + ' | ms=' + (rec.endedAt - rec.startedAt));
         emitUpdate(rec);
     }
 
@@ -993,7 +1016,11 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                 hasListModels: hasListModels
             };
         },
+        notifyUserPrompt: function() {
+            lastUserPromptAt = Date.now();
+        },
         beginTurn: function() {
+            lastUserPromptAt = Date.now();
             activeTurnToken = ++turnCounter;
             streamsByTurn[activeTurnToken] = null;
             return activeTurnToken;
@@ -1296,7 +1323,8 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
         }
         if (!text && window.__omniWire && window.__omniWire.getLatest) {
             const latest = window.__omniWire.getLatest();
-            if (latest && latest.output) text = cleanSpeechString(latest.output);
+            const latestOut = latest ? (latest.stitchedOutput || latest.output) : '';
+            if (latestOut) text = cleanSpeechString(latestOut);
         }
         if (text && window.OmniVoiceBridge && window.OmniVoiceBridge.speak) {
             window.OmniVoiceBridge.speak(text, turnId, false);
@@ -1331,12 +1359,13 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
 
     window.addEventListener('__omniWireUpdate', function(ev) {
         const rec = ev && ev.detail;
-        if (!rec || !rec.done || rec.statusCode !== 0 || !rec.output || !rec.output.trim()) return;
+        const wireText = rec ? (rec.stitchedOutput || rec.output || '') : '';
+        if (!rec || !rec.done || rec.statusCode !== 0 || !wireText.trim()) return;
         if (rec.id <= window.__omniLastAutoReadWireId) return;
         window.__omniLastAutoReadWireId = rec.id;
         setTimeout(function() {
             injectTurnButtons();
-            triggerAutoReadIfEligible(rec.output);
+            triggerAutoReadIfEligible(wireText);
         }, 400);
     });
 
