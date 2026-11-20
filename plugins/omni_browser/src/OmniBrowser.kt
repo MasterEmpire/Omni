@@ -477,6 +477,17 @@ class OmniBrowser : PluginEntry() {
                 "favorite_tab" -> state.toggleTabFavorite(state.activeTabId)
                 "focus_lock" -> state.toggleFocusLock()
                 "copy_url" -> if (state.currentUrl != "about:blank") bridge.copyToClipboard(sanitizeUrlForCopy(state.currentUrl))
+                "dom_snapshot" -> {
+                    state.currentWebView?.evaluateJavascript(DOM_SNAPSHOT_SCRIPT) { html ->
+                        if (!html.isNullOrEmpty()) {
+                            val rawHtml = if (html.startsWith("\"") && html.endsWith("\"")) {
+                                try { org.json.JSONObject("{\"h\":$html}").getString("h") } catch (e: Exception) { html }
+                            } else html
+                            saveHtmlSnapshot(context, bridge, rawHtml, "DOM_Dump")
+                        }
+                    }
+                }
+                "full_source" -> state.captureFullWebSource()
                 "local_ide" -> state.openLocalIdeAsNeighbor()
                 "autopilot" -> state.toggleLiveAutoPilot()
                 "studio_lab" -> state.showStudioLabDialog = true
@@ -484,6 +495,13 @@ class OmniBrowser : PluginEntry() {
                 "recents" -> bridge.showRecents()
                 "diagnostics" -> bridge.showDiagnostics()
                 "settings" -> state.showSettingsDialog = true
+                "exit" -> {
+                    state.showMenu = false
+                    coroutineScope.launch {
+                        delay(300)
+                        bridge.close()
+                    }
+                }
             }
         }
 
