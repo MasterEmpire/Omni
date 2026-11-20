@@ -55,7 +55,16 @@ data class VaultRestoreData(
     val forceDark: Boolean? = null,
     val localPort: Int? = null,
     val activeMenuItems: List<String>? = null,
-    val hiddenMenuItems: List<String>? = null
+    val hiddenMenuItems: List<String>? = null,
+    val bottomBarItems: List<String>? = null,
+    val topBarItems: List<String>? = null
+)
+
+data class MenuLayoutConfig(
+    val activeMenuItems: List<String> = emptyList(),
+    val hiddenMenuItems: List<String> = emptyList(),
+    val bottomBarItems: List<String> = emptyList(),
+    val topBarItems: List<String> = emptyList()
 )
 
 class VaultManager(
@@ -475,30 +484,41 @@ class VaultManager(
             null
         }
     }
-    fun saveMenuLayout(activeMenuItems: List<String>, hiddenMenuItems: List<String>) {
+    fun saveMenuLayout(
+        activeMenuItems: List<String>,
+        hiddenMenuItems: List<String>,
+        bottomBarItems: List<String> = emptyList(),
+        topBarItems: List<String> = emptyList()
+    ) {
         try {
             val json = JSONObject().apply {
                 put("activeMenuItems", JSONArray(activeMenuItems))
                 put("hiddenMenuItems", JSONArray(hiddenMenuItems))
+                put("bottomBarItems", JSONArray(bottomBarItems))
+                put("topBarItems", JSONArray(topBarItems))
             }
             bridge.saveFile("config/menu_layout.json", json.toString().toByteArray(Charsets.UTF_8))
             autoMirrorVaultToDocuments()
         } catch (_: Exception) {}
     }
 
-    fun loadMenuLayout(): Pair<List<String>, List<String>>? {
+    fun loadMenuLayout(): MenuLayoutConfig? {
         return try {
             val bytes = bridge.readFile("config/menu_layout.json") ?: return null
             val json = JSONObject(String(bytes, Charsets.UTF_8))
-            val active = mutableListOf<String>()
-            json.optJSONArray("activeMenuItems")?.let { arr ->
-                for (i in 0 until arr.length()) active.add(arr.getString(i))
+            fun readArr(key: String): List<String> {
+                val list = mutableListOf<String>()
+                json.optJSONArray(key)?.let { arr ->
+                    for (i in 0 until arr.length()) list.add(arr.getString(i))
+                }
+                return list
             }
-            val hidden = mutableListOf<String>()
-            json.optJSONArray("hiddenMenuItems")?.let { arr ->
-                for (i in 0 until arr.length()) hidden.add(arr.getString(i))
-            }
-            if (active.isEmpty() && hidden.isEmpty()) null else Pair(active, hidden)
+            val active = readArr("activeMenuItems")
+            val hidden = readArr("hiddenMenuItems")
+            val bottom = readArr("bottomBarItems")
+            val top = readArr("topBarItems")
+            if (active.isEmpty() && hidden.isEmpty() && bottom.isEmpty() && top.isEmpty()) null
+            else MenuLayoutConfig(active, hidden, bottom, top)
         } catch (_: Exception) {
             null
         }
@@ -883,6 +903,8 @@ class VaultManager(
         var loadedLocalPort: Int? = null
         var loadedActiveMenu: List<String>? = null
         var loadedHiddenMenu: List<String>? = null
+        var loadedBottomMenu: List<String>? = null
+        var loadedTopMenu: List<String>? = null
         var loadedSystemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
         var loadedSmartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null
 
@@ -961,18 +983,23 @@ class VaultManager(
                         "menu_layout.json" -> {
                             bridge.saveFile("config/menu_layout.json", bytes)
                             val json = JSONObject(String(bytes, Charsets.UTF_8))
-                            val aMenu = mutableListOf<String>()
-                            json.optJSONArray("activeMenuItems")?.let { arr ->
-                                for (i in 0 until arr.length()) aMenu.add(arr.getString(i))
+                            fun readArr(key: String): List<String> {
+                                val list = mutableListOf<String>()
+                                json.optJSONArray(key)?.let { arr ->
+                                    for (i in 0 until arr.length()) list.add(arr.getString(i))
+                                }
+                                return list
                             }
-                            val hMenu = mutableListOf<String>()
-                            json.optJSONArray("hiddenMenuItems")?.let { arr ->
-                                for (i in 0 until arr.length()) hMenu.add(arr.getString(i))
-                            }
+                            val aMenu = readArr("activeMenuItems")
+                            val hMenu = readArr("hiddenMenuItems")
+                            val bMenu = readArr("bottomBarItems")
+                            val tMenu = readArr("topBarItems")
                             if (aMenu.isNotEmpty() || hMenu.isNotEmpty()) {
                                 loadedActiveMenu = aMenu
                                 loadedHiddenMenu = hMenu
                             }
+                            if (bMenu.isNotEmpty()) loadedBottomMenu = bMenu
+                            if (tMenu.isNotEmpty()) loadedTopMenu = tMenu
                         }
                         "system_presets.json" -> {
                             bridge.saveFile("config/system_presets.json", bytes)
@@ -1033,7 +1060,9 @@ class VaultManager(
             forceDark = loadedForceDark,
             localPort = loadedLocalPort,
             activeMenuItems = loadedActiveMenu,
-            hiddenMenuItems = loadedHiddenMenu
+            hiddenMenuItems = loadedHiddenMenu,
+            bottomBarItems = loadedBottomMenu,
+            topBarItems = loadedTopMenu
         )
     }
 }
