@@ -111,6 +111,35 @@ fun buildAiStudioPuppetScript(): String {
                 }
             }
 
+            function isBinaryMediaFile(name, mime) {
+                const n = (name || '').toLowerCase();
+                const m = (mime || '').toLowerCase();
+                if (m.startsWith('image/') || m.startsWith('audio/') || m.startsWith('video/')) return true;
+                if (m.includes('pdf') || m.includes('zip') || m.includes('tar') || m.includes('gzip') || m.includes('octet-stream')) return true;
+                const binaryExts = [
+                    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.apk', '.jar',
+                    '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.ico', '.tiff', '.heic', '.heif',
+                    '.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.opus',
+                    '.mp4', '.webm', '.mkv', '.avi', '.mov', '.m4v',
+                    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.exe', '.bin', '.wasm'
+                ];
+                return binaryExts.some(ext => n.endsWith(ext));
+            }
+
+            function base64ToUtf8Text(b64) {
+                try {
+                    const clean = b64.includes(',') ? b64.split(',')[1] : b64;
+                    const binChars = atob(clean);
+                    const bytes = new Uint8Array(binChars.length);
+                    for (let i = 0; i < binChars.length; i++) {
+                        bytes[i] = binChars.charCodeAt(i);
+                    }
+                    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+                } catch(_) {
+                    return null;
+                }
+            }
+
             const uploadedAttachmentKeys = new Set();
             async function injectAttachments(attachmentsList, label) {
                 if (!attachmentsList || !Array.isArray(attachmentsList) || attachmentsList.length === 0) return;
@@ -124,10 +153,9 @@ fun buildAiStudioPuppetScript(): String {
                     hostLog('ATTACHMENTS', 'Skipping already uploaded attachments for ' + label);
                     return;
                 }
-                const fileWord = uniqueList.length === 1 ? 'image' : 'images';
                 const uploadPrefix = label && !label.includes('Global') ? (label + ' ') : '';
-                updateStatus(uploadPrefix + 'Uploading ' + uniqueList.length + ' ' + fileWord + '.');
-                hostLog('ATTACHMENTS', 'Injecting ' + uniqueList.length + ' file(s) into file input for ' + label);
+                updateStatus(uploadPrefix + 'Attaching ' + uniqueList.length + ' media file(s)...');
+                hostLog('ATTACHMENTS', 'Injecting ' + uniqueList.length + ' binary file(s) into file input for ' + label);
 
                 const fileInput = document.querySelector('input[data-test-upload-file-input], input[type="file"].file-input, input[type="file"]');
                 if (fileInput) {
@@ -143,7 +171,7 @@ fun buildAiStudioPuppetScript(): String {
                             const blob = new Blob([byteArray], { type: att.mime || 'application/octet-stream' });
                             const file = new File([blob], att.name || 'file', { type: att.mime || 'application/octet-stream' });
                             dt.items.add(file);
-                            hostLog('ATTACHMENTS', 'Prepared File: ' + file.name + ' (' + file.size + ' bytes)');
+                            hostLog('ATTACHMENTS', 'Prepared File: ' + file.name + ' (' + file.size + ' bytes, mime=' + (att.mime || 'bin') + ')');
                         } catch (e) {
                             hostLog('ATTACHMENTS_ERR', 'Failed preparing ' + att.name + ': ' + e.message);
                         }
@@ -152,21 +180,21 @@ fun buildAiStudioPuppetScript(): String {
                     if (dt.files.length > 0) {
                         fileInput.files = dt.files;
                         fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-                        await randomDelay(1200, 1800);
+                        await randomDelay(1000, 1500);
 
-                        updateStatus('Processing attached images.');
+                        updateStatus('Processing attachments...');
                         let uploadWait = 0;
-                        const maxUploadTicks = Math.max(80, uniqueList.length * 40);
+                        const maxUploadTicks = Math.max(120, uniqueList.length * 50);
                         while (uploadWait < maxUploadTicks) {
-                            const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress, ms-prompt-box .loading');
+                            const activeUploadIndicator = document.querySelector('mat-progress-bar, mat-spinner, ms-prompt-box .loading-indicator, .media-upload-progress, ms-prompt-box .loading, [role="progressbar"]');
                             if (!activeUploadIndicator) break;
                             await delay(500);
                             uploadWait++;
                             if (uploadWait % 16 === 0) {
-                                updateStatus('Still uploading images...');
+                                updateStatus('Processing attachments (' + Math.round((uploadWait / maxUploadTicks) * 100) + '%)...');
                             }
                         }
-                        await randomDelay(800, 1200);
+                        await randomDelay(600, 1000);
                         hostLog('ATTACHMENTS', 'Media attachments processed for ' + label);
                     }
                 }
@@ -584,12 +612,37 @@ fun buildAiStudioPuppetScript(): String {
 
                 executeTurn: async function(turnOpts) {
                     turnOpts = turnOpts || {};
-                    const prompt = turnOpts.prompt || '';
-                    const attachments = turnOpts.attachments || [];
+                    let prompt = turnOpts.prompt || '';
+                    const allAttachments = turnOpts.attachments || [];
                     const stepLabel = turnOpts.label || 'Turn';
                     const useDeltaMode = !!turnOpts.deltaMode;
                     this.aborted = false;
                     this.isBusy = true;
+
+                    // Native AIS Attachment Router: Ingest text/code files via [AIS_METADATA] directly, binary via DataTransfer
+                    const binaryAttachments = [];
+                    const textMetadataBlocks = [];
+
+                    for (const att of allAttachments) {
+                        if (!att || !att.data) continue;
+                        const name = att.name || 'file.txt';
+                        const mime = att.mime || 'text/plain';
+
+                        if (!isBinaryMediaFile(name, mime)) {
+                            const decoded = base64ToUtf8Text(att.data);
+                            if (decoded !== null) {
+                                textMetadataBlocks.push('[AIS_METADATA] [Attached file: name="' + name + '", mime_type="' + mime + '"]\n--- START OF FILE ' + name + ' ---\n\n' + decoded);
+                                continue;
+                            }
+                        }
+                        binaryAttachments.push(att);
+                    }
+
+                    if (textMetadataBlocks.length > 0) {
+                        const directTextPayload = textMetadataBlocks.join('\n\n');
+                        prompt = prompt ? (directTextPayload + '\n\n' + prompt) : directTextPayload;
+                        hostLog('ATTACHMENTS', '⚡ Ingested ' + textMetadataBlocks.length + ' text/code file(s) directly via [AIS_METADATA] (0ms upload).');
+                    }
 
                     updateStatus((stepLabel + ': Submitting prompt.').trim());
                     const wireTurnToken = (window.__omniWire && window.__omniWire.beginTurn) ? window.__omniWire.beginTurn() : 0;
@@ -599,8 +652,8 @@ fun buildAiStudioPuppetScript(): String {
                         await dismissInterstitials();
                     }
 
-                    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
-                        await injectAttachments(attachments, stepLabel);
+                    if (binaryAttachments.length > 0) {
+                        await injectAttachments(binaryAttachments, stepLabel);
                     }
 
                     let activePromptArea = null;
@@ -745,8 +798,9 @@ fun buildAiStudioPuppetScript(): String {
                                     latestTurnThoughts = wire.thoughts;
                                     idleTicks = 0;
                                 }
-                                if (wire.output && wire.output.length > currentTurnOutput.length) {
-                                    currentTurnOutput = wire.output;
+                                const wireText = wire.stitchedOutput || wire.output || '';
+                                if (wireText && wireText.length > currentTurnOutput.length) {
+                                    currentTurnOutput = wireText;
                                     idleTicks = 0;
                                 }
 
@@ -805,6 +859,13 @@ fun buildAiStudioPuppetScript(): String {
                                 }
 
                                 if (wire.done && wire.statusCode === 0) {
+                                    // If finishReason is 2 (MAX_TOKENS) or UI is still running, auto-continuation stream is expected
+                                    if (wire.finishReason === 2 || checkUiGenerating()) {
+                                        hostLog('WIRE_CONT', 'Stream #' + wire.id + ' ended with finishReason=' + wire.finishReason + '. Waiting for auto-continuation stream...');
+                                        await delay(400);
+                                        continue;
+                                    }
+
                                     if (currentTurnOutput.trim().length > 0) {
                                         const firstTokAt = (wire.firstThoughtAt && wire.firstOutputAt) ? Math.min(wire.firstThoughtAt, wire.firstOutputAt) : (wire.firstThoughtAt || wire.firstOutputAt || 0);
                                         const wireTtft = firstTokAt && wire.startedAt ? (firstTokAt - wire.startedAt) : 0;
