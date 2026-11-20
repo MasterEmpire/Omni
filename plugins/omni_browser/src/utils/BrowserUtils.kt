@@ -541,7 +541,10 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
         }
 
         var id = ++latestStreamId;
-        var turnTok = activeTurnToken;
+        var turnTok = (isContinuation && prev && prev.turnToken > 0) ? prev.turnToken : activeTurnToken;
+        if (isContinuation && prev && prev.turnToken > 0) {
+            activeTurnToken = prev.turnToken;
+        }
         var prefix = isContinuation ? (prev.stitchedOutput || prev.output || '') : '';
         var rec = {
             id: id,
