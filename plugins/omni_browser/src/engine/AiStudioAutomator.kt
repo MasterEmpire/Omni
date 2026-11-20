@@ -517,6 +517,7 @@ class AiStudioAutomator(
     fun prepareSession(
         profileId: String,
         model: String = "",
+        temporaryChat: Boolean? = null,
         onReady: (Boolean, String?) -> Unit
     ) {
         defaultSessionId?.let { closeSession(it) }
