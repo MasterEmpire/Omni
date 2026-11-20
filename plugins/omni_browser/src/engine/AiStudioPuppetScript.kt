@@ -701,7 +701,7 @@ fun buildAiStudioPuppetScript(): String {
                         updateStatus((stepLabel + ': Preparing to run.').trim());
                         let readyTicks = 0;
                         let submitBtn = null;
-                        const maxReadyTicks = Math.max(2400, (attachments ? attachments.length : 0) * 600);
+                        const maxReadyTicks = Math.max(2400, (binaryAttachments ? binaryAttachments.length : 0) * 600);
 
                         while (readyTicks < maxReadyTicks) {
                             if (checkUiGenerating()) break;
