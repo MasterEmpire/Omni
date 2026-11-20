@@ -463,6 +463,24 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     var hasListModels = false;
     var lastUserPromptAt = 0;
 
+    function reportWirePrompt() {
+        try {
+            if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
+                window.OmniAnalyticsBridge.recordPrompt(window.__omniProfileId || 'default');
+            }
+        } catch(_) {}
+    }
+
+    function reportWireQuota(rec, reasonText) {
+        try {
+            if (!rec || rec.__omniQuotaReported) return;
+            rec.__omniQuotaReported = true;
+            if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.reportQuotaHit) {
+                window.OmniAnalyticsBridge.reportQuotaHit(window.__omniProfileId || 'default', String(reasonText || 'Quota Exhausted (429)').slice(0, 140));
+            }
+        } catch(_) {}
+    }
+
     function wireLog(tag, msg) {
         try {
             if (window.OmniAutomator && window.OmniAutomator.onLog) {
@@ -576,6 +594,8 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
         }
         if (isContinuation) {
             wireLog('WIRE_STITCH', 'Stream #' + id + ' stitched as continuation of #' + prev.id + ' (prefix=' + prefix.length + 'c)');
+        } else {
+            reportWirePrompt();
         }
         return rec;
     }
@@ -821,6 +841,16 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
             rec.error = 'Quota Exhausted (429)';
         } else if (rec.httpStatus >= 400 && !rec.error) {
             rec.error = 'HTTP Error ' + rec.httpStatus;
+        }
+        var lowerWireErr = String(rec.error || rec.statusDetails || '').toLowerCase();
+        var isQuotaHit = rec.httpStatus === 429 || rec.statusCode === 8 ||
+            lowerWireErr.indexOf('quota') !== -1 ||
+            lowerWireErr.indexOf('resource exhausted') !== -1 ||
+            lowerWireErr.indexOf('resource_exhausted') !== -1 ||
+            lowerWireErr.indexOf('rate limit') !== -1 ||
+            lowerWireErr.indexOf('429') !== -1;
+        if (isQuotaHit) {
+            reportWireQuota(rec, rec.error || rec.statusDetails || ('Quota Exhausted (' + (rec.httpStatus || rec.statusCode) + ')'));
         }
         wireLog('WIRE_STREAM_END', 'Stream #' + rec.id + ' (' + rec.transport + ') ended | http=' + rec.httpStatus + ' statusCode=' + rec.statusCode + ' chunks=' + rec.chunkCount + ' out=' + rec.output.length + 'c stitched=' + (rec.stitchedOutput ? rec.stitchedOutput.length : rec.output.length) + 'c thoughts=' + rec.thoughts.length + 'c err=' + rec.error + ' | ms=' + (rec.endedAt - rec.startedAt));
         emitUpdate(rec);
@@ -3595,4 +3625,49 @@ fun saveHtmlSnapshot(context: android.content.Context, bridge: com.omni.hub.api.
     bridge.log("DOM_SNAPSHOT", "Saved DOM snapshot: $locationMsg (${rawHtml.length} bytes)")
     bridge.showToast("✅ Saved DOM to $locationMsg")
     return locationMsg
+}
+fun getAnalyticsTodayKey(timeMs: Long = System.currentTimeMillis()): String {
+    return java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date(timeMs))
+}
+
+fun getLastNDaysKeys(days: Int = 7, nowMs: Long = System.currentTimeMillis()): List<String> {
+    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = nowMs }
+    val keys = mutableListOf<String>()
+    cal.add(java.util.Calendar.DAY_OF_YEAR, -(days - 1))
+    repeat(days) {
+        keys.add(fmt.format(cal.time))
+        cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+    }
+    return keys
+}
+
+fun getLastPacificMidnightMs(nowMs: Long = System.currentTimeMillis()): Long {
+    val ptZone = java.util.TimeZone.getTimeZone("America/Los_Angeles")
+    val cal = java.util.Calendar.getInstance(ptZone).apply {
+        timeInMillis = nowMs
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }
+    return cal.timeInMillis
+}
+
+fun getNextPacificMidnightMs(nowMs: Long = System.currentTimeMillis()): Long {
+    val ptZone = java.util.TimeZone.getTimeZone("America/Los_Angeles")
+    val cal = java.util.Calendar.getInstance(ptZone).apply {
+        timeInMillis = nowMs
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+        add(java.util.Calendar.DAY_OF_MONTH, 1)
+    }
+    return cal.timeInMillis
+}
+
+fun isQuotaCurrentlyActive(lastQuotaHitTimestamp: Long, nowMs: Long = System.currentTimeMillis()): Boolean {
+    if (lastQuotaHitTimestamp <= 0L) return false
+    return lastQuotaHitTimestamp >= getLastPacificMidnightMs(nowMs)
 }
