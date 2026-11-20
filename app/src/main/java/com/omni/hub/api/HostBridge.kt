@@ -384,6 +384,44 @@ object DiagnosticsDispatcher {
         }
     }
 }
+object PluginEventDispatcher {
+    @Volatile
+    private var handler: ((Context, String, String, String, Map<String, Any>) -> Boolean)? = null
+
+    fun registerHandler(block: ((Context, String, String, String, Map<String, Any>) -> Boolean)?) {
+        handler = block
+    }
+
+    fun dispatch(
+        appContext: Context,
+        sourcePluginId: String,
+        targetPluginId: String,
+        event: String,
+        payload: Map<String, Any>
+    ): Boolean {
+        val h = handler ?: return false
+        return h(appContext, sourcePluginId, targetPluginId, event, payload)
+    }
+}
+object PluginEventDispatcher {
+    @Volatile
+    private var handler: ((Context, String, String, String, Map<String, Any>) -> Boolean)? = null
+
+    fun registerHandler(block: ((Context, String, String, String, Map<String, Any>) -> Boolean)?) {
+        handler = block
+    }
+
+    fun dispatch(
+        appContext: Context,
+        sourcePluginId: String,
+        targetPluginId: String,
+        event: String,
+        payload: Map<String, Any>
+    ): Boolean {
+        val h = handler ?: return false
+        return h(appContext, sourcePluginId, targetPluginId, event, payload)
+    }
+}
 
 /**
  * Client-side IPC controller connecting Omni Hub to the Nexus Python Engine.
@@ -1457,21 +1495,12 @@ class HostBridgeImpl(
         event: String,
         payload: Map<String, Any>
     ): Boolean {
-        return try {
-            val appCtx = context.applicationContext
-            val loaded = com.omni.hub.loader.PluginLoader.loadFromDir(appCtx, targetPluginId)
-            val targetBridge = HostBridgeImpl(appCtx, loaded.dataDir, targetPluginId) {}
-            val enriched = HashMap<String, Any>(payload.size + 4)
-            enriched.putAll(payload)
-            if (!enriched.containsKey("context")) enriched["context"] = appCtx
-            if (!enriched.containsKey("bridge")) enriched["bridge"] = targetBridge
-            enriched["source_plugin_id"] = pluginId
-            enriched["target_plugin_id"] = targetPluginId
-            loaded.instance.onSystemEvent(event, enriched)
-            true
-        } catch (e: Exception) {
-            OmniLogger.log("PLUGIN_IPC_ERR", "dispatchPluginEvent($targetPluginId, $event) failed: ${e.message}")
-            false
-        }
+        return PluginEventDispatcher.dispatch(
+            appContext = context.applicationContext,
+            sourcePluginId = pluginId,
+            targetPluginId = targetPluginId,
+            event = event,
+            payload = payload
+        )
     }
 }
