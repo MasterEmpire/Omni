@@ -83,6 +83,7 @@ class AiStudioAutomator(
     fun createSession(
         profileId: String,
         model: String = "",
+        temporaryChat: Boolean? = null,
         onReady: (sessionId: String?, error: String?) -> Unit
     ) {
         val sessionId = "session_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}"
@@ -372,8 +373,11 @@ class AiStudioAutomator(
         bridge.log("AI_STUDIO_POOL", "🚀 Initialized Session [$sessionId] for Profile '$profileId' (Active Sessions: ${sessions.size})")
 
         val slug = normalizeModelSlug(model)
-        val targetUrl = if (slug.isNotEmpty()) {
-            "https://aistudio.google.com/prompts/new_chat?model=$slug"
+        val queryParts = mutableListOf<String>()
+        if (slug.isNotEmpty()) queryParts.add("model=$slug")
+        if (temporaryChat != null) queryParts.add("temporary=$temporaryChat")
+        val targetUrl = if (queryParts.isNotEmpty()) {
+            "https://aistudio.google.com/prompts/new_chat?" + queryParts.joinToString("&")
         } else {
             "https://aistudio.google.com/prompts/new_chat"
         }
@@ -516,7 +520,7 @@ class AiStudioAutomator(
         onReady: (Boolean, String?) -> Unit
     ) {
         defaultSessionId?.let { closeSession(it) }
-        createSession(profileId, model) { sId, err ->
+        createSession(profileId, model, temporaryChat) { sId, err ->
             if (sId != null) {
                 defaultSessionId = sId
                 onReady(true, null)
