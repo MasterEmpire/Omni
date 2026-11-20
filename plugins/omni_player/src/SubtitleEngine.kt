@@ -532,3 +532,259 @@ object OpenSubtitlesService {
         }
     }
 }
+data class OmniProfileInfo(
+    val id: String,
+    val name: String,
+    val promptsSentToday: Int = 0,
+    val isQuotaExhausted: Boolean = false,
+    val needsVerification: Boolean = false,
+    val isAvailable: Boolean = true
+)
+
+object OmniAiBridgeClient {
+    const val PROVIDER_GROQ = "GROQ"
+    const val PROVIDER_OMNI_BROWSER = "OMNI_BROWSER"
+    private const val PREF_NAME = "omni_player_prefs"
+    private const val SESSION_KEY = "omni_player_subtitle"
+    private const val PRESET_TITLE = "Omni Cinema Translator"
+
+    const val DEFAULT_OMNI_PROMPT =
+        "You are an unfiltered live movie subtitle & slang explainer. The user will send dialogue lines or single words as they watch a movie. " +
+        "Explain clearly and concisely in 1-2 short sentences what the line or word means in natural everyday English (including any slang, idioms, profanity, or subtext). " +
+        "Never soften, censor, or lecture. Remember earlier lines from this movie in our chat for scene context."
+
+    var warmState by mutableStateOf("COLD") // "COLD", "WARMING", "WARM", "ERROR"
+    var warmStatusMessage by mutableStateOf("")
+
+    private fun prefs(context: Context) =
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+
+    fun getProvider(context: Context): String =
+        prefs(context).getString("ai_provider", PROVIDER_GROQ) ?: PROVIDER_GROQ
+
+    fun saveProvider(context: Context, provider: String) {
+        prefs(context).edit().putString("ai_provider", provider).apply()
+    }
+
+    fun getProfileId(context: Context): String =
+        prefs(context).getString("omni_profile_id", "default") ?: "default"
+
+    fun saveProfileId(context: Context, profileId: String) {
+        prefs(context).edit().putString("omni_profile_id", profileId).apply()
+    }
+
+    fun getModel(context: Context): String =
+        prefs(context).getString("omni_model", "Gemini 3.8 Flash") ?: "Gemini 3.8 Flash"
+
+    fun saveModel(context: Context, model: String) {
+        prefs(context).edit().putString("omni_model", model.trim().ifEmpty { "Gemini 3.8 Flash" }).apply()
+    }
+
+    fun getThinkingLevel(context: Context): String =
+        prefs(context).getString("omni_thinking_level", "Default") ?: "Default"
+
+    fun saveThinkingLevel(context: Context, level: String) {
+        prefs(context).edit().putString("omni_thinking_level", level).apply()
+    }
+
+    fun getTemporaryChat(context: Context): Boolean =
+        prefs(context).getBoolean("omni_temp_chat", true)
+
+    fun saveTemporaryChat(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("omni_temp_chat", enabled).apply()
+    }
+
+    fun getKeepMovieContext(context: Context): Boolean =
+        prefs(context).getBoolean("omni_keep_context", true)
+
+    fun saveKeepMovieContext(context: Context, keep: Boolean) {
+        prefs(context).edit().putBoolean("omni_keep_context", keep).apply()
+    }
+
+    fun getOmniSystemPrompt(context: Context): String {
+        val saved = prefs(context).getString("omni_system_prompt", null)
+        return if (saved.isNullOrBlank()) DEFAULT_OMNI_PROMPT else saved
+    }
+
+    fun saveOmniSystemPrompt(context: Context, prompt: String) {
+        val clean = prompt.trim()
+        prefs(context).edit().putString("omni_system_prompt", clean).apply()
+    }
+
+    fun isOmniBrowserInstalled(bridge: com.omni.hub.api.HostBridge): Boolean {
+        return try {
+            bridge.isPluginAvailable("omni_browser")
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    fun fetchProfiles(
+        bridge: com.omni.hub.api.HostBridge,
+        onResult: (List<OmniProfileInfo>) -> Unit
+    ) {
+        val cb: (List<Map<String, Any>>) -> Unit = { rawList ->
+            val mapped = rawList.map { m ->
+                OmniProfileInfo(
+                    id = (m["id"] as? String) ?: "default",
+                    name = (m["name"] as? String) ?: "Default",
+                    promptsSentToday = (m["promptsSentToday"] as? Int) ?: 0,
+                    isQuotaExhausted = (m["isQuotaExhausted"] as? Boolean) ?: false,
+                    needsVerification = (m["needsVerification"] as? Boolean) ?: false,
+                    isAvailable = (m["isAvailable"] as? Boolean) ?: true
+                )
+            }
+            onResult(mapped.ifEmpty { listOf(OmniProfileInfo("default", "Default")) })
+        }
+        val ok = try {
+            bridge.dispatchPluginEvent(
+                "omni_browser",
+                "AI_LIST_PROFILES",
+                mapOf("on_result" to cb)
+            )
+        } catch (_: Throwable) {
+            false
+        }
+        if (!ok) {
+            onResult(listOf(OmniProfileInfo("default", "Default")))
+        }
+    }
+
+    fun warmSession(
+        context: Context,
+        bridge: com.omni.hub.api.HostBridge,
+        onDone: (Boolean, String?) -> Unit = { _, _ -> }
+    ) {
+        warmState = "WARMING"
+        warmStatusMessage = "Warming AI Studio..."
+        val payload = mapOf<String, Any>(
+            "session_key" to SESSION_KEY,
+            "profile_id" to getProfileId(context),
+            "model" to getModel(context),
+            "thinking_level" to getThinkingLevel(context),
+            "temporary_chat" to getTemporaryChat(context),
+            "system_title" to PRESET_TITLE,
+            "system_prompt" to getOmniSystemPrompt(context),
+            "on_status" to { msg: String ->
+                warmStatusMessage = msg
+            },
+            "on_ready" to { ok: Boolean, err: String? ->
+                warmState = if (ok) "WARM" else "ERROR"
+                warmStatusMessage = if (ok) "Session warm" else (err ?: "Warm-up failed")
+                onDone(ok, err)
+            }
+        )
+        val dispatched = try {
+            bridge.dispatchPluginEvent("omni_browser", "AI_WARM_SESSION", payload)
+        } catch (t: Throwable) {
+            warmState = "ERROR"
+            warmStatusMessage = t.message ?: "Bridge error"
+            onDone(false, warmStatusMessage)
+            false
+        }
+        if (!dispatched && warmState == "WARMING") {
+            warmState = "ERROR"
+            warmStatusMessage = "Omni Browser plugin not installed"
+            onDone(false, warmStatusMessage)
+        }
+    }
+
+    fun askStreaming(
+        context: Context,
+        bridge: com.omni.hub.api.HostBridge,
+        prompt: String,
+        label: String,
+        onStatus: (String) -> Unit,
+        onDelta: (String) -> Unit,
+        onComplete: (String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (warmState != "WARM") {
+            warmState = "WARMING"
+        }
+        val payload = mapOf<String, Any>(
+            "session_key" to SESSION_KEY,
+            "prompt" to prompt,
+            "label" to label,
+            "profile_id" to getProfileId(context),
+            "model" to getModel(context),
+            "thinking_level" to getThinkingLevel(context),
+            "temporary_chat" to getTemporaryChat(context),
+            "system_title" to PRESET_TITLE,
+            "system_prompt" to getOmniSystemPrompt(context),
+            "new_chat" to (!getKeepMovieContext(context)),
+            "on_status" to { msg: String ->
+                warmStatusMessage = msg
+                onStatus(msg)
+            },
+            "on_delta" to { _: String, outDelta: String, _: Boolean ->
+                warmState = "WARM"
+                if (outDelta.isNotEmpty()) onDelta(outDelta)
+            },
+            "on_complete" to { _: String, output: String ->
+                warmState = "WARM"
+                warmStatusMessage = "Ready"
+                onComplete(output)
+            },
+            "on_error" to { err: String ->
+                warmState = "ERROR"
+                warmStatusMessage = err
+                onError(err)
+            }
+        )
+        val ok = try {
+            bridge.dispatchPluginEvent("omni_browser", "AI_ASK_STREAM", payload)
+        } catch (t: Throwable) {
+            false
+        }
+        if (!ok) {
+            warmState = "ERROR"
+            onError("Could not reach Omni Browser plugin.")
+        }
+    }
+
+    fun newChat(
+        bridge: com.omni.hub.api.HostBridge,
+        onDone: (Boolean, String?) -> Unit = { _, _ -> }
+    ) {
+        if (warmState != "WARM") {
+            onDone(true, null)
+            return
+        }
+        warmState = "WARMING"
+        warmStatusMessage = "Resetting chat..."
+        val ok = try {
+            bridge.dispatchPluginEvent(
+                "omni_browser",
+                "AI_NEW_CHAT",
+                mapOf(
+                    "session_key" to SESSION_KEY,
+                    "on_done" to { success: Boolean, err: String? ->
+                        warmState = if (success) "WARM" else "ERROR"
+                        warmStatusMessage = if (success) "Fresh chat ready" else (err ?: "Reset failed")
+                        onDone(success, err)
+                    }
+                )
+            )
+        } catch (_: Throwable) {
+            false
+        }
+        if (!ok) {
+            warmState = "COLD"
+            onDone(false, "Omni Browser unavailable")
+        }
+    }
+
+    fun closeSession(bridge: com.omni.hub.api.HostBridge) {
+        if (warmState == "COLD") return
+        try {
+            bridge.dispatchPluginEvent(
+                "omni_browser",
+                "AI_CLOSE_SESSION",
+                mapOf("session_key" to SESSION_KEY)
+            )
+        } catch (_: Throwable) {}
+        warmState = "COLD"
+        warmStatusMessage = ""
+    }
+}
