@@ -874,8 +874,7 @@ fun buildAiStudioPuppetScript(): String {
                                         return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + wire.error };
                                     }
 
-                                    const isWireRetryable = wire.httpStatus >= 500 || wire.httpStatus === 403 || wire.statusCode === 7 ||
-                                        lowerWireErr.includes('caller does not have permission') || lowerWireErr.includes('permission denied') ||
+                                    const isWireRetryable = wire.httpStatus >= 500 ||
                                         lowerWireErr.includes('internal') || lowerWireErr.includes('overloaded') ||
                                         lowerWireErr.includes('unavailable') || lowerWireErr.includes('network');
 
@@ -966,7 +965,6 @@ fun buildAiStudioPuppetScript(): String {
                                 }
 
                                 const isRetryable = lowerErr.includes('internal error') ||
-                                                    lowerErr.includes('permission denied') ||
                                                     lowerErr.includes('overloaded') ||
                                                     lowerErr.includes('try again') ||
                                                     lowerErr.includes('server error');
