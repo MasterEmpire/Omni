@@ -90,10 +90,12 @@ private fun Modifier.scrimDismissTouches(onDismiss: () -> Unit): Modifier = poin
 @Composable
 fun SubtitleHubSheet(
     subtitleState: SubtitleState,
+    aiEngineSummary: String = "",
     onOpenFile: () -> Unit,
     onOpenDownload: () -> Unit,
     onOpenStyle: () -> Unit,
     onOpenDelay: () -> Unit,
+    onOpenAiSettings: () -> Unit = {},
     onStateChanged: () -> Unit = {},
     onClose: () -> Unit
 ) {
@@ -237,6 +239,38 @@ fun SubtitleHubSheet(
                     .clickable { onOpenDelay() }
                     .padding(vertical = 12.dp, horizontal = 4.dp)
             )
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(vertical = 6.dp))
+
+            // AI Explainer & Warm Engine Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onOpenAiSettings() }
+                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "AI Explainer & Engine",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontStyle = FontStyle.Italic
+                    )
+                    if (aiEngineSummary.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = aiEngineSummary,
+                            color = Color(0xFF00E676),
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Text("›", color = Color(0xFF8B949E), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
 
             Spacer(Modifier.height(10.dp))
         }
@@ -554,6 +588,12 @@ fun SubtitleDelayWidget(
 fun SubtitleOnVideoOverlay(
     cueText: String?,
     subtitleState: SubtitleState,
+    inlineVisible: Boolean = false,
+    inlineText: String = "",
+    inlineStatus: String = "",
+    inlineIsLoading: Boolean = false,
+    inlineError: String? = null,
+    onTapInlineBox: () -> Unit = {},
     onPositionChanged: (Float) -> Unit,
     onTapSubtitle: () -> Unit,
     modifier: Modifier = Modifier
@@ -566,13 +606,64 @@ fun SubtitleOnVideoOverlay(
         val boxHeightPx = constraints.maxHeight.toFloat()
         val verticalBias = (1f - 2f * subtitleState.yFraction).coerceIn(-0.90f, 0.92f)
 
-        Box(
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .align(BiasAlignment(0f, verticalBias))
-                .padding(horizontal = 24.dp),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 24.dp)
         ) {
+            AnimatedVisibility(
+                visible = inlineVisible,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                val inlineFontSp = (subtitleState.fontSizeSp * 0.80f).coerceIn(13f, 22f)
+                Surface(
+                    color = if (subtitleState.boxColor.alpha == 0f) Color(0xB3000000) else subtitleState.boxColor,
+                    shape = RoundedCornerShape(4.dp),
+                    border = if (subtitleState.hasOutline) {
+                        BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
+                    } else null,
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .heightIn(max = 175.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { onTapInlineBox() }
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        if (inlineIsLoading) {
+                            CircularProgressIndicator(
+                                color = if (subtitleState.fontColor == Color.Black) Color(0xFF00E676) else subtitleState.fontColor,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        val displayMsg = when {
+                            inlineError != null -> inlineError
+                            inlineText.isNotBlank() -> inlineText
+                            inlineStatus.isNotBlank() -> inlineStatus
+                            else -> "Translating..."
+                        }
+                        Text(
+                            text = displayMsg,
+                            color = if (inlineError != null) Color(0xFFF85149) else subtitleState.fontColor,
+                            fontSize = inlineFontSp.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            lineHeight = (inlineFontSp * 1.25f).sp
+                        )
+                    }
+                }
+            }
+
             Surface(
                 color = subtitleState.boxColor,
                 shape = RoundedCornerShape(4.dp),
@@ -639,16 +730,26 @@ fun SubtitleOnVideoOverlay(
 @Composable
 fun AiDialogueInspectorSheet(
     context: Context,
+    bridge: com.omni.hub.api.HostBridge,
     currentCue: String,
+    lineText: String = "",
+    lineStatus: String = "",
+    lineIsLoading: Boolean = false,
+    lineError: String? = null,
+    onRetryLine: () -> Unit = {},
     onConfigureKey: () -> Unit,
     onResumeMovie: () -> Unit,
     onClose: () -> Unit
 ) {
     var selectedWord by remember { mutableStateOf<String?>(null) }
-    var explanationText by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var wordExplanationText by remember { mutableStateOf<String?>(null) }
+    var wordStatusText by remember { mutableStateOf("") }
+    var isWordLoading by remember { mutableStateOf(false) }
+    var wordErrorMessage by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    val activeProvider = OmniAiBridgeClient.getProvider(context)
+    val isOmni = activeProvider == OmniAiBridgeClient.PROVIDER_OMNI_BROWSER
 
     val rawTokens = remember(currentCue) {
         currentCue.split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -658,27 +759,50 @@ fun AiDialogueInspectorSheet(
         return token.replace(Regex("^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$"), "")
     }
 
-    fun requestExplanation(word: String?) {
-        scope.launch {
-            isLoading = true
-            errorMessage = null
-            try {
-                explanationText = if (word != null) {
-                    GroqAiService.explainWord(context, word, currentCue)
-                } else {
-                    GroqAiService.explainDialogue(context, currentCue)
+    fun requestWordExplanation(word: String) {
+        if (isOmni) {
+            isWordLoading = true
+            wordErrorMessage = null
+            wordExplanationText = ""
+            wordStatusText = if (OmniAiBridgeClient.warmState == "WARM") "Sending..." else "Warming AI Studio..."
+            val prompt = "In that subtitle line (\"$currentCue\"), explain the word/term \"$word\" briefly in 2 points:\n1. Direct Meaning\n2. Meaning in this scene."
+            OmniAiBridgeClient.askStreaming(
+                context = context,
+                bridge = bridge,
+                prompt = prompt,
+                label = "Word: $word",
+                onStatus = { st -> wordStatusText = st },
+                onDelta = { delta ->
+                    wordExplanationText = (wordExplanationText ?: "") + delta
+                },
+                onComplete = { finalOut ->
+                    wordExplanationText = finalOut
+                    isWordLoading = false
+                },
+                onError = { err ->
+                    wordErrorMessage = err
+                    isWordLoading = false
                 }
-            } catch (e: Exception) {
-                errorMessage = e.message ?: "Failed to generate explanation"
-            } finally {
-                isLoading = false
+            )
+        } else {
+            scope.launch {
+                isWordLoading = true
+                wordErrorMessage = null
+                try {
+                    wordExplanationText = GroqAiService.explainWord(context, word, currentCue)
+                } catch (e: Exception) {
+                    wordErrorMessage = e.message ?: "Failed to generate explanation"
+                } finally {
+                    isWordLoading = false
+                }
             }
         }
     }
 
-    LaunchedEffect(currentCue) {
-        requestExplanation(null)
-    }
+    val isLoading = if (selectedWord != null) isWordLoading else lineIsLoading
+    val errorMessage = if (selectedWord != null) wordErrorMessage else lineError
+    val explanationText = if (selectedWord != null) wordExplanationText else lineText
+    val statusText = if (selectedWord != null) wordStatusText else lineStatus
 
     Box(
         modifier = Modifier
@@ -714,7 +838,15 @@ fun AiDialogueInspectorSheet(
                         border = BorderStroke(0.8.dp, Color(0xFF00E676).copy(alpha = 0.4f))
                     ) {
                         Text(
-                            text = "qwen3.8-27b",
+                            text = if (isOmni) {
+                                val dot = when (OmniAiBridgeClient.warmState) {
+                                    "WARM" -> "🟢"
+                                    "WARMING" -> "🟡"
+                                    "ERROR" -> "🔴"
+                                    else -> "⚪"
+                                }
+                                "$dot ${OmniAiBridgeClient.getModel(context).take(16)}"
+                            } else "qwen3.8-27b",
                             color = Color(0xFF00E676),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
@@ -728,6 +860,28 @@ fun AiDialogueInspectorSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (isOmni) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF161B22),
+                            border = BorderStroke(0.8.dp, Color(0xFF00E676).copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    OmniAiBridgeClient.newChat(bridge) { ok, err ->
+                                        bridge.showToast(if (ok) "Fresh AI Studio chat ready" else (err ?: "Reset failed"))
+                                    }
+                                }
+                        ) {
+                            Text(
+                                text = "New Chat",
+                                color = Color(0xFF00E676),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = Color(0xFF161B22),
@@ -781,7 +935,6 @@ fun AiDialogueInspectorSheet(
                         .clickable {
                             if (selectedWord != null) {
                                 selectedWord = null
-                                requestExplanation(null)
                             }
                         }
                 ) {
@@ -807,7 +960,7 @@ fun AiDialogueInspectorSheet(
                             .clickable {
                                 if (clean.isNotEmpty() && !isThisSelected) {
                                     selectedWord = clean
-                                    requestExplanation(clean)
+                                    requestWordExplanation(clean)
                                 }
                             }
                     ) {
@@ -839,26 +992,29 @@ fun AiDialogueInspectorSheet(
                         .padding(14.dp),
                     contentAlignment = if (isLoading) Alignment.Center else Alignment.TopStart
                 ) {
-                    if (isLoading) {
+                    if (isLoading && explanationText.isNullOrBlank()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             CircularProgressIndicator(color = Color(0xFF00E676), strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                             Text(
-                                text = "Groq LPU thinking...",
+                                text = statusText.ifBlank { if (isOmni) "Omni AI Studio thinking..." else "Groq LPU thinking..." },
                                 color = Color(0xFF8B949E),
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
-                    } else if (errorMessage != null) {
+                    } else if (errorMessage != null && explanationText.isNullOrBlank()) {
                         Column {
                             Text("Explanation Error:", color = Color(0xFFF85149), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(4.dp))
-                            Text(errorMessage!!, color = Color(0xFFC9D1D9), fontSize = 12.sp)
+                            Text(errorMessage, color = Color(0xFFC9D1D9), fontSize = 12.sp)
                             Spacer(Modifier.height(8.dp))
-                            TextButton(onClick = { requestExplanation(selectedWord) }) {
+                            TextButton(onClick = {
+                                val w = selectedWord
+                                if (w != null) requestWordExplanation(w) else onRetryLine()
+                            }) {
                                 Text("Retry", color = Color(0xFF00E676), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
@@ -910,14 +1066,49 @@ fun AiDialogueInspectorSheet(
 // 6. GROQ API KEY CONFIGURATION MODAL
 // ========================================================
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GroqKeyConfigDialog(
     context: Context,
+    bridge: com.omni.hub.api.HostBridge,
     onKeySaved: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val omniAvailable = remember { OmniAiBridgeClient.isOmniBrowserInstalled(bridge) }
+    var selectedProvider by remember { mutableStateOf(OmniAiBridgeClient.getProvider(context)) }
     var keyInput by remember { mutableStateOf(GroqAiService.getApiKey(context) ?: "") }
-    var promptInput by remember { mutableStateOf(GroqAiService.getSystemPrompt(context)) }
+    var groqPromptInput by remember { mutableStateOf(GroqAiService.getSystemPrompt(context)) }
+
+    var profiles by remember { mutableStateOf(listOf(OmniProfileInfo("default", "Default"))) }
+    var selectedProfileId by remember { mutableStateOf(OmniAiBridgeClient.getProfileId(context)) }
+    var modelInput by remember { mutableStateOf(OmniAiBridgeClient.getModel(context)) }
+    var thinkingLevel by remember { mutableStateOf(OmniAiBridgeClient.getThinkingLevel(context)) }
+    var tempChat by remember { mutableStateOf(OmniAiBridgeClient.getTemporaryChat(context)) }
+    var keepContext by remember { mutableStateOf(OmniAiBridgeClient.getKeepMovieContext(context)) }
+    var omniPromptInput by remember { mutableStateOf(OmniAiBridgeClient.getOmniSystemPrompt(context)) }
+
+    LaunchedEffect(omniAvailable) {
+        if (omniAvailable) {
+            OmniAiBridgeClient.fetchProfiles(bridge) { loaded ->
+                profiles = loaded
+            }
+        }
+    }
+
+    fun persistSettings() {
+        OmniAiBridgeClient.saveProvider(context, selectedProvider)
+        if (selectedProvider == OmniAiBridgeClient.PROVIDER_GROQ) {
+            if (keyInput.isNotBlank()) GroqAiService.saveApiKey(context, keyInput.trim())
+            GroqAiService.saveSystemPrompt(context, groqPromptInput)
+        } else {
+            OmniAiBridgeClient.saveProfileId(context, selectedProfileId)
+            OmniAiBridgeClient.saveModel(context, modelInput)
+            OmniAiBridgeClient.saveThinkingLevel(context, thinkingLevel)
+            OmniAiBridgeClient.saveTemporaryChat(context, tempChat)
+            OmniAiBridgeClient.saveKeepMovieContext(context, keepContext)
+            OmniAiBridgeClient.saveOmniSystemPrompt(context, omniPromptInput)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -925,85 +1116,321 @@ fun GroqKeyConfigDialog(
         shape = RoundedCornerShape(16.dp),
         title = {
             Column {
-                Text("Groq AI Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("AI Explainer Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 Spacer(Modifier.height(2.dp))
-                Text("Qwen 3.8 27B • Key & System Instruction", color = Color(0xFF00E676), fontSize = 11.sp)
+                Text(
+                    if (selectedProvider == OmniAiBridgeClient.PROVIDER_OMNI_BROWSER)
+                        "Omni Browser • Persistent Headless AI Studio"
+                    else
+                        "Groq LPU • Qwen 3.8 27B",
+                    color = Color(0xFF00E676),
+                    fontSize = 11.sp
+                )
             }
         },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState())
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = "Groq API Key",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                OutlinedTextField(
-                    value = keyInput,
-                    onValueChange = { keyInput = it },
-                    singleLine = true,
-                    placeholder = { Text("gsk_...", fontSize = 12.sp) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF00E676),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "System Instruction",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Reset Default",
-                        color = Color(0xFF58A6FF),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable { promptInput = GroqAiService.DEFAULT_SYSTEM_PROMPT }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+                Text("AI Provider", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf(
+                        OmniAiBridgeClient.PROVIDER_GROQ to "Groq (Qwen 3.8)",
+                        OmniAiBridgeClient.PROVIDER_OMNI_BROWSER to "Omni Browser"
+                    ).forEach { (pKey, pLabel) ->
+                        val isSel = selectedProvider == pKey
+                        val enabled = pKey == OmniAiBridgeClient.PROVIDER_GROQ || omniAvailable
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSel) Color(0xFF00E676).copy(alpha = 0.2f) else Color(0xFF0D1117),
+                            border = BorderStroke(1.dp, if (isSel) Color(0xFF00E676) else Color.White.copy(alpha = 0.15f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = enabled) { selectedProvider = pKey }
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (!enabled) "Omni (Missing)" else pLabel,
+                                    color = if (!enabled) Color(0xFF484F58) else if (isSel) Color(0xFF00E676) else Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
 
-                OutlinedTextField(
-                    value = promptInput,
-                    onValueChange = { promptInput = it },
-                    minLines = 3,
-                    maxLines = 6,
-                    placeholder = { Text("Custom system prompt...", fontSize = 12.sp) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF00E676),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (selectedProvider == OmniAiBridgeClient.PROVIDER_GROQ) {
+                    Text("Groq API Key", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = keyInput,
+                        onValueChange = { keyInput = it },
+                        singleLine = true,
+                        placeholder = { Text("gsk_...", fontSize = 12.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF00E676),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("System Instruction", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Reset Default",
+                            color = Color(0xFF58A6FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { groqPromptInput = GroqAiService.DEFAULT_SYSTEM_PROMPT }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = groqPromptInput,
+                        onValueChange = { groqPromptInput = it },
+                        minLines = 3,
+                        maxLines = 5,
+                        placeholder = { Text("Custom system prompt...", fontSize = 12.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF00E676),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Text("Account Profile", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        profiles.forEach { prof ->
+                            val isSel = selectedProfileId == prof.id
+                            val badge = when {
+                                prof.needsVerification -> " 🔒"
+                                prof.isQuotaExhausted -> " 🔴"
+                                else -> ""
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) Color(0xFF00E676).copy(alpha = 0.2f) else Color(0xFF0D1117),
+                                border = BorderStroke(
+                                    1.dp,
+                                    when {
+                                        isSel -> Color(0xFF00E676)
+                                        prof.needsVerification -> Color(0xFFFF6D00).copy(alpha = 0.6f)
+                                        prof.isQuotaExhausted -> Color(0xFFF85149).copy(alpha = 0.6f)
+                                        else -> Color.White.copy(alpha = 0.15f)
+                                    }
+                                ),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { selectedProfileId = prof.id }
+                            ) {
+                                Text(
+                                    text = "${prof.name}$badge",
+                                    color = if (isSel) Color(0xFF00E676) else Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Text("Model", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = modelInput,
+                        onValueChange = { modelInput = it },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF00E676),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("Gemini 3.8 Flash", "Gemini 3.7 Flash", "Gemini 2.5 Pro").forEach { m ->
+                            val isSel = modelInput.equals(m, ignoreCase = true)
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isSel) Color(0xFF58A6FF).copy(alpha = 0.2f) else Color(0xFF0D1117),
+                                border = BorderStroke(1.dp, if (isSel) Color(0xFF58A6FF) else Color.White.copy(alpha = 0.12f)),
+                                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { modelInput = m }
+                            ) {
+                                Text(m, color = if (isSel) Color(0xFF58A6FF) else Color(0xFF8B949E), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                        }
+                    }
+
+                    Text("Thinking Level", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        listOf("Default", "Minimal", "Low", "High").forEach { lvl ->
+                            val isSel = thinkingLevel == lvl
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) Color(0xFF00E676).copy(alpha = 0.2f) else Color(0xFF0D1117),
+                                border = BorderStroke(1.dp, if (isSel) Color(0xFF00E676) else Color.White.copy(alpha = 0.15f)),
+                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { thinkingLevel = lvl }
+                            ) {
+                                Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                                    Text(lvl, color = if (isSel) Color(0xFF00E676) else Color(0xFF8B949E), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Keep Movie Context", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Reuse same session across subtitles", color = Color(0xFF8B949E), fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = keepContext,
+                            onCheckedChange = { keepContext = it },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF00E676))
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Temporary Chat", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Don't clutter Google Drive history", color = Color(0xFF8B949E), fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = tempChat,
+                            onCheckedChange = { tempChat = it },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF00E676))
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("System Instruction", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Reset Default",
+                            color = Color(0xFF58A6FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { omniPromptInput = OmniAiBridgeClient.DEFAULT_OMNI_PROMPT }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = omniPromptInput,
+                        onValueChange = { omniPromptInput = it },
+                        minLines = 3,
+                        maxLines = 5,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF00E676),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Warm Session Button
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF0D1117),
+                        border = BorderStroke(
+                            1.dp,
+                            when (OmniAiBridgeClient.warmState) {
+                                "WARM" -> Color(0xFF00E676)
+                                "WARMING" -> Color(0xFFD29922)
+                                "ERROR" -> Color(0xFFF85149)
+                                else -> Color(0xFF58A6FF)
+                            }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(enabled = OmniAiBridgeClient.warmState != "WARMING") {
+                                persistSettings()
+                                OmniAiBridgeClient.warmSession(context, bridge) { ok, err ->
+                                    bridge.showToast(if (ok) "🟢 AI Studio Session Warm & Ready!" else (err ?: "Warm-up failed"))
+                                }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (OmniAiBridgeClient.warmState == "WARMING") {
+                                    CircularProgressIndicator(color = Color(0xFFD29922), strokeWidth = 2.dp, modifier = Modifier.size(15.dp))
+                                } else {
+                                    Text(
+                                        when (OmniAiBridgeClient.warmState) {
+                                            "WARM" -> "🟢"
+                                            "ERROR" -> "🔴"
+                                            else -> "🔥"
+                                        },
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                Text(
+                                    text = when (OmniAiBridgeClient.warmState) {
+                                        "WARMING" -> OmniAiBridgeClient.warmStatusMessage.ifBlank { "Warming AI Studio..." }
+                                        "WARM" -> "Session Warm (Tap to Re-Sync)"
+                                        "ERROR" -> OmniAiBridgeClient.warmStatusMessage.ifBlank { "Retry Warm Session" }
+                                        else -> "Warm Session Now"
+                                    },
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (keyInput.isNotBlank()) {
-                        GroqAiService.saveApiKey(context, keyInput.trim())
-                        GroqAiService.saveSystemPrompt(context, promptInput)
-                        onKeySaved(keyInput.trim())
-                    }
+                    persistSettings()
+                    onKeySaved(
+                        if (selectedProvider == OmniAiBridgeClient.PROVIDER_OMNI_BROWSER) "OMNI"
+                        else keyInput.trim()
+                    )
                 },
-                enabled = keyInput.isNotBlank(),
+                enabled = selectedProvider == OmniAiBridgeClient.PROVIDER_OMNI_BROWSER || keyInput.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
             ) {
                 Text("Save", color = Color.Black, fontWeight = FontWeight.Bold)
