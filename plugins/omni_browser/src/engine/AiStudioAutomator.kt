@@ -109,7 +109,6 @@ class AiStudioAutomator(
         )
 
         val autoWv = sessionInstance.webView.apply {
-            setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
             translationX = 0f
             alpha = 1f
             layoutParams = ViewGroup.LayoutParams(viewWidth, viewHeight)
@@ -139,7 +138,7 @@ class AiStudioAutomator(
                 allowContentAccess = true
                 useWideViewPort = true
                 loadWithOverviewMode = true
-                blockNetworkImage = true
+                blockNetworkImage = false
                 mediaPlaybackRequiresUserGesture = true
                 setGeolocationEnabled(false)
                 setSupportMultipleWindows(true)
@@ -287,7 +286,12 @@ class AiStudioAutomator(
                             context, bridge, pId.ifEmpty { profileId }, reason
                         )
                     },
-                    onLog = { tag, msg -> bridge.log(tag, msg) }
+                    onLog = { tag, msg -> bridge.log(tag, msg) },
+                    onVerificationLock = { pId, reason ->
+                        com.omni.plugin.browser.storage.VaultManager.recordVerificationLock(
+                            context, bridge, pId.ifEmpty { profileId }, reason
+                        )
+                    }
                 ),
                 "OmniAnalyticsBridge"
             )
@@ -305,34 +309,15 @@ class AiStudioAutomator(
                         host.contains("doubleclick.net") ||
                         host.contains("googleadservices.com") ||
                         host.contains("googlesyndication.com") ||
-                        host.contains("fonts.googleapis.com") ||
-                        host.contains("fonts.gstatic.com") ||
-                        host.contains("csp.withgoogle.com") ||
-                        host.contains("ogads-pa.clients6.google.com") ||
-                        urlStr.contains("play.google.com/log") ||
-                        urlStr.contains("console.cloud.google.com/onboarding/auth_warmup") ||
                         urlStr.contains("cookienotificationbar") ||
-                        urlStr.contains("feedback/js/help") ||
-                        urlStr.contains("cspreport/fine-allowlist") ||
-                        urlStr.contains("gstatic.com/images/branding/")
+                        urlStr.contains("feedback/js/help")
 
-                    val isStaticWeight = path.endsWith(".woff2") ||
-                        path.endsWith(".woff") ||
-                        path.endsWith(".ttf") ||
-                        path.endsWith(".otf") ||
-                        path.endsWith(".png") ||
-                        path.endsWith(".jpg") ||
-                        path.endsWith(".jpeg") ||
-                        path.endsWith(".webp") ||
-                        path.endsWith(".gif") ||
-                        path.endsWith(".svg") ||
-                        path.endsWith(".ico") ||
-                        path.endsWith(".mp4") ||
+                    val isHeavyMedia = path.endsWith(".mp4") ||
                         path.endsWith(".webm") ||
                         path.endsWith(".mp3") ||
                         path.endsWith(".wav")
 
-                    if (isJunkHost || isStaticWeight) {
+                    if (isJunkHost || isHeavyMedia) {
                         val origin = request.requestHeaders?.get("Origin") ?: "https://aistudio.google.com"
                         val corsHeaders = mapOf(
                             "Access-Control-Allow-Origin" to origin,
