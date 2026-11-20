@@ -46,6 +46,7 @@ val CHATGPT_HEADLESS_TURBO_SCRIPT = """
                 });
             } catch(_) {}
 
+            const throttleMs = window.__omniGptHeadlessTurbo ? 350 : 180;
             const timeoutId = setTimeout(function() {
                 if (!executed) {
                     executed = true;
@@ -53,7 +54,7 @@ val CHATGPT_HEADLESS_TURBO_SCRIPT = """
                     try { if (nativeId !== null) origCancelRaf.call(window, nativeId); } catch(_) {}
                     cb(performance.now());
                 }
-            }, 18);
+            }, throttleMs);
 
             pendingCallbacks.set(id, { nativeId: nativeId, timeoutId: timeoutId });
             return id;
@@ -77,7 +78,7 @@ val CHATGPT_HEADLESS_TURBO_SCRIPT = """
                 style.id = 'omni-gpt-headless-turbo-css';
                 style.textContent = [
                     '*, *::before, *::after { animation-duration: 0.001ms !important; animation-delay: 0ms !important; transition-duration: 0.001ms !important; transition-delay: 0ms !important; }',
-                    '[data-message-author-role="assistant"] .markdown { content-visibility: hidden !important; contain: strict !important; }'
+                    '[data-message-author-role="assistant"], [data-message-author-role="assistant"] .markdown, img { display: none !important; }'
                 ].join('\n');
                 (document.head || document.documentElement).appendChild(style);
             }
