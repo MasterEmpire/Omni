@@ -37,6 +37,13 @@ fun buildAiStudioPuppetScript(): String {
                     }
                 } catch(_) {}
             }
+            function isVerificationError(lowerMsg) {
+                if (!lowerMsg) return false;
+                return lowerMsg.includes('verify-account') ||
+                    lowerMsg.includes('must be verified') ||
+                    lowerMsg.includes('unusual activity') ||
+                    lowerMsg.includes('account verification is required');
+            }
 
             function isElementVisible(el) {
                 if (!el) return false;
@@ -720,7 +727,7 @@ fun buildAiStudioPuppetScript(): String {
 
                     if (activePromptArea && prompt && prompt.trim().length > 0) {
                         safeInjectText(activePromptArea, prompt);
-                        await delay(16);
+                        await randomDelay(350, 700);
                     }
 
                     if (!checkUiGenerating()) {
@@ -861,6 +868,21 @@ fun buildAiStudioPuppetScript(): String {
 
                                 if (wire.error) {
                                     const lowerWireErr = String(wire.error).toLowerCase();
+                                    if (isVerificationError(lowerWireErr)) {
+                                        hostLog('VERIFICATION_LOCK', 'Account verification required (' + wire.httpStatus + '/' + wire.statusCode + '): ' + wire.error);
+                                        try {
+                                            if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.reportVerificationLock) {
+                                                window.OmniAnalyticsBridge.reportVerificationLock(window.__omniProfileId || 'default', wire.error);
+                                            }
+                                        } catch(_) {}
+                                        this.isBusy = false;
+                                        const vErr = 'Verification Required: ' + wire.error;
+                                        if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                            window.OmniAutomator.onPuppetTurnError(vErr);
+                                        }
+                                        return { thoughts: latestTurnThoughts, output: '', error: vErr };
+                                    }
+
                                     const isWireQuota = wire.httpStatus === 429 || wire.statusCode === 8 ||
                                         lowerWireErr.includes('quota') || lowerWireErr.includes('resource exhausted') ||
                                         lowerWireErr.includes('resource_exhausted') || lowerWireErr.includes('rate limit') || lowerWireErr.includes('429');
@@ -954,6 +976,20 @@ fun buildAiStudioPuppetScript(): String {
 
                             if (errTxt && !errTxt.toLowerCase().includes('saved')) {
                                 const lowerErr = errTxt.toLowerCase();
+                                if (isVerificationError(lowerErr)) {
+                                    hostLog('VERIFICATION_LOCK', 'DOM verification gate detected: ' + errTxt);
+                                    try {
+                                        if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.reportVerificationLock) {
+                                            window.OmniAnalyticsBridge.reportVerificationLock(window.__omniProfileId || 'default', errTxt);
+                                        }
+                                    } catch(_) {}
+                                    this.isBusy = false;
+                                    const vErr = 'Verification Required: ' + errTxt;
+                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                        window.OmniAutomator.onPuppetTurnError(vErr);
+                                    }
+                                    return { thoughts: latestTurnThoughts, output: '', error: vErr };
+                                }
                                 const isQuota = lowerErr.includes('quota') || lowerErr.includes('resource exhausted') || lowerErr.includes('resource_exhausted') || lowerErr.includes('rate limit') || lowerErr.includes('429');
                                 if (isQuota) {
                                     hostLog('STUDIO_ERROR', 'Quota exhausted (429): ' + errTxt);
