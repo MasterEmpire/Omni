@@ -57,16 +57,22 @@ fun OmniBrowserTopBar(
     onNavigate: (String) -> Unit,
     profColor: Color,
     tabCount: Int,
+    topLeftItems: List<String>,
     topBarItems: List<String>,
     isHomeOverlayOpen: Boolean,
     isSearchFocused: Boolean,
     onSearchFocusChange: (Boolean) -> Unit,
-    onReloadClick: () -> Unit,
     onActionClick: (String) -> Unit,
     onActionLongClick: (String) -> Unit = {},
     isAutoPilotActive: Boolean = false,
     isDataSaverActive: Boolean = false,
+    forceDarkWebPages: Boolean = false,
+    dataSaverMode: String = "MEDIUM",
+    isCurrentTabFavorite: Boolean = false,
+    isFocusLockActive: Boolean = false,
     activeDownloadsCount: Int = 0,
+    canGoBack: Boolean = false,
+    canGoForward: Boolean = false,
     onTopBarDragStart: () -> Unit = {},
     onTopBarDrag: (Float) -> Unit = {},
     onTopBarDragEnd: () -> Unit = {},
@@ -148,21 +154,49 @@ fun OmniBrowserTopBar(
                     modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
-                        Icons.Default.ArrowBack,
+                        BrowserIcons.ArrowBack,
                         contentDescription = "Collapse Search",
-                        tint = profColor
+                        tint = profColor,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
                 Spacer(Modifier.width(4.dp))
+            } else if (topLeftItems.isNotEmpty()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    topLeftItems.forEach { slotId ->
+                        NavSlotGlyph(
+                            slotId = slotId,
+                            profColor = profColor,
+                            tabCount = tabCount,
+                            currentUrl = currentUrl,
+                            canGoBack = canGoBack,
+                            canGoForward = canGoForward,
+                            isHomeOverlayOpen = isHomeOverlayOpen,
+                            isAutoPilotActive = isAutoPilotActive,
+                            forceDarkWebPages = forceDarkWebPages,
+                            dataSaverMode = dataSaverMode,
+                            isCurrentTabFavorite = isCurrentTabFavorite,
+                            isFocusLockActive = isFocusLockActive,
+                            activeDownloadsCount = activeDownloadsCount,
+                            sizeDp = 30,
+                            onClick = { onActionClick(slotId) },
+                            onLongClick = { onActionLongClick(slotId) }
+                        )
+                    }
+                }
             }
 
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(18.dp))
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(17.dp))
                     .background(profColor.copy(alpha = 0.14f))
-                    .border(1.3.dp, profColor, RoundedCornerShape(18.dp))
+                    .border(1.2.dp, profColor, RoundedCornerShape(17.dp))
                     .then(
                         if (!isSearchFocused) {
                             Modifier.clickable(
@@ -190,14 +224,19 @@ fun OmniBrowserTopBar(
                     Spacer(Modifier.width(6.dp))
 
                     if (isDataSaverActive) {
-                        Text("🛡️", fontSize = 10.sp)
+                        Icon(
+                            BrowserIcons.Shield,
+                            contentDescription = "Data Saver",
+                            tint = Color(0xFF58A6FF),
+                            modifier = Modifier.size(13.dp)
+                        )
                         Spacer(Modifier.width(4.dp))
                     }
                     Icon(
-                        imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
+                        imageVector = if (currentUrl.startsWith("https://")) BrowserIcons.ShieldCheck else if (currentUrl.startsWith("http://")) Icons.Default.Info else BrowserIcons.Search,
                         contentDescription = null,
                         tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else if (currentUrl.startsWith("http://")) Color(0xFFFDD663) else profColor,
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(14.dp)
                     )
 
                     Spacer(Modifier.width(6.dp))
@@ -278,7 +317,7 @@ fun OmniBrowserTopBar(
                                 },
                                 modifier = Modifier.size(24.dp)
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(15.dp))
+                                Icon(BrowserIcons.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(15.dp))
                             }
                         }
                     } else {
@@ -302,20 +341,6 @@ fun OmniBrowserTopBar(
                                 )
                             )
                         }
-
-                        if (currentUrl != "about:blank") {
-                            IconButton(
-                                onClick = onReloadClick,
-                                modifier = Modifier.size(26.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Reload",
-                                    tint = Color(0xFF9AA0A6),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -331,83 +356,24 @@ fun OmniBrowserTopBar(
                     modifier = Modifier.padding(start = 10.dp, end = 2.dp)
                 ) {
                     topBarItems.forEach { slotId ->
-                        when (slotId) {
-                            "quick_toggle" -> {
-                                Box(
-                                    modifier = Modifier
-                                        .size(30.dp)
-                                        .clip(CircleShape)
-                                        .then(
-                                            if (tabCount > 1) {
-                                                Modifier.combinedClickable(
-                                                    onClick = { onActionClick("quick_toggle") },
-                                                    onLongClick = { onActionLongClick("quick_toggle") }
-                                                )
-                                            } else Modifier
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        "⇄",
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (tabCount > 1) Color(0xFFE8EAED) else Color(0xFF5F6368)
-                                    )
-                                }
-                            }
-                            "tabs" -> {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(profColor.copy(alpha = 0.2f))
-                                        .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
-                                        .combinedClickable(
-                                            onClick = { onActionClick("tabs") },
-                                            onLongClick = { onActionLongClick("tabs") }
-                                        )
-                                ) {
-                                    Text(
-                                        "$tabCount",
-                                        color = profColor,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                }
-                            }
-                            else -> {
-                                val badge = if (slotId == "downloads" && activeDownloadsCount > 0) "$activeDownloadsCount" else null
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(30.dp)
-                                        .clip(CircleShape)
-                                        .combinedClickable(
-                                            onClick = { onActionClick(slotId) },
-                                            onLongClick = { onActionLongClick(slotId) }
-                                        )
-                                ) {
-                                    Text(
-                                        text = getMenuSlotEmoji(slotId, forceDark = false, isAutoPilot = isAutoPilotActive, isHome = isHomeOverlayOpen),
-                                        fontSize = 15.sp,
-                                        color = Color(0xFFE8EAED)
-                                    )
-                                    if (badge != null) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .size(13.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF3FB950)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(badge, color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        NavSlotGlyph(
+                            slotId = slotId,
+                            profColor = profColor,
+                            tabCount = tabCount,
+                            currentUrl = currentUrl,
+                            canGoBack = canGoBack,
+                            canGoForward = canGoForward,
+                            isHomeOverlayOpen = isHomeOverlayOpen,
+                            isAutoPilotActive = isAutoPilotActive,
+                            forceDarkWebPages = forceDarkWebPages,
+                            dataSaverMode = dataSaverMode,
+                            isCurrentTabFavorite = isCurrentTabFavorite,
+                            isFocusLockActive = isFocusLockActive,
+                            activeDownloadsCount = activeDownloadsCount,
+                            sizeDp = 30,
+                            onClick = { onActionClick(slotId) },
+                            onLongClick = { onActionLongClick(slotId) }
+                        )
                     }
                 }
             }
@@ -415,48 +381,139 @@ fun OmniBrowserTopBar(
     }
 }
 
-private fun getMenuSlotEmoji(
-    id: String,
-    forceDark: Boolean = false,
-    isAutoPilot: Boolean = false,
-    isHome: Boolean = false,
-    isDataSaver: Boolean = false,
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun NavSlotGlyph(
+    slotId: String,
+    profColor: Color,
+    tabCount: Int,
+    currentUrl: String,
+    canGoBack: Boolean,
+    canGoForward: Boolean,
+    isHomeOverlayOpen: Boolean,
+    isAutoPilotActive: Boolean,
+    forceDarkWebPages: Boolean,
     dataSaverMode: String = "MEDIUM",
-    isSiteCached: Boolean = false,
-    isFav: Boolean = false,
-    isFocusLock: Boolean = false
-): String = when (id) {
-    "quick_toggle" -> "⇄"
-    "tabs" -> "📑"
-    "menu" -> "☰"
-    "home" -> "🏠"
-    "back" -> "‹"
-    "forward" -> "›"
-    "reload" -> "↻"
-    "new_tab" -> "＋"
-    "smart_notes" -> "📝"
-    "downloads" -> "📥"
-    "force_dark" -> if (forceDark) "☀️" else "🌙"
-    "data_saver" -> if (dataSaverMode == "EXTREME") "🔥" else "🛡️"
-    "site_cache" -> "📦"
-    "page_zoom" -> "🔍"
-    "favorite_tab" -> if (isFav) "★" else "☆"
-    "focus_lock" -> if (isFocusLock) "🔒" else "🛡️"
-    "copy_url" -> "🔗"
-    "dom_snapshot" -> "📸"
-    "full_source" -> "🗜️"
-    "local_ide" -> "💻"
-    "autopilot" -> "⚡"
-    "studio_lab" -> "🧪"
-    "ai_automator" -> "🤖"
-    "recents" -> "📱"
-    "diagnostics" -> "📋"
-    "settings" -> "⚙️"
-    "exit" -> "⏻"
-    else -> "•"
+    isCurrentTabFavorite: Boolean = false,
+    isFocusLockActive: Boolean = false,
+    activeDownloadsCount: Int = 0,
+    showMenuActiveTint: Boolean = false,
+    sizeDp: Int = 32,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {}
+) {
+    val isEnabled = when (slotId) {
+        "back" -> canGoBack || currentUrl != "about:blank"
+        "forward" -> canGoForward
+        "quick_toggle" -> tabCount > 1
+        else -> true
+    }
+
+    val tintColor = when {
+        !isEnabled -> Color(0xFF484F58)
+        slotId == "home" && (isHomeOverlayOpen || currentUrl == "about:blank") -> profColor
+        slotId == "menu" && showMenuActiveTint -> profColor
+        slotId == "autopilot" && isAutoPilotActive -> Color(0xFF00E5FF)
+        slotId == "force_dark" && forceDarkWebPages -> Color(0xFFFDD663)
+        slotId == "favorite_tab" && isCurrentTabFavorite -> Color(0xFFFFD600)
+        slotId == "focus_lock" && isFocusLockActive -> Color(0xFFF85149)
+        slotId == "data_saver" && dataSaverMode == "EXTREME" -> Color(0xFF3FB950)
+        slotId == "data_saver" && dataSaverMode == "MEDIUM" -> Color(0xFF58A6FF)
+        slotId == "new_tab" -> profColor
+        slotId == "exit" -> Color(0xFFF28B82)
+        else -> Color(0xFFE8EAED)
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(sizeDp.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .combinedClickable(
+                enabled = isEnabled,
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+    ) {
+        when (slotId) {
+            "tabs" -> {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(profColor.copy(alpha = 0.16f))
+                        .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
+                ) {
+                    Text(
+                        "$tabCount",
+                        color = profColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+            "menu" -> {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        BrowserIcons.Menu,
+                        contentDescription = "Menu",
+                        tint = tintColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    if (isAutoPilotActive) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .align(Alignment.TopEnd)
+                                .offset(x = 2.dp, y = (-2).dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF00E5FF))
+                        )
+                    }
+                }
+            }
+            "downloads" -> {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        BrowserIcons.Download,
+                        contentDescription = "Downloads",
+                        tint = tintColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    if (activeDownloadsCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 5.dp, y = (-3).dp)
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF3FB950)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("$activeDownloadsCount", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            else -> {
+                Icon(
+                    imageVector = getBrowserIconForSlot(
+                        id = slotId,
+                        forceDark = forceDarkWebPages,
+                        dataSaverMode = dataSaverMode,
+                        isFav = isCurrentTabFavorite
+                    ),
+                    contentDescription = slotId,
+                    tint = tintColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OmniBottomBar(
     bottomBarItems: List<String>,
@@ -468,6 +525,9 @@ fun OmniBottomBar(
     isHomeOverlayOpen: Boolean,
     isAutoPilotActive: Boolean,
     forceDarkWebPages: Boolean,
+    dataSaverMode: String = "MEDIUM",
+    isCurrentTabFavorite: Boolean = false,
+    isFocusLockActive: Boolean = false,
     activeDownloadsCount: Int,
     showMenu: Boolean,
     onItemClick: (String) -> Unit,
@@ -491,143 +551,94 @@ fun OmniBottomBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 bottomBarItems.forEach { slotId ->
-                    val isEnabled = when (slotId) {
-                        "back" -> canGoBack || currentUrl != "about:blank"
-                        "forward" -> canGoForward
-                        "quick_toggle" -> tabCount > 1
-                        else -> true
-                    }
-
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(10.dp))
-                            .combinedClickable(
-                                enabled = isEnabled,
-                                onClick = { onItemClick(slotId) },
-                                onLongClick = { onItemLongClick(slotId) }
-                            )
-                    ) {
-                        when (slotId) {
-                            "tabs" -> {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(profColor.copy(alpha = 0.16f))
-                                        .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
-                                ) {
-                                    Text(
-                                        "$tabCount",
-                                        color = profColor,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                }
-                            }
-                            "menu" -> {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.Menu,
-                                        contentDescription = "Menu",
-                                        tint = if (showMenu) profColor else Color(0xFFE8EAED),
-                                        modifier = Modifier.size(21.dp)
-                                    )
-                                    if (isAutoPilotActive) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .align(Alignment.TopEnd)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF00E5FF))
-                                        )
-                                    }
-                                }
-                            }
-                            "home" -> {
-                                Icon(
-                                    Icons.Default.Home,
-                                    contentDescription = "Home",
-                                    tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFFC9D1D9),
-                                    modifier = Modifier.size(21.dp)
-                                )
-                            }
-                            "back" -> {
-                                Icon(
-                                    Icons.Default.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = if (isEnabled) Color(0xFFE8EAED) else Color(0xFF484F58),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            "forward" -> {
-                                Icon(
-                                    Icons.Default.ArrowForward,
-                                    contentDescription = "Forward",
-                                    tint = if (isEnabled) Color(0xFFE8EAED) else Color(0xFF484F58),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            "reload" -> {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Reload",
-                                    tint = Color(0xFFE8EAED),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            "new_tab" -> {
-                                Icon(
-                                    Icons.Default.Add,
-                                    contentDescription = "New Tab",
-                                    tint = profColor,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            "quick_toggle" -> {
-                                Text(
-                                    "⇄",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (tabCount > 1) Color(0xFFE8EAED) else Color(0xFF484F58)
-                                )
-                            }
-                            "downloads" -> {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text("📥", fontSize = 17.sp)
-                                    if (activeDownloadsCount > 0) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .offset(x = 5.dp, y = (-3).dp)
-                                                .size(14.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF3FB950)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("$activeDownloadsCount", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                            }
-                            else -> {
-                                Text(
-                                    text = getMenuSlotEmoji(slotId, forceDark = forceDarkWebPages, isAutoPilot = isAutoPilotActive, isHome = isHomeOverlayOpen),
-                                    fontSize = 17.sp,
-                                    color = if (slotId == "autopilot" && isAutoPilotActive) Color(0xFF00E5FF) else Color(0xFFE8EAED)
-                                )
-                            }
-                        }
-                    }
+                    NavSlotGlyph(
+                        slotId = slotId,
+                        profColor = profColor,
+                        tabCount = tabCount,
+                        currentUrl = currentUrl,
+                        canGoBack = canGoBack,
+                        canGoForward = canGoForward,
+                        isHomeOverlayOpen = isHomeOverlayOpen,
+                        isAutoPilotActive = isAutoPilotActive,
+                        forceDarkWebPages = forceDarkWebPages,
+                        dataSaverMode = dataSaverMode,
+                        isCurrentTabFavorite = isCurrentTabFavorite,
+                        isFocusLockActive = isFocusLockActive,
+                        activeDownloadsCount = activeDownloadsCount,
+                        showMenuActiveTint = showMenu,
+                        sizeDp = 36,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        onClick = { onItemClick(slotId) },
+                        onLongClick = { onItemLongClick(slotId) }
+                    )
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun BottomBarExpandFab(
+    visible: Boolean,
+    profColor: Color,
+    isAutoPilotActive: Boolean,
+    onExpand: () -> Unit,
+    onOpenMenu: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var dragOffsetX by remember { mutableFloatStateOf(0f) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(initialScale = 0.7f),
+        exit = fadeOut() + scaleOut(targetScale = 0.7f),
+        modifier = modifier.offset {
+            IntOffset(dragOffsetX.roundToInt(), dragOffsetY.roundToInt())
+        }
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = Color(0xFF161B22).copy(alpha = 0.90f),
+            border = BorderStroke(1.2.dp, profColor.copy(alpha = 0.75f)),
+            shadowElevation = 10.dp,
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        dragOffsetX += dragAmount.x
+                        dragOffsetY += dragAmount.y
+                    }
+                }
+                .combinedClickable(
+                    onClick = onExpand,
+                    onLongClick = onOpenMenu
+                )
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    BrowserIcons.Menu,
+                    contentDescription = "Expand Bar",
+                    tint = Color(0xFFE8EAED),
+                    modifier = Modifier.size(19.dp)
+                )
+                if (isAutoPilotActive) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF00E5FF))
+                    )
+                }
+            }
+        }
+    }
+}
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SpeedDialView(
@@ -903,45 +914,65 @@ fun BrowserMenuOverlay(
     }
 
     fun getGridTileMeta(id: String): Triple<String, String, Color?> = when (id) {
-        "force_dark" -> Triple(if (forceDarkWebPages) "☀️" else "🌙", if (forceDarkWebPages) "Light Mode" else "Night Mode", if (forceDarkWebPages) Color(0xFFFDD663) else null)
-        "data_saver" -> Triple(
-            if (dataSaverMode == "EXTREME") "🔥" else "🛡️",
-            when (dataSaverMode) {
-                "EXTREME" -> "Data: Ext"
-                "MEDIUM" -> "Data: Med"
-                else -> "Data Saver"
-            },
-            when (dataSaverMode) {
-                "EXTREME" -> Color(0xFF3FB950)
-                "MEDIUM" -> Color(0xFF58A6FF)
-                else -> null
-            }
-        )
-        "site_cache" -> Triple("📦", if (isSiteCached && siteCacheSizeText != "0 B") siteCacheSizeText else "Cache Site", if (isSiteCached) Color(0xFF3FB950) else null)
-        "page_zoom" -> Triple("🔍", "Zoom $currentZoomPercent%", if (currentZoomPercent != 100) Color(0xFF58A6FF) else null)
-        "favorite_tab" -> Triple(if (isCurrentTabFavorite) "★" else "☆", if (isCurrentTabFavorite) "Favorited" else "Fav Tab", if (isCurrentTabFavorite) Color(0xFFFFD600) else null)
-        "focus_lock" -> Triple(if (isFocusLockActive) "🔒" else "🛡️", if (isFocusLockActive) "Locked" else "Focus Lock", if (isFocusLockActive) Color(0xFFF85149) else null)
-        "copy_url" -> Triple("🔗", "Copy URL", null)
-        "dom_snapshot" -> Triple("📸", "DOM Dump", null)
-        "full_source" -> Triple("🗜️", "Web Source", Color(0xFF81C995))
-        "local_ide" -> Triple("💻", "Local IDE", Color(0xFF58A6FF))
-        "autopilot" -> Triple("⚡", if (isLiveAutoPilotEnabled) "Auto-Pilot ON" else "Auto-Pilot", if (isLiveAutoPilotEnabled) Color(0xFF00E5FF) else null)
-        "studio_lab" -> Triple("🧪", "Studio Lab", Color(0xFF00E5FF))
-        "ai_automator" -> Triple("🤖", "Automator", Color(0xFF8AB4F8))
-        "smart_notes" -> Triple("📝", "Smart Notes", Color(0xFF8AB4F8))
-        "downloads" -> Triple("📥", if (activeDownloadsCount > 0) "DL ($activeDownloadsCount)" else "Downloads", if (activeDownloadsCount > 0) Color(0xFF3FB950) else null)
-        "recents" -> Triple("📱", "Recents", Color(0xFF58A6FF))
-        "diagnostics" -> Triple("📋", "Diagnostics", Color(0xFF58A6FF))
-        "settings" -> Triple("⚙️", "Settings", Color(0xFF8AB4F8))
-        "exit" -> Triple("⏻", "Exit", Color(0xFFF28B82))
-        "back" -> Triple("‹", "Back", null)
-        "forward" -> Triple("›", "Forward", null)
-        "reload" -> Triple("↻", "Reload", null)
-        "new_tab" -> Triple("＋", "New Tab", Color(0xFF8AB4F8))
-        "home" -> Triple("🏠", "Home", null)
-        "tabs" -> Triple("📑", "Tabs", Color(0xFF8AB4F8))
-        "quick_toggle" -> Triple("⇄", "Prev Tab", null)
-        else -> Triple("•", id, null)
+    fun getGridTileColor(id: String): Color? = when (id) {
+        "force_dark" -> if (forceDarkWebPages) Color(0xFFFDD663) else null
+        "data_saver" -> when (dataSaverMode) {
+            "EXTREME" -> Color(0xFF3FB950)
+            "MEDIUM" -> Color(0xFF58A6FF)
+            else -> null
+        }
+        "site_cache" -> if (isSiteCached) Color(0xFF3FB950) else null
+        "page_zoom" -> if (currentZoomPercent != 100) Color(0xFF58A6FF) else null
+        "favorite_tab" -> if (isCurrentTabFavorite) Color(0xFFFFD600) else null
+        "focus_lock" -> if (isFocusLockActive) Color(0xFFF85149) else null
+        "full_source" -> Color(0xFF81C995)
+        "local_ide" -> Color(0xFF58A6FF)
+        "autopilot" -> if (isLiveAutoPilotEnabled) Color(0xFF00E5FF) else null
+        "studio_lab" -> Color(0xFF00E5FF)
+        "ai_automator" -> Color(0xFF8AB4F8)
+        "smart_notes" -> Color(0xFF8AB4F8)
+        "downloads" -> if (activeDownloadsCount > 0) Color(0xFF3FB950) else null
+        "recents" -> Color(0xFF58A6FF)
+        "diagnostics" -> Color(0xFF58A6FF)
+        "settings" -> Color(0xFF8AB4F8)
+        "exit" -> Color(0xFFF28B82)
+        "new_tab" -> Color(0xFF8AB4F8)
+        "tabs" -> Color(0xFF8AB4F8)
+        else -> null
+    }
+
+    fun getGridTileLabel(id: String): String = when (id) {
+        "force_dark" -> if (forceDarkWebPages) "Light Mode" else "Night Mode"
+        "data_saver" -> when (dataSaverMode) {
+            "EXTREME" -> "Data: Ext"
+            "MEDIUM" -> "Data: Med"
+            else -> "Data Saver"
+        }
+        "site_cache" -> if (isSiteCached && siteCacheSizeText != "0 B") siteCacheSizeText else "Cache Site"
+        "page_zoom" -> "Zoom $currentZoomPercent%"
+        "favorite_tab" -> if (isCurrentTabFavorite) "Favorited" else "Fav Tab"
+        "focus_lock" -> if (isFocusLockActive) "Locked" else "Focus Lock"
+        "copy_url" -> "Copy URL"
+        "dom_snapshot" -> "DOM Dump"
+        "full_source" -> "Web Source"
+        "local_ide" -> "Local IDE"
+        "autopilot" -> if (isLiveAutoPilotEnabled) "Auto-Pilot ON" else "Auto-Pilot"
+        "studio_lab" -> "Studio Lab"
+        "ai_automator" -> "Automator"
+        "smart_notes" -> "Smart Notes"
+        "downloads" -> if (activeDownloadsCount > 0) "DL ($activeDownloadsCount)" else "Downloads"
+        "recents" -> "Recents"
+        "diagnostics" -> "Diagnostics"
+        "settings" -> "Settings"
+        "exit" -> "Exit"
+        "back" -> "Back"
+        "forward" -> "Forward"
+        "reload" -> "Reload"
+        "new_tab" -> "New Tab"
+        "home" -> "Home"
+        "tabs" -> "Tabs"
+        "quick_toggle" -> "Prev Tab"
+        else -> id
     }
 
     fun triggerTileAction(id: String) {
@@ -1019,7 +1050,7 @@ fun BrowserMenuOverlay(
                             modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
-                                Icons.Default.ArrowBack,
+                                BrowserIcons.ArrowBack,
                                 contentDescription = "Back",
                                 tint = if (canGoBack || currentUrl != "about:blank") Color(0xFFE8EAED) else Color(0xFF5F6368),
                                 modifier = Modifier.size(19.dp)
@@ -1031,7 +1062,7 @@ fun BrowserMenuOverlay(
                             modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
-                                Icons.Default.ArrowForward,
+                                BrowserIcons.ArrowForward,
                                 contentDescription = "Forward",
                                 tint = if (canGoForward) Color(0xFFE8EAED) else Color(0xFF5F6368),
                                 modifier = Modifier.size(19.dp)
@@ -1041,13 +1072,13 @@ fun BrowserMenuOverlay(
                             onClick = { onDismiss(); onReloadClick() },
                             modifier = Modifier.size(34.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = Color(0xFFE8EAED), modifier = Modifier.size(19.dp))
+                            Icon(BrowserIcons.Reload, contentDescription = "Reload", tint = Color(0xFFE8EAED), modifier = Modifier.size(19.dp))
                         }
                         IconButton(
                             onClick = { onDismiss(); onNewTab() },
                             modifier = Modifier.size(34.dp)
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = "New Tab", tint = Color(0xFF8AB4F8), modifier = Modifier.size(20.dp))
+                            Icon(BrowserIcons.Plus, contentDescription = "New Tab", tint = Color(0xFF8AB4F8), modifier = Modifier.size(20.dp))
                         }
                     }
 
@@ -1060,13 +1091,24 @@ fun BrowserMenuOverlay(
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onToggleAutoPilotConfirm() }
                         ) {
-                            Text(
-                                text = if (isAutoPilotConfirmEnabled) "🛡️ Confirm: ON" else "⚡ Auto: ON",
-                                color = Color(0xFF00E5FF),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                            ) {
+                                Icon(
+                                    if (isAutoPilotConfirmEnabled) BrowserIcons.ShieldCheck else BrowserIcons.Zap,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = if (isAutoPilotConfirmEnabled) "Confirm: ON" else "Auto: ON",
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -1103,7 +1145,14 @@ fun BrowserMenuOverlay(
                                             if (itemId == null) {
                                                 Spacer(modifier = Modifier.weight(1f).height(64.dp))
                                             } else {
-                                                val (emoji, label, accent) = getGridTileMeta(itemId)
+                                                val accent = getGridTileColor(itemId)
+                                                val label = getGridTileLabel(itemId)
+                                                val iconVec = getBrowserIconForSlot(
+                                                    id = itemId,
+                                                    forceDark = forceDarkWebPages,
+                                                    dataSaverMode = dataSaverMode,
+                                                    isFav = isCurrentTabFavorite
+                                                )
                                                 val isActiveHighlight = accent != null
                                                 Column(
                                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1132,7 +1181,12 @@ fun BrowserMenuOverlay(
                                                                 else Color(0xFF282C34)
                                                             )
                                                     ) {
-                                                        Text(emoji, fontSize = 17.sp)
+                                                        Icon(
+                                                            imageVector = iconVec,
+                                                            contentDescription = label,
+                                                            tint = accent ?: Color(0xFFE8EAED),
+                                                            modifier = Modifier.size(19.dp)
+                                                        )
                                                     }
                                                     Spacer(Modifier.height(4.dp))
                                                     Text(
@@ -1184,7 +1238,6 @@ fun BrowserMenuOverlay(
                 }
 
                 HorizontalDivider(color = Color(0xFF2C313A), modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
-
                 // Bottom Sheet Footer (Customize Layout on left, Exit & Collapse on right)
                 Row(
                     modifier = Modifier
@@ -1201,7 +1254,9 @@ fun BrowserMenuOverlay(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                         modifier = Modifier.height(30.dp)
                     ) {
-                        Text("⋮ Edit Layout", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(BrowserIcons.LayoutGrid, contentDescription = null, tint = Color(0xFF8AB4F8), modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Edit Layout", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1212,13 +1267,13 @@ fun BrowserMenuOverlay(
                             },
                             modifier = Modifier.size(34.dp)
                         ) {
-                            Text("⏻", color = Color(0xFFF28B82), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Icon(BrowserIcons.Power, contentDescription = "Exit", tint = Color(0xFFF28B82), modifier = Modifier.size(19.dp))
                         }
                         IconButton(
                             onClick = onDismiss,
                             modifier = Modifier.size(34.dp)
                         ) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close", tint = Color(0xFF9AA0A6))
+                            Icon(BrowserIcons.ChevronDown, contentDescription = "Close", tint = Color(0xFF9AA0A6), modifier = Modifier.size(20.dp))
                         }
                     }
                 }
