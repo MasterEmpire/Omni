@@ -913,7 +913,6 @@ fun BrowserMenuOverlay(
         }
     }
 
-    fun getGridTileMeta(id: String): Triple<String, String, Color?> = when (id) {
     fun getGridTileColor(id: String): Color? = when (id) {
         "force_dark" -> if (forceDarkWebPages) Color(0xFFFDD663) else null
         "data_saver" -> when (dataSaverMode) {
