@@ -253,6 +253,15 @@ class OmniStudioLabBridge(
             resolve(callId, "Closed")
         }
     }
+    @JavascriptInterface
+    fun studioNewChatSession(callId: String, sessionId: String) {
+        mainHandler.post {
+            automator.newChatSession(sessionId) { success, err ->
+                if (success) resolve(callId, "Ready")
+                else reject(callId, err ?: "Failed resetting AI Studio session")
+            }
+        }
+    }
 
     // --- Backward-Compatible Default Session Wrappers ---
     @JavascriptInterface
