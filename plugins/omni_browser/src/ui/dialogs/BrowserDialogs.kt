@@ -727,8 +727,8 @@ fun SettingsBackupDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("⋮ Dynamic Menu Matrix", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("Control layout, order, and visibility of 3-dots menu", color = Color(0xFF9AA0A6), fontSize = 10.sp)
+                        Text("☰ Bars & Menu Layout", color = Color(0xFFE8EAED), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Customize Top Left/Right, Bottom Bar & 5x2 Hamburger Grid", color = Color(0xFF9AA0A6), fontSize = 10.sp)
                     }
                     Button(
                         onClick = onCustomizeMenu,
