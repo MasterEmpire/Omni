@@ -193,6 +193,52 @@ class VaultManager(
                 return map
             }
         }
+        fun recordVerificationLock(
+            context: Context,
+            bridge: HostBridge,
+            profileId: String,
+            reason: String
+        ): Pair<Boolean, Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>> {
+            val today = com.omni.plugin.browser.utils.getAnalyticsTodayKey()
+            val now = System.currentTimeMillis()
+            val cleanReason = reason.trim().take(200).ifEmpty { "Google account verification required" }
+            synchronized(analyticsLock) {
+                val vault = VaultManager(context, bridge)
+                val map = vault.loadAiAnalytics().toMutableMap()
+                val cur = map[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
+                val wasAlreadyLocked = cur.needsVerification
+                val updated = cur.copy(
+                    needsVerification = true,
+                    verificationRequiredAt = if (cur.verificationRequiredAt > 0L) cur.verificationRequiredAt else now,
+                    verificationReason = cleanReason,
+                    lastActiveDay = today
+                )
+                map[profileId] = updated
+                vault.saveAiAnalytics(map)
+                onAnalyticsUpdatedListener?.invoke(map)
+                return Pair(!wasAlreadyLocked, map)
+            }
+        }
+
+        fun clearVerificationLock(
+            context: Context,
+            bridge: HostBridge,
+            profileId: String
+        ): Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics> {
+            synchronized(analyticsLock) {
+                val vault = VaultManager(context, bridge)
+                val map = vault.loadAiAnalytics().toMutableMap()
+                val cur = map[profileId] ?: return map
+                map[profileId] = cur.copy(
+                    needsVerification = false,
+                    verificationRequiredAt = 0L,
+                    verificationReason = ""
+                )
+                vault.saveAiAnalytics(map)
+                onAnalyticsUpdatedListener?.invoke(map)
+                return map
+            }
+        }
     }
     fun syncLocalFileToVault(sourcePath: String, targetSubPath: String = "ide/index.html"): Pair<Boolean, String> {
         val cleanInput = sourcePath.trim()
@@ -721,6 +767,9 @@ class VaultManager(
                     put("lastQuotaHitTimestamp", a.lastQuotaHitTimestamp)
                     put("lastQuotaReason", a.lastQuotaReason)
                     put("lastActiveDay", a.lastActiveDay)
+                    put("needsVerification", a.needsVerification)
+                    put("verificationRequiredAt", a.verificationRequiredAt)
+                    put("verificationReason", a.verificationReason)
                     put("dailyHistory", dhObj)
                     put("quotaHistory", qArr)
                 }
@@ -798,6 +847,9 @@ class VaultManager(
                     lastQuotaHitTimestamp = lastQTime,
                     lastQuotaReason = lastQReason,
                     lastActiveDay = legacyDay,
+                    needsVerification = obj.optBoolean("needsVerification", false),
+                    verificationRequiredAt = obj.optLong("verificationRequiredAt", 0L),
+                    verificationReason = obj.optString("verificationReason", ""),
                     dailyHistory = historyMap,
                     quotaHistory = qList
                 )
