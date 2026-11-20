@@ -530,9 +530,21 @@ class OmniBrowser : PluginEntry() {
             val finalSysPrompt = matchedPreset?.body ?: ""
 
             val profiles = vaultManager.loadProfiles() ?: emptyList()
-            val eligibleProfiles = profiles.filter { profile ->
+            val analyticsMap = vaultManager.loadAiAnalytics()
+            val nowMs = System.currentTimeMillis()
+            val nonDefaultProfiles = profiles.filter { profile ->
                 !profile.id.equals("default", ignoreCase = true) &&
                 !profile.name.trim().equals("default", ignoreCase = true)
+            }
+            val verifiedProfiles = nonDefaultProfiles.filter { !(analyticsMap[it.id]?.needsVerification ?: false) }
+            val freshProfiles = verifiedProfiles.filter { prof ->
+                val qTime = analyticsMap[prof.id]?.lastQuotaHitTimestamp ?: 0L
+                !isQuotaCurrentlyActive(qTime, nowMs)
+            }
+            val eligibleProfiles = when {
+                freshProfiles.isNotEmpty() -> freshProfiles
+                verifiedProfiles.isNotEmpty() -> verifiedProfiles
+                else -> emptyList()
             }
 
             if (eligibleProfiles.isEmpty()) {
@@ -1229,6 +1241,7 @@ class OmniBrowser : PluginEntry() {
                     onDeleteProfile = { prof -> state.deleteProfile(prof) },
                     aiAnalytics = state.aiAnalytics,
                     onClearQuotaHit = { state.clearQuotaHit(it) },
+                    onClearVerificationLock = { state.clearVerificationLock(it) },
                     onSelectTab = { state.switchToTab(it) },
                     onCloseTab = { state.closeTab(it) },
                     onNewTab = { profId -> state.createNewTab(targetProfileId = profId) },
