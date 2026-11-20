@@ -62,10 +62,141 @@ import java.io.File
 class OmniBrowser : PluginEntry() {
 
     companion object {
+        private data class IpcAiSession(
+            val automator: AiStudioAutomator,
+            val sessionId: String,
+            val profileId: String,
+            val model: String,
+            val temporaryChat: Boolean,
+            var sysTitle: String,
+            var sysPrompt: String,
+            var thinkingLevel: String,
+            var turnSeq: Long = 0L
+        )
+
+        private val ipcAiSessions = java.util.concurrent.ConcurrentHashMap<String, IpcAiSession>()
+
         @Volatile
         private var activeSolverAutomator: AiStudioAutomator? = null
         @Volatile
         private var activeBrowserStateRef: java.lang.ref.WeakReference<BrowserStateHolder>? = null
+
+        private fun ensureIpcSession(
+            ctx: Context,
+            bridge: HostBridge,
+            sessionKey: String,
+            requestedProfileId: String,
+            model: String,
+            thinkingLevel: String,
+            temporaryChat: Boolean,
+            sysTitle: String,
+            sysPrompt: String,
+            onStatus: ((String) -> Unit)?,
+            onReady: (IpcAiSession?, String?) -> Unit
+        ) {
+            val vault = VaultManager(ctx, bridge)
+            vault.resurrectFromVault()
+            val profiles = (vault.loadProfiles() ?: emptyList()).ifEmpty {
+                listOf(BrowserProfile("default", "Default", 0xFF2979FF))
+            }
+            val analytics = vault.loadAiAnalytics()
+            val now = System.currentTimeMillis()
+
+            val resolvedProfile = if (requestedProfileId.equals("random", ignoreCase = true)) {
+                val unverified = profiles.filter { !(analytics[it.id]?.needsVerification ?: false) }
+                val base = if (unverified.isNotEmpty()) unverified else profiles
+                val fresh = base.filter { !isQuotaCurrentlyActive(analytics[it.id]?.lastQuotaHitTimestamp ?: 0L, now) }
+                (if (fresh.isNotEmpty()) fresh else base).random().id
+            } else {
+                val matched = profiles.find { it.id.equals(requestedProfileId, ignoreCase = true) }
+                    ?: profiles.find { it.name.trim().equals(requestedProfileId.trim(), ignoreCase = true) }
+                matched?.id ?: requestedProfileId.ifBlank { "default" }
+            }
+
+            if (analytics[resolvedProfile]?.needsVerification == true) {
+                val profName = profiles.find { it.id == resolvedProfile }?.name ?: resolvedProfile
+                onReady(null, "Profile '$profName' requires Google verification. Approve it in Omni Browser Health Deck.")
+                return
+            }
+
+            val existing = ipcAiSessions[sessionKey]
+            if (existing != null && existing.automator.sessions.containsKey(existing.sessionId)) {
+                val sameBootParams = existing.profileId == resolvedProfile &&
+                    existing.model == model &&
+                    existing.temporaryChat == temporaryChat
+                if (sameBootParams) {
+                    val needsReconfig = existing.sysTitle != sysTitle ||
+                        existing.sysPrompt != sysPrompt ||
+                        existing.thinkingLevel != thinkingLevel
+                    if (!needsReconfig) {
+                        onReady(existing, null)
+                        return
+                    }
+                    onStatus?.invoke("Updating AI Studio config...")
+                    existing.automator.configureSession(
+                        sessionId = existing.sessionId,
+                        sysTitle = sysTitle,
+                        sysPrompt = sysPrompt,
+                        thinkingLevel = thinkingLevel,
+                        model = model,
+                        fallbackEnabled = true,
+                        temporaryChat = temporaryChat,
+                        headlessTurbo = true
+                    ) { ok, err ->
+                        if (ok) {
+                            existing.sysTitle = sysTitle
+                            existing.sysPrompt = sysPrompt
+                            existing.thinkingLevel = thinkingLevel
+                            onReady(existing, null)
+                        } else {
+                            onReady(null, err ?: "Failed configuring AI Studio session")
+                        }
+                    }
+                    return
+                } else {
+                    existing.automator.closeSession(existing.sessionId)
+                    ipcAiSessions.remove(sessionKey)
+                }
+            }
+
+            onStatus?.invoke("Warming AI Studio...")
+            val automator = AiStudioAutomator(ctx.applicationContext, bridge)
+            automator.createSession(resolvedProfile, model, temporaryChat) { sessionId, err ->
+                if (sessionId == null) {
+                    onReady(null, err ?: "Failed starting AI Studio session")
+                    return@createSession
+                }
+                onStatus?.invoke("Applying instructions...")
+                automator.configureSession(
+                    sessionId = sessionId,
+                    sysTitle = sysTitle,
+                    sysPrompt = sysPrompt,
+                    thinkingLevel = thinkingLevel,
+                    model = model,
+                    fallbackEnabled = true,
+                    temporaryChat = temporaryChat,
+                    headlessTurbo = true
+                ) { ok, cfgErr ->
+                    if (!ok) {
+                        automator.closeSession(sessionId)
+                        onReady(null, cfgErr ?: "Failed configuring AI Studio")
+                        return@configureSession
+                    }
+                    val created = IpcAiSession(
+                        automator = automator,
+                        sessionId = sessionId,
+                        profileId = resolvedProfile,
+                        model = model,
+                        temporaryChat = temporaryChat,
+                        sysTitle = sysTitle,
+                        sysPrompt = sysPrompt,
+                        thinkingLevel = thinkingLevel
+                    )
+                    ipcAiSessions[sessionKey] = created
+                    onReady(created, null)
+                }
+            }
+        }
 
         fun abortCurrentSolve() {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -89,6 +220,211 @@ class OmniBrowser : PluginEntry() {
             val bridge = payload["bridge"] as? HostBridge
             bridge?.log("OMNI_SOLVE_IPC", "🛑 Processing ABORT_SOLVE. Halting AI Studio automator immediately.")
             abortCurrentSolve()
+            return
+        }
+        if (event == "AI_LIST_PROFILES") {
+            val ctx = payload["context"] as? Context ?: return
+            val bridge = payload["bridge"] as? HostBridge ?: return
+            @Suppress("UNCHECKED_CAST")
+            val onResult = payload["on_result"] as? (List<Map<String, Any>>) -> Unit ?: return
+            val vault = VaultManager(ctx, bridge)
+            vault.resurrectFromVault()
+            val profiles = (vault.loadProfiles() ?: emptyList()).ifEmpty {
+                listOf(BrowserProfile("default", "Default", 0xFF2979FF))
+            }
+            val analytics = vault.loadAiAnalytics()
+            val now = System.currentTimeMillis()
+            val today = getAnalyticsTodayKey(now)
+            val resultList = profiles.map { prof ->
+                val a = analytics[prof.id]
+                val qTime = a?.lastQuotaHitTimestamp ?: 0L
+                val isExhausted = isQuotaCurrentlyActive(qTime, now)
+                val needsVerify = a?.needsVerification ?: false
+                mapOf<String, Any>(
+                    "id" to prof.id,
+                    "name" to prof.name,
+                    "promptsSentToday" to (a?.effectivePromptsToday(today) ?: 0),
+                    "isQuotaExhausted" to isExhausted,
+                    "needsVerification" to needsVerify,
+                    "isAvailable" to (!isExhausted && !needsVerify)
+                )
+            }
+            onResult(resultList)
+            return
+        }
+
+        if (event == "AI_WARM_SESSION") {
+            val ctx = payload["context"] as? Context ?: return
+            val bridge = payload["bridge"] as? HostBridge ?: return
+            val sessionKey = (payload["session_key"] as? String)?.ifBlank { "default_ipc" } ?: "default_ipc"
+            val profileId = (payload["profile_id"] as? String)?.ifBlank { "default" } ?: "default"
+            val model = (payload["model"] as? String) ?: "Gemini 3.8 Flash"
+            val thinkingLevel = (payload["thinking_level"] as? String)?.ifBlank { "Default" } ?: "Default"
+            val temporaryChat = (payload["temporary_chat"] as? Boolean) ?: true
+            val sysTitle = (payload["system_title"] as? String) ?: "Omni Assistant"
+            val sysPrompt = (payload["system_prompt"] as? String) ?: ""
+            @Suppress("UNCHECKED_CAST")
+            val onStatus = payload["on_status"] as? (String) -> Unit
+            @Suppress("UNCHECKED_CAST")
+            val onReady = payload["on_ready"] as? (Boolean, String?) -> Unit
+
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                ensureIpcSession(
+                    ctx = ctx,
+                    bridge = bridge,
+                    sessionKey = sessionKey,
+                    requestedProfileId = profileId,
+                    model = model,
+                    thinkingLevel = thinkingLevel,
+                    temporaryChat = temporaryChat,
+                    sysTitle = sysTitle,
+                    sysPrompt = sysPrompt,
+                    onStatus = onStatus
+                ) { session, err ->
+                    onReady?.invoke(session != null, err)
+                }
+            }
+            return
+        }
+
+        if (event == "AI_ASK_STREAM") {
+            val ctx = payload["context"] as? Context ?: return
+            val bridge = payload["bridge"] as? HostBridge ?: return
+            val sessionKey = (payload["session_key"] as? String)?.ifBlank { "default_ipc" } ?: "default_ipc"
+            val prompt = (payload["prompt"] as? String) ?: ""
+            val label = (payload["label"] as? String)?.ifBlank { "Turn" } ?: "Turn"
+            val profileId = (payload["profile_id"] as? String)?.ifBlank { "default" } ?: "default"
+            val model = (payload["model"] as? String) ?: "Gemini 3.8 Flash"
+            val thinkingLevel = (payload["thinking_level"] as? String)?.ifBlank { "Default" } ?: "Default"
+            val temporaryChat = (payload["temporary_chat"] as? Boolean) ?: true
+            val sysTitle = (payload["system_title"] as? String) ?: "Omni Assistant"
+            val sysPrompt = (payload["system_prompt"] as? String) ?: ""
+            val forceNewChat = (payload["new_chat"] as? Boolean) ?: false
+            @Suppress("UNCHECKED_CAST")
+            val onStatus = payload["on_status"] as? (String) -> Unit
+            @Suppress("UNCHECKED_CAST")
+            val onDelta = payload["on_delta"] as? (String, String, Boolean) -> Unit
+            @Suppress("UNCHECKED_CAST")
+            val onProgress = payload["on_progress"] as? (String, String) -> Unit
+            @Suppress("UNCHECKED_CAST")
+            val onComplete = payload["on_complete"] as? (String, String) -> Unit
+            @Suppress("UNCHECKED_CAST")
+            val onError = payload["on_error"] as? (String) -> Unit
+
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                ensureIpcSession(
+                    ctx = ctx,
+                    bridge = bridge,
+                    sessionKey = sessionKey,
+                    requestedProfileId = profileId,
+                    model = model,
+                    thinkingLevel = thinkingLevel,
+                    temporaryChat = temporaryChat,
+                    sysTitle = sysTitle,
+                    sysPrompt = sysPrompt,
+                    onStatus = onStatus
+                ) { session, err ->
+                    if (session == null) {
+                        onError?.invoke(err ?: "Could not connect to AI Studio")
+                        return@ensureIpcSession
+                    }
+                    val mySeq = ++session.turnSeq
+                    fun runTurnNow() {
+                        if (session.turnSeq != mySeq) return
+                        onStatus?.invoke("Generating...")
+                        session.automator.executeSessionTurn(
+                            sessionId = session.sessionId,
+                            prompt = prompt,
+                            attachments = emptyList(),
+                            label = label,
+                            onProgress = { thoughts, output ->
+                                if (session.turnSeq == mySeq) onProgress?.invoke(thoughts, output)
+                            },
+                            onComplete = { thoughts, output ->
+                                if (session.turnSeq == mySeq) onComplete?.invoke(thoughts, output)
+                            },
+                            onError = { turnErr ->
+                                if (turnErr.contains("Verification Required", ignoreCase = true) ||
+                                    turnErr.contains("Quota Exhausted", ignoreCase = true)) {
+                                    session.automator.closeSession(session.sessionId)
+                                    ipcAiSessions.remove(sessionKey)
+                                }
+                                if (session.turnSeq == mySeq) onError?.invoke(turnErr)
+                            },
+                            onDelta = if (onDelta != null) {
+                                { dt, doStr, isFirst ->
+                                    if (session.turnSeq == mySeq) onDelta.invoke(dt, doStr, isFirst)
+                                }
+                            } else null
+                        )
+                    }
+
+                    if (forceNewChat) {
+                        onStatus?.invoke("Resetting chat...")
+                        session.automator.newChatSession(session.sessionId) { ok, ncErr ->
+                            if (!ok) {
+                                onError?.invoke(ncErr ?: "Failed resetting chat")
+                                return@newChatSession
+                            }
+                            session.automator.configureSession(
+                                sessionId = session.sessionId,
+                                sysTitle = sysTitle,
+                                sysPrompt = sysPrompt,
+                                thinkingLevel = thinkingLevel,
+                                model = model,
+                                fallbackEnabled = true,
+                                temporaryChat = temporaryChat,
+                                headlessTurbo = true
+                            ) { _, _ -> runTurnNow() }
+                        }
+                    } else {
+                        runTurnNow()
+                    }
+                }
+            }
+            return
+        }
+
+        if (event == "AI_NEW_CHAT") {
+            val sessionKey = (payload["session_key"] as? String)?.ifBlank { "default_ipc" } ?: "default_ipc"
+            @Suppress("UNCHECKED_CAST")
+            val onDone = payload["on_done"] as? (Boolean, String?) -> Unit
+            val session = ipcAiSessions[sessionKey]
+            if (session == null) {
+                onDone?.invoke(true, "No active session")
+                return
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                session.automator.newChatSession(session.sessionId) { ok, err ->
+                    if (!ok) {
+                        onDone?.invoke(false, err)
+                        return@newChatSession
+                    }
+                    session.automator.configureSession(
+                        sessionId = session.sessionId,
+                        sysTitle = session.sysTitle,
+                        sysPrompt = session.sysPrompt,
+                        thinkingLevel = session.thinkingLevel,
+                        model = session.model,
+                        fallbackEnabled = true,
+                        temporaryChat = session.temporaryChat,
+                        headlessTurbo = true
+                    ) { cfgOk, cfgErr ->
+                        onDone?.invoke(cfgOk, cfgErr)
+                    }
+                }
+            }
+            return
+        }
+
+        if (event == "AI_CLOSE_SESSION") {
+            val sessionKey = (payload["session_key"] as? String)?.ifBlank { "default_ipc" } ?: "default_ipc"
+            val session = ipcAiSessions.remove(sessionKey)
+            if (session != null) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    session.automator.closeSession(session.sessionId)
+                }
+            }
             return
         }
 
