@@ -235,15 +235,48 @@ data class ActiveDownloadItem(
     val status: Int
 )
 
+data class DailyAiStats(
+    val date: String,
+    val prompts: Int = 0,
+    val tabsOpened: Int = 0,
+    val quotaHits: Int = 0,
+    val headlessPrompts: Int = 0
+)
+
+data class QuotaEventRecord(
+    val timestamp: Long,
+    val reason: String = ""
+)
+
 data class ProfileAiAnalytics(
     val profileId: String,
     val tabsOpenedToday: Int = 0,
     val promptsSentToday: Int = 0,
     val totalPromptsLifetime: Int = 0,
+    val totalTabsLifetime: Int = 0,
+    val totalQuotaHitsLifetime: Int = 0,
     val lastPromptTimestamp: Long = 0L,
     val lastQuotaHitTimestamp: Long = 0L,
-    val lastActiveDay: String = ""
-)
+    val lastQuotaReason: String = "",
+    val lastActiveDay: String = "",
+    val dailyHistory: Map<String, DailyAiStats> = emptyMap(),
+    val quotaHistory: List<QuotaEventRecord> = emptyList()
+) {
+    fun effectivePromptsToday(today: String): Int =
+        dailyHistory[today]?.prompts ?: if (lastActiveDay == today) promptsSentToday else 0
+
+    fun effectiveTabsToday(today: String): Int =
+        dailyHistory[today]?.tabsOpened ?: if (lastActiveDay == today) tabsOpenedToday else 0
+
+    fun effectiveQuotaHitsToday(today: String): Int =
+        dailyHistory[today]?.quotaHits ?: 0
+
+    fun promptsInDays(dayKeys: List<String>): Int =
+        dayKeys.sumOf { dailyHistory[it]?.prompts ?: 0 }
+
+    fun quotaHitsInDays(dayKeys: List<String>): Int =
+        dayKeys.sumOf { dailyHistory[it]?.quotaHits ?: 0 }
+}
 
 class OmniFocusBridge(
     private val onViolation: () -> Unit,
