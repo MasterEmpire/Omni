@@ -209,6 +209,9 @@ object LiveAutoPilotEngine {
                     if (runBtn && !runBtn.__omniHooked) {
                         runBtn.__omniHooked = true;
                         runBtn.addEventListener('click', function() {
+                            if (window.__omniWire && window.__omniWire.notifyUserPrompt) {
+                                window.__omniWire.notifyUserPrompt();
+                            }
                             if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
                                 window.OmniAnalyticsBridge.recordPrompt(window.__omniProfileId || 'default');
                             }
@@ -219,6 +222,9 @@ object LiveAutoPilotEngine {
                         ta.__omniHooked = true;
                         ta.addEventListener('keydown', function(e) {
                             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                if (window.__omniWire && window.__omniWire.notifyUserPrompt) {
+                                    window.__omniWire.notifyUserPrompt();
+                                }
                                 if (window.OmniAnalyticsBridge && window.OmniAnalyticsBridge.recordPrompt) {
                                     window.OmniAnalyticsBridge.recordPrompt(window.__omniProfileId || 'default');
                                 }
@@ -748,10 +754,11 @@ object LiveAutoPilotEngine {
                                 }
                             }
                         }
-                        if (latestWire.done && latestWire.statusCode === 0 && latestWire.output && latestWire.output.trim().length > 0) {
+                        const wirePayload = latestWire.stitchedOutput || latestWire.output || '';
+                        if (latestWire.done && latestWire.statusCode === 0 && wirePayload.trim().length > 0) {
                             if (latestWire.id !== window.__omniLastDispatchedWireId) {
                                 window.__omniLastDispatchedWireId = latestWire.id;
-                                dispatchActionsFromPayload(latestWire.output, 'WIRE_INTERCEPT', latestTurn);
+                                dispatchActionsFromPayload(wirePayload, 'WIRE_INTERCEPT', latestTurn);
                                 return;
                             }
                             // Do NOT return early here: allow DOM Fallback to catch subsequent turns if wire missed them!
