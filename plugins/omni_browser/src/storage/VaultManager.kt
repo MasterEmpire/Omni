@@ -77,6 +77,122 @@ class VaultManager(
 ) {
     companion object {
         private val mirrorExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        private val analyticsLock = Any()
+
+        @Volatile
+        var onAnalyticsUpdatedListener: ((Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>) -> Unit)? = null
+
+        fun recordTabOpened(
+            context: Context,
+            bridge: HostBridge,
+            profileId: String
+        ): Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics> {
+            val today = com.omni.plugin.browser.utils.getAnalyticsTodayKey()
+            synchronized(analyticsLock) {
+                val vault = VaultManager(context, bridge)
+                val map = vault.loadAiAnalytics().toMutableMap()
+                val cur = map[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
+                val existingToday = cur.dailyHistory[today] ?: com.omni.plugin.browser.models.DailyAiStats(date = today)
+                val updatedToday = existingToday.copy(tabsOpened = existingToday.tabsOpened + 1)
+                val updated = cur.copy(
+                    tabsOpenedToday = updatedToday.tabsOpened,
+                    promptsSentToday = updatedToday.prompts,
+                    totalTabsLifetime = cur.totalTabsLifetime + 1,
+                    lastActiveDay = today,
+                    dailyHistory = cur.dailyHistory + (today to updatedToday)
+                )
+                map[profileId] = updated
+                vault.saveAiAnalytics(map)
+                onAnalyticsUpdatedListener?.invoke(map)
+                return map
+            }
+        }
+
+        fun recordPrompt(
+            context: Context,
+            bridge: HostBridge,
+            profileId: String,
+            isHeadless: Boolean = false
+        ): Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics> {
+            val today = com.omni.plugin.browser.utils.getAnalyticsTodayKey()
+            val now = System.currentTimeMillis()
+            synchronized(analyticsLock) {
+                val vault = VaultManager(context, bridge)
+                val map = vault.loadAiAnalytics().toMutableMap()
+                val cur = map[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
+                val existingToday = cur.dailyHistory[today] ?: com.omni.plugin.browser.models.DailyAiStats(date = today)
+                val updatedToday = existingToday.copy(
+                    prompts = existingToday.prompts + 1,
+                    headlessPrompts = existingToday.headlessPrompts + if (isHeadless) 1 else 0
+                )
+                val updated = cur.copy(
+                    tabsOpenedToday = updatedToday.tabsOpened,
+                    promptsSentToday = updatedToday.prompts,
+                    totalPromptsLifetime = cur.totalPromptsLifetime + 1,
+                    lastPromptTimestamp = now,
+                    lastActiveDay = today,
+                    dailyHistory = cur.dailyHistory + (today to updatedToday)
+                )
+                map[profileId] = updated
+                vault.saveAiAnalytics(map)
+                onAnalyticsUpdatedListener?.invoke(map)
+                return map
+            }
+        }
+
+        fun recordQuotaHit(
+            context: Context,
+            bridge: HostBridge,
+            profileId: String,
+            reason: String
+        ): Pair<Boolean, Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>> {
+            val today = com.omni.plugin.browser.utils.getAnalyticsTodayKey()
+            val now = System.currentTimeMillis()
+            val cleanReason = reason.trim().take(160)
+            synchronized(analyticsLock) {
+                val vault = VaultManager(context, bridge)
+                val map = vault.loadAiAnalytics().toMutableMap()
+                val cur = map[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
+                if (now - cur.lastQuotaHitTimestamp < 5000L && cur.lastQuotaReason == cleanReason) {
+                    return Pair(false, map)
+                }
+                val existingToday = cur.dailyHistory[today] ?: com.omni.plugin.browser.models.DailyAiStats(date = today)
+                val updatedToday = existingToday.copy(quotaHits = existingToday.quotaHits + 1)
+                val updated = cur.copy(
+                    tabsOpenedToday = updatedToday.tabsOpened,
+                    promptsSentToday = updatedToday.prompts,
+                    totalQuotaHitsLifetime = cur.totalQuotaHitsLifetime + 1,
+                    lastQuotaHitTimestamp = now,
+                    lastQuotaReason = cleanReason,
+                    lastActiveDay = today,
+                    dailyHistory = cur.dailyHistory + (today to updatedToday),
+                    quotaHistory = cur.quotaHistory + com.omni.plugin.browser.models.QuotaEventRecord(
+                        timestamp = now,
+                        reason = cleanReason
+                    )
+                )
+                map[profileId] = updated
+                vault.saveAiAnalytics(map)
+                onAnalyticsUpdatedListener?.invoke(map)
+                return Pair(true, map)
+            }
+        }
+
+        fun clearActiveQuotaFlag(
+            context: Context,
+            bridge: HostBridge,
+            profileId: String
+        ): Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics> {
+            synchronized(analyticsLock) {
+                val vault = VaultManager(context, bridge)
+                val map = vault.loadAiAnalytics().toMutableMap()
+                val cur = map[profileId] ?: return map
+                map[profileId] = cur.copy(lastQuotaHitTimestamp = 0L)
+                vault.saveAiAnalytics(map)
+                onAnalyticsUpdatedListener?.invoke(map)
+                return map
+            }
+        }
     }
     fun syncLocalFileToVault(sourcePath: String, targetSubPath: String = "ide/index.html"): Pair<Boolean, String> {
         val cleanInput = sourcePath.trim()
@@ -578,14 +694,35 @@ class VaultManager(
         try {
             val arr = JSONArray()
             analyticsMap.values.forEach { a ->
+                val dhObj = JSONObject()
+                a.dailyHistory.toSortedMap().forEach { (dateKey, stats) ->
+                    dhObj.put(dateKey, JSONObject().apply {
+                        put("prompts", stats.prompts)
+                        put("tabsOpened", stats.tabsOpened)
+                        put("quotaHits", stats.quotaHits)
+                        put("headlessPrompts", stats.headlessPrompts)
+                    })
+                }
+                val qArr = JSONArray()
+                a.quotaHistory.forEach { q ->
+                    qArr.put(JSONObject().apply {
+                        put("timestamp", q.timestamp)
+                        put("reason", q.reason)
+                    })
+                }
                 val obj = JSONObject().apply {
                     put("profileId", a.profileId)
                     put("tabsOpenedToday", a.tabsOpenedToday)
                     put("promptsSentToday", a.promptsSentToday)
                     put("totalPromptsLifetime", a.totalPromptsLifetime)
+                    put("totalTabsLifetime", a.totalTabsLifetime)
+                    put("totalQuotaHitsLifetime", a.totalQuotaHitsLifetime)
                     put("lastPromptTimestamp", a.lastPromptTimestamp)
                     put("lastQuotaHitTimestamp", a.lastQuotaHitTimestamp)
+                    put("lastQuotaReason", a.lastQuotaReason)
                     put("lastActiveDay", a.lastActiveDay)
+                    put("dailyHistory", dhObj)
+                    put("quotaHistory", qArr)
                 }
                 arr.put(obj)
             }
@@ -602,14 +739,67 @@ class VaultManager(
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val id = obj.getString("profileId")
+                val historyMap = mutableMapOf<String, com.omni.plugin.browser.models.DailyAiStats>()
+                obj.optJSONObject("dailyHistory")?.let { dhObj ->
+                    dhObj.keys().forEach { dateKey ->
+                        val dObj = dhObj.optJSONObject(dateKey)
+                        if (dObj != null) {
+                            historyMap[dateKey] = com.omni.plugin.browser.models.DailyAiStats(
+                                date = dateKey,
+                                prompts = dObj.optInt("prompts", 0),
+                                tabsOpened = dObj.optInt("tabsOpened", 0),
+                                quotaHits = dObj.optInt("quotaHits", 0),
+                                headlessPrompts = dObj.optInt("headlessPrompts", 0)
+                            )
+                        }
+                    }
+                }
+                val legacyDay = obj.optString("lastActiveDay", "")
+                val legacyPrompts = obj.optInt("promptsSentToday", 0)
+                val legacyTabs = obj.optInt("tabsOpenedToday", 0)
+                if (legacyDay.isNotEmpty() && !historyMap.containsKey(legacyDay) && (legacyPrompts > 0 || legacyTabs > 0)) {
+                    historyMap[legacyDay] = com.omni.plugin.browser.models.DailyAiStats(
+                        date = legacyDay,
+                        prompts = legacyPrompts,
+                        tabsOpened = legacyTabs
+                    )
+                }
+                val qList = mutableListOf<com.omni.plugin.browser.models.QuotaEventRecord>()
+                obj.optJSONArray("quotaHistory")?.let { qArr ->
+                    for (qIdx in 0 until qArr.length()) {
+                        val qObj = qArr.optJSONObject(qIdx)
+                        if (qObj != null) {
+                            qList.add(
+                                com.omni.plugin.browser.models.QuotaEventRecord(
+                                    timestamp = qObj.optLong("timestamp", 0L),
+                                    reason = qObj.optString("reason", "")
+                                )
+                            )
+                        }
+                    }
+                }
+                val lastQTime = obj.optLong("lastQuotaHitTimestamp", 0L)
+                val lastQReason = obj.optString("lastQuotaReason", "")
+                if (lastQTime > 0L && qList.none { it.timestamp == lastQTime }) {
+                    qList.add(com.omni.plugin.browser.models.QuotaEventRecord(lastQTime, lastQReason))
+                }
+                val totalTabs = maxOf(obj.optInt("totalTabsLifetime", 0), historyMap.values.sumOf { it.tabsOpened })
+                val totalQuotaHits = maxOf(obj.optInt("totalQuotaHitsLifetime", 0), qList.size)
+                val totalPrompts = maxOf(obj.optInt("totalPromptsLifetime", 0), historyMap.values.sumOf { it.prompts })
+
                 map[id] = com.omni.plugin.browser.models.ProfileAiAnalytics(
                     profileId = id,
-                    tabsOpenedToday = obj.optInt("tabsOpenedToday", 0),
-                    promptsSentToday = obj.optInt("promptsSentToday", 0),
-                    totalPromptsLifetime = obj.optInt("totalPromptsLifetime", 0),
+                    tabsOpenedToday = legacyTabs,
+                    promptsSentToday = legacyPrompts,
+                    totalPromptsLifetime = totalPrompts,
+                    totalTabsLifetime = totalTabs,
+                    totalQuotaHitsLifetime = totalQuotaHits,
                     lastPromptTimestamp = obj.optLong("lastPromptTimestamp", 0L),
-                    lastQuotaHitTimestamp = obj.optLong("lastQuotaHitTimestamp", 0L),
-                    lastActiveDay = obj.optString("lastActiveDay", "")
+                    lastQuotaHitTimestamp = lastQTime,
+                    lastQuotaReason = lastQReason,
+                    lastActiveDay = legacyDay,
+                    dailyHistory = historyMap,
+                    quotaHistory = qList
                 )
             }
             map
@@ -873,6 +1063,7 @@ class VaultManager(
             addFileToZip("config/tab_groups.json", "tab_groups.json")
             addFileToZip("config/history.json", "history.json")
             addFileToZip("config/domain_upload_paths.json", "domain_upload_paths.json")
+            addFileToZip("config/ai_studio_analytics.json", "ai_studio_analytics.json")
 
             val ideDir = File(bridge.getPluginDir(), "ide")
             if (ideDir.exists() && ideDir.isDirectory) {
@@ -1048,7 +1239,10 @@ class VaultManager(
                             }
                             if (notes.isNotEmpty()) loadedSmartNotes = notes
                         }
-                        "ide_index.html" -> {
+                                                "ai_studio_analytics.json" -> {
+                            bridge.saveFile("config/ai_studio_analytics.json", bytes)
+                        }
+"ide_index.html" -> {
                             bridge.saveFile("ide/index.html", bytes)
                         }
                     }
