@@ -1220,6 +1220,10 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
     }
 
     function injectTurnButtons() {
+        if (window.__omniReadAloudEnabled === false) {
+            document.querySelectorAll('[data-omni-voice-btn="true"]').forEach(el => el.remove());
+            return;
+        }
         const turns = getModelTurns();
         for (const turn of turns) {
             if (!hasRealAnswer(turn)) continue;
@@ -1233,7 +1237,7 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
                 btn.type = 'button';
                 btn.setAttribute('data-omni-voice-btn', 'true');
                 btn.setAttribute('data-omni-target-turn', turnId);
-                btn.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 10px;margin:4px 6px;border-radius:14px;border:1px solid rgba(138,180,248,0.45);font-size:11px;font-weight:600;cursor:pointer;line-height:1.2;z-index:20;';
+                btn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;min-width:88px;padding:8px 14px;margin:6px 6px;border-radius:18px;border:1.5px solid rgba(138,180,248,0.55);font-size:13px;font-weight:700;cursor:pointer;line-height:1.2;flex-shrink:0;touch-action:manipulation;box-sizing:border-box;z-index:20;';
 
                 btn.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -1299,7 +1303,7 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
     };
 
     function triggerAutoReadIfEligible(wireOutput) {
-        if (!window.__omniAutoReadAloud) return;
+        if (window.__omniReadAloudEnabled === false || !window.__omniAutoReadAloud) return;
         const turns = getModelTurns().filter(hasRealAnswer);
         const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
         if (lastTurn) {
