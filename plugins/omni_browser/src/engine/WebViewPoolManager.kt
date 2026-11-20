@@ -44,6 +44,7 @@ interface WebViewEventListener {
     fun onSyncFavoriteIde(content: String): Boolean
     fun onAiPromptSent(profileId: String)
     fun onAiQuotaHit(profileId: String, reason: String)
+    fun onAiVerificationLock(profileId: String, reason: String)
     fun onAiGenerationStateChanged(tabId: String, isGenerating: Boolean)
     fun onFocusViolation(tabId: String)
     fun onPlaybookFilePullRequested(project: String, files: List<String>, onResult: (String, Int) -> Unit)
@@ -385,7 +386,12 @@ class WebViewPoolManager(
                         listener.onAiQuotaHit(pId, reason)
                     }
                 },
-                onLog = { tag, msg -> bridge.log(tag, msg) }
+                onLog = { tag, msg -> bridge.log(tag, msg) },
+                onVerificationLock = { pId, reason ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onAiVerificationLock(pId, reason)
+                    }
+                }
             )
             addJavascriptInterface(analyticsBridge, "OmniAnalyticsBridge")
 
