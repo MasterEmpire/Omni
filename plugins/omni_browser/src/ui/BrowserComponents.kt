@@ -1412,13 +1412,19 @@ fun ReadAloudPillBanner(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    text = when {
-                        isConnecting -> "⏳"
-                        !isIdle -> "⏹"
-                        else -> "🔊"
+                Icon(
+                    imageVector = when {
+                        isConnecting -> BrowserIcons.Reload
+                        !isIdle -> BrowserIcons.Stop
+                        else -> BrowserIcons.VolumeUp
                     },
-                    fontSize = 13.sp
+                    contentDescription = null,
+                    tint = when {
+                        isConnecting -> Color(0xFFD29922)
+                        !isIdle -> Color(0xFFF85149)
+                        else -> Color(0xFF8AB4F8)
+                    },
+                    modifier = Modifier.size(15.dp)
                 )
                 Text(
                     text = when {
