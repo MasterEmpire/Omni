@@ -71,7 +71,10 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                 opts = opts || {};
                 var profile = opts.profile || opts.profileId || 'default';
                 var model = opts.model || '';
-                return rpcCall('studioCreateSession', [profile, model]).then(function(res) {
+                var bootPromise = (opts.temporaryChat !== undefined && window.__OmniStudioLabBridge && window.__OmniStudioLabBridge.studioCreateSessionWithOpts)
+                    ? rpcCall('studioCreateSessionWithOpts', [JSON.stringify(opts)])
+                    : rpcCall('studioCreateSession', [profile, model]);
+                return bootPromise.then(function(res) {
                     var sId = res.sessionId;
                     return {
                         id: sId,
