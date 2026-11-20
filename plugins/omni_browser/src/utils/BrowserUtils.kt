@@ -1228,9 +1228,12 @@ val AI_STUDIO_READ_ALOUD_SCRIPT = """
         for (const turn of turns) {
             if (!hasRealAnswer(turn)) continue;
             const turnId = ensureTurnId(turn);
+            const footer = turn.querySelector('.turn-footer, ms-turn-footer');
             let btn = turn.querySelector('[data-omni-voice-btn="true"]');
+            if (btn && footer && btn.parentElement !== footer) {
+                footer.appendChild(btn);
+            }
             if (!btn) {
-                const footer = turn.querySelector('.turn-footer .actions-container, .actions-container, .turn-footer');
                 const mountTarget = footer || turn;
 
                 btn = document.createElement('button');
