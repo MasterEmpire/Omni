@@ -507,13 +507,38 @@ fun buildAiStudioPuppetScript(): String {
                             if ((SYS_TITLE && SYS_TITLE.length > 0) || (SYS_PROMPT && SYS_PROMPT.length > 0)) {
                                 try {
                                     updateStatus('Checking System Instructions...');
+                                    // Pre-seed/upsert localStorage preset list so AI Studio finds it immediately in 1 click
+                                    if (SYS_TITLE && SYS_TITLE.length > 0 && SYS_PROMPT && SYS_PROMPT.length > 0) {
+                                        try {
+                                            const lsKey = 'aistudio_all_system_instructions';
+                                            const existingList = JSON.parse(window.localStorage.getItem(lsKey) || '[]');
+                                            if (Array.isArray(existingList)) {
+                                                const normTitle = SYS_TITLE.trim().toLowerCase();
+                                                const idx = existingList.findIndex(item => item && (item.title || '').trim().toLowerCase() === normTitle);
+                                                if (idx >= 0) {
+                                                    if (existingList[idx].text !== SYS_PROMPT) {
+                                                        existingList[idx].text = SYS_PROMPT;
+                                                        window.localStorage.setItem(lsKey, JSON.stringify(existingList));
+                                                        hostLog('SYS_PROMPT', 'Updated existing preset "' + SYS_TITLE + '" in localStorage.');
+                                                    }
+                                                } else {
+                                                    existingList.push({ title: SYS_TITLE.trim(), text: SYS_PROMPT });
+                                                    window.localStorage.setItem(lsKey, JSON.stringify(existingList));
+                                                    hostLog('SYS_PROMPT', 'Pre-seeded new preset "' + SYS_TITLE + '" into localStorage.');
+                                                }
+                                            }
+                                        } catch(lsErr) {
+                                            hostLog('SYS_PROMPT_WARN', 'localStorage preset upsert failed: ' + lsErr.message);
+                                        }
+                                    }
+
                                     sysCard = document.querySelector('button.system-instructions-card, button[data-test-system-instructions-card], ms-system-instructions-panel button');
                                     const cardSub = (sysCard ? (sysCard.querySelector('.subtitle')?.textContent || '') : '').trim();
                                     const alreadyMatches = (SYS_TITLE && cardSub.toLowerCase().includes(SYS_TITLE.toLowerCase())) ||
                                                            (SYS_PROMPT && cardSub.length > 15 && SYS_PROMPT.startsWith(cardSub.slice(0, 15)));
 
-                                    if (alreadyMatches && !FALLBACK_ENABLED) {
-                                        hostLog('SYS_PROMPT', 'System instructions match preview. Skipping.');
+                                    if (alreadyMatches) {
+                                        hostLog('SYS_PROMPT', 'System instructions already active on card. Skipping.');
                                     } else if (sysCard) {
                                         sysCard.click();
                                         await waitForEl('ms-system-instructions', 1800, 25);
@@ -533,7 +558,8 @@ fun buildAiStudioPuppetScript(): String {
                                                     if (match) {
                                                         match.click();
                                                         matchedExisting = true;
-                                                        await delay(120);
+                                                        hostLog('SYS_PROMPT', 'Selected preset "' + SYS_TITLE + '" in 1 click.');
+                                                        await delay(80);
                                                     }
                                                 }
                                                 if (!matchedExisting) {
@@ -560,19 +586,19 @@ fun buildAiStudioPuppetScript(): String {
                                                 safeInjectText(sysTa, SYS_PROMPT);
                                                 await delay(150);
                                             }
+                                            let saveWait = 0;
+                                            while (saveWait < 30) {
+                                                const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status');
+                                                if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) break;
+                                                await delay(100);
+                                                saveWait++;
+                                            }
                                         }
 
-                                        let saveWait = 0;
-                                        while (saveWait < 30) {
-                                            const saveIndicator = document.querySelector('mat-dialog-container .saving-status, .saving-status');
-                                            if (saveIndicator && (saveIndicator.textContent || '').toLowerCase().includes('saved')) break;
-                                            await delay(100);
-                                            saveWait++;
-                                        }
                                         const closeBtn = document.querySelector('mat-dialog-container button[mat-dialog-close], mat-dialog-container button[aria-label*="Close"], button[data-test-close-button]');
                                         if (closeBtn) {
                                             closeBtn.click();
-                                            await delay(150);
+                                            await delay(120);
                                         }
                                     }
                                 } catch(e) {
@@ -633,7 +659,7 @@ fun buildAiStudioPuppetScript(): String {
                         }
                         return true;
                     }
-                    window.location.href = 'https://aistudio.google.com/prompts/new_chat';
+                    window.location.href = 'https://aistudio.google.com/prompts/new_chat' + (window.location.search || '');
                     return true;
                 },
 
