@@ -428,6 +428,57 @@ class OmniBrowser : PluginEntry() {
         val activeTab = state.tabs.find { it.id == state.activeTabId }
         val activeProf = state.profiles.find { it.id == activeTab?.profileId } ?: state.profiles.firstOrNull() ?: BrowserProfile("default", "Default", 0xFF2979FF)
         val profColor = remember(activeProf.colorValue) { Color(activeProf.colorValue) }
+        val isImeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+
+        fun dispatchSlotAction(slotId: String) {
+            when (slotId) {
+                "quick_toggle" -> state.togglePreviousTab()
+                "tabs" -> state.openTabSwitcher(focusManager)
+                "menu" -> {
+                    state.refreshSiteCacheSize()
+                    state.showMenu = !state.showMenu
+                }
+                "home" -> {
+                    if (state.currentUrl != "about:blank") {
+                        state.isHomeOverlayOpen = !state.isHomeOverlayOpen
+                    }
+                }
+                "back" -> {
+                    if (state.canGoBack) state.currentWebView?.goBack()
+                    else if (state.currentUrl != "about:blank") state.navigateTo("about:blank")
+                }
+                "forward" -> state.currentWebView?.goForward()
+                "reload" -> state.reloadCurrentPage()
+                "new_tab" -> state.createNewTab()
+                "smart_notes" -> state.openSmartNotes()
+                "downloads" -> {
+                    state.refreshCompletedDownloads()
+                    state.showDownloadsDialog = true
+                }
+                "force_dark" -> state.toggleForceDark()
+                "data_saver" -> state.toggleDataSaver()
+                "site_cache" -> state.toggleCurrentSiteCache()
+                "page_zoom" -> state.showZoomBar = true
+                "favorite_tab" -> state.toggleTabFavorite(state.activeTabId)
+                "focus_lock" -> state.toggleFocusLock()
+                "copy_url" -> if (state.currentUrl != "about:blank") bridge.copyToClipboard(sanitizeUrlForCopy(state.currentUrl))
+                "local_ide" -> state.openLocalIdeAsNeighbor()
+                "autopilot" -> state.toggleLiveAutoPilot()
+                "studio_lab" -> state.showStudioLabDialog = true
+                "ai_automator" -> state.showAutomationDialog = true
+                "recents" -> bridge.showRecents()
+                "diagnostics" -> bridge.showDiagnostics()
+                "settings" -> state.showSettingsDialog = true
+            }
+        }
+
+        fun dispatchSlotLongClick(slotId: String) {
+            when (slotId) {
+                "quick_toggle" -> state.switchToThirdRecentTab()
+                "tabs" -> state.togglePreviousTab()
+                "site_cache" -> state.clearCurrentSiteCache()
+            }
+        }
 
         Box(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -450,6 +501,7 @@ class OmniBrowser : PluginEntry() {
                     },
                     profColor = profColor,
                     tabCount = state.tabs.size,
+                    topBarItems = state.topBarItems,
                     isHomeOverlayOpen = state.isHomeOverlayOpen,
                     isSearchFocused = state.isSearchFocused,
                     onSearchFocusChange = { focused ->
@@ -460,35 +512,12 @@ class OmniBrowser : PluginEntry() {
                             state.dismissSearch()
                         }
                     },
-                    onHomeClick = {
-                        if (state.currentUrl != "about:blank") {
-                            state.isHomeOverlayOpen = !state.isHomeOverlayOpen
-                        }
-                    },
-                    onQuickToggleTab = { state.togglePreviousTab() },
-                    onLongToggleTab = { state.switchToThirdRecentTab() },
-                    onTabSwitcherClick = {
-                        state.bridge.log("OMNI_TRACE", "🔘 [TAB_BTN_CLICK] User tapped tab count button (${state.tabs.size} tabs open)!")
-                        if (state.isSearchFocused) {
-                            state.dismissSearch()
-                        }
-                        focusManager.clearFocus()
-                        val thumb = state.currentWebView?.captureThumbnail()
-                        val bundle = android.os.Bundle()
-                        state.currentWebView?.saveState(bundle)
-                        state.tabs = state.tabs.map { if (it.id == state.activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
-                        CookieManager.getInstance().flush()
-                        state.containerLayout?.visibility = android.view.View.INVISIBLE
-                        state.isTabSwitcherOpen = true
-                        state.bridge.log("OMNI_TRACE", "📂 [TAB_BTN_CLICK] state.isTabSwitcherOpen flipped to TRUE!")
-                    },
-                    showMenu = state.showMenu,
-                    onMenuToggle = {
-                        state.refreshSiteCacheSize()
-                        state.showMenu = !state.showMenu
-                    },
+                    onReloadClick = { state.reloadCurrentPage() },
+                    onActionClick = { dispatchSlotAction(it) },
+                    onActionLongClick = { dispatchSlotLongClick(it) },
                     isAutoPilotActive = state.isLiveAutoPilotEnabled,
                     isDataSaverActive = state.isEffectiveDataSaver(),
+                    activeDownloadsCount = state.trackedDownloadIds.size,
                     onTopBarDragStart = { state.onTopBarDragStart() },
                     onTopBarDrag = { state.onTopBarDrag(it) },
                     onTopBarDragEnd = { state.onTopBarDragEnd() },
@@ -662,6 +691,23 @@ class OmniBrowser : PluginEntry() {
             }
 
             // --- Overlays & Screens ---
+                if (!isImeVisible) {
+                    OmniBottomBar(
+                        bottomBarItems = state.bottomBarItems,
+                        profColor = profColor,
+                        tabCount = state.tabs.size,
+                        currentUrl = state.currentUrl,
+                        canGoBack = state.canGoBack,
+                        canGoForward = state.canGoForward,
+                        isHomeOverlayOpen = state.isHomeOverlayOpen,
+                        isAutoPilotActive = state.isLiveAutoPilotEnabled,
+                        forceDarkWebPages = state.forceDarkWebPages,
+                        activeDownloadsCount = state.trackedDownloadIds.size,
+                        showMenu = state.showMenu,
+                        onItemClick = { dispatchSlotAction(it) },
+                        onItemLongClick = { dispatchSlotLongClick(it) }
+                    )
+                }
                             BrowserMenuOverlay(
                     showMenu = state.showMenu,
                     onDismiss = { state.showMenu = false },
@@ -698,6 +744,13 @@ class OmniBrowser : PluginEntry() {
                     }
                 },
                 onNewTab = { state.createNewTab() },
+                onOpenTabSwitcher = { state.openTabSwitcher(focusManager) },
+                onQuickToggleTab = { state.togglePreviousTab() },
+                onHomeClick = {
+                    if (state.currentUrl != "about:blank") {
+                        state.isHomeOverlayOpen = !state.isHomeOverlayOpen
+                    }
+                },
                 onCopyCleanUrl = {
                     if (state.currentUrl != "about:blank") {
                         val cleanUrl = sanitizeUrlForCopy(state.currentUrl)
@@ -742,6 +795,7 @@ class OmniBrowser : PluginEntry() {
                     bridge.showDiagnostics()
                 },
                 onOpenSettings = { state.showSettingsDialog = true },
+                onCustomizeLayout = { state.showMenuCustomizerDialog = true },
                 onExitBrowser = {
                     state.showMenu = false
                     coroutineScope.launch {
@@ -1000,11 +1054,15 @@ class OmniBrowser : PluginEntry() {
                     MenuCustomizerDialog(
                         initialActive = state.activeMenuItems,
                         initialHidden = state.hiddenMenuItems,
-                        onSave = { aMenu, hMenu ->
+                        initialBottomBar = state.bottomBarItems,
+                        initialTopBar = state.topBarItems,
+                        onSave = { aMenu, hMenu, bMenu, tMenu ->
                             state.activeMenuItems = aMenu
                             state.hiddenMenuItems = hMenu
-                            state.vaultManager.saveMenuLayout(aMenu, hMenu)
-                            bridge.showToast("Menu layout updated!")
+                            state.bottomBarItems = if ("menu" in bMenu) bMenu else (bMenu + "menu")
+                            state.topBarItems = tMenu
+                            state.vaultManager.saveMenuLayout(aMenu, hMenu, state.bottomBarItems, tMenu)
+                            bridge.showToast("Bars & menu layout updated!")
                             state.showMenuCustomizerDialog = false
                         },
                         onDismiss = { state.showMenuCustomizerDialog = false }
