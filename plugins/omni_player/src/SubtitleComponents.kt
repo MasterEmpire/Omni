@@ -632,34 +632,57 @@ fun SubtitleOnVideoOverlay(
                         .clip(RoundedCornerShape(4.dp))
                         .clickable { onTapInlineBox() }
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        if (inlineIsLoading) {
-                            CircularProgressIndicator(
-                                color = if (subtitleState.fontColor == Color.Black) Color(0xFF00E676) else subtitleState.fontColor,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(14.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (inlineIsLoading) {
+                                CircularProgressIndicator(
+                                    color = if (subtitleState.fontColor == Color.Black) Color(0xFF00E676) else subtitleState.fontColor,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            val displayMsg = when {
+                                inlineError != null -> inlineError
+                                inlineText.isNotBlank() -> inlineText
+                                inlineStatus.isNotBlank() -> inlineStatus
+                                else -> "Translating..."
+                            }
+                            Text(
+                                text = displayMsg,
+                                color = if (inlineError != null) Color(0xFFF85149) else subtitleState.fontColor,
+                                fontSize = inlineFontSp.sp,
+                                fontWeight = FontWeight.Medium,
+                                textAlign = TextAlign.Center,
+                                lineHeight = (inlineFontSp * 1.25f).sp
                             )
                         }
-                        val displayMsg = when {
-                            inlineError != null -> inlineError
-                            inlineText.isNotBlank() -> inlineText
-                            inlineStatus.isNotBlank() -> inlineStatus
-                            else -> "Translating..."
+
+                        if (inlineError != null) {
+                            Spacer(Modifier.height(4.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF1F6FEB),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .clickable { onTapInlineBox() }
+                            ) {
+                                Text(
+                                    text = "↻ Retry in New Session",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
                         }
-                        Text(
-                            text = displayMsg,
-                            color = if (inlineError != null) Color(0xFFF85149) else subtitleState.fontColor,
-                            fontSize = inlineFontSp.sp,
-                            fontWeight = FontWeight.Medium,
-                            textAlign = TextAlign.Center,
-                            lineHeight = (inlineFontSp * 1.25f).sp
-                        )
                     }
                 }
             }
@@ -818,24 +841,62 @@ fun AiDialogueInspectorSheet(
                 .consumeAllTouches()
                 .padding(16.dp)
         ) {
-            // Header: Title, Model Badge, Key Settings, Close
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            // Header: Bulletproof Two-Tier Layout (Guaranteed No Overflow)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         text = "AI Scene Explainer",
                         color = Color.White,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(Modifier.width(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF161B22),
+                            border = BorderStroke(0.8.dp, Color(0xFF58A6FF).copy(alpha = 0.6f)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onConfigureKey() }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("⚙️ Settings", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8B949E))
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Surface(
                         shape = RoundedCornerShape(4.dp),
                         color = Color(0xFF00E676).copy(alpha = 0.15f),
-                        border = BorderStroke(0.8.dp, Color(0xFF00E676).copy(alpha = 0.4f))
+                        border = BorderStroke(0.8.dp, Color(0xFF00E676).copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { onConfigureKey() }
                     ) {
                         Text(
                             text = if (isOmni) {
@@ -845,7 +906,7 @@ fun AiDialogueInspectorSheet(
                                     "ERROR" -> "🔴"
                                     else -> "⚪"
                                 }
-                                "$dot ${OmniAiBridgeClient.getModel(context).take(16)}"
+                                "$dot ${OmniAiBridgeClient.getModel(context)}"
                             } else "qwen3.8-27b",
                             color = Color(0xFF00E676),
                             fontSize = 10.sp,
@@ -854,12 +915,7 @@ fun AiDialogueInspectorSheet(
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
-                }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
                     if (isOmni) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
@@ -876,33 +932,11 @@ fun AiDialogueInspectorSheet(
                             Text(
                                 text = "New Chat",
                                 color = Color(0xFF00E676),
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF161B22),
-                        border = BorderStroke(0.8.dp, Color(0xFF58A6FF).copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { onConfigureKey() }
-                    ) {
-                        Text(
-                            text = "Prompt",
-                            color = Color(0xFF58A6FF),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                    IconButton(onClick = onConfigureKey, modifier = Modifier.size(32.dp)) {
-                        CineLockIcon(isLocked = false, tint = Color(0xFF58A6FF), modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8B949E))
                     }
                 }
             }
@@ -1011,11 +1045,26 @@ fun AiDialogueInspectorSheet(
                             Spacer(Modifier.height(4.dp))
                             Text(errorMessage, color = Color(0xFFC9D1D9), fontSize = 12.sp)
                             Spacer(Modifier.height(8.dp))
-                            TextButton(onClick = {
-                                val w = selectedWord
-                                if (w != null) requestWordExplanation(w) else onRetryLine()
-                            }) {
-                                Text("Retry", color = Color(0xFF00E676), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = {
+                                    val w = selectedWord
+                                    if (w != null) requestWordExplanation(w) else onRetryLine()
+                                }) {
+                                    Text("Retry", color = Color(0xFF00E676), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Button(
+                                    onClick = {
+                                        OmniAiBridgeClient.closeSession(bridge)
+                                        val w = selectedWord
+                                        if (w != null) requestWordExplanation(w) else onRetryLine()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Text("↻ Retry in New Session", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     } else {
