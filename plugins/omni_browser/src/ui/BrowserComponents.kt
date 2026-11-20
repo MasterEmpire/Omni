@@ -56,17 +56,16 @@ fun OmniBrowserTopBar(
     onNavigate: (String) -> Unit,
     profColor: Color,
     tabCount: Int,
+    topBarItems: List<String>,
     isHomeOverlayOpen: Boolean,
     isSearchFocused: Boolean,
     onSearchFocusChange: (Boolean) -> Unit,
-    onHomeClick: () -> Unit,
-    onQuickToggleTab: () -> Unit,
-    onLongToggleTab: () -> Unit = {},
-    onTabSwitcherClick: () -> Unit,
-    showMenu: Boolean,
-    onMenuToggle: () -> Unit,
+    onReloadClick: () -> Unit,
+    onActionClick: (String) -> Unit,
+    onActionLongClick: (String) -> Unit = {},
     isAutoPilotActive: Boolean = false,
     isDataSaverActive: Boolean = false,
+    activeDownloadsCount: Int = 0,
     onTopBarDragStart: () -> Unit = {},
     onTopBarDrag: (Float) -> Unit = {},
     onTopBarDragEnd: () -> Unit = {},
@@ -134,26 +133,9 @@ fun OmniBrowserTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AnimatedVisibility(
-                visible = !isSearchFocused,
-                enter = fadeIn() + expandHorizontally(),
-                exit = fadeOut() + shrinkHorizontally()
-            ) {
-                IconButton(
-                    onClick = onHomeClick,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Home,
-                        contentDescription = "Home",
-                        tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFF9AA0A6)
-                    )
-                }
-            }
-
             if (isSearchFocused) {
                 IconButton(
                     onClick = {
@@ -162,7 +144,7 @@ fun OmniBrowserTopBar(
                         focusManager.clearFocus()
                         keyboardController?.hide()
                     },
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         Icons.Default.ArrowBack,
@@ -170,15 +152,16 @@ fun OmniBrowserTopBar(
                         tint = profColor
                     )
                 }
+                Spacer(Modifier.width(4.dp))
             }
 
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(profColor.copy(alpha = 0.15f))
-                    .border(1.5.dp, profColor, RoundedCornerShape(20.dp))
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(profColor.copy(alpha = 0.14f))
+                    .border(1.3.dp, profColor, RoundedCornerShape(18.dp))
                     .then(
                         if (!isSearchFocused) {
                             Modifier.clickable(
@@ -198,7 +181,7 @@ fun OmniBrowserTopBar(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(8.dp)
+                            .size(7.dp)
                             .clip(CircleShape)
                             .background(profColor)
                     )
@@ -206,14 +189,14 @@ fun OmniBrowserTopBar(
                     Spacer(Modifier.width(6.dp))
 
                     if (isDataSaverActive) {
-                        Text("🛡️", fontSize = 11.sp)
+                        Text("🛡️", fontSize = 10.sp)
                         Spacer(Modifier.width(4.dp))
                     }
                     Icon(
                         imageVector = if (currentUrl.startsWith("https://")) Icons.Default.Check else if (currentUrl.startsWith("http://")) Icons.Default.Info else Icons.Default.Search,
                         contentDescription = null,
                         tint = if (currentUrl.startsWith("https://")) Color(0xFF81C995) else if (currentUrl.startsWith("http://")) Color(0xFFFDD663) else profColor,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
 
                     Spacer(Modifier.width(6.dp))
@@ -294,7 +277,7 @@ fun OmniBrowserTopBar(
                                 },
                                 modifier = Modifier.size(24.dp)
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9AA0A6), modifier = Modifier.size(15.dp))
                             }
                         }
                     } else {
@@ -308,7 +291,7 @@ fun OmniBrowserTopBar(
                             Text(
                                 text = if (urlInputText.isEmpty() || currentUrl == "about:blank") "Search or type URL" else urlInputText,
                                 color = if (urlInputText.isEmpty() || currentUrl == "about:blank") Color(0xFF9AA0A6) else Color(0xFFE8EAED),
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = TextStyle(
@@ -318,78 +301,322 @@ fun OmniBrowserTopBar(
                                 )
                             )
                         }
+
+                        if (currentUrl != "about:blank") {
+                            IconButton(
+                                onClick = onReloadClick,
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Reload",
+                                    tint = Color(0xFF9AA0A6),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
 
             AnimatedVisibility(
-                visible = !isSearchFocused,
+                visible = !isSearchFocused && topBarItems.isNotEmpty(),
                 enter = fadeIn() + expandHorizontally(),
                 exit = fadeOut() + shrinkHorizontally()
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(4.dp))
-
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .then(
-                                if (tabCount > 1) {
-                                    Modifier.combinedClickable(
-                                        onClick = onQuickToggleTab,
-                                        onLongClick = onLongToggleTab
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(start = 10.dp, end = 2.dp)
+                ) {
+                    topBarItems.forEach { slotId ->
+                        when (slotId) {
+                            "quick_toggle" -> {
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .then(
+                                            if (tabCount > 1) {
+                                                Modifier.combinedClickable(
+                                                    onClick = { onActionClick("quick_toggle") },
+                                                    onLongClick = { onActionLongClick("quick_toggle") }
+                                                )
+                                            } else Modifier
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "⇄",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (tabCount > 1) Color(0xFFE8EAED) else Color(0xFF5F6368)
                                     )
-                                } else Modifier
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "⇄",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (tabCount > 1) Color(0xFFE8EAED) else Color(0xFF5F6368)
-                        )
+                                }
+                            }
+                            "tabs" -> {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(profColor.copy(alpha = 0.2f))
+                                        .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
+                                        .combinedClickable(
+                                            onClick = { onActionClick("tabs") },
+                                            onLongClick = { onActionLongClick("tabs") }
+                                        )
+                                ) {
+                                    Text(
+                                        "$tabCount",
+                                        color = profColor,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                            else -> {
+                                val badge = if (slotId == "downloads" && activeDownloadsCount > 0) "$activeDownloadsCount" else null
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .combinedClickable(
+                                            onClick = { onActionClick(slotId) },
+                                            onLongClick = { onActionLongClick(slotId) }
+                                        )
+                                ) {
+                                    Text(
+                                        text = getMenuSlotEmoji(slotId, forceDark = false, isAutoPilot = isAutoPilotActive, isHome = isHomeOverlayOpen),
+                                        fontSize = 15.sp,
+                                        color = Color(0xFFE8EAED)
+                                    )
+                                    if (badge != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .size(13.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF3FB950)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(badge, color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
+                }
+            }
+        }
+    }
+}
 
-                    Spacer(Modifier.width(2.dp))
+private fun getMenuSlotEmoji(
+    id: String,
+    forceDark: Boolean = false,
+    isAutoPilot: Boolean = false,
+    isHome: Boolean = false,
+    isDataSaver: Boolean = false,
+    dataSaverMode: String = "MEDIUM",
+    isSiteCached: Boolean = false,
+    isFav: Boolean = false,
+    isFocusLock: Boolean = false
+): String = when (id) {
+    "quick_toggle" -> "⇄"
+    "tabs" -> "📑"
+    "menu" -> "☰"
+    "home" -> "🏠"
+    "back" -> "‹"
+    "forward" -> "›"
+    "reload" -> "↻"
+    "new_tab" -> "＋"
+    "smart_notes" -> "📝"
+    "downloads" -> "📥"
+    "force_dark" -> if (forceDark) "☀️" else "🌙"
+    "data_saver" -> if (dataSaverMode == "EXTREME") "🔥" else "🛡️"
+    "site_cache" -> "📦"
+    "page_zoom" -> "🔍"
+    "favorite_tab" -> if (isFav) "★" else "☆"
+    "focus_lock" -> if (isFocusLock) "🔒" else "🛡️"
+    "copy_url" -> "🔗"
+    "dom_snapshot" -> "📸"
+    "full_source" -> "🗜️"
+    "local_ide" -> "💻"
+    "autopilot" -> "⚡"
+    "studio_lab" -> "🧪"
+    "ai_automator" -> "🤖"
+    "recents" -> "📱"
+    "diagnostics" -> "📋"
+    "settings" -> "⚙️"
+    "exit" -> "⏻"
+    else -> "•"
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun OmniBottomBar(
+    bottomBarItems: List<String>,
+    profColor: Color,
+    tabCount: Int,
+    currentUrl: String,
+    canGoBack: Boolean,
+    canGoForward: Boolean,
+    isHomeOverlayOpen: Boolean,
+    isAutoPilotActive: Boolean,
+    forceDarkWebPages: Boolean,
+    activeDownloadsCount: Int,
+    showMenu: Boolean,
+    onItemClick: (String) -> Unit,
+    onItemLongClick: (String) -> Unit
+) {
+    Surface(
+        color = Color(0xFF16181D),
+        tonalElevation = 4.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+    ) {
+        Column {
+            HorizontalDivider(color = Color(0xFF282C34), thickness = 0.8.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(42.dp)
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                bottomBarItems.forEach { slotId ->
+                    val isEnabled = when (slotId) {
+                        "back" -> canGoBack || currentUrl != "about:blank"
+                        "forward" -> canGoForward
+                        "quick_toggle" -> tabCount > 1
+                        else -> true
+                    }
 
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(profColor.copy(alpha = 0.2f))
-                            .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
-                            .clickable { onTabSwitcherClick() }
-                    ) {
-                        Text(
-                            "$tabCount",
-                            color = profColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-
-                    Spacer(Modifier.width(2.dp))
-
-                    IconButton(
-                        onClick = onMenuToggle,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.MoreVert,
-                                contentDescription = "Menu",
-                                tint = if (showMenu) profColor else Color(0xFF9AA0A6)
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(10.dp))
+                            .combinedClickable(
+                                enabled = isEnabled,
+                                onClick = { onItemClick(slotId) },
+                                onLongClick = { onItemLongClick(slotId) }
                             )
-                            if (isAutoPilotActive) {
+                    ) {
+                        when (slotId) {
+                            "tabs" -> {
                                 Box(
+                                    contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(7.dp)
-                                        .align(Alignment.TopEnd)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF00E5FF))
+                                        .size(24.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(profColor.copy(alpha = 0.16f))
+                                        .border(1.5.dp, profColor, RoundedCornerShape(6.dp))
+                                ) {
+                                    Text(
+                                        "$tabCount",
+                                        color = profColor,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                            "menu" -> {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Menu,
+                                        contentDescription = "Menu",
+                                        tint = if (showMenu) profColor else Color(0xFFE8EAED),
+                                        modifier = Modifier.size(21.dp)
+                                    )
+                                    if (isAutoPilotActive) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .align(Alignment.TopEnd)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF00E5FF))
+                                        )
+                                    }
+                                }
+                            }
+                            "home" -> {
+                                Icon(
+                                    Icons.Default.Home,
+                                    contentDescription = "Home",
+                                    tint = if (isHomeOverlayOpen || currentUrl == "about:blank") profColor else Color(0xFFC9D1D9),
+                                    modifier = Modifier.size(21.dp)
+                                )
+                            }
+                            "back" -> {
+                                Icon(
+                                    Icons.Default.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = if (isEnabled) Color(0xFFE8EAED) else Color(0xFF484F58),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            "forward" -> {
+                                Icon(
+                                    Icons.Default.ArrowForward,
+                                    contentDescription = "Forward",
+                                    tint = if (isEnabled) Color(0xFFE8EAED) else Color(0xFF484F58),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            "reload" -> {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Reload",
+                                    tint = Color(0xFFE8EAED),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            "new_tab" -> {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "New Tab",
+                                    tint = profColor,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            "quick_toggle" -> {
+                                Text(
+                                    "⇄",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (tabCount > 1) Color(0xFFE8EAED) else Color(0xFF484F58)
+                                )
+                            }
+                            "downloads" -> {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text("📥", fontSize = 17.sp)
+                                    if (activeDownloadsCount > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .offset(x = 5.dp, y = (-3).dp)
+                                                .size(14.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF3FB950)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("$activeDownloadsCount", color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                            else -> {
+                                Text(
+                                    text = getMenuSlotEmoji(slotId, forceDark = forceDarkWebPages, isAutoPilot = isAutoPilotActive, isHome = isHomeOverlayOpen),
+                                    fontSize = 17.sp,
+                                    color = if (slotId == "autopilot" && isAutoPilotActive) Color(0xFF00E5FF) else Color(0xFFE8EAED)
                                 )
                             }
                         }
@@ -593,6 +820,7 @@ fun SpeedDialView(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BrowserMenuOverlay(
     showMenu: Boolean,
@@ -623,6 +851,9 @@ fun BrowserMenuOverlay(
     onForwardClick: () -> Unit,
     onReloadClick: () -> Unit,
     onNewTab: () -> Unit,
+    onOpenTabSwitcher: () -> Unit = {},
+    onQuickToggleTab: () -> Unit = {},
+    onHomeClick: () -> Unit = {},
     onCopyCleanUrl: () -> Unit,
     onCaptureDomSnapshot: () -> Unit,
     onCaptureFullSource: () -> Unit = {},
@@ -635,294 +866,359 @@ fun BrowserMenuOverlay(
     onShowRecents: () -> Unit = {},
     onShowDiagnostics: () -> Unit = {},
     onOpenSettings: () -> Unit,
+    onCustomizeLayout: () -> Unit = {},
     onExitBrowser: () -> Unit
 ) {
     if (!showMenu) return
 
-            Box(
+    val gridItems = remember(activeMenuItems) {
+        activeMenuItems.filter { it != "menu" }
+    }
+    val pages = remember(gridItems) {
+        val chunked = gridItems.chunked(10)
+        if (chunked.isEmpty()) listOf(emptyList()) else chunked
+    }
+
+    val scrollState = rememberScrollState()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val scope = rememberCoroutineScope()
+    var pageWidthPx by remember { mutableFloatStateOf(0f) }
+
+    val currentPage by remember {
+        derivedStateOf {
+            if (pageWidthPx <= 1f) 0
+            else kotlin.math.round(scrollState.value / pageWidthPx).toInt().coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+        }
+    }
+
+    LaunchedEffect(scrollState.isScrollInProgress, pageWidthPx) {
+        if (!scrollState.isScrollInProgress && pageWidthPx > 1f) {
+            val targetPage = kotlin.math.round(scrollState.value / pageWidthPx).toInt().coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+            val targetScroll = kotlin.math.round(targetPage * pageWidthPx).toInt()
+            if (kotlin.math.abs(scrollState.value - targetScroll) > 2) {
+                scrollState.animateScrollTo(targetScroll)
+            }
+        }
+    }
+
+    fun getGridTileMeta(id: String): Triple<String, String, Color?> = when (id) {
+        "force_dark" -> Triple(if (forceDarkWebPages) "☀️" else "🌙", if (forceDarkWebPages) "Light Mode" else "Night Mode", if (forceDarkWebPages) Color(0xFFFDD663) else null)
+        "data_saver" -> Triple(
+            if (dataSaverMode == "EXTREME") "🔥" else "🛡️",
+            when (dataSaverMode) {
+                "EXTREME" -> "Data: Ext"
+                "MEDIUM" -> "Data: Med"
+                else -> "Data Saver"
+            },
+            when (dataSaverMode) {
+                "EXTREME" -> Color(0xFF3FB950)
+                "MEDIUM" -> Color(0xFF58A6FF)
+                else -> null
+            }
+        )
+        "site_cache" -> Triple("📦", if (isSiteCached && siteCacheSizeText != "0 B") siteCacheSizeText else "Cache Site", if (isSiteCached) Color(0xFF3FB950) else null)
+        "page_zoom" -> Triple("🔍", "Zoom $currentZoomPercent%", if (currentZoomPercent != 100) Color(0xFF58A6FF) else null)
+        "favorite_tab" -> Triple(if (isCurrentTabFavorite) "★" else "☆", if (isCurrentTabFavorite) "Favorited" else "Fav Tab", if (isCurrentTabFavorite) Color(0xFFFFD600) else null)
+        "focus_lock" -> Triple(if (isFocusLockActive) "🔒" else "🛡️", if (isFocusLockActive) "Locked" else "Focus Lock", if (isFocusLockActive) Color(0xFFF85149) else null)
+        "copy_url" -> Triple("🔗", "Copy URL", null)
+        "dom_snapshot" -> Triple("📸", "DOM Dump", null)
+        "full_source" -> Triple("🗜️", "Web Source", Color(0xFF81C995))
+        "local_ide" -> Triple("💻", "Local IDE", Color(0xFF58A6FF))
+        "autopilot" -> Triple("⚡", if (isLiveAutoPilotEnabled) "Auto-Pilot ON" else "Auto-Pilot", if (isLiveAutoPilotEnabled) Color(0xFF00E5FF) else null)
+        "studio_lab" -> Triple("🧪", "Studio Lab", Color(0xFF00E5FF))
+        "ai_automator" -> Triple("🤖", "Automator", Color(0xFF8AB4F8))
+        "smart_notes" -> Triple("📝", "Smart Notes", Color(0xFF8AB4F8))
+        "downloads" -> Triple("📥", if (activeDownloadsCount > 0) "DL ($activeDownloadsCount)" else "Downloads", if (activeDownloadsCount > 0) Color(0xFF3FB950) else null)
+        "recents" -> Triple("📱", "Recents", Color(0xFF58A6FF))
+        "diagnostics" -> Triple("📋", "Diagnostics", Color(0xFF58A6FF))
+        "settings" -> Triple("⚙️", "Settings", Color(0xFF8AB4F8))
+        "exit" -> Triple("⏻", "Exit", Color(0xFFF28B82))
+        "back" -> Triple("‹", "Back", null)
+        "forward" -> Triple("›", "Forward", null)
+        "reload" -> Triple("↻", "Reload", null)
+        "new_tab" -> Triple("＋", "New Tab", Color(0xFF8AB4F8))
+        "home" -> Triple("🏠", "Home", null)
+        "tabs" -> Triple("📑", "Tabs", Color(0xFF8AB4F8))
+        "quick_toggle" -> Triple("⇄", "Prev Tab", null)
+        else -> Triple("•", id, null)
+    }
+
+    fun triggerTileAction(id: String) {
+        onDismiss()
+        when (id) {
+            "force_dark" -> onToggleForceDark()
+            "data_saver" -> onToggleDataSaver()
+            "site_cache" -> onToggleSiteCache()
+            "page_zoom" -> onOpenZoom()
+            "favorite_tab" -> onToggleFavoriteTab()
+            "focus_lock" -> onToggleFocusLock()
+            "copy_url" -> onCopyCleanUrl()
+            "dom_snapshot" -> onCaptureDomSnapshot()
+            "full_source" -> onCaptureFullSource()
+            "local_ide" -> onOpenLocalIde()
+            "autopilot" -> onToggleLiveAutoPilot()
+            "studio_lab" -> onOpenStudioLab()
+            "ai_automator" -> onOpenAutomation()
+            "smart_notes" -> onOpenSmartNotes()
+            "downloads" -> onOpenDownloads()
+            "recents" -> onShowRecents()
+            "diagnostics" -> onShowDiagnostics()
+            "settings" -> onOpenSettings()
+            "exit" -> onExitBrowser()
+            "back" -> onBackClick()
+            "forward" -> onForwardClick()
+            "reload" -> onReloadClick()
+            "new_tab" -> onNewTab()
+            "home" -> onHomeClick()
+            "tabs" -> onOpenTabSwitcher()
+            "quick_toggle" -> onQuickToggleTab()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(20f)
+            .background(Color.Black.copy(alpha = 0.45f))
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { onDismiss() })
+            }
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Surface(
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            color = Color(0xFF1E222A),
+            tonalElevation = 10.dp,
+            shadowElevation = 16.dp,
+            border = BorderStroke(1.dp, Color(0xFF30363D)),
             modifier = Modifier
-                .fillMaxSize()
-                .zIndex(20f)
+                .fillMaxWidth()
                 .pointerInput(Unit) {
-                    detectTapGestures(onTap = { onDismiss() })
+                    detectTapGestures(onTap = { /* Consume taps */ })
                 }
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(top = 52.dp, end = 8.dp, bottom = 12.dp),
-            contentAlignment = Alignment.TopEnd
         ) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF282C34),
-                tonalElevation = 8.dp,
-                shadowElevation = 10.dp,
-                border = BorderStroke(1.dp, Color(0xFF3C4043)),
+            Column(
                 modifier = Modifier
-                    .width(260.dp)
-                    .fillMaxHeight()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { /* Consume taps */ })
-                    }
+                    .fillMaxWidth()
+                    .padding(top = 10.dp, bottom = 8.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(vertical = 6.dp)
-                ) {
-                // Quick Controls Header (Back, Forward, Reload, + New Tab)
+                // Top quick strip: Back, Forward, Reload, New Tab (+ Auto-Pilot Confirm toggle when armed)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                        .padding(horizontal = 14.dp, vertical = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = {
-                            onDismiss()
-                            onBackClick()
-                        },
-                        enabled = canGoBack || currentUrl != "about:blank"
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowBack,
-                            contentDescription = "Back",
-                            tint = if (canGoBack || currentUrl != "about:blank") Color(0xFFE8EAED) else Color(0xFF5F6368)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            onDismiss()
-                            onForwardClick()
-                        },
-                        enabled = canGoForward
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowForward,
-                            contentDescription = "Forward",
-                            tint = if (canGoForward) Color(0xFFE8EAED) else Color(0xFF5F6368)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            onDismiss()
-                            onReloadClick()
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        IconButton(
+                            onClick = { onDismiss(); onBackClick() },
+                            enabled = canGoBack || currentUrl != "about:blank",
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = if (canGoBack || currentUrl != "about:blank") Color(0xFFE8EAED) else Color(0xFF5F6368),
+                                modifier = Modifier.size(19.dp)
+                            )
                         }
-                    ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Reload",
-                            tint = Color(0xFFE8EAED)
-                        )
+                        IconButton(
+                            onClick = { onDismiss(); onForwardClick() },
+                            enabled = canGoForward,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowForward,
+                                contentDescription = "Forward",
+                                tint = if (canGoForward) Color(0xFFE8EAED) else Color(0xFF5F6368),
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { onDismiss(); onReloadClick() },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = Color(0xFFE8EAED), modifier = Modifier.size(19.dp))
+                        }
+                        IconButton(
+                            onClick = { onDismiss(); onNewTab() },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "New Tab", tint = Color(0xFF8AB4F8), modifier = Modifier.size(20.dp))
+                        }
                     }
 
-                    IconButton(
-                        onClick = {
-                            onDismiss()
-                            onNewTab()
+                    if (isLiveAutoPilotEnabled) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isAutoPilotConfirmEnabled) Color(0xFF00E5FF).copy(alpha = 0.18f) else Color(0xFF282C34),
+                            border = BorderStroke(1.dp, if (isAutoPilotConfirmEnabled) Color(0xFF00E5FF) else Color(0xFF3C4043)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onToggleAutoPilotConfirm() }
+                        ) {
+                            Text(
+                                text = if (isAutoPilotConfirmEnabled) "🛡️ Confirm: ON" else "⚡ Auto: ON",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
                         }
-                    ) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = "New Tab",
-                            tint = Color(0xFF8AB4F8)
-                        )
                     }
                 }
 
-                HorizontalDivider(color = Color(0xFF3C4043), modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(color = Color(0xFF2C313A), modifier = Modifier.padding(vertical = 6.dp))
 
-                @Composable
-                fun InLayoutMenuItem(
-                    title: String,
-                    color: Color = Color(0xFFE8EAED),
-                    isBold: Boolean = false,
-                    onClick: () -> Unit
-                ) {
+                // Horizontally scrollable 5x2 grid pages
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val widthDp = maxWidth
+                    val widthPx = with(density) { widthDp.toPx() }
+                    LaunchedEffect(widthPx) { pageWidthPx = widthPx }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable {
-                                onDismiss()
-                                onClick()
-                            }
-                            .padding(horizontal = 16.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .horizontalScroll(scrollState)
                     ) {
-                        Text(
-                            text = title,
-                            color = color,
-                            fontSize = 13.sp,
-                            fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-                }
-
-                activeMenuItems.forEach { id ->
-                    when (id) {
-                        "force_dark" -> {
-                            InLayoutMenuItem(
-                                title = if (forceDarkWebPages) "☀️ Switch to Light Mode" else "🌙 Switch to Dark Mode",
-                                color = if (forceDarkWebPages) Color(0xFFFDD663) else Color(0xFFE8EAED),
-                                isBold = true,
-                                onClick = { onToggleForceDark() }
-                            )
-                        }
-                        "data_saver" -> {
-                            val (dsTitle, dsColor) = when (dataSaverMode) {
-                                "EXTREME" -> "🔥 Data-saver (Extreme)" to Color(0xFF3FB950)
-                                "MEDIUM" -> "🛡️ Data-saver (Medium)" to Color(0xFF58A6FF)
-                                else -> "🛡️ Data-saver (Off)" to Color(0xFFE8EAED)
-                            }
-                            InLayoutMenuItem(
-                                title = dsTitle,
-                                color = dsColor,
-                                isBold = dataSaverMode != "OFF",
-                                onClick = { onToggleDataSaver() }
-                            )
-                        }
-                                                "site_cache" -> {
-                            Row(
+                        pages.forEach { pageItems ->
+                            val row1 = pageItems.take(5)
+                            val row2 = pageItems.drop(5).take(5)
+                            Column(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        onDismiss()
-                                        onToggleSiteCache()
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 7.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .width(widthDp)
+                                    .padding(horizontal = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = "📦 Cache This Site",
-                                            color = if (isSiteCached) Color(0xFF3FB950) else Color(0xFFE8EAED),
-                                            fontSize = 13.sp,
-                                            fontWeight = if (isSiteCached) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                        if (isSiteCached) {
-                                            Spacer(Modifier.width(6.dp))
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = Color(0xFF238636).copy(alpha = 0.25f)
-                                            ) {
-                                                Text(
-                                                    "ACTIVE",
-                                                    color = Color(0xFF3FB950),
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                )
+                                listOf(row1, row2).forEach { rowItems ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceEvenly
+                                    ) {
+                                        for (colIdx in 0 until 5) {
+                                            val itemId = rowItems.getOrNull(colIdx)
+                                            if (itemId == null) {
+                                                Spacer(modifier = Modifier.weight(1f).height(64.dp))
+                                            } else {
+                                                val (emoji, label, accent) = getGridTileMeta(itemId)
+                                                val isActiveHighlight = accent != null
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.Center,
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .combinedClickable(
+                                                            onClick = { triggerTileAction(itemId) },
+                                                            onLongClick = {
+                                                                if (itemId == "site_cache") {
+                                                                    onDismiss()
+                                                                    onClearSiteCache()
+                                                                }
+                                                            }
+                                                        )
+                                                        .padding(vertical = 6.dp, horizontal = 2.dp)
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier
+                                                            .size(36.dp)
+                                                            .clip(CircleShape)
+                                                            .background(
+                                                                if (isActiveHighlight) accent!!.copy(alpha = 0.16f)
+                                                                else Color(0xFF282C34)
+                                                            )
+                                                    ) {
+                                                        Text(emoji, fontSize = 17.sp)
+                                                    }
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Text(
+                                                        text = label,
+                                                        color = accent ?: Color(0xFFE8EAED),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = if (isActiveHighlight) FontWeight.Bold else FontWeight.Medium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
                                             }
                                         }
                                     }
-                                    Text(
-                                        text = if (siteCacheSizeText.isNotEmpty() && siteCacheSizeText != "0 B") "$siteCacheSizeText saved on disk" else "Saves data on immutable assets",
-                                        color = Color(0xFF8B949E),
-                                        fontSize = 10.sp
-                                    )
                                 }
+                            }
+                        }
+                    }
+                }
 
-                                if (siteCacheSizeText.isNotEmpty() && siteCacheSizeText != "0 B") {
-                                    IconButton(
-                                        onClick = {
-                                            onDismiss()
-                                            onClearSiteCache()
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Text("🗑️", fontSize = 13.sp)
+                // Page Indicator Dots
+                if (pages.size > 1) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 2.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        pages.indices.forEach { idx ->
+                            val isSel = idx == currentPage
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp)
+                                    .size(width = if (isSel) 14.dp else 6.dp, height = 6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSel) Color(0xFF8AB4F8) else Color(0xFF484F58))
+                                    .clickable {
+                                        if (pageWidthPx > 1f) {
+                                            scope.launch {
+                                                scrollState.animateScrollTo(kotlin.math.round(idx * pageWidthPx).toInt())
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                        }
-"page_zoom" -> {
-                            InLayoutMenuItem(
-                                title = "🔍 Page Zoom ($currentZoomPercent%)",
-                                color = if (currentZoomPercent != 100) Color(0xFF58A6FF) else Color(0xFFE8EAED),
-                                isBold = currentZoomPercent != 100,
-                                onClick = { onOpenZoom() }
                             )
                         }
-                        "favorite_tab" -> {
-                            InLayoutMenuItem(
-                                title = if (isCurrentTabFavorite) "★ Favorited Tab" else "☆ Favorite This Tab",
-                                color = if (isCurrentTabFavorite) Color(0xFFFFD600) else Color(0xFFE8EAED),
-                                isBold = isCurrentTabFavorite,
-                                onClick = { onToggleFavoriteTab() }
-                            )
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF2C313A), modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
+
+                // Bottom Sheet Footer (Customize Layout on left, Exit & Collapse on right)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = {
+                            onDismiss()
+                            onCustomizeLayout()
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text("⋮ Edit Layout", color = Color(0xFF8AB4F8), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        IconButton(
+                            onClick = {
+                                onDismiss()
+                                onExitBrowser()
+                            },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Text("⏻", color = Color(0xFFF28B82), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         }
-                        "focus_lock" -> {
-                            val (fTitle, fColor) = if (isFocusLockActive) {
-                                "🔒 Focus Lock (ACTIVE)" to Color(0xFFF85149)
-                            } else {
-                                "🛡️ Enable Focus (1h)" to Color(0xFF58A6FF)
-                            }
-                            InLayoutMenuItem(
-                                title = fTitle,
-                                color = fColor,
-                                isBold = true,
-                                onClick = { onToggleFocusLock() }
-                            )
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close", tint = Color(0xFF9AA0A6))
                         }
-                        "copy_url" -> InLayoutMenuItem("Copy Clean URL") { onCopyCleanUrl() }
-                        "dom_snapshot" -> InLayoutMenuItem("Capture DOM Snapshot") { onCaptureDomSnapshot() }
-                        "full_source" -> InLayoutMenuItem("📦 Export Full Web Source (ZIP)", color = Color(0xFF81C995), isBold = true) { onCaptureFullSource() }
-                        "local_ide" -> InLayoutMenuItem("💻 Open Local IDE", color = Color(0xFF58A6FF), isBold = true) { onOpenLocalIde() }
-                        "autopilot" -> {
-                            InLayoutMenuItem(
-                                title = if (isLiveAutoPilotEnabled) "⚡ Live Auto-Pilot (ARMED)" else "⚡ Live Auto-Pilot (Off)",
-                                color = if (isLiveAutoPilotEnabled) Color(0xFF00E5FF) else Color(0xFF8AB4F8),
-                                isBold = isLiveAutoPilotEnabled,
-                                onClick = { onToggleLiveAutoPilot() }
-                            )
-                            if (isLiveAutoPilotEnabled) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 2.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "🛡️ Require Confirmation",
-                                        color = if (isAutoPilotConfirmEnabled) Color(0xFF00E5FF) else Color(0xFF9AA0A6),
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isAutoPilotConfirmEnabled) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                    Switch(
-                                        checked = isAutoPilotConfirmEnabled,
-                                        onCheckedChange = { onToggleAutoPilotConfirm() },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = Color(0xFF00E5FF),
-                                            checkedTrackColor = Color(0xFF00E5FF).copy(alpha = 0.3f)
-                                        ),
-                                        modifier = Modifier.height(22.dp)
-                                    )
-                                }
-                            }
-                        }
-                        "studio_lab" -> InLayoutMenuItem("🧪 Studio Lab (Playbooks)", color = Color(0xFF00E5FF), isBold = true) { onOpenStudioLab() }
-                        "ai_automator" -> InLayoutMenuItem("🤖 AI Studio Automator", color = Color(0xFF8AB4F8), isBold = true) { onOpenAutomation() }
-                        "smart_notes" -> InLayoutMenuItem("📝 Smart Notes", color = Color(0xFF8AB4F8)) { onOpenSmartNotes() }
-                        "downloads" -> {
-                            InLayoutMenuItem(
-                                title = if (activeDownloadsCount > 0) "📥 Downloads ($activeDownloadsCount)" else "📥 Downloads",
-                                color = if (activeDownloadsCount > 0) Color(0xFF81C995) else Color(0xFF8AB4F8),
-                                isBold = activeDownloadsCount > 0,
-                                onClick = { onOpenDownloads() }
-                            )
-                        }
-                        "recents" -> InLayoutMenuItem("📱 Recents Deck", color = Color(0xFF58A6FF)) { onShowRecents() }
-                        "diagnostics" -> InLayoutMenuItem("📋 Diagnostics Console", color = Color(0xFF58A6FF)) { onShowDiagnostics() }
-                        "settings" -> InLayoutMenuItem("⚙️ General Settings", color = Color(0xFF8AB4F8), isBold = true) { onOpenSettings() }
-                        "exit" -> InLayoutMenuItem("Exit Omni Chrome", color = Color(0xFFF28B82), isBold = true) { onExitBrowser() }
                     }
                 }
             }
