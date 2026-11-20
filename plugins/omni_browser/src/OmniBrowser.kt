@@ -1008,7 +1008,8 @@ class OmniBrowser : PluginEntry() {
                                 state.localServerPort, state.isErudaEnabled, state.isDesktopMode,
                                 state.isBackgroundAudioEnabled, state.dataSaverMode, state.filePickerProvider,
                                 state.blockAiStudioBack, aMenu, hMenu,
-                                state.geminiApiKey, state.autoReadAloud, state.geminiVoiceName
+                                state.geminiApiKey, state.autoReadAloud, state.geminiVoiceName,
+                                state.readAloudEnabled, state.showReadAloudPill
                             )
                             bridge.showToast("Menu layout updated!")
                             state.showMenuCustomizerDialog = false
@@ -1052,6 +1053,8 @@ class OmniBrowser : PluginEntry() {
                         geminiApiKey = state.geminiApiKey,
                         autoReadAloud = state.autoReadAloud,
                         geminiVoiceName = state.geminiVoiceName,
+                        readAloudEnabled = state.readAloudEnabled,
+                        showReadAloudPill = state.showReadAloudPill,
                         onExportBackup = { state.exportBackup() },
                         onRestoreBackup = {
                             restoreCallback = { uri -> state.restoreBackup(uri) }
@@ -1067,7 +1070,7 @@ class OmniBrowser : PluginEntry() {
                             state.showSettingsDialog = false
                             state.showMenuCustomizerDialog = true
                         },
-                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack, gemKey, autoRead, gemVoice ->
+                        onSave = { key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack, gemKey, autoRead, gemVoice, readEnabled, showPill ->
                             state.solverApiKey = key
                             state.autoSolveEnabled = auto
                             state.forceDarkWebPages = dark
@@ -1080,6 +1083,11 @@ class OmniBrowser : PluginEntry() {
                             state.geminiApiKey = gemKey
                             state.autoReadAloud = autoRead
                             state.geminiVoiceName = gemVoice
+                            state.readAloudEnabled = readEnabled
+                            state.showReadAloudPill = showPill
+                            if (!readEnabled) {
+                                state.stopVoiceReadAloud()
+                            }
                             state.poolManager.localPort = port
                             state.poolManager.updateForceDark(dark)
                             state.syncDataSaver()
@@ -1092,7 +1100,8 @@ class OmniBrowser : PluginEntry() {
                             }
                             state.vaultManager.saveSolverConfig(
                                 key, auto, dark, port, eruda, desktop, audio, mode, picker, blockBack,
-                                state.activeMenuItems, state.hiddenMenuItems, gemKey, autoRead, gemVoice
+                                state.activeMenuItems, state.hiddenMenuItems, gemKey, autoRead, gemVoice,
+                                readEnabled, showPill
                             )
                             bridge.showToast("Settings saved!")
                             state.showSettingsDialog = false
@@ -1319,7 +1328,8 @@ class OmniBrowser : PluginEntry() {
                     .zIndex(40f)
             )
             ReadAloudPillBanner(
-                visible = !state.isTabSwitcherOpen && !state.isHomeOverlayOpen &&
+                visible = state.readAloudEnabled && state.showReadAloudPill &&
+                    !state.isTabSwitcherOpen && !state.isHomeOverlayOpen &&
                     (state.currentUrl.contains("aistudio.google.com") || state.voicePlaybackState != "IDLE"),
                 playbackState = state.voicePlaybackState,
                 chunkProgress = state.voiceChunkProgress,
