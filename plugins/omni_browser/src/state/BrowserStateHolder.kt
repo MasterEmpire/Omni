@@ -152,6 +152,8 @@ class BrowserStateHolder(
     var geminiApiKey by mutableStateOf("")
     var autoReadAloud by mutableStateOf(false)
     var geminiVoiceName by mutableStateOf("Default")
+    var readAloudEnabled by mutableStateOf(true)
+    var showReadAloudPill by mutableStateOf(true)
     var voicePlaybackState by mutableStateOf("IDLE")
     var voiceActiveTurnId by mutableStateOf<String?>(null)
     var voiceChunkProgress by mutableStateOf("")
@@ -387,6 +389,8 @@ class BrowserStateHolder(
             geminiApiKey = config.geminiApiKey
             autoReadAloud = config.autoReadAloud
             geminiVoiceName = config.geminiVoiceName
+            readAloudEnabled = config.readAloudEnabled
+            showReadAloudPill = config.showReadAloudPill
             poolManager.updateForceDark(config.forceDark)
             syncDataSaver()
             
@@ -1195,7 +1199,9 @@ class BrowserStateHolder(
             hiddenMenuItems = hiddenMenuItems,
             geminiApiKey = geminiApiKey,
             autoReadAloud = autoReadAloud,
-            geminiVoiceName = geminiVoiceName
+            geminiVoiceName = geminiVoiceName,
+            readAloudEnabled = readAloudEnabled,
+            showReadAloudPill = showReadAloudPill
         )
         val statusMsg = if (forceDarkWebPages) "🌙 Dark Mode Enabled" else "☀️ Light Mode Enabled"
         bridge.showToast(statusMsg)
@@ -1316,7 +1322,9 @@ class BrowserStateHolder(
             hiddenMenuItems = hiddenMenuItems,
             geminiApiKey = geminiApiKey,
             autoReadAloud = autoReadAloud,
-            geminiVoiceName = geminiVoiceName
+            geminiVoiceName = geminiVoiceName,
+            readAloudEnabled = readAloudEnabled,
+            showReadAloudPill = showReadAloudPill
         )
         syncDataSaver()
         val effective = getEffectiveDataSaverMode()
@@ -3302,7 +3310,7 @@ class BrowserStateHolder(
         val escapedState = org.json.JSONObject.quote(voicePlaybackState)
         val escapedTurn = if (voiceActiveTurnId != null) org.json.JSONObject.quote(voiceActiveTurnId) else "null"
         wv.evaluateJavascript(
-            "window.__omniAutoReadAloud = $autoReadAloud; if (window.__omniUpdateVoiceUi) window.__omniUpdateVoiceUi($escapedState, $escapedTurn);",
+            "window.__omniReadAloudEnabled = $readAloudEnabled; window.__omniAutoReadAloud = $autoReadAloud; if (window.__omniVoiceSyncButtons) window.__omniVoiceSyncButtons(); if (window.__omniUpdateVoiceUi) window.__omniUpdateVoiceUi($escapedState, $escapedTurn);",
             null
         )
     }
@@ -3339,6 +3347,7 @@ class BrowserStateHolder(
     }
 
     override fun onVoiceReadRequested(tabId: String, text: String, turnId: String, isAuto: Boolean) {
+        if (!readAloudEnabled) return
         if (isAuto && !autoReadAloud) return
         if (geminiApiKey.isBlank()) {
             if (!isAuto) {
