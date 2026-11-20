@@ -275,6 +275,22 @@ class AiStudioAutomator(
                     }
                 }
             }, "OmniAutomator")
+            addJavascriptInterface(
+                com.omni.plugin.browser.models.OmniAnalyticsBridge(
+                    onPromptSent = { pId ->
+                        com.omni.plugin.browser.storage.VaultManager.recordPrompt(
+                            context, bridge, pId.ifEmpty { profileId }, isHeadless = true
+                        )
+                    },
+                    onQuotaHit = { pId, reason ->
+                        com.omni.plugin.browser.storage.VaultManager.recordQuotaHit(
+                            context, bridge, pId.ifEmpty { profileId }, reason
+                        )
+                    },
+                    onLog = { tag, msg -> bridge.log(tag, msg) }
+                ),
+                "OmniAnalyticsBridge"
+            )
 
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
@@ -335,12 +351,14 @@ class AiStudioAutomator(
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    view?.evaluateJavascript("window.__omniProfileId = ${JSONObject.quote(profileId)};", null)
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     if (url != null && url.contains("aistudio.google.com")) {
+                        view?.evaluateJavascript("window.__omniProfileId = ${JSONObject.quote(profileId)};", null)
                         bridge.log("AI_STUDIO_INJECT", "Injecting Puppet Core Engine into [$sessionId] ($url)")
                         val script = buildAiStudioPuppetScript() + "\nwindow.__omniPuppet.init();"
                         view?.evaluateJavascript(script, null)
