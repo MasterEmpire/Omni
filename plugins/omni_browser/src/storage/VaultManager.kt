@@ -53,13 +53,18 @@ data class VaultRestoreData(
     val systemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null,
     val smartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null,
     val forceDark: Boolean? = null,
-    val localPort: Int? = null
+    val localPort: Int? = null,
+    val activeMenuItems: List<String>? = null,
+    val hiddenMenuItems: List<String>? = null
 )
 
 class VaultManager(
     private val context: Context,
     private val bridge: HostBridge
 ) {
+    companion object {
+        private val mirrorExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    }
     fun syncLocalFileToVault(sourcePath: String, targetSubPath: String = "ide/index.html"): Pair<Boolean, String> {
         val cleanInput = sourcePath.trim()
         bridge.log("IDE_SYNC", "Attempting sync for source: $cleanInput")
@@ -171,7 +176,7 @@ class VaultManager(
     }
 
     fun autoMirrorVaultToDocuments() {
-        Thread {
+        mirrorExecutor.execute {
             try {
                 val docsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
                 val vaultDir = File(docsDir, ".omni_vault").apply { mkdirs() }
@@ -186,6 +191,7 @@ class VaultManager(
                 mirrorFile("config/shortcuts.json", "shortcuts.json")
                 mirrorFile("config/session.json", "session.json")
                 mirrorFile("config/solver.json", "solver.json")
+                mirrorFile("config/menu_layout.json", "menu_layout.json")
                 mirrorFile("config/system_presets.json", "system_presets.json")
                 mirrorFile("config/smart_notes.json", "smart_notes.json")
                 mirrorFile("config/tab_groups.json", "tab_groups.json")
@@ -200,7 +206,7 @@ class VaultManager(
                     ideDir.copyRecursively(destIdeDir, overwrite = true)
                 }
             } catch (_: Exception) {}
-        }.start()
+        }
     }
 
     fun resurrectFromVault() {
@@ -220,6 +226,7 @@ class VaultManager(
                 restoreIfMissing("config/shortcuts.json", "shortcuts.json")
                 restoreIfMissing("config/session.json", "session.json")
                 restoreIfMissing("config/solver.json", "solver.json")
+                restoreIfMissing("config/menu_layout.json", "menu_layout.json")
                 restoreIfMissing("config/system_presets.json", "system_presets.json")
                 restoreIfMissing("config/smart_notes.json", "smart_notes.json")
                 restoreIfMissing("config/tab_groups.json", "tab_groups.json")
@@ -464,6 +471,34 @@ class VaultManager(
                 activeMenuItems = aMenu,
                 hiddenMenuItems = hMenu
             )
+        } catch (_: Exception) {
+            null
+        }
+    }
+    fun saveMenuLayout(activeMenuItems: List<String>, hiddenMenuItems: List<String>) {
+        try {
+            val json = JSONObject().apply {
+                put("activeMenuItems", JSONArray(activeMenuItems))
+                put("hiddenMenuItems", JSONArray(hiddenMenuItems))
+            }
+            bridge.saveFile("config/menu_layout.json", json.toString().toByteArray(Charsets.UTF_8))
+            autoMirrorVaultToDocuments()
+        } catch (_: Exception) {}
+    }
+
+    fun loadMenuLayout(): Pair<List<String>, List<String>>? {
+        return try {
+            val bytes = bridge.readFile("config/menu_layout.json") ?: return null
+            val json = JSONObject(String(bytes, Charsets.UTF_8))
+            val active = mutableListOf<String>()
+            json.optJSONArray("activeMenuItems")?.let { arr ->
+                for (i in 0 until arr.length()) active.add(arr.getString(i))
+            }
+            val hidden = mutableListOf<String>()
+            json.optJSONArray("hiddenMenuItems")?.let { arr ->
+                for (i in 0 until arr.length()) hidden.add(arr.getString(i))
+            }
+            if (active.isEmpty() && hidden.isEmpty()) null else Pair(active, hidden)
         } catch (_: Exception) {
             null
         }
@@ -803,6 +838,7 @@ class VaultManager(
             addFileToZip("config/shortcuts.json", "shortcuts.json")
             addFileToZip("config/session.json", "session.json")
             addFileToZip("config/solver.json", "solver.json")
+            addFileToZip("config/menu_layout.json", "menu_layout.json")
             addFileToZip("config/system_presets.json", "system_presets.json")
             addFileToZip("config/smart_notes.json", "smart_notes.json")
             addFileToZip("config/tab_groups.json", "tab_groups.json")
@@ -845,6 +881,8 @@ class VaultManager(
         var loadedAutoSolve: Boolean? = null
         var loadedForceDark: Boolean? = null
         var loadedLocalPort: Int? = null
+        var loadedActiveMenu: List<String>? = null
+        var loadedHiddenMenu: List<String>? = null
         var loadedSystemPresets: List<com.omni.plugin.browser.models.SystemInstructionPreset>? = null
         var loadedSmartNotes: List<com.omni.plugin.browser.models.SmartNote>? = null
 
@@ -920,6 +958,22 @@ class VaultManager(
                             loadedForceDark = json.optBoolean("forceDark", false)
                             loadedLocalPort = json.optInt("localPort", 8080)
                         }
+                        "menu_layout.json" -> {
+                            bridge.saveFile("config/menu_layout.json", bytes)
+                            val json = JSONObject(String(bytes, Charsets.UTF_8))
+                            val aMenu = mutableListOf<String>()
+                            json.optJSONArray("activeMenuItems")?.let { arr ->
+                                for (i in 0 until arr.length()) aMenu.add(arr.getString(i))
+                            }
+                            val hMenu = mutableListOf<String>()
+                            json.optJSONArray("hiddenMenuItems")?.let { arr ->
+                                for (i in 0 until arr.length()) hMenu.add(arr.getString(i))
+                            }
+                            if (aMenu.isNotEmpty() || hMenu.isNotEmpty()) {
+                                loadedActiveMenu = aMenu
+                                loadedHiddenMenu = hMenu
+                            }
+                        }
                         "system_presets.json" -> {
                             bridge.saveFile("config/system_presets.json", bytes)
                             val arr = JSONArray(String(bytes, Charsets.UTF_8))
@@ -977,7 +1031,9 @@ class VaultManager(
             systemPresets = loadedSystemPresets,
             smartNotes = loadedSmartNotes,
             forceDark = loadedForceDark,
-            localPort = loadedLocalPort
+            localPort = loadedLocalPort,
+            activeMenuItems = loadedActiveMenu,
+            hiddenMenuItems = loadedHiddenMenu
         )
     }
 }
