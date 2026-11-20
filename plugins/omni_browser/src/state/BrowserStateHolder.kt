@@ -137,6 +137,10 @@ class BrowserStateHolder(
     var sourceDumpStatus by mutableStateOf("")
     var hiddenMenuItems by mutableStateOf<List<String>>(emptyList())
     var showMenuCustomizerDialog by mutableStateOf(false)
+    val defaultBottomBar = listOf("smart_notes", "downloads", "home", "tabs", "menu")
+    var bottomBarItems by mutableStateOf(defaultBottomBar)
+    val defaultTopBar = listOf("quick_toggle", "tabs")
+    var topBarItems by mutableStateOf(defaultTopBar)
 
     // Solver & Data-saver States
     var solverApiKey by mutableStateOf("")
@@ -402,14 +406,26 @@ class BrowserStateHolder(
 
         val dedicatedLayout = vaultManager.loadMenuLayout()
         if (dedicatedLayout != null) {
-            activeMenuItems = dedicatedLayout.first
-            hiddenMenuItems = dedicatedLayout.second
+            if (dedicatedLayout.activeMenuItems.isNotEmpty() || dedicatedLayout.hiddenMenuItems.isNotEmpty()) {
+                activeMenuItems = dedicatedLayout.activeMenuItems
+                hiddenMenuItems = dedicatedLayout.hiddenMenuItems
+            }
+            if (dedicatedLayout.bottomBarItems.isNotEmpty()) {
+                bottomBarItems = if ("menu" in dedicatedLayout.bottomBarItems) {
+                    dedicatedLayout.bottomBarItems
+                } else {
+                    dedicatedLayout.bottomBarItems + "menu"
+                }
+            }
+            if (dedicatedLayout.topBarItems.isNotEmpty()) {
+                topBarItems = dedicatedLayout.topBarItems
+            }
         } else if (activeMenuItems != defaultActiveMenu || hiddenMenuItems.isNotEmpty()) {
             // One-time migration from legacy solver.json into dedicated menu_layout.json
-            vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems)
+            vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems, bottomBarItems, topBarItems)
         }
 
-        val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems }
+        val missing = defaultActiveMenu.filter { it !in activeMenuItems && it !in hiddenMenuItems && it !in bottomBarItems }
         if (missing.isNotEmpty()) {
             val updatedList = activeMenuItems.toMutableList()
             val remaining = missing.toMutableList()
@@ -429,7 +445,7 @@ class BrowserStateHolder(
             }
             activeMenuItems = updatedList + remaining
             if (dedicatedLayout != null) {
-                vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems)
+                vaultManager.saveMenuLayout(activeMenuItems, hiddenMenuItems, bottomBarItems, topBarItems)
             }
         }
 
@@ -2834,6 +2850,8 @@ class BrowserStateHolder(
                 activeMenuItems = result.activeMenuItems ?: emptyList()
                 hiddenMenuItems = result.hiddenMenuItems ?: emptyList()
             }
+            result.bottomBarItems?.let { if (it.isNotEmpty()) bottomBarItems = it }
+            result.topBarItems?.let { topBarItems = it }
             if (!result.tabs.isNullOrEmpty()) {
                 tabs = result.tabs
                 val targetId = if (!result.activeTabId.isNullOrEmpty() && result.tabs.any { it.id == result.activeTabId }) result.activeTabId else result.tabs.first().id
@@ -3361,6 +3379,30 @@ class BrowserStateHolder(
 
     fun stopVoiceReadAloud() {
         voiceEngine.stop()
+    }
+    fun openTabSwitcher(focusManager: androidx.compose.ui.focus.FocusManager? = null) {
+        if (isSearchFocused) {
+            dismissSearch()
+        }
+        focusManager?.clearFocus()
+        val thumb = currentWebView?.captureThumbnail()
+        val bundle = Bundle()
+        currentWebView?.saveState(bundle)
+        tabs = tabs.map { if (it.id == activeTabId) it.copy(stateBundle = bundle, thumbnail = thumb ?: it.thumbnail) else it }
+        android.webkit.CookieManager.getInstance().flush()
+        containerLayout?.visibility = android.view.View.INVISIBLE
+        isTabSwitcherOpen = true
+    }
+
+    fun reloadCurrentPage() {
+        if (currentWebView != null && currentUrl != "about:blank") {
+            val wvUrl = currentWebView?.url
+            if (wvUrl == null || wvUrl == "about:blank" || wvUrl.isEmpty()) {
+                currentWebView?.loadUrl(currentUrl)
+            } else {
+                currentWebView?.reload()
+            }
+        }
     }
 
     override fun onVoiceReadRequested(tabId: String, text: String, turnId: String, isAuto: Boolean) {
