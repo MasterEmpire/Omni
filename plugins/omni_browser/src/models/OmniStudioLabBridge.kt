@@ -31,7 +31,8 @@ class OmniStudioLabBridge(
     private val onIdeCommit: (xml: String, onResult: (String, String) -> Unit) -> Unit,
     private val scope: CoroutineScope,
     private val getActiveWebView: () -> WebView?,
-    private val onPipelineStateChanged: (Boolean) -> Unit = {}
+    private val onPipelineStateChanged: (Boolean) -> Unit = {},
+    private val onOpenTab: (url: String, profileId: String?) -> Unit = { _, _ -> }
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var savedWindowBrightness: Float? = null
@@ -376,7 +377,10 @@ class OmniStudioLabBridge(
             val resolvedId = resolveProfileId(profileId)
             automator.createSession(resolvedId, model) { sessionId, err ->
                 if (sessionId != null) {
-                    val res = JSONObject().apply { put("sessionId", sessionId) }
+                    val res = JSONObject().apply {
+                        put("sessionId", sessionId)
+                        put("profileId", resolvedId)
+                    }
                     resolve(callId, res)
                 } else {
                     reject(callId, err ?: "Failed creating session")
@@ -395,7 +399,10 @@ class OmniStudioLabBridge(
                 val tempChat: Boolean? = if (json.has("temporaryChat") && !json.isNull("temporaryChat")) json.optBoolean("temporaryChat") else null
                 automator.createSession(resolvedId, model, tempChat) { sessionId, err ->
                     if (sessionId != null) {
-                        val res = JSONObject().apply { put("sessionId", sessionId) }
+                        val res = JSONObject().apply {
+                            put("sessionId", sessionId)
+                            put("profileId", resolvedId)
+                        }
                         resolve(callId, res)
                     } else {
                         reject(callId, err ?: "Failed creating session")
@@ -456,20 +463,28 @@ class OmniStudioLabBridge(
                         progressDelta(callId, thoughtsDelta, outputDelta, isFirst)
                     },
                     onComplete = { thoughts, output ->
+                        val chatUrl = automator.getSessionUrl(sessionId)
+                        val profId = automator.sessions[sessionId]?.profileId ?: ""
                         val resObj = JSONObject().apply {
                             put("thoughts", thoughts)
                             put("output", output)
                             put("finishReason", 0)
                             put("truncated", false)
+                            put("url", chatUrl)
+                            put("profileId", profId)
                         }
                         resolve(callId, resObj)
                     },
                     onCompleteMeta = { thoughts, output, finishReason, truncated ->
+                        val chatUrl = automator.getSessionUrl(sessionId)
+                        val profId = automator.sessions[sessionId]?.profileId ?: ""
                         val resObj = JSONObject().apply {
                             put("thoughts", thoughts)
                             put("output", output)
                             put("finishReason", finishReason)
                             put("truncated", truncated)
+                            put("url", chatUrl)
+                            put("profileId", profId)
                         }
                         resolve(callId, resObj)
                     },
@@ -597,7 +612,10 @@ class OmniStudioLabBridge(
             val resolvedId = resolveProfileId(profileId)
             chatGptAutomator.createSession(resolvedId, model, temporaryChat) { sessionId, err ->
                 if (sessionId != null) {
-                    val res = JSONObject().apply { put("sessionId", sessionId) }
+                    val res = JSONObject().apply {
+                        put("sessionId", sessionId)
+                        put("profileId", resolvedId)
+                    }
                     resolve(callId, res)
                 } else {
                     reject(callId, err ?: "Failed creating ChatGPT session")
@@ -652,9 +670,13 @@ class OmniStudioLabBridge(
                         progressDelta(callId, thoughtsDelta, outputDelta, isFirst)
                     },
                     onComplete = { thoughts, output ->
+                        val chatUrl = chatGptAutomator.getSessionUrl(sessionId)
+                        val profId = chatGptAutomator.sessions[sessionId]?.profileId ?: ""
                         val resObj = JSONObject().apply {
                             put("thoughts", thoughts)
                             put("output", output)
+                            put("url", chatUrl)
+                            put("profileId", profId)
                         }
                         resolve(callId, resObj)
                     },
@@ -798,7 +820,10 @@ class OmniStudioLabBridge(
             val resolvedId = resolveProfileId(profileId)
             geminiAutomator.createSession(resolvedId, model, temporaryChat) { sessionId, err ->
                 if (sessionId != null) {
-                    val res = JSONObject().apply { put("sessionId", sessionId) }
+                    val res = JSONObject().apply {
+                        put("sessionId", sessionId)
+                        put("profileId", resolvedId)
+                    }
                     resolve(callId, res)
                 } else {
                     reject(callId, err ?: "Failed creating Gemini session")
@@ -853,9 +878,13 @@ class OmniStudioLabBridge(
                         progressDelta(callId, thoughtsDelta, outputDelta, isFirst)
                     },
                     onComplete = { thoughts, output ->
+                        val chatUrl = geminiAutomator.getSessionUrl(sessionId)
+                        val profId = geminiAutomator.sessions[sessionId]?.profileId ?: ""
                         val resObj = JSONObject().apply {
                             put("thoughts", thoughts)
                             put("output", output)
+                            put("url", chatUrl)
+                            put("profileId", profId)
                         }
                         resolve(callId, resObj)
                     },
@@ -1115,6 +1144,15 @@ class OmniStudioLabBridge(
 
     @JavascriptInterface
     fun getClipboardText(): String { return bridge.getClipboardText() ?: "" }
+    @JavascriptInterface
+    fun browserOpenTab(url: String, profileId: String) {
+        val cleanUrl = url.trim()
+        if (cleanUrl.isEmpty()) return
+        val resolvedProf = if (profileId.isBlank() || profileId.equals("random", ignoreCase = true)) null else resolveProfileId(profileId)
+        mainHandler.post {
+            onOpenTab(cleanUrl, resolvedProf)
+        }
+    }
 
     // --- 6. Hardware, Screen Awake & WakeLock Management ---
     @JavascriptInterface
