@@ -75,7 +75,7 @@ object PluginLoader {
         val finalName = manifest?.name ?: finalId
 
         // Purge active in-memory tasks & background engines holding old bytecode in RAM
-        PluginTaskEngine.stopTask(context, finalId)
+        PluginTaskEngine.stopForPluginReload(context, finalId)
         val activeSession = OmniTaskManager.activeSessions.find { it.pluginId == finalId }
         if (activeSession != null) {
             OmniTaskManager.killTask(context, activeSession.taskId)
