@@ -433,6 +433,71 @@ fun isMeteredOrMobileConnection(context: android.content.Context): Boolean {
     }
 }
 
+val PLAYBOOK_KEEPALIVE_SCRIPT = """
+(function() {
+    if (window.__omniPlaybookKeepAliveHooked) return;
+    window.__omniPlaybookKeepAliveHooked = true;
+
+    try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+        document.hasFocus = function() { return true; };
+    } catch(_) {}
+
+    try {
+        const origAddEvent = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, listener, options) {
+            if (type === 'visibilitychange' || type === 'webkitvisibilitychange' || type === 'freeze' || type === 'pagehide') {
+                if (this === window || this === document) return;
+            }
+            return origAddEvent.call(this, type, listener, options);
+        };
+    } catch(_) {}
+
+    try {
+        const origRaf = window.requestAnimationFrame;
+        const origCancelRaf = window.cancelAnimationFrame;
+        const pendingCallbacks = new Map();
+        let rafIdCounter = 1;
+
+        window.requestAnimationFrame = function(cb) {
+            const id = rafIdCounter++;
+            let executed = false;
+            let nativeId = null;
+            try {
+                nativeId = origRaf.call(window, function(ts) {
+                    if (!executed) {
+                        executed = true;
+                        pendingCallbacks.delete(id);
+                        cb(ts);
+                    }
+                });
+            } catch(_) {}
+            const timeoutId = setTimeout(function() {
+                if (!executed) {
+                    executed = true;
+                    pendingCallbacks.delete(id);
+                    try { if (nativeId !== null) origCancelRaf.call(window, nativeId); } catch(_) {}
+                    cb(performance.now());
+                }
+            }, 32);
+            pendingCallbacks.set(id, { nativeId: nativeId, timeoutId: timeoutId });
+            return id;
+        };
+
+        window.cancelAnimationFrame = function(id) {
+            const entry = pendingCallbacks.get(id);
+            if (entry) {
+                pendingCallbacks.delete(id);
+                try { if (entry.nativeId !== null) origCancelRaf.call(window, entry.nativeId); } catch(_) {}
+                clearTimeout(entry.timeoutId);
+            }
+        };
+    } catch(_) {}
+})();
+""".trimIndent()
 val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
 (function() {
     if (window.__omniWireHooked) return;
