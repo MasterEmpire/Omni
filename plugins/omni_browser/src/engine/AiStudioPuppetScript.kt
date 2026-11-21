@@ -895,6 +895,19 @@ fun buildAiStudioPuppetScript(): String {
                                         }
                                         return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + wire.error };
                                     }
+                                    const isWirePermission = wire.httpStatus === 403 || wire.statusCode === 7 ||
+                                        lowerWireErr.includes('permission') || lowerWireErr.includes('caller does not have') ||
+                                        lowerWireErr.includes('unauthenticated');
+
+                                    if (isWirePermission) {
+                                        hostLog('WIRE_PERMISSION_ERR', 'Permission error on wire (' + wire.httpStatus + '/' + wire.statusCode + '): ' + wire.error + '. Aborting session immediately!');
+                                        this.isBusy = false;
+                                        const pErr = 'Permission Denied: ' + wire.error;
+                                        if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                            window.OmniAutomator.onPuppetTurnError(pErr);
+                                        }
+                                        return { thoughts: latestTurnThoughts, output: '', error: pErr };
+                                    }
 
                                     const isWireRetryable = wire.httpStatus >= 500 ||
                                         lowerWireErr.includes('internal') || lowerWireErr.includes('overloaded') ||
@@ -998,6 +1011,16 @@ fun buildAiStudioPuppetScript(): String {
                                         window.OmniAutomator.onPuppetTurnError('Quota Exhausted (429): ' + errTxt);
                                     }
                                     return { thoughts: latestTurnThoughts, output: '', error: 'Quota Exhausted (429): ' + errTxt };
+                                }
+                                const isDomPermission = lowerErr.includes('permission') || lowerErr.includes('caller does not have') || lowerErr.includes('unauthenticated');
+                                if (isDomPermission) {
+                                    hostLog('STUDIO_PERMISSION_ERR', 'DOM permission error: ' + errTxt + '. Aborting session immediately!');
+                                    this.isBusy = false;
+                                    const pErr = 'Permission Denied: ' + errTxt;
+                                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnError) {
+                                        window.OmniAutomator.onPuppetTurnError(pErr);
+                                    }
+                                    return { thoughts: latestTurnThoughts, output: '', error: pErr };
                                 }
 
                                 const isRetryable = lowerErr.includes('internal error') ||
