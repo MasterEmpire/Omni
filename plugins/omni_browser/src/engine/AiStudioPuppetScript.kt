@@ -365,7 +365,15 @@ fun buildAiStudioPuppetScript(): String {
                     hostLog('PUPPET', 'Puppet execution aborted by host.');
                 },
 
-                init: async function() {
+                _isReady: false,
+                _initPromise: null,
+
+                init: function() {
+                    if (this._isReady) return Promise.resolve(true);
+                    if (this._initPromise) return this._initPromise;
+                    const self = this;
+                    this._initPromise = (async function() {
+                        try {
                     hostLog('PUPPET_INIT', 'Initializing AI Studio Puppet Engine (Turbo)...');
                     if (window.location.href.includes('accounts.google.com') || window.location.href.includes('/signin/')) {
                         const authErr = 'Account not logged in on this profile. Please log in to Google AI Studio first.';
@@ -402,18 +410,24 @@ fun buildAiStudioPuppetScript(): String {
                     while (warmTicks < 60 && !this.aborted) {
                         const warm = (window.__omniWire && window.__omniWire.isSessionWarm) ? window.__omniWire.isSessionWarm() : null;
                         if (warm && warm.ready) {
-                            hostLog('PUPPET_INIT', 'Boot settled cleanly (' + (warmTicks * 100) + 'ms, accessToken=' + warm.hasAccessToken + ', models=' + warm.hasListModels + ').');
+                            hostLog('PUPPET_INIT', 'Boot settled cleanly (' + (warmTicks * 100) + 'ms, accessToken=' + warm.hasAccessToken + ', waa=' + warm.hasWaa + ', models=' + warm.hasListModels + ').');
                             break;
                         }
                         await delay(100);
                         warmTicks++;
                     }
                     await delay(30);
+                    self._isReady = true;
                     hostLog('PUPPET_INIT', 'Session warm and ready!');
                     if (window.OmniAutomator && window.OmniAutomator.onPuppetReady) {
                         window.OmniAutomator.onPuppetReady(true, 'Ready');
                     }
                     return true;
+                        } finally {
+                            self._initPromise = null;
+                        }
+                    })();
+                    return this._initPromise;
                 },
 
                 configure: async function(opts) {
@@ -1224,7 +1238,7 @@ fun buildAiStudioPuppetScript(): String {
                     const wireIncomplete = finalWire ? (finalFinishReason === 0 && (!finalWire.syntaxComplete || !!finalWire.aborted || !!finalWire.streamDropped)) : false;
                     const isTruncated = (finalFinishReason === 2) || wireIncomplete;
                     const telemetry = {
-                        usedWire: usedWire,
+                        usedWire: usedWireStream,
                         finishReason: finalFinishReason,
                         truncated: isTruncated,
                         wireIncomplete: wireIncomplete,
