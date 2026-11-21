@@ -236,6 +236,32 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                 return rpcCall('wakeLockRelease', []);
             }
         },
+        screen: {
+            keepAwake: function(enabled) {
+                return rpcCall('screenKeepAwake', [!!enabled]);
+            },
+            setNightDimmer: function(enabled, statusText) {
+                return rpcCall('nightDimmerSet', [!!enabled, String(statusText || '')]);
+            },
+            updateNightDimmer: function(statusText) {
+                if (window.__OmniStudioLabBridge && window.__OmniStudioLabBridge.nightDimmerUpdate) {
+                    window.__OmniStudioLabBridge.nightDimmerUpdate(String(statusText || ''));
+                }
+            }
+        },
+        overlay: {
+            canDraw: function() {
+                if (window.__OmniStudioLabBridge && window.__OmniStudioLabBridge.canDrawOverlays) {
+                    return !!window.__OmniStudioLabBridge.canDrawOverlays();
+                }
+                return false;
+            },
+            request: function() {
+                if (window.__OmniStudioLabBridge && window.__OmniStudioLabBridge.requestOverlayPermission) {
+                    window.__OmniStudioLabBridge.requestOverlayPermission();
+                }
+            }
+        },
         toast: function(msg) {
             if (window.__OmniStudioLabBridge) window.__OmniStudioLabBridge.toast(String(msg));
         },
