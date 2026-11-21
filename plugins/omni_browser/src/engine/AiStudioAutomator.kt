@@ -51,6 +51,9 @@ class AiStudioAutomator(
     private val context: Context,
     private val bridge: HostBridge
 ) {
+    companion object {
+        val liveHeadlessWebViews = java.util.concurrent.CopyOnWriteArraySet<WebView>()
+    }
     val sessions = java.util.concurrent.ConcurrentHashMap<String, ActivePuppetSession>()
     private var defaultSessionId: String? = null
 
@@ -106,10 +109,16 @@ class AiStudioAutomator(
             sessionId = sessionId,
             profileId = profileId,
             model = model,
-            webView = WebView(context)
+            webView = WebView(context.applicationContext)
         )
 
         val autoWv = sessionInstance.webView.apply {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                try {
+                    setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+                } catch (_: Exception) {}
+            }
+            liveHeadlessWebViews.add(this)
             translationX = 0f
             alpha = 1f
             layoutParams = ViewGroup.LayoutParams(viewWidth, viewHeight)
@@ -508,6 +517,7 @@ class AiStudioAutomator(
 
     fun closeSession(sessionId: String) {
         val session = sessions.remove(sessionId) ?: return
+        liveHeadlessWebViews.remove(session.webView)
         bridge.log("AI_STUDIO_POOL", "🛑 Closing Session [$sessionId]. Remaining: ${sessions.size}")
         try {
             session.webView.evaluateJavascript("if (window.__omniPuppet) { window.__omniPuppet.abort(); }", null)
