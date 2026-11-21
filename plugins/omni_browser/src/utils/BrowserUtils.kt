@@ -1150,9 +1150,9 @@ if (!isGenerationStreamUrl(url)) {
         hasHooked: true,
         isSessionWarm: function() {
             var bootElapsed = firstBootRpcAt ? (Date.now() - firstBootRpcAt) : 0;
-            var authSettled = (hasAccessToken && hasWaa) || ((hasAccessToken || hasListModels) && bootElapsed >= 3500);
-            return {</find>
-                ready: (document.readyState !== 'loading' && pendingBootRpcs === 0 && authSettled),
+                var authSettled = (hasAccessToken && hasWaa) || ((hasAccessToken || hasListModels) && bootElapsed >= 3500);
+                return {
+                    ready: (document.readyState !== 'loading' && pendingBootRpcs === 0 && authSettled),
                 readyState: document.readyState,
                 pendingBootRpcs: pendingBootRpcs,
                 hasAccessToken: hasAccessToken,
