@@ -40,6 +40,7 @@ data class ActivePuppetSession(
     var onTurnDeltaCallback: ((String, String, Boolean) -> Unit)? = null,
     var onTurnCompleteCallback: ((String, String) -> Unit)? = null,
     var onTurnCompleteMetaCallback: ((String, String, Int, Boolean) -> Unit)? = null,
+    var onTurnCompleteTelemetryCallback: ((String, String, Int, Boolean, String) -> Unit)? = null,
     var onTurnErrorCallback: ((String) -> Unit)? = null,
     var isAborted: Boolean = false
 )
@@ -298,6 +299,22 @@ class AiStudioAutomator(
                         }
                     }
                 }
+                @JavascriptInterface
+                fun onPuppetTurnCompleteDetailed(thoughts: String, output: String, finishReason: Int, truncated: Boolean, telemetryJson: String) {
+                    mainHandler.post {
+                        val telCb = sessionInstance.onTurnCompleteTelemetryCallback
+                        if (telCb != null) {
+                            telCb.invoke(thoughts, output, finishReason, truncated, telemetryJson)
+                        } else {
+                            val metaCb = sessionInstance.onTurnCompleteMetaCallback
+                            if (metaCb != null) {
+                                metaCb.invoke(thoughts, output, finishReason, truncated)
+                            } else {
+                                sessionInstance.onTurnCompleteCallback?.invoke(thoughts, output)
+                            }
+                        }
+                    }
+                }
 
                 @JavascriptInterface
                 fun onPuppetTurnError(err: String) {
@@ -501,7 +518,8 @@ override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         onComplete: (thoughts: String, output: String) -> Unit,
         onError: (String) -> Unit,
         onDelta: ((thoughtsDelta: String, outputDelta: String, isFirst: Boolean) -> Unit)? = null,
-        onCompleteMeta: ((thoughts: String, output: String, finishReason: Int, truncated: Boolean) -> Unit)? = null
+        onCompleteMeta: ((thoughts: String, output: String, finishReason: Int, truncated: Boolean) -> Unit)? = null,
+        onCompleteTelemetry: ((thoughts: String, output: String, finishReason: Int, truncated: Boolean, telemetryJson: String) -> Unit)? = null
     ) {
         val session = sessions[sessionId]
         if (session == null) {
@@ -513,6 +531,7 @@ override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         session.onTurnDeltaCallback = onDelta
         session.onTurnCompleteCallback = onComplete
         session.onTurnCompleteMetaCallback = onCompleteMeta
+        session.onTurnCompleteTelemetryCallback = onCompleteTelemetry
         session.onTurnErrorCallback = onError
 
         val attachmentsArray = org.json.JSONArray()
