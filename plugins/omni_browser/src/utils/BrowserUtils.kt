@@ -662,6 +662,9 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
             active: true,
             done: false,
             isContinuation: isContinuation,
+            syntaxComplete: false,
+            aborted: false,
+            streamDropped: false,
             error: null,
             httpStatus: 0,
             statusCode: 0,
@@ -948,7 +951,8 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                 reportWireQuota(rec, rec.error || rec.statusDetails || ('Quota Exhausted (' + (rec.httpStatus || rec.statusCode) + ')'));
             }
         }
-        wireLog('WIRE_STREAM_END', 'Stream #' + rec.id + ' (' + rec.transport + ') ended | http=' + rec.httpStatus + ' statusCode=' + rec.statusCode + ' chunks=' + rec.chunkCount + ' out=' + rec.output.length + 'c stitched=' + (rec.stitchedOutput ? rec.stitchedOutput.length : rec.output.length) + 'c thoughts=' + rec.thoughts.length + 'c err=' + rec.error + ' | ms=' + (rec.endedAt - rec.startedAt));
+        var tailPreview = rec.output ? rec.output.slice(-100).replace(/\r/g, '\\r').replace(/\n/g, '\\n') : '';
+        wireLog('WIRE_STREAM_END', 'Stream #' + rec.id + ' (' + rec.transport + ') ended | http=' + rec.httpStatus + ' statusCode=' + rec.statusCode + ' finishReason=' + rec.finishReason + ' syntaxComplete=' + rec.syntaxComplete + ' aborted=' + rec.aborted + ' dropped=' + rec.streamDropped + ' chunks=' + rec.chunkCount + ' out=' + rec.output.length + 'c stitched=' + (rec.stitchedOutput ? rec.stitchedOutput.length : rec.output.length) + 'c thoughts=' + rec.thoughts.length + 'c err=' + rec.error + ' details=' + JSON.stringify(rec.statusDetails || '') + ' tail=' + JSON.stringify(tailPreview) + ' | ms=' + (rec.endedAt - rec.startedAt));
         emitUpdate(rec);
     }
 
@@ -978,6 +982,7 @@ if (!isGenerationStreamUrl(url)) {
             var rec = createStreamRecord(url, 'fetch');
             wireLog('WIRE_STREAM_START', 'Stream #' + rec.id + ' [FETCH] turn=' + rec.turnToken + ' url=' + url);
             var parser = createStreamParser(rec, function() {
+                rec.syntaxComplete = true;
                 finalizeRecord(rec, rec.httpStatus || 200, null);
             });
 
@@ -1043,8 +1048,12 @@ if (!isGenerationStreamUrl(url)) {
                 if (this.__omniWireDrain) this.__omniWireDrain();
                 var rec = this.__omniWireRec;
                 if (rec && !rec.done) {
-                    if (rec.chunkCount > 0 || rec.output.length > 0 || rec.thoughts.length > 0 || rec.statusCode !== 0 || rec.error) {
-                        finalizeRecord(rec, this.status || rec.httpStatus || 200, null);
+                    rec.aborted = true;
+                    if (!rec.syntaxComplete && rec.finishReason === 0) {
+                        rec.streamDropped = true;
+                    }
+                    if (rec.chunkCount > 0 || rec.output.length > 0 || rec.thoughts.length > 0 || rec.error) {
+                        finalizeRecord(rec, this.status || rec.httpStatus || 0, null);
                     } else {
                         finalizeRecord(rec, this.status || 0, 'XHR aborted');
                     }
@@ -1070,6 +1079,7 @@ if (!isGenerationStreamUrl(url)) {
                 var rec = createStreamRecord(url, 'xhr');
                 wireLog('WIRE_STREAM_START', 'Stream #' + rec.id + ' [XHR] turn=' + rec.turnToken + ' url=' + url);
                 var parser = createStreamParser(rec, function() {
+                    rec.syntaxComplete = true;
                     finalizeRecord(rec, xhr.status || rec.httpStatus || 200, null);
                 });
                 var prevLen = 0;
@@ -1120,8 +1130,11 @@ if (!isGenerationStreamUrl(url)) {
                 xhr.addEventListener('loadend', function() {
                     drainXhr();
                     if (!rec.done) {
+                        if (!rec.syntaxComplete && rec.finishReason === 0) {
+                            rec.streamDropped = true;
+                        }
                         var err = (xhr.status === 0 && !rec.output && !rec.thoughts) ? 'XHR aborted or network error' : null;
-                        finalizeRecord(rec, xhr.status || 200, err);
+                        finalizeRecord(rec, xhr.status || rec.httpStatus || 0, err);
                     }
                 });
                 xhr.addEventListener('error', function() {
