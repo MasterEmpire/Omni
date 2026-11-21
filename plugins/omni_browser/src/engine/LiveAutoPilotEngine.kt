@@ -18,7 +18,10 @@ object LiveAutoPilotEngine {
         if (showToast) bridge.showToast("⚡ Live AI Auto-Pilot Armed!")
         bridge.log("AUTOPILOT_PIPELINE", "🟢 [ARMED] Live Auto-Pilot is now ACTIVE and watching AI Studio.")
         webView.evaluateJavascript(buildSentinelScript(), null)
-        webView.evaluateJavascript("window.__omniLiveAutoPilotActive = true;", null)
+        webView.evaluateJavascript(
+            "window.__omniLiveAutoPilotActive = true; if (typeof window.__omniAuditArmedTurn === 'function') window.__omniAuditArmedTurn($showToast);",
+            null
+        )
     }
 
     fun disarm(webView: WebView?, bridge: HostBridge, showToast: Boolean = true) {
@@ -270,10 +273,9 @@ object LiveAutoPilotEngine {
                     if (document.querySelector('.run-button.stoppable, ms-run-button .stoppable-spinner, ms-run-button .stoppable-stop, button.stoppable')) {
                         return true;
                     }
-                    if (document.querySelector('.thinking-progress-icon.in-progress, ms-thought-chunk .in-progress, [class*="thinking-progress-icon"][class*="in-progress"]')) {
-                        return true;
-                    }
-                    if (document.querySelector('ms-chat-turn loading-indicator, ms-chat-turn .loading-indicator, ms-chat-turn mat-spinner, ms-chat-turn mat-progress-bar')) {
+                    const allTurns = document.querySelectorAll('ms-chat-turn');
+                    const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
+                    if (lastTurn && lastTurn.querySelector('.thinking-progress-icon.in-progress, ms-thought-chunk .in-progress, [class*="thinking-progress-icon"][class*="in-progress"], loading-indicator, .loading-indicator, mat-spinner, mat-progress-bar')) {
                         return true;
                     }
                     return false;
@@ -505,7 +507,9 @@ object LiveAutoPilotEngine {
                         tempDiv.style.pointerEvents = 'none';
 
                         const clone = contentContainer.cloneNode(true);
+                        clone.style.display = 'block';
                         clone.querySelectorAll('ms-thought-chunk, .author-label, .header, .timestamp, .info-container, .turn-information, loading-indicator, .turn-footer, button, .actions-container, ms-run-button, [data-omni-voice-btn]').forEach(el => el.remove());
+                        clone.querySelectorAll('ms-text-chunk, ms-cmark-node, ms-code-block, pre, code').forEach(el => { el.style.display = 'block'; });
                         tempDiv.appendChild(clone);
                         document.body.appendChild(tempDiv);
 
@@ -704,11 +708,19 @@ object LiveAutoPilotEngine {
 
                 window.__omniAuditPendingCxp = function() {
                     if (!window.__omniLiveAutoPilotActive) return;
-                    processAutoPilotTick();
+                    processAutoPilotTick(false, false);
+                };
+
+                window.__omniAuditArmedTurn = function(logDiag) {
+                    if (!window.__omniLiveAutoPilotActive) return;
+                    window.__omniLastText = '';
+                    window.__omniStillTicks = 0;
+                    processAutoPilotTick(true, !!logDiag);
                 };
 
                 function dispatchActionsFromPayload(rawText, sourceTag, targetDomTurn) {
-                    if (!rawText) return;
+                    if (!rawText) return false;
+                    let dispatchedAny = false;
 
                     // 1. Detect & Auto-Bridge CXP Patch Markup to Conduit IDE
                     if (!targetDomTurn || targetDomTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
@@ -718,6 +730,7 @@ object LiveAutoPilotEngine {
                             if (targetDomTurn) targetDomTurn.setAttribute('data-omni-cxp-executed', 'true');
                             if (!window.__omniDispatchedHashes.has(cxpHash)) {
                                 window.__omniDispatchedHashes.add(cxpHash);
+                                dispatchedAny = true;
                                 if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
                                     window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [' + sourceTag + '] Valid CXP burger extracted (' + cxpPayload.length + ' chars, hash=' + cxpHash + '). Beaming to Conduit IDE...');
                                 }
@@ -736,6 +749,7 @@ object LiveAutoPilotEngine {
                             if (targetDomTurn) targetDomTurn.setAttribute('data-omni-executed', 'true');
                             if (!window.__omniDispatchedHashes.has(pyHash)) {
                                 window.__omniDispatchedHashes.add(pyHash);
+                                dispatchedAny = true;
                                 if (window.OmniPythonBridge && window.OmniPythonBridge.executeFromLivePage) {
                                     window.OmniPythonBridge.log('LIVE_AUTO', '[' + sourceTag + '] Captured Python block (' + pythonScript.length + ' chars). Executing on Nexus...');
                                     window.OmniPythonBridge.executeFromLivePage(pythonScript);
@@ -752,6 +766,7 @@ object LiveAutoPilotEngine {
                             if (targetDomTurn) targetDomTurn.setAttribute('data-omni-pull-executed', 'true');
                             if (!window.__omniDispatchedHashes.has(pullHash)) {
                                 window.__omniDispatchedHashes.add(pullHash);
+                                dispatchedAny = true;
                                 if (window.OmniIdeBridge && window.OmniIdeBridge.requestFilePull) {
                                     if (window.OmniIdeBridge.log) {
                                         window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📂 [' + sourceTag + '] Captured pull_files request (' + pullPayload.length + ' chars). Beaming to Conduit IDE...');
@@ -761,12 +776,21 @@ object LiveAutoPilotEngine {
                             }
                         }
                     }
+                    return dispatchedAny;
                 }
 
-                function processAutoPilotTick() {
+                function processAutoPilotTick(forceImmediate, logDiagnostics) {
                     if (!window.__omniLiveAutoPilotActive) return;
 
-                    const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"], [data-turn-role="model" i], ms-chat-turn:not(.user)'));
+                    const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"], [data-turn-role="model" i], ms-chat-turn'))
+                        .filter(el => {
+                            if (el.classList.contains('user')) return false;
+                            if ((el.getAttribute('data-turn-role') || '').toLowerCase() === 'user') return false;
+                            if (el.tagName && el.tagName.toLowerCase() === 'ms-chat-turn') {
+                                return !el.querySelector('.chat-turn-container.user, [data-turn-role="User" i]');
+                            }
+                            return !el.closest('.chat-turn-container.user, [data-turn-role="User" i]');
+                        });
                     let latestTurn = null;
                     for (let i = allModelContainers.length - 1; i >= 0; i--) {
                         const t = allModelContainers[i];
@@ -799,12 +823,12 @@ object LiveAutoPilotEngine {
                         if (latestWire.done && latestWire.statusCode === 0 && wirePayload.trim().length > 0) {
                             if (latestWire.id !== window.__omniLastDispatchedWireId) {
                                 window.__omniLastDispatchedWireId = latestWire.id;
-                                dispatchActionsFromPayload(wirePayload, 'WIRE_INTERCEPT', latestTurn);
-                                return;
+                                const didDispatch = dispatchActionsFromPayload(wirePayload, 'WIRE_INTERCEPT', latestTurn);
+                                if (didDispatch || !forceImmediate) return;
                             }
                             // Do NOT return early here: allow DOM Fallback to catch subsequent turns if wire missed them!
                         }
-                        if (latestWire.active) {
+                        if (latestWire.active && !(forceImmediate && !checkUiGenerating())) {
                             const wireLen = (latestWire.output ? latestWire.output.length : 0) + (latestWire.thoughts ? latestWire.thoughts.length : 0);
                             if (window.__omniTrackedWireId !== latestWire.id || wireLen !== window.__omniTrackedWireLen) {
                                 window.__omniTrackedWireId = latestWire.id;
@@ -819,7 +843,13 @@ object LiveAutoPilotEngine {
                     }
 
                     // Priority 2: DOM Fallback (covers unhooked endpoints & pre-existing turns)
-                    if (checkUiGenerating() || !latestTurn) return;
+                    const uiGen = checkUiGenerating();
+                    if (uiGen || !latestTurn) {
+                        if (logDiagnostics && window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                            window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', 'ℹ️ [ARM_AUDIT] Skipped DOM scan (uiGenerating=' + uiGen + ', hasLatestTurn=' + !!latestTurn + ')');
+                        }
+                        return;
+                    }
 
                     if (window.__omniLastTurnRef !== latestTurn || window.__omniLastTurnCount !== allModelContainers.length) {
                         window.__omniLastTurnRef = latestTurn;
@@ -829,7 +859,22 @@ object LiveAutoPilotEngine {
                     }
 
                     const screenText = getScreenText(latestTurn);
-                    if (!screenText) return;
+                    if (!screenText) {
+                        if (logDiagnostics && window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                            window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', 'ℹ️ [ARM_AUDIT] Latest model turn yielded 0 chars from DOM.');
+                        }
+                        return;
+                    }
+
+                    if (forceImmediate) {
+                        window.__omniLastText = screenText;
+                        window.__omniStillTicks = 4;
+                        const didDispatchDom = dispatchActionsFromPayload(screenText, 'DOM_ARM_AUDIT', latestTurn);
+                        if (!didDispatchDom && logDiagnostics && window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                            window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', 'ℹ️ [ARM_AUDIT] Scanned ' + screenText.length + ' chars in latest turn; no new CXP/Python/Pull block found.');
+                        }
+                        return;
+                    }
 
                     window.__omniLastText = window.__omniLastText || '';
                     window.__omniStillTicks = window.__omniStillTicks || 0;
