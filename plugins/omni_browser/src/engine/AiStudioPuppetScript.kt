@@ -970,7 +970,12 @@ fun buildAiStudioPuppetScript(): String {
                                     if (currentTurnOutput.trim().length > 0) {
                                         const firstTokAt = (wire.firstThoughtAt && wire.firstOutputAt) ? Math.min(wire.firstThoughtAt, wire.firstOutputAt) : (wire.firstThoughtAt || wire.firstOutputAt || 0);
                                         const wireTtft = firstTokAt && wire.startedAt ? (firstTokAt - wire.startedAt) : 0;
-                                        hostLog('WIRE_STOP', '⚡ DECISION: Wire stream finished cleanly (' + wire.transport + ', chunks=' + wire.chunkCount + ', wireTTFT=' + wireTtft + 'ms, size=' + currentTurnOutput.length + 'c). Zero stillness wait!');
+                                        const incompleteStream = (wire.finishReason === 0) && (!wire.syntaxComplete || !!wire.aborted || !!wire.streamDropped);
+                                        if (incompleteStream) {
+                                            hostLog('WIRE_INCOMPLETE', '⚠️ Stream #' + wire.id + ' closed incomplete (finishReason=0, syntaxComplete=' + wire.syntaxComplete + ', aborted=' + !!wire.aborted + ', dropped=' + !!wire.streamDropped + ', chunks=' + wire.chunkCount + ', size=' + currentTurnOutput.length + 'c). Handing partial payload up for continuation!');
+                                        } else {
+                                            hostLog('WIRE_STOP', '⚡ DECISION: Wire stream finished (' + wire.transport + ', finishReason=' + wire.finishReason + ', chunks=' + wire.chunkCount + ', wireTTFT=' + wireTtft + 'ms, size=' + currentTurnOutput.length + 'c). Zero stillness wait!');
+                                        }
                                         break;
                                     } else {
                                         hostLog('WIRE_FALLBACK', 'Wire stream closed with 0 parsed chars; falling back to DOM scrape.');
@@ -1216,19 +1221,42 @@ fun buildAiStudioPuppetScript(): String {
 
                     const finalWire = (activeWireToken && window.__omniWire) ? window.__omniWire.getTurn(activeWireToken) : null;
                     const finalFinishReason = finalWire ? (finalWire.finishReason || 0) : 0;
-                    const isTruncated = (finalFinishReason === 2);
+                    const wireIncomplete = finalWire ? (finalFinishReason === 0 && (!finalWire.syntaxComplete || !!finalWire.aborted || !!finalWire.streamDropped)) : false;
+                    const isTruncated = (finalFinishReason === 2) || wireIncomplete;
+                    const telemetry = {
+                        usedWire: usedWire,
+                        finishReason: finalFinishReason,
+                        truncated: isTruncated,
+                        wireIncomplete: wireIncomplete,
+                        httpStatus: finalWire ? (finalWire.httpStatus || 0) : 0,
+                        statusCode: finalWire ? (finalWire.statusCode || 0) : 0,
+                        statusDetails: finalWire ? (finalWire.statusDetails || '') : '',
+                        chunkCount: finalWire ? (finalWire.chunkCount || 0) : 0,
+                        transport: finalWire ? (finalWire.transport || '') : 'dom',
+                        syntaxComplete: finalWire ? !!finalWire.syntaxComplete : false,
+                        aborted: finalWire ? !!finalWire.aborted : false,
+                        streamDropped: finalWire ? !!finalWire.streamDropped : false,
+                        isContinuationStream: finalWire ? !!finalWire.isContinuation : false,
+                        durationMs: finalWire && finalWire.startedAt ? ((finalWire.endedAt || Date.now()) - finalWire.startedAt) : 0,
+                        outputChars: currentTurnOutput.length,
+                        thoughtsChars: latestTurnThoughts.length
+                    };
+                    const telemetryJson = JSON.stringify(telemetry);
+                    hostLog('TURN_SETTLE', stepLabel + ' settled | ' + telemetryJson + ' | tail=' + JSON.stringify(currentTurnOutput.slice(-100)));
 
-                                        try {
+                    try {
                         if (window.OmniAutomator && window.OmniAutomator.onTurnUrl) {
                             window.OmniAutomator.onTurnUrl(window.location.href || '');
                         }
                     } catch(_) {}
-if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnCompleteWithMeta) {
+                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnCompleteDetailed) {
+                        window.OmniAutomator.onPuppetTurnCompleteDetailed(latestTurnThoughts, currentTurnOutput, finalFinishReason, isTruncated, telemetryJson);
+                    } else if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnCompleteWithMeta) {
                         window.OmniAutomator.onPuppetTurnCompleteWithMeta(latestTurnThoughts, currentTurnOutput, finalFinishReason, isTruncated);
                     } else if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnComplete) {
                         window.OmniAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
                     }
-                    return { thoughts: latestTurnThoughts, output: currentTurnOutput, finishReason: finalFinishReason, truncated: isTruncated, error: null };
+                    return { thoughts: latestTurnThoughts, output: currentTurnOutput, finishReason: finalFinishReason, truncated: isTruncated, telemetry: telemetry, error: null };
                 },
 
                 runBatch: async function(config, steps) {
