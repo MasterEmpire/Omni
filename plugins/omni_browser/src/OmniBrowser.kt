@@ -737,8 +737,15 @@ class OmniBrowser : PluginEntry() {
             } catch (e: Exception) {}
 
             val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                    state.checkAndConsumePendingUrl()
+                when (event) {
+                    androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                        state.exitBackgroundExecutionMode()
+                        state.checkAndConsumePendingUrl()
+                    }
+                    androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                        state.enterBackgroundExecutionMode()
+                    }
+                    else -> {}
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
@@ -958,7 +965,7 @@ class OmniBrowser : PluginEntry() {
                                     frame.visibility = targetVisibility
                                     state.bridge.log("TOUCH_SHIELD", "WebView container visibility -> ${if (state.isTabSwitcherOpen) "INVISIBLE (Shielded from touch)" else "VISIBLE"}")
                                 }
-                                if (state.containerLayout != null && state.currentWebView == null) {
+                                if (!state.isBackgroundOverlayHosting && state.containerLayout != null && state.currentWebView == null) {
                                     state.attachTabWebView(state.activeTabId)
                                 }
                             },
