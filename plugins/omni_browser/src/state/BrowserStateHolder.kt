@@ -3445,6 +3445,19 @@ class BrowserStateHolder(
     override fun onVoiceStopRequested() {
         stopVoiceReadAloud()
     }
+    override fun onOpenTabWithProfileRequested(url: String, profileId: String?) {
+        val targetProf = profileId?.takeIf { pId -> profiles.any { it.id == pId } } ?: selectedProfileId
+        val existingTab = tabs.firstOrNull { it.url == url && it.profileId == targetProf }
+        if (existingTab != null) {
+            switchToTab(existingTab.id)
+            return
+        }
+        val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+        val insertAt = if (currentIdx >= 0) currentIdx + 1 else tabs.size
+        isHomeOverlayOpen = false
+        isTabSwitcherOpen = false
+        createNewTab(targetUrl = url, targetProfileId = targetProf, insertAtIndex = insertAt)
+    }
     override fun onPlaybookPipelineStateChanged(tabId: String, active: Boolean) {
         if (active) {
             if (!activePlaybookTabIds.contains(tabId)) {
