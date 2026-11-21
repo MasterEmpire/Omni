@@ -32,6 +32,7 @@ data class ActivePuppetSession(
     val profileId: String,
     val model: String,
     val webView: WebView,
+    @Volatile var currentUrl: String = "",
     var onReadyCallback: ((Boolean, String?) -> Unit)? = null,
     var onConfigCallback: ((Boolean, String?) -> Unit)? = null,
     var onNewChatCallback: ((Boolean, String?) -> Unit)? = null,
@@ -80,6 +81,16 @@ class AiStudioAutomator(
         return trimmed.lowercase(java.util.Locale.US)
             .replace(" ", "-")
             .replace("_", "-")
+    }
+    fun getSessionUrl(sessionId: String): String {
+        val session = sessions[sessionId] ?: return ""
+        val wvUrl = try { session.webView.url ?: "" } catch (_: Exception) { "" }
+        return when {
+            wvUrl.contains("/prompts/") && !wvUrl.contains("/prompts/new_chat") -> wvUrl
+            session.currentUrl.contains("/prompts/") && !session.currentUrl.contains("/prompts/new_chat") -> session.currentUrl
+            wvUrl.isNotBlank() && wvUrl != "about:blank" -> wvUrl
+            else -> session.currentUrl
+        }
     }
 
     // --- MULTI-SESSION FACTORY: Spawn Independent Profile Session ---
@@ -294,6 +305,12 @@ class AiStudioAutomator(
                         sessionInstance.onTurnErrorCallback?.invoke(err)
                     }
                 }
+                @JavascriptInterface
+                fun onTurnUrl(url: String) {
+                    if (url.isNotBlank()) {
+                        sessionInstance.currentUrl = url
+                    }
+                }
             }, "OmniAutomator")
             addJavascriptInterface(
                 com.omni.plugin.browser.models.OmniAnalyticsBridge(
@@ -355,7 +372,12 @@ class AiStudioAutomator(
                     return super.shouldInterceptRequest(view, request)
                 }
 
-                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                    if (!url.isNullOrBlank() && url != "about:blank") {
+                        sessionInstance.currentUrl = url
+                    }
+                }
+override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     view?.evaluateJavascript("window.__omniProfileId = ${JSONObject.quote(profileId)};", null)
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
