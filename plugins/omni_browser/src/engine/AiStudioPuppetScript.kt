@@ -407,7 +407,7 @@ fun buildAiStudioPuppetScript(): String {
 
                     hostLog('PUPPET_INIT', 'Prompt area mounted. Waiting for AI Studio auth/model boot RPCs to settle...');
                     let warmTicks = 0;
-                    while (warmTicks < 60 && !this.aborted) {
+                    while (warmTicks < 60 && !self.aborted) {
                         const warm = (window.__omniWire && window.__omniWire.isSessionWarm) ? window.__omniWire.isSessionWarm() : null;
                         if (warm && warm.ready) {
                             hostLog('PUPPET_INIT', 'Boot settled cleanly (' + (warmTicks * 100) + 'ms, accessToken=' + warm.hasAccessToken + ', waa=' + warm.hasWaa + ', models=' + warm.hasListModels + ').');
