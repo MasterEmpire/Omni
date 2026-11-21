@@ -26,6 +26,8 @@ data class ActiveGptPuppetSession(
     val profileId: String,
     val model: String,
     val webView: WebView,
+    @Volatile var currentUrl: String = "",
+    @Volatile var conversationId: String = "",
     var onReadyCallback: ((Boolean, String?) -> Unit)? = null,
     var onConfigCallback: ((Boolean, String?) -> Unit)? = null,
     var onNewChatCallback: ((Boolean, String?) -> Unit)? = null,
@@ -62,7 +64,20 @@ class ChatGptAutomator(
             }
         }
 
-    @SuppressLint("SetJavaScriptEnabled")
+        fun getSessionUrl(sessionId: String): String {
+        val session = sessions[sessionId] ?: return ""
+        val wvUrl = try { session.webView.url ?: "" } catch (_: Exception) { "" }
+        val convId = session.conversationId.trim()
+        return when {
+            wvUrl.contains("/c/") -> wvUrl
+            session.currentUrl.contains("/c/") -> session.currentUrl
+            convId.isNotEmpty() && !wvUrl.contains("temporary-chat=true") && !session.currentUrl.contains("temporary-chat=true") ->
+                "https://chatgpt.com/c/$convId"
+            wvUrl.isNotBlank() && wvUrl != "about:blank" -> wvUrl
+            else -> session.currentUrl
+        }
+    }
+@SuppressLint("SetJavaScriptEnabled")
     fun createSession(
         profileId: String,
         model: String = "",
@@ -224,6 +239,11 @@ class ChatGptAutomator(
                         sessionInstance.onTurnErrorCallback?.invoke(err)
                     }
                 }
+                @JavascriptInterface
+                fun onTurnMeta(url: String, conversationId: String) {
+                    if (url.isNotBlank()) sessionInstance.currentUrl = url
+                    if (conversationId.isNotBlank()) sessionInstance.conversationId = conversationId
+                }
             }, "OmniGptAutomator")
 
             webViewClient = object : WebViewClient() {
@@ -253,7 +273,12 @@ class ChatGptAutomator(
                     return super.shouldInterceptRequest(view, request)
                 }
 
-                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                    if (!url.isNullOrBlank() && url != "about:blank") {
+                        sessionInstance.currentUrl = url
+                    }
+                }
+override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                 }
