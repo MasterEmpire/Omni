@@ -52,7 +52,9 @@ interface WebViewEventListener {
     fun onVoiceReadRequested(tabId: String, text: String, turnId: String, isAuto: Boolean)
     fun onVoiceStopRequested()
     fun onPlaybookPipelineStateChanged(tabId: String, active: Boolean)
+    fun onOpenTabWithProfileRequested(url: String, profileId: String?)
 }
+
 
 
 class WebViewPoolManager(
@@ -429,6 +431,9 @@ class WebViewPoolManager(
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         listener.onPlaybookPipelineStateChanged(tabId, active)
                     }
+                },
+                onOpenTab = { url, profId ->
+                    listener.onOpenTabWithProfileRequested(url, profId)
                 }
             )
             addJavascriptInterface(studioLabBridge, "__OmniStudioLabBridge")
