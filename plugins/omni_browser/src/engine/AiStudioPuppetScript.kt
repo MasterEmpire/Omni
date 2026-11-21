@@ -1218,7 +1218,12 @@ fun buildAiStudioPuppetScript(): String {
                     const finalFinishReason = finalWire ? (finalWire.finishReason || 0) : 0;
                     const isTruncated = (finalFinishReason === 2);
 
-                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnCompleteWithMeta) {
+                                        try {
+                        if (window.OmniAutomator && window.OmniAutomator.onTurnUrl) {
+                            window.OmniAutomator.onTurnUrl(window.location.href || '');
+                        }
+                    } catch(_) {}
+if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnCompleteWithMeta) {
                         window.OmniAutomator.onPuppetTurnCompleteWithMeta(latestTurnThoughts, currentTurnOutput, finalFinishReason, isTruncated);
                     } else if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnComplete) {
                         window.OmniAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
