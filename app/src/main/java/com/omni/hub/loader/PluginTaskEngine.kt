@@ -175,7 +175,18 @@ object PluginTaskEngine {
         }
     }
 
-    fun stopTask(context: Context, pluginId: String) {
+        fun stopForPluginReload(context: Context, pluginId: String) {
+        scheduledRetries.remove(pluginId)?.cancel()
+        retryAttempts.remove(pluginId)
+        activeInstances[pluginId]?.first?.let { instance ->
+            try {
+                instance.onSystemEvent("FORCE_TEARDOWN", emptyMap())
+            } catch (_: Exception) {}
+        }
+        cleanupInstance(context, pluginId)
+        OmniLogger.log("TASK_ENGINE", "🔄 Force-stopped [$pluginId] for plugin update reload.")
+    }
+fun stopTask(context: Context, pluginId: String) {
         if (pluginId == "scroll_lock" || pluginId == "focus_shield") {
             OmniLogger.log("TASK_ENGINE", "🛡️ $pluginId has God-Mode immunity. stopTask rejected.")
             return
