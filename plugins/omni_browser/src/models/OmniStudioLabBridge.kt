@@ -488,6 +488,24 @@ class OmniStudioLabBridge(
                         }
                         resolve(callId, resObj)
                     },
+                    onCompleteTelemetry = { thoughts, output, finishReason, truncated, telemetryJson ->
+                        val chatUrl = automator.getSessionUrl(sessionId)
+                        val profId = automator.sessions[sessionId]?.profileId ?: ""
+                        val resObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                            put("finishReason", finishReason)
+                            put("truncated", truncated)
+                            put("url", chatUrl)
+                            put("profileId", profId)
+                            try {
+                                if (telemetryJson.isNotBlank()) {
+                                    put("telemetry", JSONObject(telemetryJson))
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        resolve(callId, resObj)
+                    },
                     onError = { err ->
                         reject(callId, err)
                     }
