@@ -264,6 +264,17 @@ class OmniStudioLabBridge(
                         val resObj = JSONObject().apply {
                             put("thoughts", thoughts)
                             put("output", output)
+                            put("finishReason", 0)
+                            put("truncated", false)
+                        }
+                        resolve(callId, resObj)
+                    },
+                    onCompleteMeta = { thoughts, output, finishReason, truncated ->
+                        val resObj = JSONObject().apply {
+                            put("thoughts", thoughts)
+                            put("output", output)
+                            put("finishReason", finishReason)
+                            put("truncated", truncated)
                         }
                         resolve(callId, resObj)
                     },
