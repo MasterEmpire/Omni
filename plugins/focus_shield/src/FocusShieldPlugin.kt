@@ -144,6 +144,30 @@ object TelegramDetector {
         return false
     }
 }
+object MovieBoxDetector {
+    private val labelCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    fun isMovieBox(context: Context, pkg: String): Boolean {
+        if (pkg.isEmpty()) return false
+        val lowerPkg = pkg.lowercase(Locale.US)
+        if (lowerPkg.contains("moviebox") ||
+            lowerPkg.startsWith("com.community.mbox") ||
+            lowerPkg == "com.community.oneroom") {
+            return true
+        }
+        if (lowerPkg == "android" || lowerPkg == "com.android.systemui") return false
+        return labelCache.computeIfAbsent(pkg) {
+            try {
+                val pm = context.packageManager
+                val ai = pm.getApplicationInfo(pkg, 0)
+                val label = pm.getApplicationLabel(ai).toString().lowercase(Locale.US)
+                label.contains("moviebox") || label.contains("movie box")
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+}
 
 class FocusShieldPlugin : PluginEntry() {
 
@@ -254,6 +278,19 @@ class FocusShieldPlugin : PluginEntry() {
             }
             return
         }
+        if (eventPkg != lastTracedA11yPkg) {
+            lastTracedA11yPkg = eventPkg
+            val isMatch = KNOWN_BROWSER_PACKAGES.contains(eventPkg) ||
+                CURFEW_APP_PACKAGES.contains(eventPkg) ||
+                customLockedApps.any { it.packageName == eventPkg } ||
+                isSettingsPackage(eventPkg) ||
+                TelegramDetector.isTelegram(context, eventPkg) ||
+                MovieBoxDetector.isMovieBox(context, eventPkg)
+            bridge.log(
+                "FOCUS_SHIELD_TRACE",
+                "A11y event: pkg='$eventPkg' type=${event.eventType} matched=$isMatch panic=$isPanicActive night=$isNightActive"
+            )
+        }
 
         // 1b. Anti-Tamper Deflection for Android Settings, Samsung Accessibility & Telegram during active lock
         if (isSettingsPackage(eventPkg) || TelegramDetector.isTelegram(context, eventPkg)) {
@@ -296,7 +333,8 @@ class FocusShieldPlugin : PluginEntry() {
                 if (pkg != context.packageName && pkg != "com.omni.hub" &&
                     (KNOWN_BROWSER_PACKAGES.contains(pkg) || CURFEW_APP_PACKAGES.contains(pkg) || customPkgs.contains(pkg) ||
                      isSettingsPackage(pkg) ||
-                     TelegramDetector.isTelegram(context, pkg))) {
+                     TelegramDetector.isTelegram(context, pkg) ||
+                     MovieBoxDetector.isMovieBox(context, pkg))) {
                     val rect = Rect()
                     w.getBoundsInScreen(rect)
                     val entry = TargetWindowEntry(root, rect, pkg)
@@ -325,7 +363,8 @@ class FocusShieldPlugin : PluginEntry() {
                     !rootPkg.contains("inputmethod") &&
                     (KNOWN_BROWSER_PACKAGES.contains(rootPkg) || CURFEW_APP_PACKAGES.contains(rootPkg) || customPkgs.contains(rootPkg) ||
                      isSettingsPackage(rootPkg) ||
-                     TelegramDetector.isTelegram(context, rootPkg))) {
+                     TelegramDetector.isTelegram(context, rootPkg) ||
+                     MovieBoxDetector.isMovieBox(context, rootPkg))) {
                     val rect = Rect()
                     activeRoot.getBoundsInScreen(rect)
                     val entry = TargetWindowEntry(activeRoot, rect, rootPkg)
@@ -370,13 +409,29 @@ class FocusShieldPlugin : PluginEntry() {
             pkg
         }
 
-        val dm = context.resources.displayMetrics
-        val screenWidth = dm.widthPixels
-        val screenHeight = dm.heightPixels
+        val realMetrics = android.util.DisplayMetrics()
+        try {
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+            @Suppress("DEPRECATION")
+            wm?.defaultDisplay?.getRealMetrics(realMetrics)
+        } catch (_: Exception) {}
+        val fallbackDm = context.resources.displayMetrics
+        val baseW = if (realMetrics.widthPixels > 0) realMetrics.widthPixels else fallbackDm.widthPixels
+        val baseH = if (realMetrics.heightPixels > 0) realMetrics.heightPixels else fallbackDm.heightPixels
+        val isLandscapeWin = bounds.width() > bounds.height()
+        val screenWidth = if (isLandscapeWin) maxOf(baseW, baseH) else minOf(baseW, baseH)
+        val screenHeight = if (isLandscapeWin) minOf(baseW, baseH) else maxOf(baseW, baseH)
 
-        val isPopup = bounds.width() < (screenWidth * 0.96f) ||
-                      bounds.height() < (screenHeight * 0.92f) ||
-                      bounds.top > 80 || bounds.left > 10
+        val isPopup = bounds.width() < (screenWidth * 0.92f) ||
+                      bounds.height() < (screenHeight * 0.84f) ||
+                      bounds.top > 180 || bounds.left > 24
+
+        if (now - targetFirstSeenTimeMs < 50L) {
+            bridge.log(
+                "FOCUS_SHIELD_TRACE",
+                "Target window [$appLabel] ($pkg) bounds=$bounds screen=${screenWidth}x${screenHeight} isPopup=$isPopup"
+            )
+        }
 
         // 3. Execute Dual-Window Sniper on ALL target windows (searching pill window + content window)
         val killed = huntAndKillMultiWindow(service, targetWindows, bridge, appLabel)
@@ -386,11 +441,16 @@ class FocusShieldPlugin : PluginEntry() {
         }
 
         // 4. Mount precision overlay ONLY IF sniper hasn't neutralized it within 350ms grace period
+        var fallbackDeflect = false
         if (isPopup) {
             if (now - targetFirstSeenTimeMs >= 350L) {
                 mountOrUpdatePopupOverlay(context, bridge, appLabel, bounds)
+                if (!isOverlayMounted && !isClosingPopUp) {
+                    fallbackDeflect = true
+                }
             }
-        } else {
+        }
+        if (!isPopup || fallbackDeflect) {
             targetFirstSeenTimeMs = 0L
             dismissPopupOverlay(bridge)
             if (now - lastFullDeflectTimeMs >= 600L) {
@@ -404,12 +464,13 @@ class FocusShieldPlugin : PluginEntry() {
                 val reason = when {
                     isSettingsPackage(pkg) -> "Settings & Accessibility are locked to prevent tampering."
                     TelegramDetector.isTelegram(context, pkg) -> "Telegram is locked."
+                    MovieBoxDetector.isMovieBox(context, pkg) || CURFEW_APP_PACKAGES.contains(pkg) -> "MovieBox is locked during curfew & Focus Lock."
                     isPanicActive -> "Focus Lock active! Browsers and blacklist trapped."
                     isNightActive -> "Night Guard active (10:00 PM – 6:00 AM). Sleep mode engaged."
                     else -> "App is blacklisted."
                 }
                 bridge.showToast("Focus Shield: $appLabel is locked. $reason")
-                bridge.log("FOCUS_SHIELD", "Deflected full-screen blocked app [$appLabel] ($pkg) to Home via Accessibility!")
+                bridge.log("FOCUS_SHIELD", "Deflected blocked app [$appLabel] ($pkg) to Home via Accessibility (fallback=$fallbackDeflect)!")
             }
         }
     }
@@ -827,12 +888,20 @@ class FocusShieldPlugin : PluginEntry() {
 
         val customPkgs = customLockedApps.map { it.packageName }.toSet()
         val isBrowser = KNOWN_BROWSER_PACKAGES.contains(fgPkg)
-        val isCurfewApp = CURFEW_APP_PACKAGES.contains(fgPkg)
+        val isCurfewApp = CURFEW_APP_PACKAGES.contains(fgPkg) || MovieBoxDetector.isMovieBox(context, fgPkg)
         val isCustomBlocked = customPkgs.contains(fgPkg)
         val isSettings = isSettingsPackage(fgPkg)
         val isTelegram = TelegramDetector.isTelegram(context, fgPkg)
 
         val isTargetBlocked = isBrowser || isCurfewApp || isCustomBlocked || isSettings || isTelegram
+
+        if (fgPkg != lastTracedFgPkg) {
+            lastTracedFgPkg = fgPkg
+            bridge.log(
+                "FOCUS_SHIELD_TRACE",
+                "UsageStats fgPkg='$fgPkg' blocked=$isTargetBlocked panic=$isPanicActive night=$isNightSchedule"
+            )
+        }
 
         if (isTargetBlocked) {
             val appLabel = try {
@@ -992,7 +1061,8 @@ class FocusShieldPlugin : PluginEntry() {
 
             val candidateFiles = listOf(
                 java.io.File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/config/focus_shield_state.json"),
-                java.io.File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json")
+                java.io.File(context.getDir("plugins_data", Context.MODE_PRIVATE), "focus_shield/focus_shield_state.json"),
+                java.io.File(context.getDir("plugins_data", Context.MODE_PRIVATE), "scroll_lock/scroll_lock_state.json")
             )
             for (f in candidateFiles) {
                 if (f.exists()) {
@@ -1575,6 +1645,8 @@ class FocusShieldPlugin : PluginEntry() {
         @Volatile var lastTapAttemptTimeMs = 0L
         @Volatile var lastFullDeflectTimeMs = 0L
         @Volatile var lastAccessibilityDiskSyncMs = 0L
+        @Volatile var lastTracedA11yPkg: String? = null
+        @Volatile var lastTracedFgPkg: String? = null
 
         val CURFEW_APP_PACKAGES = setOf(
             "com.community.moviebox"               // MovieBox (1-Hour Lockout & 10 PM - 6 AM Curfew)
