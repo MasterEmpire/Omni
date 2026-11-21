@@ -233,6 +233,23 @@ class FocusShieldPlugin : PluginEntry() {
     override fun onStop(context: Context) {
         // UI dismissed: Keep background monitor and accessibility active
     }
+    override fun onSystemEvent(event: String, payload: Map<String, Any>) {
+        if (event == "FORCE_TEARDOWN") {
+            isRunning = false
+            globalMonitorJob?.cancel()
+            globalMonitorJob = null
+            AccessibilityDispatcher.removeListener(accessibilityListener)
+            screenReceiver?.let {
+                try { activeContext?.applicationContext?.unregisterReceiver(it) } catch (_: Exception) {}
+            }
+            screenReceiver = null
+            activeBridge?.let { dismissPopupOverlay(it) }
+            if (isWakeLockHeld) {
+                activeBridge?.releaseWakeLock()
+                isWakeLockHeld = false
+            }
+        }
+    }
 
     private fun isSettingsPackage(pkg: String): Boolean {
         if (pkg.isEmpty()) return false
@@ -255,6 +272,11 @@ class FocusShieldPlugin : PluginEntry() {
             eventPkg.contains("inputmethod") ||
             event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
             event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
+            return
+        }
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            !isOverlayMounted && targetFirstSeenTimeMs == 0L &&
+            (eventPkg == "com.android.systemui" || eventPkg == "com.sec.android.app.launcher")) {
             return
         }
 
@@ -1173,7 +1195,23 @@ class FocusShieldPlugin : PluginEntry() {
                     Text("🛡️", fontSize = 24.sp)
                     Spacer(Modifier.width(8.dp))
                     Column {
-                        Text("Focus Shield", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Focus Shield", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF1F6FEB).copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, Color(0xFF58A6FF).copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    SHIELD_BUILD_VERSION,
+                                    color = Color(0xFF58A6FF),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         Text("UsageStats & Pop-Up Hunter", color = Color(0xFF8B949E), fontSize = 11.sp)
                     }
                 }
@@ -1624,6 +1662,7 @@ class FocusShieldPlugin : PluginEntry() {
 
     companion object {
         private const val POPUP_OVERLAY_TAG = "focus_shield_popup_block"
+        private const val SHIELD_BUILD_VERSION = "v2.2 • MovieBox"
         private val sentinelLock = Any()
         @Volatile private var globalMonitorJob: Job? = null
         @Volatile var isRunning = false
