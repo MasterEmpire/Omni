@@ -616,7 +616,15 @@ fun buildChatGptPuppetScript(): String {
                         return { thoughts: latestTurnThoughts, output: '', conversationId: conversationId, error: emptyErr };
                     }
 
-                    if (window.OmniGptAutomator && window.OmniGptAutomator.onPuppetTurnComplete) {
+                                        try {
+                        if (window.OmniGptAutomator && window.OmniGptAutomator.onTurnMeta) {
+                            window.OmniGptAutomator.onTurnMeta(
+                                window.location.href || '',
+                                isTemporaryChatActive() ? '' : (conversationId || '')
+                            );
+                        }
+                    } catch(_) {}
+if (window.OmniGptAutomator && window.OmniGptAutomator.onPuppetTurnComplete) {
                         window.OmniGptAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
                     }
                     return { thoughts: latestTurnThoughts, output: currentTurnOutput, conversationId: conversationId, error: null };
