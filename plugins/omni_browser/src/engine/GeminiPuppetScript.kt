@@ -665,7 +665,15 @@ fun buildGeminiPuppetScript(): String {
                         return { thoughts: latestTurnThoughts, output: '', conversationId: conversationId, error: emptyErr };
                     }
 
-                    if (window.OmniGeminiAutomator && window.OmniGeminiAutomator.onPuppetTurnComplete) {
+                                        try {
+                        if (window.OmniGeminiAutomator && window.OmniGeminiAutomator.onTurnMeta) {
+                            window.OmniGeminiAutomator.onTurnMeta(
+                                window.location.href || '',
+                                isTemporaryChatActive() ? '' : (conversationId || '')
+                            );
+                        }
+                    } catch(_) {}
+if (window.OmniGeminiAutomator && window.OmniGeminiAutomator.onPuppetTurnComplete) {
                         window.OmniGeminiAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
                     }
                     return { thoughts: latestTurnThoughts, output: currentTurnOutput, conversationId: conversationId, error: null };
