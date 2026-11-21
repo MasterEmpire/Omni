@@ -774,6 +774,8 @@ fun buildAiStudioPuppetScript(): String {
                     let usedWireStream = false;
                     let loggedWireMiss = false;
                     let fallbackCtrlTriggered = false;
+                    let contWaitStreamId = 0;
+                    let contWaitTicks = 0;
 
                     let wireWakeup = null;
                     const notifyWire = () => {
@@ -946,11 +948,23 @@ fun buildAiStudioPuppetScript(): String {
                                 }
 
                                 if (wire.done && wire.statusCode === 0) {
-                                    // If finishReason is 2 (MAX_TOKENS) or UI is still running, auto-continuation stream is expected
+                                    // If finishReason is 2 (MAX_TOKENS) or UI is still running, wait a bounded window for auto-continuation
                                     if (wire.finishReason === 2 || checkUiGenerating()) {
-                                        hostLog('WIRE_CONT', 'Stream #' + wire.id + ' ended with finishReason=' + wire.finishReason + '. Waiting for auto-continuation stream...');
-                                        await delay(400);
-                                        continue;
+                                        if (contWaitStreamId !== wire.id) {
+                                            contWaitStreamId = wire.id;
+                                            contWaitTicks = 0;
+                                        }
+                                        contWaitTicks++;
+                                        const uiGen = checkUiGenerating();
+                                        const maxContTicks = uiGen ? 38 : 8;
+                                        if (contWaitTicks <= maxContTicks) {
+                                            if (contWaitTicks === 1 || contWaitTicks % 5 === 0) {
+                                                hostLog('WIRE_CONT', 'Stream #' + wire.id + ' ended with finishReason=' + wire.finishReason + ' (uiGen=' + uiGen + ', wait ' + contWaitTicks + '/' + maxContTicks + '). Waiting for auto-continuation stream...');
+                                            }
+                                            await delay(400);
+                                            continue;
+                                        }
+                                        hostLog('WIRE_CONT_DONE', 'Stream #' + wire.id + ' continuation wait settled after ' + contWaitTicks + ' ticks (uiGen=' + uiGen + ', finishReason=' + wire.finishReason + ', size=' + currentTurnOutput.length + 'c).');
                                     }
 
                                     if (currentTurnOutput.trim().length > 0) {
@@ -1200,10 +1214,16 @@ fun buildAiStudioPuppetScript(): String {
                         await delay(800);
                     }
 
-                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnComplete) {
+                    const finalWire = (activeWireToken && window.__omniWire) ? window.__omniWire.getTurn(activeWireToken) : null;
+                    const finalFinishReason = finalWire ? (finalWire.finishReason || 0) : 0;
+                    const isTruncated = (finalFinishReason === 2);
+
+                    if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnCompleteWithMeta) {
+                        window.OmniAutomator.onPuppetTurnCompleteWithMeta(latestTurnThoughts, currentTurnOutput, finalFinishReason, isTruncated);
+                    } else if (window.OmniAutomator && window.OmniAutomator.onPuppetTurnComplete) {
                         window.OmniAutomator.onPuppetTurnComplete(latestTurnThoughts, currentTurnOutput);
                     }
-                    return { thoughts: latestTurnThoughts, output: currentTurnOutput, error: null };
+                    return { thoughts: latestTurnThoughts, output: currentTurnOutput, finishReason: finalFinishReason, truncated: isTruncated, error: null };
                 },
 
                 runBatch: async function(config, steps) {
