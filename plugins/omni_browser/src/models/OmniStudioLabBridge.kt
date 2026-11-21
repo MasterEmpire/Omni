@@ -30,9 +30,204 @@ class OmniStudioLabBridge(
     private val onIdePull: (project: String, files: List<String>, onResult: (String, Int) -> Unit) -> Unit,
     private val onIdeCommit: (xml: String, onResult: (String, String) -> Unit) -> Unit,
     private val scope: CoroutineScope,
-    private val getActiveWebView: () -> WebView?
+    private val getActiveWebView: () -> WebView?,
+    private val onPipelineStateChanged: (Boolean) -> Unit = {}
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var savedWindowBrightness: Float? = null
+    private var savedSystemBrightness: Int? = null
+    private var savedSystemBrightnessMode: Int? = null
+    private var dimmerStatusTextView: android.widget.TextView? = null
+    private var lastDimmerTapMs: Long = 0L
+
+    private fun findHostActivity(): android.app.Activity? {
+        var ctx: Context? = getActiveWebView()?.context ?: context
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is android.app.Activity) return ctx
+            ctx = ctx.baseContext
+        }
+        return ctx as? android.app.Activity
+    }
+
+    private fun applyActivityKeepScreenOn(enabled: Boolean) {
+        val window = findHostActivity()?.window ?: return
+        if (enabled) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun applyKeepAwakeInternal(enabled: Boolean) {
+        applyActivityKeepScreenOn(enabled)
+        if (enabled) {
+            if (bridge.canDrawOverlays()) {
+                val anchor = android.view.View(context.applicationContext).apply {
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                }
+                bridge.showOverlay(
+                    tag = "omni_keep_screen_awake",
+                    view = anchor,
+                    width = 1,
+                    height = 1,
+                    gravity = android.view.Gravity.TOP or android.view.Gravity.START,
+                    x = 0,
+                    y = 0,
+                    focusable = false,
+                    touchable = false
+                )
+            }
+        } else {
+            bridge.dismissOverlay("omni_keep_screen_awake")
+        }
+    }
+
+    private fun applyBrightnessDim(dim: Boolean) {
+        val appCtx = context.applicationContext
+        val activity = findHostActivity()
+        if (dim) {
+            if (activity != null) {
+                val lp = activity.window.attributes
+                if (savedWindowBrightness == null) {
+                    savedWindowBrightness = lp.screenBrightness
+                }
+                lp.screenBrightness = 0.01f
+                activity.window.attributes = lp
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
+                android.provider.Settings.System.canWrite(appCtx)) {
+                try {
+                    if (savedSystemBrightness == null) {
+                        savedSystemBrightness = android.provider.Settings.System.getInt(
+                            appCtx.contentResolver,
+                            android.provider.Settings.System.SCREEN_BRIGHTNESS
+                        )
+                        savedSystemBrightnessMode = android.provider.Settings.System.getInt(
+                            appCtx.contentResolver,
+                            android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE
+                        )
+                    }
+                    bridge.setScreenBrightness(1)
+                } catch (_: Exception) {}
+            }
+        } else {
+            if (activity != null && savedWindowBrightness != null) {
+                val lp = activity.window.attributes
+                lp.screenBrightness = savedWindowBrightness ?: android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                activity.window.attributes = lp
+                savedWindowBrightness = null
+            }
+            if (savedSystemBrightness != null &&
+                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
+                android.provider.Settings.System.canWrite(appCtx)) {
+                try {
+                    android.provider.Settings.System.putInt(
+                        appCtx.contentResolver,
+                        android.provider.Settings.System.SCREEN_BRIGHTNESS,
+                        savedSystemBrightness!!
+                    )
+                    savedSystemBrightnessMode?.let { mode ->
+                        android.provider.Settings.System.putInt(
+                            appCtx.contentResolver,
+                            android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
+                            mode
+                        )
+                    }
+                } catch (_: Exception) {}
+                savedSystemBrightness = null
+                savedSystemBrightnessMode = null
+            }
+        }
+    }
+
+    private fun setNightDimmerInternal(enabled: Boolean, statusText: String): Boolean {
+        if (!enabled) {
+            bridge.dismissOverlay("omni_night_dimmer")
+            dimmerStatusTextView = null
+            applyBrightnessDim(false)
+            return false
+        }
+
+        applyKeepAwakeInternal(true)
+        applyBrightnessDim(true)
+
+        if (!bridge.canDrawOverlays()) {
+            return false
+        }
+
+        val appCtx = context.applicationContext
+        val density = appCtx.resources.displayMetrics.density
+        val pad = (24 * density).toInt()
+
+        val root = android.widget.FrameLayout(appCtx).apply {
+            setBackgroundColor(android.graphics.Color.BLACK)
+        }
+
+        val col = android.widget.LinearLayout(appCtx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setPadding(pad, pad, pad, pad)
+        }
+
+        val titleTv = android.widget.TextView(appCtx).apply {
+            text = "🌙 NIGHT SHIFT OLED SHIELD"
+            setTextColor(android.graphics.Color.parseColor("#484F58"))
+            textSize = 12f
+            gravity = android.view.Gravity.CENTER
+        }
+
+        val statusTv = android.widget.TextView(appCtx).apply {
+            text = statusText.ifBlank { "Pipeline active in background..." }
+            setTextColor(android.graphics.Color.parseColor("#6E7681"))
+            textSize = 13f
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, (8 * density).toInt(), 0, (18 * density).toInt())
+        }
+        dimmerStatusTextView = statusTv
+
+        val wakeBtn = android.widget.TextView(appCtx).apply {
+            text = "☀️ Tap Twice Anywhere or Tap Here to Wake"
+            setTextColor(android.graphics.Color.parseColor("#58A6FF"))
+            textSize = 12f
+            gravity = android.view.Gravity.CENTER
+            setBackgroundColor(android.graphics.Color.parseColor("#0D1117"))
+            setPadding((16 * density).toInt(), (10 * density).toInt(), (16 * density).toInt(), (10 * density).toInt())
+            setOnClickListener {
+                setNightDimmerInternal(false, "")
+            }
+        }
+
+        col.addView(titleTv)
+        col.addView(statusTv)
+        col.addView(wakeBtn)
+
+        val lp = android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.CENTER
+        )
+        root.addView(col, lp)
+        root.setOnClickListener {
+            val now = System.currentTimeMillis()
+            if (now - lastDimmerTapMs <= 650L) {
+                setNightDimmerInternal(false, "")
+            } else {
+                lastDimmerTapMs = now
+            }
+        }
+
+        return bridge.showOverlay(
+            tag = "omni_night_dimmer",
+            view = root,
+            width = android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            height = android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            gravity = android.view.Gravity.CENTER,
+            x = 0,
+            y = 0,
+            focusable = false,
+            touchable = true
+        )
+    }
 
     private fun resolveProfileId(input: String): String {
         val trimmed = input.trim()
@@ -921,11 +1116,61 @@ class OmniStudioLabBridge(
     @JavascriptInterface
     fun getClipboardText(): String { return bridge.getClipboardText() ?: "" }
 
-    // --- 6. Hardware & WakeLock Management ---
+    // --- 6. Hardware, Screen Awake & WakeLock Management ---
+    @JavascriptInterface
+    fun canDrawOverlays(): Boolean {
+        return bridge.canDrawOverlays()
+    }
+
+    @JavascriptInterface
+    fun requestOverlayPermission() {
+        mainHandler.post {
+            bridge.requestOverlayPermission()
+        }
+    }
+
+    @JavascriptInterface
+    fun screenKeepAwake(callId: String, enabled: Boolean) {
+        mainHandler.post {
+            try {
+                applyKeepAwakeInternal(enabled)
+                resolve(callId, JSONObject().apply {
+                    put("keepAwake", enabled)
+                    put("overlayActive", enabled && bridge.canDrawOverlays())
+                })
+            } catch (e: Exception) {
+                reject(callId, e.message ?: "Failed toggling keepScreenAwake")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun nightDimmerSet(callId: String, enabled: Boolean, statusText: String) {
+        mainHandler.post {
+            try {
+                val overlayShown = setNightDimmerInternal(enabled, statusText)
+                resolve(callId, JSONObject().apply {
+                    put("enabled", enabled)
+                    put("overlayMode", overlayShown)
+                })
+            } catch (e: Exception) {
+                reject(callId, e.message ?: "Failed toggling Night Dimmer")
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun nightDimmerUpdate(statusText: String) {
+        mainHandler.post {
+            dimmerStatusTextView?.text = statusText
+        }
+    }
+
     @JavascriptInterface
     fun wakeLockAcquire(callId: String, tag: String) {
         mainHandler.post {
             try {
+                onPipelineStateChanged(true)
                 bridge.acquireWakeLock(tag.ifEmpty { "StudioLab" })
                 bridge.startForegroundTask("Omni Factory", "Running background pipeline ($tag)")
                 resolve(callId, "Acquired")
@@ -939,7 +1184,11 @@ class OmniStudioLabBridge(
     fun wakeLockRelease(callId: String) {
         mainHandler.post {
             try {
+                onPipelineStateChanged(false)
+                setNightDimmerInternal(false, "")
+                applyKeepAwakeInternal(false)
                 bridge.releaseWakeLock()
+                bridge.stopForegroundTask()
                 resolve(callId, "Released")
             } catch (e: Exception) {
                 reject(callId, e.message ?: "Failed releasing WakeLock")
