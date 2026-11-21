@@ -104,6 +104,9 @@ class BrowserStateHolder(
 
     var containerLayout: FrameLayout? = null
     var currentWebView: WebView? = null
+    val activePlaybookTabIds = mutableStateListOf<String>()
+    var isBackgroundOverlayHosting by mutableStateOf(false)
+    private var backgroundHostOverlayView: FrameLayout? = null
 
     // Temporary Popup Tab & Opener Tracking
     val popupTabs = mutableSetOf<String>()
@@ -673,13 +676,18 @@ class BrowserStateHolder(
             if (id != targetTabId) {
                 val tab = tabs.find { it.id == id }
                 val isVipAi = tab?.url?.contains("aistudio.google.com") == true || tab?.url?.contains("chatgpt.com") == true || tab?.url?.contains("gemini.google.com") == true
+                val isPlaybookOrLocal = tab?.url?.contains("/playbooks/") == true ||
+                    tab?.url?.contains("localhost:$localPort") == true ||
+                    tab?.url?.contains("127.0.0.1:$localPort") == true ||
+                    activePlaybookTabIds.contains(id)
                 val isMediaActive = isBackgroundAudioEnabled && id == activeMediaTabId
 
-                if (!isVipAi && !isMediaActive) {
+                if (!isVipAi && !isPlaybookOrLocal && !isMediaActive) {
                     wv.onPause()
                 } else {
-                    // God-Mode VIP: Never pause AI Studio, ChatGPT or Gemini in background so token streams never disconnect
+                    // God-Mode VIP: Never pause AI Studio, ChatGPT, Gemini, or Playbook tabs in background
                     wv.onResume()
+                    wv.resumeTimers()
                 }
             }
         }
@@ -743,7 +751,12 @@ class BrowserStateHolder(
             val child = container.getChildAt(i)
             if (child !== targetWv) {
                 val childTab = tabs.find { poolManager.pool[it.id] === child }
-                val isChildVipAi = childTab?.url?.contains("aistudio.google.com") == true || childTab?.url?.contains("chatgpt.com") == true || childTab?.url?.contains("gemini.google.com") == true
+                val isChildVipAi = childTab?.url?.contains("aistudio.google.com") == true ||
+                    childTab?.url?.contains("chatgpt.com") == true ||
+                    childTab?.url?.contains("gemini.google.com") == true ||
+                    childTab?.url?.contains("/playbooks/") == true ||
+                    childTab?.url?.contains("localhost:$localPort") == true ||
+                    (childTab != null && activePlaybookTabIds.contains(childTab.id))
 
                 if (isChildVipAi) {
                     child.visibility = android.view.View.INVISIBLE
@@ -1017,6 +1030,10 @@ class BrowserStateHolder(
 
         tabProgressMap.remove(targetId)
         poolManager.pool.remove(targetId)?.let { wv ->
+        activePlaybookTabIds.remove(targetId)
+        if (activePlaybookTabIds.isEmpty() && isBackgroundOverlayHosting) {
+            exitBackgroundExecutionMode()
+        }
             wv.onPause()
             containerLayout?.removeView(wv)
             poolManager.pendingPurge[targetId] = wv
@@ -3427,5 +3444,105 @@ class BrowserStateHolder(
 
     override fun onVoiceStopRequested() {
         stopVoiceReadAloud()
+    }
+    override fun onPlaybookPipelineStateChanged(tabId: String, active: Boolean) {
+        if (active) {
+            if (!activePlaybookTabIds.contains(tabId)) {
+                activePlaybookTabIds.add(tabId)
+            }
+            poolManager.pool[tabId]?.let { wv ->
+                wv.onResume()
+                wv.resumeTimers()
+            }
+        } else {
+            activePlaybookTabIds.remove(tabId)
+            if (activePlaybookTabIds.isEmpty()) {
+                exitBackgroundExecutionMode()
+            }
+        }
+    }
+
+    fun enterBackgroundExecutionMode() {
+        val headlessList = com.omni.plugin.browser.engine.AiStudioAutomator.liveHeadlessWebViews.toList()
+        val playbookWvs = activePlaybookTabIds.mapNotNull { poolManager.pool[it] }
+        if (playbookWvs.isEmpty() && headlessList.isEmpty()) return
+
+        playbookWvs.forEach { wv ->
+            wv.onResume()
+            wv.resumeTimers()
+        }
+        headlessList.forEach { wv ->
+            wv.onResume()
+            wv.resumeTimers()
+        }
+
+        if (!bridge.canDrawOverlays() || isBackgroundOverlayHosting) return
+
+        try {
+            val hostBox = FrameLayout(context.applicationContext).apply {
+                alpha = 0.004f
+            }
+
+            playbookWvs.forEach { wv ->
+                (wv.parent as? ViewGroup)?.removeView(wv)
+                hostBox.addView(
+                    wv,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
+                wv.onResume()
+                wv.resumeTimers()
+            }
+
+            headlessList.forEach { wv ->
+                (wv.parent as? ViewGroup)?.removeView(wv)
+                hostBox.addView(
+                    wv,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
+                wv.onResume()
+                wv.resumeTimers()
+            }
+
+            val mounted = bridge.showOverlay(
+                tag = "omni_bg_webview_anchor",
+                view = hostBox,
+                width = 480,
+                height = 800,
+                gravity = android.view.Gravity.TOP or android.view.Gravity.START,
+                x = 0,
+                y = 0,
+                focusable = false,
+                touchable = false
+            )
+            if (mounted) {
+                backgroundHostOverlayView = hostBox
+                isBackgroundOverlayHosting = true
+                bridge.log("BG_WEBVIEW_HOST", "🛡️ Mounted ${playbookWvs.size} playbook + ${headlessList.size} headless WebView(s) into live overlay anchor on ON_STOP")
+            }
+        } catch (e: Exception) {
+            bridge.log("BG_WEBVIEW_ERR", "Failed mounting background WebView host: ${e.message}")
+        }
+    }
+
+    fun exitBackgroundExecutionMode() {
+        if (!isBackgroundOverlayHosting) return
+        isBackgroundOverlayHosting = false
+        try {
+            bridge.dismissOverlay("omni_bg_webview_anchor")
+            backgroundHostOverlayView?.removeAllViews()
+            backgroundHostOverlayView = null
+            if (containerLayout != null) {
+                attachTabWebView(activeTabId)
+            }
+            bridge.log("BG_WEBVIEW_HOST", "✅ Restored WebView(s) back into foreground container on ON_RESUME")
+        } catch (e: Exception) {
+            bridge.log("BG_WEBVIEW_ERR", "Failed restoring background WebViews: ${e.message}")
+        }
     }
 }
