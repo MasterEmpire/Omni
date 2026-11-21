@@ -51,6 +51,7 @@ interface WebViewEventListener {
     fun onPlaybookCxpCommitRequested(xml: String, onResult: (String, String) -> Unit)
     fun onVoiceReadRequested(tabId: String, text: String, turnId: String, isAuto: Boolean)
     fun onVoiceStopRequested()
+    fun onPlaybookPipelineStateChanged(tabId: String, active: Boolean)
 }
 
 
@@ -294,6 +295,11 @@ class WebViewPoolManager(
         var currentPageHost = extractHostSafe(initialUrl)
 
         val webView = WebView(context).apply {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                try {
+                    setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+                } catch (_: Exception) {}
+            }
             setBackgroundColor(if (isForceDarkWebPages) android.graphics.Color.parseColor("#1F2227") else android.graphics.Color.WHITE)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -418,7 +424,12 @@ class WebViewPoolManager(
                     listener.onPlaybookCxpCommitRequested(xml, onRes)
                 },
                 scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main),
-                getActiveWebView = { this@apply }
+                getActiveWebView = { this@apply },
+                onPipelineStateChanged = { active ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onPlaybookPipelineStateChanged(tabId, active)
+                    }
+                }
             )
             addJavascriptInterface(studioLabBridge, "__OmniStudioLabBridge")
 
@@ -704,7 +715,13 @@ class WebViewPoolManager(
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
                     view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
+                    if (url != null && (url.contains("localhost:$localPort") || url.contains("127.0.0.1:$localPort"))) {
+                        view?.evaluateJavascript(PLAYBOOK_KEEPALIVE_SCRIPT, null)
+                    }
                     view?.evaluateJavascript(OMNI_STUDIO_LAB_CLIENT_SCRIPT, null)
+                    if (url != null && (url.contains("localhost:$localPort") || url.contains("127.0.0.1:$localPort"))) {
+                        view?.evaluateJavascript(PLAYBOOK_KEEPALIVE_SCRIPT, null)
+                    }
                     if (tabDesktopModes[tabId] == true) {
                         view?.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT, null)
                     }
