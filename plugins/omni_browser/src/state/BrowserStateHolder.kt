@@ -677,8 +677,8 @@ class BrowserStateHolder(
                 val tab = tabs.find { it.id == id }
                 val isVipAi = tab?.url?.contains("aistudio.google.com") == true || tab?.url?.contains("chatgpt.com") == true || tab?.url?.contains("gemini.google.com") == true
                 val isPlaybookOrLocal = tab?.url?.contains("/playbooks/") == true ||
-                    tab?.url?.contains("localhost:$localPort") == true ||
-                    tab?.url?.contains("127.0.0.1:$localPort") == true ||
+                    tab?.url?.contains("localhost:$localServerPort") == true ||
+                    tab?.url?.contains("127.0.0.1:$localServerPort") == true ||
                     activePlaybookTabIds.contains(id)
                 val isMediaActive = isBackgroundAudioEnabled && id == activeMediaTabId
 
@@ -755,7 +755,7 @@ class BrowserStateHolder(
                     childTab?.url?.contains("chatgpt.com") == true ||
                     childTab?.url?.contains("gemini.google.com") == true ||
                     childTab?.url?.contains("/playbooks/") == true ||
-                    childTab?.url?.contains("localhost:$localPort") == true ||
+                    childTab?.url?.contains("localhost:$localServerPort") == true ||
                     (childTab != null && activePlaybookTabIds.contains(childTab.id))
 
                 if (isChildVipAi) {
