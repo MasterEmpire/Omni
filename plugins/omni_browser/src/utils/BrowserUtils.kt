@@ -449,8 +449,27 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     var latestStreamId = 0;
     var pendingBootRpcs = 0;
     var hasAccessToken = false;
+    var hasWaa = false;
     var hasListModels = false;
+    var firstBootRpcAt = 0;
     var lastUserPromptAt = 0;
+
+    function startBootRpc(url) {
+        if (!firstBootRpcAt) firstBootRpcAt = Date.now();
+        pendingBootRpcs++;
+        var finished = false;
+        return function(status) {
+            if (finished) return;
+            finished = true;
+            if (pendingBootRpcs > 0) pendingBootRpcs--;
+            var st = status || 0;
+            if (st === 0 || (st >= 200 && st < 400)) {
+                if (url.indexOf('GenerateAccessToken') !== -1) hasAccessToken = true;
+                if (url.indexOf('Waa/Create') !== -1) hasWaa = true;
+                if (url.indexOf('ListModels') !== -1) hasListModels = true;
+            }
+        };
+    }
 
     function reportWirePrompt() {
         try {
@@ -845,6 +864,8 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
         if (errMsg && !rec.error) rec.error = errMsg;
         if (rec.httpStatus === 429 && !rec.error) {
             rec.error = 'Quota Exhausted (429)';
+        } else if (rec.httpStatus === 403 && !rec.error) {
+            rec.error = 'Permission Denied (403)';
         } else if (rec.httpStatus >= 400 && !rec.error) {
             rec.error = 'HTTP Error ' + rec.httpStatus;
         }
@@ -875,7 +896,17 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
                 url = (typeof input === 'string') ? input : (input && input.url ? input.url : String(input || ''));
             } catch(_) {}
 
-            if (!isGenerationStreamUrl(url)) {
+                        if (isBootRpcUrl(url)) {
+                var markFetchBootDone = startBootRpc(url);
+                return origFetch.apply(this, arguments).then(function(res) {
+                    markFetchBootDone(res ? res.status : 200);
+                    return res;
+                }, function(err) {
+                    markFetchBootDone(0);
+                    throw err;
+                });
+            }
+if (!isGenerationStreamUrl(url)) {
                 return origFetch.apply(this, arguments);
             }
 
@@ -961,18 +992,7 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
             var url = this.__omniWireUrl || '';
             if (isBootRpcUrl(url)) {
                 var bootXhr = this;
-                var bootFinished = false;
-                pendingBootRpcs++;
-                var markBootDone = function(status) {
-                    if (bootFinished) return;
-                    bootFinished = true;
-                    if (pendingBootRpcs > 0) pendingBootRpcs--;
-                    var st = status || 0;
-                    if (st === 0 || (st >= 200 && st < 400)) {
-                        if (url.indexOf('GenerateAccessToken') !== -1) hasAccessToken = true;
-                        if (url.indexOf('ListModels') !== -1) hasListModels = true;
-                    }
-                };
+                var markBootDone = startBootRpc(url);
                 bootXhr.__omniBootDone = markBootDone;
                 bootXhr.addEventListener('readystatechange', function() {
                     if (bootXhr.readyState === 4) markBootDone(bootXhr.status);
@@ -1051,11 +1071,14 @@ val AI_STUDIO_WIRE_INTERCEPTOR_SCRIPT = """
     window.__omniWire = {
         hasHooked: true,
         isSessionWarm: function() {
+            var bootElapsed = firstBootRpcAt ? (Date.now() - firstBootRpcAt) : 0;
+            var authSettled = hasAccessToken || (hasListModels && bootElapsed >= 1800);
             return {
-                ready: (document.readyState !== 'loading' && pendingBootRpcs === 0 && (hasAccessToken || hasListModels)),
+                ready: (document.readyState !== 'loading' && pendingBootRpcs === 0 && authSettled),
                 readyState: document.readyState,
                 pendingBootRpcs: pendingBootRpcs,
                 hasAccessToken: hasAccessToken,
+                hasWaa: hasWaa,
                 hasListModels: hasListModels
             };
         },
