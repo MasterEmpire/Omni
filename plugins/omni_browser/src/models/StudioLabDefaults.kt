@@ -76,9 +76,10 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                     : rpcCall('studioCreateSession', [profile, model]);
                 return bootPromise.then(function(res) {
                     var sId = res.sessionId;
+                    var resolvedProf = res.profileId || profile;
                     return {
                         id: sId,
-                        profile: profile,
+                        profile: resolvedProf,
                         configure: function(configOpts) {
                             return rpcCall('studioConfigureSession', [sId, JSON.stringify(configOpts || {})]);
                         },
@@ -118,9 +119,10 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                 var temporaryChat = !!opts.temporaryChat;
                 return rpcCall('gptCreateSession', [profile, model, temporaryChat]).then(function(res) {
                     var sId = res.sessionId;
+                    var resolvedProf = res.profileId || profile;
                     return {
                         id: sId,
-                        profile: profile,
+                        profile: resolvedProf,
                         configure: function(configOpts) {
                             return rpcCall('gptConfigureSession', [sId, JSON.stringify(configOpts || {})]);
                         },
@@ -165,9 +167,10 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
                 var temporaryChat = !!opts.temporaryChat;
                 return rpcCall('geminiCreateSession', [profile, model, temporaryChat]).then(function(res) {
                     var sId = res.sessionId;
+                    var resolvedProf = res.profileId || profile;
                     return {
                         id: sId,
-                        profile: profile,
+                        profile: resolvedProf,
                         configure: function(configOpts) {
                             return rpcCall('geminiConfigureSession', [sId, JSON.stringify(configOpts || {})]);
                         },
@@ -274,6 +277,16 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
         getClipboard: function() {
             if (window.__OmniStudioLabBridge) return window.__OmniStudioLabBridge.getClipboardText();
             return "";
+        }
+,
+        browser: {
+            openTab: function(url, profileId) {
+                if (window.__OmniStudioLabBridge && window.__OmniStudioLabBridge.browserOpenTab) {
+                    window.__OmniStudioLabBridge.browserOpenTab(String(url || ''), String(profileId || ''));
+                    return true;
+                }
+                return false;
+            }
         }
     };
     console.log("⚡ [Omni Studio Lab] window.Omni SDK initialized & ready.");
