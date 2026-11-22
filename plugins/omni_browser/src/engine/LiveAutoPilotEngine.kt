@@ -139,25 +139,36 @@ object LiveAutoPilotEngine {
 
                 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
+                function maskNative(fn, name) {
+                    try {
+                        const label = 'function ' + (name || fn.name || '') + '() { [native code] }';
+                        Object.defineProperty(fn, 'toString', {
+                            value: function() { return label; },
+                            configurable: true
+                        });
+                    } catch(_) {}
+                    return fn;
+                }
+
                 // 🛡️ 24/7 Visibility Spoof: Deceive Angular/DOM renderer to keep streaming active even when tab/app is backgrounded
                 try {
                     Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
                     Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
                     Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
                     Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
-                    document.hasFocus = function() { return true; };
+                    document.hasFocus = maskNative(function hasFocus() { return true; }, 'hasFocus');
                 } catch(_) {}
 
                 // Trap visibility change listeners so AI Studio doesn't freeze its rendering loop
                 if (!window.__omniVisibilityHooked) {
                     window.__omniVisibilityHooked = true;
                     const origAddEvent = EventTarget.prototype.addEventListener;
-                    EventTarget.prototype.addEventListener = function(type, listener, options) {
+                    EventTarget.prototype.addEventListener = maskNative(function addEventListener(type, listener, options) {
                         if (type === 'visibilitychange' || type === 'webkitvisibilitychange' || type === 'freeze') {
                             return;
                         }
                         return origAddEvent.call(this, type, listener, options);
-                    };
+                    }, 'addEventListener');
                 }
 
                 // 🛡️ Background rAF Unchoker: Force token typing into DOM even when tab/app is in background!
@@ -168,7 +179,7 @@ object LiveAutoPilotEngine {
                     const pendingCallbacks = new Map();
                     let rafIdCounter = 1;
 
-                    window.requestAnimationFrame = function(cb) {
+                    window.requestAnimationFrame = maskNative(function requestAnimationFrame(cb) {
                         const id = rafIdCounter++;
                         let executed = false;
                         let nativeId = null;
@@ -191,20 +202,20 @@ object LiveAutoPilotEngine {
                                 try { if (nativeId !== null) origCancelRaf.call(window, nativeId); } catch(_) {}
                                 cb(performance.now());
                             }
-                        }, 18);
+                        }, 24 + Math.floor(Math.random() * 10));
 
                         pendingCallbacks.set(id, { nativeId: nativeId, timeoutId: timeoutId });
                         return id;
-                    };
+                    }, 'requestAnimationFrame');
 
-                    window.cancelAnimationFrame = function(id) {
+                    window.cancelAnimationFrame = maskNative(function cancelAnimationFrame(id) {
                         const entry = pendingCallbacks.get(id);
                         if (entry) {
                             pendingCallbacks.delete(id);
                             try { if (entry.nativeId !== null) origCancelRaf.call(window, entry.nativeId); } catch(_) {}
                             clearTimeout(entry.timeoutId);
                         }
-                    };
+                    }, 'cancelAnimationFrame');
                 }
 
                 function hookPromptSubmission() {
@@ -672,16 +683,39 @@ object LiveAutoPilotEngine {
                     }
                 }
 
+                async function humanTap(el) {
+                    if (!el) return;
+                    try {
+                        const rect = el.getBoundingClientRect();
+                        const w = Math.max(4, rect.width || 24);
+                        const h = Math.max(4, rect.height || 24);
+                        const clientX = Math.round(rect.left + w / 2 + (Math.random() - 0.5) * w * 0.4);
+                        const clientY = Math.round(rect.top + h / 2 + (Math.random() - 0.5) * h * 0.4);
+                        const mOpts = { bubbles: true, cancelable: true, view: window, clientX: clientX, clientY: clientY, button: 0, buttons: 1 };
+                        const pOpts = Object.assign({}, mOpts, { pointerId: 1, pointerType: 'touch', isPrimary: true, pressure: 0.55 });
+                        try { el.dispatchEvent(new PointerEvent('pointerdown', pOpts)); } catch(_) {}
+                        try { el.dispatchEvent(new MouseEvent('mousedown', mOpts)); } catch(_) {}
+                        await delay(30 + Math.floor(Math.random() * 45));
+                        try { el.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, pOpts, { buttons: 0, pressure: 0 }))); } catch(_) {}
+                        try { el.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, mOpts, { buttons: 0 }))); } catch(_) {}
+                        el.click();
+                    } catch(_) {
+                        el.click();
+                    }
+                }
+
                 // 3. Inject text into textarea and click Run
                 const promptArea = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
                 if (promptArea) {
+                    await humanTap(promptArea);
+                    await delay(140 + Math.floor(Math.random() * 180));
                     safeInjectText(promptArea, effectivePrompt);
-                    await delay(600);
+                    await delay(650 + Math.floor(Math.random() * 750));
                     let readyWait = 0;
                     while (readyWait < 25) {
                         const submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
                         if (submitBtn && isRunButtonReady(submitBtn)) {
-                            submitBtn.click();
+                            await humanTap(submitBtn);
                             break;
                         }
                         await delay(300);
