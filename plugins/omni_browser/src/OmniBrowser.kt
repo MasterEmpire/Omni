@@ -1693,6 +1693,7 @@ class OmniBrowser : PluginEntry() {
                 if (state.editingShortcut != null) {
                     val targetItem = state.editingShortcut!!
                     EditShortcutDialog(
+                        bridge = bridge,
                         shortcut = targetItem,
                         faviconCache = state.faviconCache,
                         onFetchFavicon = { state.fetchFavicon(it) },
@@ -1708,6 +1709,9 @@ class OmniBrowser : PluginEntry() {
                                 }
                             }
                         },
+                        onReadLocalCode = { urlOrPath ->
+                            state.vaultManager.readLocalAppCode(urlOrPath, targetItem.id)
+                        },
                         onDelete = {
                             val updated = state.shortcuts.filter { it.id != targetItem.id }
                             state.shortcuts = updated
@@ -1716,48 +1720,53 @@ class OmniBrowser : PluginEntry() {
                             state.editingShortcut = null
                             bridge.showToast("Shortcut deleted")
                         },
-                                        onSave = { name, rawUrl, isDef, isGlobal ->
-                    val trimmedUrl = rawUrl.trim()
-                    val effectiveSource = when {
-                        isLocalFilePath(trimmedUrl) && !trimmedUrl.contains("localhost") -> trimmedUrl
-                        !targetItem.localSourcePath.isNullOrEmpty() -> targetItem.localSourcePath
-                        targetItem.url.contains("vault_") || targetItem.title.contains("IDE", true) -> targetItem.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
-                        else -> null
-                    }
+                        onSave = { name, rawUrl, isDef, isGlobal, editedCode ->
+                            val trimmedUrl = rawUrl.trim()
+                            val effectiveSource = when {
+                                isLocalFilePath(trimmedUrl) && !trimmedUrl.contains("localhost") -> trimmedUrl
+                                !targetItem.localSourcePath.isNullOrEmpty() -> targetItem.localSourcePath
+                                targetItem.url.contains("vault_") || targetItem.title.contains("IDE", true) -> targetItem.localSourcePath ?: "/storage/emulated/0/Download/F/index.html"
+                                else -> null
+                            }
 
-                    val isLocal = effectiveSource != null || isLocalFilePath(trimmedUrl)
-                    val (finalUrl, srcPath) = if (isLocal && effectiveSource != null) {
-                        val isolatedSubPath = "ide/vault_${targetItem.id}/index.html"
-                        val (success, err) = state.vaultManager.syncLocalFileToVault(effectiveSource, isolatedSubPath)
-                        if (success) {
-                            bridge.showToast("✅ Synced latest file from storage!")
-                        } else {
-                            bridge.showToast("⚠️ Auto-sync warning: $err")
-                        }
-                        Pair("http://localhost:${state.localServerPort}/vault_${targetItem.id}/index.html", normalizeLocalFilePath(effectiveSource))
-                    } else {
-                        val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
-                        Pair(webUrl, null)
-                    }
+                            val isLocal = effectiveSource != null || isLocalFilePath(trimmedUrl)
+                            val (finalUrl, srcPath) = if (isLocal && effectiveSource != null) {
+                                val isolatedSubPath = "ide/vault_${targetItem.id}/index.html"
+                                val (success, err) = if (editedCode != null) {
+                                    state.vaultManager.saveLocalAppCode(editedCode, isolatedSubPath, effectiveSource)
+                                } else {
+                                    state.vaultManager.syncLocalFileToVault(effectiveSource, isolatedSubPath)
+                                }
+                                if (success) {
+                                    bridge.showToast(if (editedCode != null) "✅ Saved edited app code!" else "✅ Synced latest file from storage!")
+                                } else {
+                                    bridge.showToast("⚠️ Auto-sync warning: $err")
+                                }
+                                Pair("http://localhost:${state.localServerPort}/vault_${targetItem.id}/index.html", normalizeLocalFilePath(effectiveSource))
+                            } else {
+                                val webUrl = if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) "https://$trimmedUrl" else trimmedUrl
+                                Pair(webUrl, null)
+                            }
 
-                    val updated = state.shortcuts.map {
-                        if (it.id == targetItem.id) {
-                            it.copy(title = name.trim().ifEmpty { targetItem.title }, url = finalUrl, localSourcePath = srcPath, isDefault = isDef, isGlobalProfile = isGlobal)
-                        } else if (isDef) {
-                            it.copy(isDefault = false)
-                        } else it
-                    }
-                    state.shortcuts = updated
-                    state.vaultManager.saveShortcuts(updated)
-                    state.fetchFavicon(extractDomain(finalUrl))
-                    state.editingShortcut = null
-                },
+                            val updated = state.shortcuts.map {
+                                if (it.id == targetItem.id) {
+                                    it.copy(title = name.trim().ifEmpty { targetItem.title }, url = finalUrl, localSourcePath = srcPath, isDefault = isDef, isGlobalProfile = isGlobal)
+                                } else if (isDef) {
+                                    it.copy(isDefault = false)
+                                } else it
+                            }
+                            state.shortcuts = updated
+                            state.vaultManager.saveShortcuts(updated)
+                            state.fetchFavicon(extractDomain(finalUrl))
+                            state.editingShortcut = null
+                        },
                         onDismiss = { state.editingShortcut = null }
                     )
                 }
 
                 if (state.isAddingShortcut) {
                     AddShortcutDialog(
+                        bridge = bridge,
                         faviconCache = state.faviconCache,
                         onFetchFavicon = { state.fetchFavicon(it) },
                         onPickFile = { onPicked ->
@@ -1772,15 +1781,22 @@ class OmniBrowser : PluginEntry() {
                                 }
                             }
                         },
-                        onAdd = { name, rawUrl, isDef, isGlobal ->
+                        onReadLocalCode = { urlOrPath ->
+                            state.vaultManager.readLocalAppCode(urlOrPath, null)
+                        },
+                        onAdd = { name, rawUrl, isDef, isGlobal, editedCode ->
                             val trimmedUrl = rawUrl.trim()
                             val isLocal = isLocalFilePath(trimmedUrl)
                             val newShortcutId = "sc_${System.currentTimeMillis()}"
                             val (finalUrl, srcPath) = if (isLocal) {
                                 val isolatedSubPath = "ide/vault_$newShortcutId/index.html"
-                                val (success, _) = state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
+                                val (success, _) = if (editedCode != null) {
+                                    state.vaultManager.saveLocalAppCode(editedCode, isolatedSubPath, trimmedUrl)
+                                } else {
+                                    state.vaultManager.syncLocalFileToVault(trimmedUrl, isolatedSubPath)
+                                }
                                 if (success) {
-                                    bridge.showToast("✅ Isolated vault created for local app")
+                                    bridge.showToast(if (editedCode != null) "✅ Vault created with edited code" else "✅ Isolated vault created for local app")
                                 }
                                 Pair("http://localhost:${state.localServerPort}/vault_$newShortcutId/index.html", normalizeLocalFilePath(trimmedUrl))
                             } else {
