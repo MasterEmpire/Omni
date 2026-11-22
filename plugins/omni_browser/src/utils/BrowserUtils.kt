@@ -1184,23 +1184,34 @@ val AI_STUDIO_HEADLESS_TURBO_SCRIPT = """
     if (window.__omniHeadlessTurboHooked) return;
     window.__omniHeadlessTurboHooked = true;
 
+    function maskNative(fn, name) {
+        try {
+            const label = 'function ' + (name || fn.name || '') + '() { [native code] }';
+            Object.defineProperty(fn, 'toString', {
+                value: function() { return label; },
+                configurable: true
+            });
+        } catch(_) {}
+        return fn;
+    }
+
     try {
         Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
         Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
         Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
         Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
-        document.hasFocus = function() { return true; };
+        document.hasFocus = maskNative(function hasFocus() { return true; }, 'hasFocus');
     } catch(_) {}
 
     if (!window.__omniVisibilityHooked) {
         window.__omniVisibilityHooked = true;
         const origAddEvent = EventTarget.prototype.addEventListener;
-        EventTarget.prototype.addEventListener = function(type, listener, options) {
+        EventTarget.prototype.addEventListener = maskNative(function addEventListener(type, listener, options) {
             if (type === 'visibilitychange' || type === 'webkitvisibilitychange' || type === 'freeze') {
                 return;
             }
             return origAddEvent.call(this, type, listener, options);
-        };
+        }, 'addEventListener');
     }
 
     if (!window.__omniRafUnchoked) {
@@ -1210,7 +1221,7 @@ val AI_STUDIO_HEADLESS_TURBO_SCRIPT = """
         const pendingCallbacks = new Map();
         let rafIdCounter = 1;
 
-        window.requestAnimationFrame = function(cb) {
+        window.requestAnimationFrame = maskNative(function requestAnimationFrame(cb) {
             const id = rafIdCounter++;
             let executed = false;
             let nativeId = null;
@@ -1225,7 +1236,7 @@ val AI_STUDIO_HEADLESS_TURBO_SCRIPT = """
                 });
             } catch(_) {}
 
-            const throttleMs = window.__omniHeadlessTurbo ? 350 : 180;
+            const fallbackMs = 24 + Math.floor(Math.random() * 12);
             const timeoutId = setTimeout(function() {
                 if (!executed) {
                     executed = true;
@@ -1233,35 +1244,24 @@ val AI_STUDIO_HEADLESS_TURBO_SCRIPT = """
                     try { if (nativeId !== null) origCancelRaf.call(window, nativeId); } catch(_) {}
                     cb(performance.now());
                 }
-            }, throttleMs);
+            }, fallbackMs);
 
             pendingCallbacks.set(id, { nativeId: nativeId, timeoutId: timeoutId });
             return id;
-        };
+        }, 'requestAnimationFrame');
 
-        window.cancelAnimationFrame = function(id) {
+        window.cancelAnimationFrame = maskNative(function cancelAnimationFrame(id) {
             const entry = pendingCallbacks.get(id);
             if (entry) {
                 pendingCallbacks.delete(id);
                 try { if (entry.nativeId !== null) origCancelRaf.call(window, entry.nativeId); } catch(_) {}
                 clearTimeout(entry.timeoutId);
             }
-        };
+        }, 'cancelAnimationFrame');
     }
 
     window.__omniEnableHeadlessTurbo = function() {
         window.__omniHeadlessTurbo = true;
-        try {
-            if (!document.getElementById('omni-headless-turbo-css')) {
-                const style = document.createElement('style');
-                style.id = 'omni-headless-turbo-css';
-                style.textContent = [
-                    '*, *::before, *::after { animation-duration: 0.001ms !important; animation-delay: 0ms !important; transition-duration: 0.001ms !important; transition-delay: 0ms !important; }',
-                    'ms-chat-turn, .chat-turn-container, ms-thought-chunk, ms-text-chunk, ms-cmark-node, ms-code-block, ms-image-chunk, ms-video-chunk, ms-audio-chunk, ms-grounding-sources, ms-search-entry-point, ms-announcement-modal, ms-banner, ms-global-banner, img { display: none !important; }'
-                ].join('\n');
-                (document.head || document.documentElement).appendChild(style);
-            }
-        } catch(_) {}
     };
 })();
 """.trimIndent()
