@@ -54,7 +54,93 @@ class AiStudioAutomator(
     private val bridge: HostBridge
 ) {
     companion object {
+        data class HeadlessWebViewRecord(
+            val webView: WebView,
+            val sessionId: String,
+            val profileId: String,
+            val automatorRef: java.lang.ref.WeakReference<AiStudioAutomator>,
+            val createdAtMs: Long = System.currentTimeMillis(),
+            @Volatile var lastActiveAtMs: Long = System.currentTimeMillis(),
+            @Volatile var isDead: Boolean = false
+        )
+
         val liveHeadlessWebViews = java.util.concurrent.CopyOnWriteArraySet<WebView>()
+        val headlessRegistry = java.util.concurrent.ConcurrentHashMap<WebView, HeadlessWebViewRecord>()
+
+        @Volatile
+        var onLivePoolChanged: (() -> Unit)? = null
+
+        fun touchHeadlessWebView(wv: WebView?) {
+            if (wv == null) return
+            headlessRegistry[wv]?.lastActiveAtMs = System.currentTimeMillis()
+        }
+
+        fun destroyWebViewSafely(wv: WebView) {
+            liveHeadlessWebViews.remove(wv)
+            headlessRegistry.remove(wv)
+            try { wv.evaluateJavascript("if (window.__omniPuppet) { window.__omniPuppet.abort(); }", null) } catch (_: Exception) {}
+            try { wv.removeJavascriptInterface("OmniAutomator") } catch (_: Exception) {}
+            try { wv.removeJavascriptInterface("OmniAnalyticsBridge") } catch (_: Exception) {}
+            try { wv.stopLoading() } catch (_: Exception) {}
+            try { wv.onPause() } catch (_: Exception) {}
+            try { (wv.parent as? ViewGroup)?.removeView(wv) } catch (_: Exception) {}
+            try { wv.loadUrl("about:blank") } catch (_: Exception) {}
+            try { wv.clearHistory() } catch (_: Exception) {}
+            try { wv.destroy() } catch (_: Exception) {}
+        }
+
+        fun purgeOrphanedAndGhostWebViews(
+            bridge: HostBridge? = null,
+            reason: String = "audit",
+            maxIdleMs: Long = 10 * 60_000L
+        ): Int {
+            val now = System.currentTimeMillis()
+            val toBust = mutableListOf<Pair<WebView, String>>()
+
+            for (wv in liveHeadlessWebViews) {
+                val rec = headlessRegistry[wv]
+                if (rec == null) {
+                    toBust.add(wv to "untracked_orphan")
+                    continue
+                }
+                val owner = rec.automatorRef.get()
+                val ownerSession = owner?.sessions?.get(rec.sessionId)
+                val idleMs = now - rec.lastActiveAtMs
+                val why = when {
+                    rec.isDead -> "renderer_dead"
+                    owner == null -> "owner_gc_orphaned"
+                    ownerSession == null -> "session_missing"
+                    ownerSession.isAborted -> "session_aborted"
+                    idleMs > maxIdleMs -> "stale_idle_${idleMs / 1000}s"
+                    else -> null
+                }
+                if (why != null) {
+                    toBust.add(wv to why)
+                }
+            }
+
+            for ((wv, _) in headlessRegistry) {
+                if (!liveHeadlessWebViews.contains(wv)) {
+                    toBust.add(wv to "dangling_registry")
+                }
+            }
+
+            var bustedCount = 0
+            for ((wv, why) in toBust.distinctBy { it.first }) {
+                val rec = headlessRegistry[wv]
+                if (rec != null) {
+                    rec.automatorRef.get()?.sessions?.remove(rec.sessionId)
+                }
+                destroyWebViewSafely(wv)
+                bustedCount++
+                bridge?.log("GHOST_BUSTER", "👻💥 Busted ghost WebView [${rec?.sessionId ?: "unknown"}] (profile=${rec?.profileId ?: "?"}, reason=$why, trigger=$reason)")
+            }
+
+            if (bustedCount > 0) {
+                onLivePoolChanged?.invoke()
+            }
+            return bustedCount
+        }
     }
     val sessions = java.util.concurrent.ConcurrentHashMap<String, ActivePuppetSession>()
     private var defaultSessionId: String? = null
@@ -102,6 +188,7 @@ class AiStudioAutomator(
         temporaryChat: Boolean? = null,
         onReady: (sessionId: String?, error: String?) -> Unit
     ) {
+        purgeOrphanedAndGhostWebViews(bridge, reason = "pre_spawn")
         val sessionId = "session_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}"
 
         if (profileId != "default" && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
@@ -131,6 +218,12 @@ class AiStudioAutomator(
                 } catch (_: Exception) {}
             }
             liveHeadlessWebViews.add(this)
+            headlessRegistry[this] = HeadlessWebViewRecord(
+                webView = this,
+                sessionId = sessionId,
+                profileId = profileId,
+                automatorRef = java.lang.ref.WeakReference(this@AiStudioAutomator)
+            )
             translationX = 0f
             alpha = 1f
             layoutParams = ViewGroup.LayoutParams(viewWidth, viewHeight)
@@ -212,12 +305,14 @@ class AiStudioAutomator(
             addJavascriptInterface(object {
                 @JavascriptInterface
                 fun onStatus(msg: String) {
+                    touchHeadlessWebView(sessionInstance.webView)
                     bridge.updateForegroundTask("AI Studio ($profileId): $msg")
                     mainHandler.post { legacyBatchCallback?.onStatus(msg) }
                 }
 
                 @JavascriptInterface
                 fun onLog(tag: String, msg: String) {
+                    touchHeadlessWebView(sessionInstance.webView)
                     bridge.log("AI_STUDIO_${tag}[$sessionId]", msg)
                 }
 
@@ -265,6 +360,7 @@ class AiStudioAutomator(
 
                 @JavascriptInterface
                 fun onPuppetTurnProgress(thoughts: String, output: String) {
+                    touchHeadlessWebView(sessionInstance.webView)
                     mainHandler.post {
                         val cb = sessionInstance.onTurnProgressCallback
                         if (cb != null) {
@@ -277,6 +373,7 @@ class AiStudioAutomator(
 
                 @JavascriptInterface
                 fun onPuppetTurnDelta(thoughtsDelta: String, outputDelta: String, isFirst: Boolean) {
+                    touchHeadlessWebView(sessionInstance.webView)
                     mainHandler.post {
                         sessionInstance.onTurnDeltaCallback?.invoke(thoughtsDelta, outputDelta, isFirst)
                     }
@@ -352,6 +449,25 @@ class AiStudioAutomator(
             )
 
             webViewClient = object : WebViewClient() {
+                override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                    bridge.log("AI_STUDIO_RENDER_CRASH", "💀 Headless renderer died for [$sessionId] (didCrash=${detail?.didCrash()})")
+                    if (view != null) {
+                        headlessRegistry[view]?.isDead = true
+                    }
+                    mainHandler.post {
+                        val crashMsg = "AI Studio headless renderer crashed (OOM)"
+                        sessionInstance.onReadyCallback?.invoke(false, crashMsg)
+                        sessionInstance.onReadyCallback = null
+                        sessionInstance.onConfigCallback?.invoke(false, crashMsg)
+                        sessionInstance.onConfigCallback = null
+                        sessionInstance.onNewChatCallback?.invoke(false, crashMsg)
+                        sessionInstance.onNewChatCallback = null
+                        sessionInstance.onTurnErrorCallback?.invoke(crashMsg)
+                        sessionInstance.onTurnErrorCallback = null
+                        closeSession(sessionId)
+                    }
+                    return true
+                }
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val reqUri = request?.url ?: return super.shouldInterceptRequest(view, request)
                     val urlStr = reqUri.toString().lowercase(java.util.Locale.US)
@@ -434,6 +550,7 @@ override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
 
         sessions[sessionId] = sessionInstance
         bridge.log("AI_STUDIO_POOL", "🚀 Initialized Session [$sessionId] for Profile '$profileId' (Active Sessions: ${sessions.size})")
+        mainHandler.post { onLivePoolChanged?.invoke() }
 
         val slug = normalizeModelSlug(model)
         val queryParts = mutableListOf<String>()
@@ -473,6 +590,7 @@ override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
             onDone(false, "Session '$sessionId' is not active.")
             return
         }
+        touchHeadlessWebView(session.webView)
         session.onNewChatCallback = onDone
         session.webView.evaluateJavascript("if (window.__omniPuppet && window.__omniPuppet.newChat) { window.__omniPuppet.newChat(); }", null)
     }
@@ -493,6 +611,7 @@ override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
             onDone(false, "Session '$sessionId' is not active.")
             return
         }
+        touchHeadlessWebView(session.webView)
         session.onConfigCallback = onDone
 
         val configObj = JSONObject().apply {
@@ -526,7 +645,7 @@ override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
             onError("Session '$sessionId' is not active.")
             return
         }
-
+        touchHeadlessWebView(session.webView)
         session.onTurnProgressCallback = onProgress
         session.onTurnDeltaCallback = onDelta
         session.onTurnCompleteCallback = onComplete
@@ -558,15 +677,10 @@ override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
 
     fun closeSession(sessionId: String) {
         val session = sessions.remove(sessionId) ?: return
-        liveHeadlessWebViews.remove(session.webView)
+        session.isAborted = true
         bridge.log("AI_STUDIO_POOL", "🛑 Closing Session [$sessionId]. Remaining: ${sessions.size}")
-        try {
-            session.webView.evaluateJavascript("if (window.__omniPuppet) { window.__omniPuppet.abort(); }", null)
-            session.webView.stopLoading()
-            session.webView.onPause()
-            (session.webView.parent as? ViewGroup)?.removeView(session.webView)
-            session.webView.destroy()
-        } catch (_: Exception) {}
+        destroyWebViewSafely(session.webView)
+        mainHandler.post { onLivePoolChanged?.invoke() }
 
         if (defaultSessionId == sessionId) {
             defaultSessionId = null
