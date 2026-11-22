@@ -91,10 +91,8 @@ class AiStudioAutomator(
 
         fun purgeOrphanedAndGhostWebViews(
             bridge: HostBridge? = null,
-            reason: String = "audit",
-            maxIdleMs: Long = 10 * 60_000L
+            reason: String = "audit"
         ): Int {
-            val now = System.currentTimeMillis()
             val toBust = mutableListOf<Pair<WebView, String>>()
 
             for (wv in liveHeadlessWebViews) {
@@ -105,13 +103,11 @@ class AiStudioAutomator(
                 }
                 val owner = rec.automatorRef.get()
                 val ownerSession = owner?.sessions?.get(rec.sessionId)
-                val idleMs = now - rec.lastActiveAtMs
                 val why = when {
                     rec.isDead -> "renderer_dead"
                     owner == null -> "owner_gc_orphaned"
                     ownerSession == null -> "session_missing"
                     ownerSession.isAborted -> "session_aborted"
-                    idleMs > maxIdleMs -> "stale_idle_${idleMs / 1000}s"
                     else -> null
                 }
                 if (why != null) {
