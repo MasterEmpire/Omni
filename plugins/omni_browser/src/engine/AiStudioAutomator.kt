@@ -197,8 +197,8 @@ class AiStudioAutomator(
         }
 
         val displayMetrics = context.resources.displayMetrics
-        val viewWidth = displayMetrics.widthPixels.coerceAtMost(720).coerceAtLeast(480)
-        val viewHeight = displayMetrics.heightPixels.coerceAtMost(1280).coerceAtLeast(800)
+        val viewWidth = displayMetrics.widthPixels.coerceAtLeast(412)
+        val viewHeight = displayMetrics.heightPixels.coerceAtLeast(800)
 
         val sessionInstance = ActivePuppetSession(
             sessionId = sessionId,
@@ -470,21 +470,12 @@ class AiStudioAutomator(
                     val host = reqUri.host?.lowercase(java.util.Locale.US) ?: ""
                     val path = reqUri.path?.lowercase(java.util.Locale.US) ?: ""
 
-                    val isJunkHost = host.contains("googletagmanager.com") ||
-                        host.contains("google-analytics.com") ||
-                        host.contains("analytics.google.com") ||
-                        host.contains("doubleclick.net") ||
-                        host.contains("googleadservices.com") ||
-                        host.contains("googlesyndication.com") ||
-                        urlStr.contains("cookienotificationbar") ||
-                        urlStr.contains("feedback/js/help")
-
                     val isHeavyMedia = path.endsWith(".mp4") ||
                         path.endsWith(".webm") ||
                         path.endsWith(".mp3") ||
                         path.endsWith(".wav")
 
-                    if (isJunkHost || isHeavyMedia) {
+                    if (isHeavyMedia) {
                         val origin = request.requestHeaders?.get("Origin") ?: "https://aistudio.google.com"
                         val corsHeaders = mapOf(
                             "Access-Control-Allow-Origin" to origin,
@@ -559,7 +550,8 @@ override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         }
 
         val now = System.currentTimeMillis()
-        val scheduledAt = nextBootSlotAtMs.updateAndGet { prev -> maxOf(now, prev + 900L) }
+        val jitterMs = (1600L..3200L).random()
+        val scheduledAt = nextBootSlotAtMs.updateAndGet { prev -> maxOf(now, prev + jitterMs) }
         val staggerDelayMs = (scheduledAt - now).coerceAtLeast(0L)
 
         bridge.startForegroundTask("AI Studio Puppet", "Active puppet sessions: ${sessions.size}")
