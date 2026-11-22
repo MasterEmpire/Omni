@@ -79,6 +79,8 @@ class OmniBrowser : PluginEntry() {
         @Volatile
         private var activeSolverAutomator: AiStudioAutomator? = null
         @Volatile
+        private var solverAbortFlag: Boolean = false
+        @Volatile
         private var activeBrowserStateRef: java.lang.ref.WeakReference<BrowserStateHolder>? = null
 
         private fun ensureIpcSession(
@@ -199,6 +201,7 @@ class OmniBrowser : PluginEntry() {
         }
 
         fun abortCurrentSolve() {
+            solverAbortFlag = true
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 activeSolverAutomator?.isAborted = true
                 activeSolverAutomator?.stop(null)
@@ -528,7 +531,6 @@ class OmniBrowser : PluginEntry() {
             val matchedPreset = presets.find { it.title.equals(presetTitle.trim(), ignoreCase = true) }
             val finalSysTitle = matchedPreset?.title ?: presetTitle.trim()
             val finalSysPrompt = matchedPreset?.body ?: ""
-
             val profiles = vaultManager.loadProfiles() ?: emptyList()
             val analyticsMap = vaultManager.loadAiAnalytics()
             val nowMs = System.currentTimeMillis()
@@ -541,13 +543,8 @@ class OmniBrowser : PluginEntry() {
                 val qTime = analyticsMap[prof.id]?.lastQuotaHitTimestamp ?: 0L
                 !isQuotaCurrentlyActive(qTime, nowMs)
             }
-            val eligibleProfiles = when {
-                freshProfiles.isNotEmpty() -> freshProfiles
-                verifiedProfiles.isNotEmpty() -> verifiedProfiles
-                else -> emptyList()
-            }
 
-            if (eligibleProfiles.isEmpty()) {
+            if (nonDefaultProfiles.isEmpty()) {
                 val noProfErr = "No secondary solver profile found in Omni Chrome. Main Default account is protected."
                 bridge.log("OMNI_SOLVE_ERR", "❌ Abort: $noProfErr")
                 sendStatus("No secondary profile found. Create an account in Omni Chrome.")
@@ -555,91 +552,167 @@ class OmniBrowser : PluginEntry() {
                 return
             }
 
+            if (verifiedProfiles.isEmpty()) {
+                val verifyErr = "All secondary solver profiles require Google verification. Approve one in Omni Chrome Health Deck."
+                bridge.log("OMNI_SOLVE_ERR", "🔒 Abort: $verifyErr")
+                sendStatus("All solver profiles locked for verification.")
+                sendResult(false, null, verifyErr)
+                return
+            }
+
+            if (freshProfiles.isEmpty()) {
+                val quotaErr = "All verified secondary solver profiles have exhausted today's quota (resets at PT midnight)."
+                bridge.log("OMNI_SOLVE_ERR", "🔴 Abort: $quotaErr")
+                sendStatus("All solver profiles quota-exhausted today.")
+                sendResult(false, null, quotaErr)
+                return
+            }
+
             val prefs = ctx.getSharedPreferences("omni_solver_prefs", Context.MODE_PRIVATE)
             val lastIdx = prefs.getInt("solver_profile_round_robin_idx", -1)
-            val nextIdx = (lastIdx + 1) % eligibleProfiles.size
-            prefs.edit().putInt("solver_profile_round_robin_idx", nextIdx).apply()
-
-            val targetProfile = eligibleProfiles[nextIdx]
-            val targetProfileId = targetProfile.id
-
-            bridge.log("OMNI_SOLVE_PRESET", "Using preset: '$finalSysTitle' (${finalSysPrompt.length} chars), Profile: '${targetProfile.name}' ($targetProfileId) [idx: $nextIdx/${eligibleProfiles.size}]")
+            val startIdx = (lastIdx + 1) % freshProfiles.size
+            val rotatedCandidates = (0 until freshProfiles.size).map { offset ->
+                freshProfiles[(startIdx + offset) % freshProfiles.size]
+            }
+            val solverModel = (payload["model"] as? String)?.ifBlank { "Gemini 3.7 Flash" } ?: "Gemini 3.7 Flash"
+            solverAbortFlag = false
 
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                val automator = AiStudioAutomator(ctx, bridge)
-                activeSolverAutomator = automator
-                val steps = listOf(
-                    SequentialPromptStep(
-                        prompt = userPrompt,
-                        repeatCount = 1,
-                        isInfinite = false,
-                        attachments = attachments
-                    )
-                )
-
-                sendStatus("Connecting to Omni solver on ${targetProfile.name}.")
-                bridge.log("OMNI_SOLVE_EXEC", "Starting headless AI Studio automator on ${targetProfile.name} ($targetProfileId)...")
-
-                automator.start(
-                    profileId = targetProfileId,
-                    steps = steps,
-                    userPrompt = userPrompt,
-                    systemPromptTitle = finalSysTitle,
-                    systemPrompt = finalSysPrompt,
-                    thinkingLevel = "Default",
-                    model = "Gemini 3.7 Flash",
-                    fallbackEnabled = true,
-                    temporaryChat = false,
-                    attachments = emptyList(),
-                    containerLayout = null,
-                    callback = object : AutomationCallback {
-                        private var lastProgressBroadcastTime = 0L
-
-                        override fun onStatus(msg: String) {
-                            sendStatus(msg)
-                        }
-
-                        override fun onProgress(thoughts: String, output: String) {
-                            bridge.log("OMNI_SOLVE_PROGRESS", "Streaming response (${output.length} chars, thoughts: ${thoughts.length} chars)")
-                            val now = System.currentTimeMillis()
-                            // Pulse live streaming heartbeat every 8 seconds to reset client Dead Man Switch
-                            if (now - lastProgressBroadcastTime > 8000L) {
-                                lastProgressBroadcastTime = now
-                                val statusMessage = if (output.isEmpty() && thoughts.isNotEmpty()) {
-                                    "Thinking and analyzing questions."
-                                } else {
-                                    "Generating answers."
-                                }
-                                sendStatus(statusMessage)
-                            }
-                        }
-
-                        override fun onComplete(thoughts: String, output: String) {
-                            bridge.log("OMNI_SOLVE_SUCCESS", "🎉 AI Studio returned solution (${output.length} chars)")
-                            bridge.log("OMNI_SOLVE_AUDIT", "Head (first 200 chars): ${output.take(200).replace("\n", " ")}")
-                            bridge.log("OMNI_SOLVE_AUDIT", "Tail (last 200 chars): ${output.takeLast(200).replace("\n", " ")}")
-                            bridge.log("OMNI_SOLVE_FULL_DUMP", "=== [DISPATCHING SOLUTION TO UNIVERSAL (${output.length} chars)] ===\n$output\n=== [END DISPATCH] ===")
-                            sendResult(true, output, null)
-                            automator.stop(null)
-                            if (activeSolverAutomator == automator) activeSolverAutomator = null
-                        }
-
-                        override fun onError(err: String) {
-                            if (automator.isAborted) {
-                                bridge.log("OMNI_SOLVE_ERROR", "🛑 Suppressed error callback because automator was ABORTED.")
-                                return
-                            }
-                            bridge.log("OMNI_SOLVE_ERROR", "💥 AI Studio automator reported error: $err")
-                            sendResult(false, null, err)
-                            automator.stop(null)
-                            if (activeSolverAutomator == automator) activeSolverAutomator = null
-                        }
+                fun attemptSolve(candidateIdx: Int, lastErr: String?) {
+                    if (solverAbortFlag) {
+                        bridge.log("OMNI_SOLVE_ERROR", "🛑 Halted solve rotation because ABORT_SOLVE was triggered.")
+                        return
                     }
-                )
+                    if (candidateIdx >= rotatedCandidates.size) {
+                        val finalErr = lastErr ?: "All eligible solver profiles failed."
+                        bridge.log("OMNI_SOLVE_ERROR", "💥 Exhausted all ${rotatedCandidates.size} candidate profile(s). Final error: $finalErr")
+                        sendResult(false, null, finalErr)
+                        return
+                    }
+
+                    val targetProfile = rotatedCandidates[candidateIdx]
+                    val targetProfileId = targetProfile.id
+                    val liveAnalytic = vaultManager.loadAiAnalytics()[targetProfileId]
+                    val curNow = System.currentTimeMillis()
+                    if (liveAnalytic != null && (liveAnalytic.needsVerification || isQuotaCurrentlyActive(liveAnalytic.lastQuotaHitTimestamp, curNow))) {
+                        bridge.log("OMNI_SOLVE_ROTATE", "⏭️ Skipping '${targetProfile.name}' ($targetProfileId) — newly locked/quota-hit. Advancing...")
+                        attemptSolve(candidateIdx + 1, lastErr)
+                        return
+                    }
+
+                    prefs.edit().putInt("solver_profile_round_robin_idx", (startIdx + candidateIdx) % freshProfiles.size).apply()
+                    bridge.log("OMNI_SOLVE_PRESET", "Using preset: '$finalSysTitle' (${finalSysPrompt.length} chars), Profile: '${targetProfile.name}' ($targetProfileId) [candidate ${candidateIdx + 1}/${rotatedCandidates.size}]")
+
+                    val automator = AiStudioAutomator(ctx, bridge)
+                    activeSolverAutomator = automator
+                    val steps = listOf(
+                        SequentialPromptStep(
+                            prompt = userPrompt,
+                            repeatCount = 1,
+                            isInfinite = false,
+                            attachments = attachments
+                        )
+                    )
+
+                    sendStatus("Connecting to Omni solver on ${targetProfile.name}.")
+                    bridge.log("OMNI_SOLVE_EXEC", "Starting headless AI Studio automator on ${targetProfile.name} ($targetProfileId)...")
+
+                    automator.start(
+                        profileId = targetProfileId,
+                        steps = steps,
+                        userPrompt = userPrompt,
+                        systemPromptTitle = finalSysTitle,
+                        systemPrompt = finalSysPrompt,
+                        thinkingLevel = "Default",
+                        model = solverModel,
+                        fallbackEnabled = true,
+                        temporaryChat = false,
+                        attachments = emptyList(),
+                        containerLayout = null,
+                        callback = object : AutomationCallback {
+                            private var lastProgressBroadcastTime = 0L
+
+                            override fun onStatus(msg: String) {
+                                sendStatus(msg)
+                            }
+
+                            override fun onProgress(thoughts: String, output: String) {
+                                bridge.log("OMNI_SOLVE_PROGRESS", "Streaming response (${output.length} chars, thoughts: ${thoughts.length} chars)")
+                                val now = System.currentTimeMillis()
+                                // Pulse live streaming heartbeat every 8 seconds to reset client Dead Man Switch
+                                if (now - lastProgressBroadcastTime > 8000L) {
+                                    lastProgressBroadcastTime = now
+                                    val statusMessage = if (output.isEmpty() && thoughts.isNotEmpty()) {
+                                        "Thinking and analyzing questions."
+                                    } else {
+                                        "Generating answers."
+                                    }
+                                    sendStatus(statusMessage)
+                                }
+                            }
+
+                            override fun onComplete(thoughts: String, output: String) {
+                                bridge.log("OMNI_SOLVE_SUCCESS", "🎉 AI Studio returned solution (${output.length} chars)")
+                                bridge.log("OMNI_SOLVE_AUDIT", "Head (first 200 chars): ${output.take(200).replace("\n", " ")}")
+                                bridge.log("OMNI_SOLVE_AUDIT", "Tail (last 200 chars): ${output.takeLast(200).replace("\n", " ")}")
+                                bridge.log("OMNI_SOLVE_FULL_DUMP", "=== [DISPATCHING SOLUTION TO UNIVERSAL (${output.length} chars)] ===\n$output\n=== [END DISPATCH] ===")
+                                sendResult(true, output, null)
+                                automator.stop(null)
+                                if (activeSolverAutomator == automator) activeSolverAutomator = null
+                            }
+
+                            override fun onError(err: String) {
+                                if (automator.isAborted || solverAbortFlag) {
+                                    bridge.log("OMNI_SOLVE_ERROR", "🛑 Suppressed error callback because automator was ABORTED.")
+                                    return
+                                }
+                                bridge.log("OMNI_SOLVE_ERROR", "💥 AI Studio automator reported error on '${targetProfile.name}': $err")
+                                automator.stop(null)
+                                if (activeSolverAutomator == automator) activeSolverAutomator = null
+
+                                val lowerErr = err.lowercase()
+                                val isQuotaErr = lowerErr.contains("quota") ||
+                                    lowerErr.contains("429") ||
+                                    lowerErr.contains("resource exhausted") ||
+                                    lowerErr.contains("resource_exhausted") ||
+                                    lowerErr.contains("rate limit")
+                                val isVerifyErr = lowerErr.contains("verification required") ||
+                                    lowerErr.contains("verify-account") ||
+                                    lowerErr.contains("must be verified") ||
+                                    lowerErr.contains("unusual activity")
+                                val isPermErr = lowerErr.contains("permission denied") ||
+                                    lowerErr.contains("caller does not have")
+
+                                if (isQuotaErr) {
+                                    val existingQTime = vaultManager.loadAiAnalytics()[targetProfileId]?.lastQuotaHitTimestamp ?: 0L
+                                    if (System.currentTimeMillis() - existingQTime > 15_000L) {
+                                        VaultManager.recordQuotaHit(ctx, bridge, targetProfileId, err)
+                                    }
+                                } else if (isVerifyErr) {
+                                    val alreadyLocked = vaultManager.loadAiAnalytics()[targetProfileId]?.needsVerification ?: false
+                                    if (!alreadyLocked) {
+                                        VaultManager.recordVerificationLock(ctx, bridge, targetProfileId, err)
+                                    }
+                                }
+
+                                val isRotatable = isQuotaErr || isVerifyErr || isPermErr
+                                if (isRotatable && (candidateIdx + 1) < rotatedCandidates.size) {
+                                    val nextProf = rotatedCandidates[candidateIdx + 1]
+                                    bridge.log("OMNI_SOLVE_ROTATE", "↪️ Rotating from '${targetProfile.name}' to '${nextProf.name}' [${candidateIdx + 2}/${rotatedCandidates.size}]")
+                                    sendStatus("${targetProfile.name} unavailable; switching to ${nextProf.name}.")
+                                    attemptSolve(candidateIdx + 1, err)
+                                } else {
+                                    sendResult(false, null, err)
+                                }
+                            }
+                        }
+                    )
+                }
+
+                attemptSolve(0, null)
             }
         }
     }
-
     override fun onCreateView(context: Context, bridge: HostBridge, baseDir: String): View {
         bridge.log("OMNI_TRACE", "🌐 [BROWSER_INIT] OmniBrowser.onCreateView invoked!")
         return ComposeView(context).apply {
