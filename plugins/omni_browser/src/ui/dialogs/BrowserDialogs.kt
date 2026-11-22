@@ -46,6 +46,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omni.hub.api.HostBridge
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.omni.plugin.browser.models.ActiveDownloadItem
 import com.omni.plugin.browser.models.BrowserProfile
 import com.omni.plugin.browser.models.ShortcutItem
@@ -324,19 +331,184 @@ fun DownloadsManagerDialog(
 }
 
 @Composable
+fun LocalShortcutCodeEditorDialog(
+    bridge: HostBridge,
+    appTitle: String,
+    initialCode: String,
+    onSaveCode: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var codeText by remember(initialCode) { mutableStateOf(initialCode) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            color = Color(0xFF16181D),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header
+                Surface(
+                    color = Color(0xFF1E222A),
+                    tonalElevation = 4.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = Color(0xFFE8EAED))
+                            }
+                            Column {
+                                Text(
+                                    text = "💻 ${appTitle.ifBlank { "Local App" }} Code",
+                                    color = Color(0xFFE8EAED),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${codeText.lines().size} lines • ${codeText.length} chars",
+                                    color = Color(0xFF8B949E),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = { onSaveCode(codeText) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.padding(end = 6.dp)
+                        ) {
+                            Text("Save Code", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // Clear / Copy / Paste Action Toolbar
+                Surface(
+                    color = Color(0xFF1B1F26),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                codeText = ""
+                                bridge.showToast("Editor cleared")
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF28B82)),
+                            border = BorderStroke(1.dp, Color(0xFFF28B82).copy(alpha = 0.5f)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(34.dp)
+                        ) {
+                            Text("🗑️ Clear", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                bridge.copyToClipboard(codeText)
+                                bridge.showToast("📋 Copied ${codeText.length} chars")
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8AB4F8)),
+                            border = BorderStroke(1.dp, Color(0xFF8AB4F8).copy(alpha = 0.5f)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(34.dp)
+                        ) {
+                            Text("📋 Copy", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val clip = bridge.getClipboardText()
+                                if (!clip.isNullOrEmpty()) {
+                                    codeText = clip
+                                    bridge.showToast("📥 Pasted ${clip.length} chars")
+                                } else {
+                                    bridge.showToast("Clipboard is empty")
+                                }
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E5FF)),
+                            border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.55f)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(34.dp)
+                        ) {
+                            Text("📥 Paste", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF2E333D))
+
+                // Code Editor Body
+                OutlinedTextField(
+                    value = codeText,
+                    onValueChange = { codeText = it },
+                    placeholder = { Text("Paste or edit app HTML/JS source code here...", color = Color(0xFF5F6368), fontSize = 12.sp) },
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        color = Color(0xFFC9D1D9)
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF0D1117),
+                        unfocusedContainerColor = Color(0xFF0D1117),
+                        focusedBorderColor = Color(0xFF30363D),
+                        unfocusedBorderColor = Color(0xFF21262D)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(10.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun EditShortcutDialog(
+    bridge: HostBridge,
     shortcut: ShortcutItem,
     faviconCache: Map<String, Bitmap>,
     onFetchFavicon: (String) -> Unit,
     onPickFile: ((String) -> Unit) -> Unit,
+    onReadLocalCode: (String) -> Result<String>,
     onDelete: () -> Unit,
-    onSave: (String, String, Boolean, Boolean) -> Unit,
+    onSave: (String, String, Boolean, Boolean, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     var editName by remember(shortcut) { mutableStateOf(shortcut.title) }
     var editUrl by remember(shortcut) { mutableStateOf(shortcut.localSourcePath ?: shortcut.url) }
     var isDefault by remember(shortcut) { mutableStateOf(shortcut.isDefault) }
     var isGlobalProfile by remember(shortcut) { mutableStateOf(shortcut.isGlobalProfile) }
+    var draftEditedCode by remember(shortcut) { mutableStateOf<String?>(null) }
+    var editorInitialCode by remember { mutableStateOf<String?>(null) }
+    var isLoadingCode by remember { mutableStateOf(false) }
     val previewDomain = remember(editUrl) { extractDomain(editUrl) }
 
     LaunchedEffect(previewDomain) {
@@ -384,11 +556,19 @@ fun EditShortcutDialog(
 
                 OutlinedTextField(
                     value = editUrl,
-                    onValueChange = { editUrl = it },
+                    onValueChange = {
+                        editUrl = it
+                        draftEditedCode = null
+                    },
                     label = { Text("URL or Local File Path") },
                     singleLine = true,
                     trailingIcon = {
-                        IconButton(onClick = { onPickFile { editUrl = it } }) {
+                        IconButton(onClick = {
+                            onPickFile {
+                                editUrl = it
+                                draftEditedCode = null
+                            }
+                        }) {
                             Icon(Icons.Default.Add, contentDescription = "Browse File", tint = Color(0xFF8AB4F8))
                         }
                     },
@@ -402,6 +582,43 @@ fun EditShortcutDialog(
                 )
 
                 if (com.omni.plugin.browser.utils.isLocalFilePath(editUrl) || shortcut.localSourcePath != null) {
+                    OutlinedButton(
+                        onClick = {
+                            if (draftEditedCode != null) {
+                                editorInitialCode = draftEditedCode
+                            } else {
+                                isLoadingCode = true
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) { onReadLocalCode(editUrl) }
+                                    isLoadingCode = false
+                                    res.onSuccess { txt ->
+                                        editorInitialCode = txt
+                                    }.onFailure { err ->
+                                        bridge.showToast("⚠️ ${err.message ?: "Could not load code"}")
+                                        editorInitialCode = ""
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !isLoadingCode,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E5FF)),
+                        border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.65f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isLoadingCode) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFF00E5FF))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Loading Source...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text(
+                                if (draftEditedCode != null) "💻 Edit App Code (Modified)" else "💻 View / Edit App Code",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = Color(0xFF1F2227),
@@ -412,12 +629,18 @@ fun EditShortcutDialog(
                             modifier = Modifier.padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("🔄", fontSize = 15.sp)
+                            Text(if (draftEditedCode != null) "✏️" else "🔄", fontSize = 15.sp)
                             Spacer(Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Auto-Sync on Save", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    "Tapping Save will re-sync the latest file directly from disk into the vault.",
+                                    if (draftEditedCode != null) "Edited Code Queued" else "Auto-Sync on Save",
+                                    color = Color(0xFF58A6FF),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    if (draftEditedCode != null) "Tapping Save will apply your edited code into the vault."
+                                    else "Tapping Save will re-sync the latest file directly from disk into the vault.",
                                     color = Color(0xFF8B949E),
                                     fontSize = 10.sp
                                 )
@@ -466,7 +689,7 @@ fun EditShortcutDialog(
                 }
 
                 Button(
-                    onClick = { onSave(editName, editUrl, isDefault, isGlobalProfile) },
+                    onClick = { onSave(editName, editUrl, isDefault, isGlobalProfile, draftEditedCode) },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
                 ) {
                     Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
@@ -479,6 +702,20 @@ fun EditShortcutDialog(
             }
         }
     )
+
+    if (editorInitialCode != null) {
+        LocalShortcutCodeEditorDialog(
+            bridge = bridge,
+            appTitle = editName.ifBlank { shortcut.title },
+            initialCode = editorInitialCode!!,
+            onSaveCode = { updated ->
+                draftEditedCode = updated
+                editorInitialCode = null
+                bridge.showToast("✅ Code ready — tap Save to apply")
+            },
+            onDismiss = { editorInitialCode = null }
+        )
+    }
 }
 
 @Composable
@@ -904,16 +1141,22 @@ fun MenuCustomizerDialog(
 }
 @Composable
 fun AddShortcutDialog(
+    bridge: HostBridge,
     faviconCache: Map<String, Bitmap>,
     onFetchFavicon: (String) -> Unit,
     onPickFile: ((String) -> Unit) -> Unit,
-    onAdd: (String, String, Boolean, Boolean) -> Unit,
+    onReadLocalCode: (String) -> Result<String>,
+    onAdd: (String, String, Boolean, Boolean, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     var newName by remember { mutableStateOf("") }
     var newUrl by remember { mutableStateOf("https://") }
     var isDefault by remember { mutableStateOf(false) }
     var isGlobalProfile by remember { mutableStateOf(true) }
+    var draftEditedCode by remember { mutableStateOf<String?>(null) }
+    var editorInitialCode by remember { mutableStateOf<String?>(null) }
+    var isLoadingCode by remember { mutableStateOf(false) }
     val previewDomain = remember(newUrl) { extractDomain(newUrl) }
 
     LaunchedEffect(previewDomain) {
@@ -959,13 +1202,17 @@ fun AddShortcutDialog(
 
                 OutlinedTextField(
                     value = newUrl,
-                    onValueChange = { newUrl = it },
+                    onValueChange = {
+                        newUrl = it
+                        draftEditedCode = null
+                    },
                     label = { Text("URL or File Path") },
                     singleLine = true,
                     trailingIcon = {
                         IconButton(onClick = {
                             onPickFile { directPath ->
                                 newUrl = directPath
+                                draftEditedCode = null
                                 if (newName.isEmpty()) {
                                     newName = directPath.substringAfterLast("/").substringBeforeLast(".")
                                 }
@@ -984,6 +1231,43 @@ fun AddShortcutDialog(
                 )
 
                 if (com.omni.plugin.browser.utils.isLocalFilePath(newUrl)) {
+                    OutlinedButton(
+                        onClick = {
+                            if (draftEditedCode != null) {
+                                editorInitialCode = draftEditedCode
+                            } else {
+                                isLoadingCode = true
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) { onReadLocalCode(newUrl) }
+                                    isLoadingCode = false
+                                    res.onSuccess { txt ->
+                                        editorInitialCode = txt
+                                    }.onFailure { err ->
+                                        bridge.showToast("⚠️ ${err.message ?: "Could not load code"}")
+                                        editorInitialCode = ""
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !isLoadingCode,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E5FF)),
+                        border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.65f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isLoadingCode) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFF00E5FF))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Loading Source...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text(
+                                if (draftEditedCode != null) "💻 Edit App Code (Modified)" else "💻 View / Edit App Code",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1020,7 +1304,7 @@ fun AddShortcutDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onAdd(newName, newUrl, isDefault, isGlobalProfile) },
+                onClick = { onAdd(newName, newUrl, isDefault, isGlobalProfile, draftEditedCode) },
                 enabled = newUrl.length >= 3,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8AB4F8))
             ) {
@@ -1033,6 +1317,20 @@ fun AddShortcutDialog(
             }
         }
     )
+
+    if (editorInitialCode != null) {
+        LocalShortcutCodeEditorDialog(
+            bridge = bridge,
+            appTitle = newName.ifBlank { "Local App" },
+            initialCode = editorInitialCode!!,
+            onSaveCode = { updated ->
+                draftEditedCode = updated
+                editorInitialCode = null
+                bridge.showToast("✅ Code ready — tap Add to save")
+            },
+            onDismiss = { editorInitialCode = null }
+        )
+    }
 }
 
 @Composable
