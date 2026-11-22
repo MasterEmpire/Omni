@@ -39,7 +39,7 @@ jobs:
           URL=$(echo "$RESPONSE" | jq -r '.url')
           
           if [[ "$TOKEN" == *"error"* ]] || [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then 
-            echo "â Error: Failed to claim token from Conduit Relay."
+            echo "❌ Error: Failed to claim token from Conduit Relay."
             echo "Raw Response: $RESPONSE"
             exit 1 
           fi
