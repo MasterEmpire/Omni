@@ -350,6 +350,101 @@ class VaultManager(
         }
     }
 
+    fun readLocalAppCode(sourcePath: String, shortcutId: String? = null): Result<String> {
+        return try {
+            val cleanInput = sourcePath.trim()
+            val pluginDir = File(bridge.getPluginDir())
+
+            if (shortcutId != null) {
+                val vaultFile = File(pluginDir, "ide/vault_$shortcutId/index.html")
+                if (vaultFile.exists() && vaultFile.isFile && vaultFile.length() > 0L) {
+                    return Result.success(vaultFile.readText(Charsets.UTF_8))
+                }
+            }
+
+            if (cleanInput.contains("localhost") || cleanInput.contains("127.0.0.1")) {
+                val rootIde = File(pluginDir, "ide/index.html")
+                if (rootIde.exists() && rootIde.isFile) {
+                    return Result.success(rootIde.readText(Charsets.UTF_8))
+                }
+            }
+
+            if (cleanInput.startsWith("content://")) {
+                val uri = Uri.parse(cleanInput)
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        return Result.success(input.readBytes().toString(Charsets.UTF_8))
+                    }
+                } catch (_: Exception) {
+                    if (android.provider.DocumentsContract.isDocumentUri(context, uri)) {
+                        val docId = android.provider.DocumentsContract.getDocumentId(uri)
+                        val rawPath = when {
+                            docId.startsWith("raw:") -> docId.removePrefix("raw:")
+                            docId.contains(":") -> {
+                                val parts = docId.split(":")
+                                if (parts[0].equals("primary", true)) "/storage/emulated/0/${parts[1]}" else null
+                            }
+                            else -> null
+                        }
+                        if (rawPath != null) {
+                            val f = File(rawPath)
+                            if (f.exists() && f.isFile) return Result.success(f.readText(Charsets.UTF_8))
+                        }
+                    }
+                }
+            }
+
+            val cleanPath = normalizeLocalFilePath(cleanInput)
+            val srcFile = File(cleanPath)
+            if (srcFile.exists() && srcFile.isFile) {
+                return Result.success(srcFile.readText(Charsets.UTF_8))
+            }
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val queryUri = android.provider.MediaStore.Files.getContentUri("external")
+                val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+                val selection = "${android.provider.MediaStore.MediaColumns.DATA} = ?"
+                context.contentResolver.query(queryUri, projection, selection, arrayOf(cleanPath), null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        val cUri = android.content.ContentUris.withAppendedId(queryUri, id)
+                        context.contentResolver.openInputStream(cUri)?.use { input ->
+                            return Result.success(input.readBytes().toString(Charsets.UTF_8))
+                        }
+                    }
+                }
+            }
+
+            Result.failure(IllegalStateException("File not found at $cleanPath"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun saveLocalAppCode(
+        code: String,
+        targetSubPath: String,
+        mirrorSourcePath: String? = null
+    ): Pair<Boolean, String> {
+        return try {
+            val bytes = code.toByteArray(Charsets.UTF_8)
+            val savedAbsPath = bridge.saveFile(targetSubPath, bytes)
+            if (!mirrorSourcePath.isNullOrBlank() && !mirrorSourcePath.contains("localhost")) {
+                try {
+                    val f = File(normalizeLocalFilePath(mirrorSourcePath))
+                    if (f.exists() && f.canWrite()) {
+                        f.writeBytes(bytes)
+                    }
+                } catch (_: Exception) {}
+            }
+            autoMirrorVaultToDocuments()
+            bridge.log("IDE_CODE_EDIT", "✅ Saved edited app code (${bytes.size} bytes) -> $targetSubPath")
+            Pair(true, "file://$savedAbsPath")
+        } catch (e: Exception) {
+            bridge.log("IDE_CODE_EDIT_ERR", "Failed saving edited code: ${e.message}")
+            Pair(false, e.message ?: "Save failed")
+        }
+    }
     fun autoMirrorVaultToDocuments() {
         mirrorExecutor.execute {
             try {
