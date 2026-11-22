@@ -875,6 +875,40 @@ class OmniBrowser : PluginEntry() {
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                factory = { ctx ->
+                    object : FrameLayout(ctx) {
+                        override fun dispatchTouchEvent(ev: android.view.MotionEvent?): Boolean = false
+                        override fun onInterceptTouchEvent(ev: android.view.MotionEvent?): Boolean = true
+                    }.apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        alpha = 0.004f
+                        isClickable = false
+                        isFocusable = false
+                        descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                        state.foregroundHeadlessContainer = this
+                        state.syncHeadlessWebViewAnchors()
+                    }
+                },
+                update = { frame ->
+                    if (state.foregroundHeadlessContainer !== frame) {
+                        state.foregroundHeadlessContainer = frame
+                    }
+                    if (!state.isBackgroundOverlayHosting &&
+                        frame.childCount == 0 &&
+                        com.omni.plugin.browser.engine.AiStudioAutomator.liveHeadlessWebViews.isNotEmpty()
+                    ) {
+                        state.syncHeadlessWebViewAnchors()
+                    }
+                },
+                modifier = Modifier
+                    .size(280.dp, 460.dp)
+                    .graphicsLayer { alpha = 0.004f }
+            )
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
