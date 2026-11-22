@@ -65,6 +65,12 @@ class WebViewPoolManager(
     val pool = mutableMapOf<String, WebView>()
     val pendingPurge = mutableMapOf<String, WebView>()
     val tabDesktopModes = mutableMapOf<String, Boolean>()
+    val tabLabBridges = java.util.concurrent.ConcurrentHashMap<String, com.omni.plugin.browser.models.OmniStudioLabBridge>()
+
+    fun cleanupTabResources(tabId: String, reason: String) {
+        val labBridge = if (reason == "navigated") tabLabBridges[tabId] else tabLabBridges.remove(tabId)
+        labBridge?.cleanupOnTabLifecycle(reason)
+    }
     var siteCacheManager: com.omni.plugin.browser.services.SiteCacheManager? = null
 
     var mobileUA: String = ""
@@ -197,7 +203,8 @@ class WebViewPoolManager(
     }
 
     fun purgePending(containerLayout: FrameLayout?) {
-        pendingPurge.forEach { (_, wv) ->
+        pendingPurge.forEach { (tabId, wv) ->
+            cleanupTabResources(tabId, "tab_purged")
             try {
                 wv.stopLoading()
                 wv.onPause()
@@ -226,6 +233,7 @@ class WebViewPoolManager(
         for (tabToEvict in tabsInPool) {
             if (numToEvict <= 0) break
             val wv = pool.remove(tabToEvict.id)
+            cleanupTabResources(tabToEvict.id, "evicted")
             if (wv != null) {
                 val bundle = Bundle()
                 wv.saveState(bundle)
@@ -265,6 +273,7 @@ class WebViewPoolManager(
         for (tabToEvict in nonAiTabsInPool) {
             if (numToEvict <= 0) break
             val wv = pool.remove(tabToEvict.id)
+            cleanupTabResources(tabToEvict.id, "trim_evicted")
             if (wv != null) {
                 val bundle = Bundle()
                 wv.saveState(bundle)
@@ -437,6 +446,7 @@ class WebViewPoolManager(
                 }
             )
             addJavascriptInterface(studioLabBridge, "__OmniStudioLabBridge")
+            tabLabBridges[tabId] = studioLabBridge
 
             val ideBridge = com.omni.plugin.browser.models.OmniIdeBridge(
                 onCxpDispatched = { xml ->
@@ -689,6 +699,7 @@ class WebViewPoolManager(
                 override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                     bridge.log("RENDER_CRASH", "Chromium render process terminated for tab [$tabId] (didCrash: ${detail?.didCrash()})")
                     pool.remove(tabId)
+                    cleanupTabResources(tabId, "render_gone")
                     try {
                         (view?.parent as? ViewGroup)?.removeView(view)
                         view?.destroy()
@@ -712,6 +723,9 @@ class WebViewPoolManager(
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    if (!url.isNullOrBlank() && url != "about:blank") {
+                        cleanupTabResources(tabId, "navigated")
+                    }
                     extractHostSafe(url).takeIf { it.isNotEmpty() }?.let { currentPageHost = it }
                     if (url != null) listener.onPageStarted(tabId, url)
                     if (url != null && url.contains("aistudio.google.com")) {
