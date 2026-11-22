@@ -40,6 +40,20 @@ class OmniStudioLabBridge(
     private var savedSystemBrightnessMode: Int? = null
     private var dimmerStatusTextView: android.widget.TextView? = null
     private var lastDimmerTapMs: Long = 0L
+    fun cleanupOnTabLifecycle(reason: String) {
+        mainHandler.post {
+            val aiCount = automator.sessions.size
+            val gptCount = chatGptAutomator.sessions.size
+            val gemCount = geminiAutomator.sessions.size
+            if (aiCount + gptCount + gemCount > 0) {
+                bridge.log("GHOST_BUSTER", "🧹 Tab lifecycle ($reason): closing $aiCount AI Studio, $gptCount ChatGPT, $gemCount Gemini session(s)")
+            }
+            automator.closeAllSessions()
+            chatGptAutomator.closeAllSessions()
+            geminiAutomator.closeAllSessions()
+            AiStudioAutomator.purgeOrphanedAndGhostWebViews(bridge, reason = "tab_$reason")
+        }
+    }
 
     private fun findHostActivity(): android.app.Activity? {
         var ctx: Context? = getActiveWebView()?.context ?: context
