@@ -52,7 +52,7 @@ fun buildAiStudioPuppetScript(): String {
             }
 
             async function waitForEl(selector, timeoutMs, intervalMs) {
-                const step = intervalMs || 25;
+                const step = intervalMs || 40;
                 const maxTries = Math.max(1, Math.ceil((timeoutMs || 2000) / step));
                 for (let i = 0; i < maxTries; i++) {
                     const el = document.querySelector(selector);
@@ -60,6 +60,71 @@ fun buildAiStudioPuppetScript(): String {
                     await delay(step);
                 }
                 return null;
+            }
+
+            async function humanScrollIntoView(el) {
+                if (!el) return;
+                try {
+                    const rect = el.getBoundingClientRect();
+                    const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+                    const vw = window.innerWidth || document.documentElement.clientWidth || 412;
+                    if (rect.top < 16 || rect.bottom > vh - 16 || rect.left < 0 || rect.right > vw) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+                        await randomDelay(160, 320);
+                    }
+                } catch(_) {}
+            }
+
+            async function humanClick(el) {
+                if (!el) return false;
+                await humanScrollIntoView(el);
+                try {
+                    const rect = el.getBoundingClientRect();
+                    const w = Math.max(4, rect.width || 24);
+                    const h = Math.max(4, rect.height || 24);
+                    const jitterX = (Math.random() - 0.5) * w * 0.44;
+                    const jitterY = (Math.random() - 0.5) * h * 0.44;
+                    const clientX = Math.round(rect.left + w / 2 + jitterX);
+                    const clientY = Math.round(rect.top + h / 2 + jitterY);
+                    const screenX = Math.round((window.screenX || 0) + clientX);
+                    const screenY = Math.round((window.screenY || 0) + clientY);
+
+                    const mouseOpts = {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: clientX,
+                        clientY: clientY,
+                        screenX: screenX,
+                        screenY: screenY,
+                        button: 0,
+                        buttons: 1
+                    };
+                    const pointerOpts = Object.assign({}, mouseOpts, {
+                        pointerId: 1,
+                        width: 14 + Math.floor(Math.random() * 8),
+                        height: 14 + Math.floor(Math.random() * 8),
+                        pressure: 0.45 + Math.random() * 0.35,
+                        pointerType: 'touch',
+                        isPrimary: true
+                    });
+
+                    try { el.dispatchEvent(new PointerEvent('pointerover', Object.assign({}, pointerOpts, { buttons: 0, pressure: 0 }))); } catch(_) {}
+                    try { el.dispatchEvent(new MouseEvent('mouseover', Object.assign({}, mouseOpts, { buttons: 0 }))); } catch(_) {}
+                    try { el.dispatchEvent(new PointerEvent('pointerdown', pointerOpts)); } catch(_) {}
+                    try { el.dispatchEvent(new MouseEvent('mousedown', mouseOpts)); } catch(_) {}
+
+                    await randomDelay(28, 72);
+
+                    const upPointer = Object.assign({}, pointerOpts, { buttons: 0, pressure: 0 });
+                    const upMouse = Object.assign({}, mouseOpts, { buttons: 0 });
+                    try { el.dispatchEvent(new PointerEvent('pointerup', upPointer)); } catch(_) {}
+                    try { el.dispatchEvent(new MouseEvent('mouseup', upMouse)); } catch(_) {}
+                    el.click();
+                    return true;
+                } catch(e) {
+                    try { el.click(); return true; } catch(_) { return false; }
+                }
             }
 
             async function dismissInterstitials() {
@@ -86,9 +151,9 @@ fun buildAiStudioPuppetScript(): String {
                             if (DISMISS_DICTIONARY.some(d => txt === d || txt.startsWith(d + ' ') || aria.includes(d) || testId.includes(d)) ||
                                 aria.includes('close') || aria.includes('dismiss')) {
                                 hostLog('INTERSTITIAL', 'Dismissing popup/modal with button: "' + (txt || aria) + '"');
-                                btn.click();
+                                await humanClick(btn);
                                 dismissed = true;
-                                await delay(400);
+                                await randomDelay(350, 620);
                                 break;
                             }
                         }
@@ -97,8 +162,8 @@ fun buildAiStudioPuppetScript(): String {
                             const closeIconBtn = dialog.querySelector('button[aria-label*="close"], button[aria-label*="Close"], button[data-test-close-button], .close-button, .close-btn, mat-icon[fonticon="close"]');
                             if (closeIconBtn && isElementVisible(closeIconBtn)) {
                                 hostLog('INTERSTITIAL', 'Dismissing popup/modal via close icon button');
-                                closeIconBtn.click();
-                                await delay(400);
+                                await humanClick(closeIconBtn);
+                                await randomDelay(350, 620);
                             }
                         }
                     }
@@ -109,8 +174,8 @@ fun buildAiStudioPuppetScript(): String {
                         const bannerDismiss = banner.querySelector('button[aria-label*="dismiss"], button[aria-label*="close"], button.dismiss-button, button.close');
                         if (bannerDismiss && isElementVisible(bannerDismiss)) {
                             hostLog('INTERSTITIAL', 'Dismissing announcement banner');
-                            bannerDismiss.click();
-                            await delay(200);
+                            await humanClick(bannerDismiss);
+                            await randomDelay(220, 420);
                         }
                     }
                 } catch(e) {
@@ -313,32 +378,74 @@ fun buildAiStudioPuppetScript(): String {
                 return true;
             }
 
-            function safeInjectText(el, text) {
+            function setNativeElementValue(el, val) {
+                const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+                if (descriptor && descriptor.set) {
+                    descriptor.set.call(el, val);
+                } else {
+                    el.value = val;
+                }
+            }
+
+            async function safeInjectText(el, text) {
                 try {
+                    await humanClick(el);
                     el.focus();
-                    el.click();
+                    await randomDelay(120, 260);
 
-                    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-                    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-                    if (descriptor && descriptor.set) {
-                        descriptor.set.call(el, text);
+                    if (text.length <= 40) {
+                        let current = '';
+                        setNativeElementValue(el, '');
+                        el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                        for (let i = 0; i < text.length; i++) {
+                            const ch = text[i];
+                            const code = ch.charCodeAt(0);
+                            el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, keyCode: code, which: code, bubbles: true, cancelable: true }));
+                            try {
+                                el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: ch }));
+                            } catch(_) {}
+                            current += ch;
+                            setNativeElementValue(el, current);
+                            try {
+                                el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: ch }));
+                            } catch(_) {
+                                el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                            }
+                            el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, keyCode: code, which: code, bubbles: true, cancelable: true }));
+                            await delay(18 + Math.floor(Math.random() * 36) + (Math.random() < 0.08 ? 60 : 0));
+                        }
+                        el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                        await randomDelay(140, 300);
                     } else {
-                        el.value = text;
+                        await randomDelay(140, 320);
+                        try {
+                            const dt = new DataTransfer();
+                            dt.setData('text/plain', text);
+                            el.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+                        } catch(_) {}
+                        try {
+                            el.dispatchEvent(new InputEvent('beforeinput', {
+                                bubbles: true,
+                                cancelable: true,
+                                inputType: 'insertFromPaste',
+                                data: null
+                            }));
+                        } catch(_) {}
+                        setNativeElementValue(el, text);
+                        try {
+                            el.dispatchEvent(new InputEvent('input', {
+                                bubbles: true,
+                                cancelable: true,
+                                inputType: 'insertFromPaste',
+                                data: null
+                            }));
+                        } catch(_) {
+                            el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                        }
+                        el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                        await randomDelay(220, 480);
                     }
-
-                    el.dispatchEvent(new Event('focus', { bubbles: true }));
-                    el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-                    try {
-                        el.dispatchEvent(new InputEvent('input', {
-                            bubbles: true,
-                            cancelable: true,
-                            inputType: 'insertText',
-                            data: text
-                        }));
-                    } catch(_) {}
-                    el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-                    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
-                    el.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
                 } catch(e) {
                     hostLog('INJECT_ERR', 'Error typing text: ' + e.message);
                     try { el.value = text; } catch(_) {}
@@ -416,7 +523,7 @@ fun buildAiStudioPuppetScript(): String {
                         await delay(100);
                         warmTicks++;
                     }
-                    await delay(30);
+                    await randomDelay(350, 750);
                     self._isReady = true;
                     hostLog('PUPPET_INIT', 'Session warm and ready!');
                     if (window.OmniAutomator && window.OmniAutomator.onPuppetReady) {
@@ -451,14 +558,15 @@ fun buildAiStudioPuppetScript(): String {
                             updateStatus(TEMPORARY_CHAT ? 'Activating Temporary Chat...' : 'Restoring persistent chat...');
                             const overflowBtn = document.querySelector('.overflow-menu-wrapper button, button[aria-label*="View more actions"]');
                             if (overflowBtn && isElementVisible(overflowBtn)) {
-                                overflowBtn.click();
-                                const tempChatOption = await waitForEl('button[data-test-incognito-toggle], button[aria-label*="temporary chat"]', 1500, 25);
+                                await humanClick(overflowBtn);
+                                const tempChatOption = await waitForEl('button[data-test-incognito-toggle], button[aria-label*="temporary chat"]', 1500, 40);
                                 if (tempChatOption) {
-                                    tempChatOption.click();
-                                    await delay(120);
+                                    await randomDelay(180, 380);
+                                    await humanClick(tempChatOption);
+                                    await randomDelay(240, 460);
                                 } else {
-                                    document.body.click();
-                                    await delay(50);
+                                    await humanClick(document.body);
+                                    await randomDelay(150, 280);
                                 }
                             }
                         }
@@ -471,8 +579,9 @@ fun buildAiStudioPuppetScript(): String {
                                 updateStatus('Opening Settings Drawer...');
                                 const tuneBtn = document.querySelector('button.runsettings-toggle-button, button[aria-label*="Toggle run settings"], button[aria-label*="run settings"]');
                                 if (tuneBtn && isElementVisible(tuneBtn)) {
-                                    tuneBtn.click();
-                                    await waitForEl('ms-thinking-level-setting mat-select, button.system-instructions-card, ms-model-setting mat-select', 1500, 25);
+                                    await humanClick(tuneBtn);
+                                    await waitForEl('ms-thinking-level-setting mat-select, button.system-instructions-card, ms-model-setting mat-select', 1500, 40);
+                                    await randomDelay(220, 420);
                                 }
                             }
 
@@ -484,20 +593,21 @@ fun buildAiStudioPuppetScript(): String {
                                         const targetClean = TARGET_MODEL.toLowerCase().replace(/[-_]/g, ' ');
                                         if (!curModel.includes(targetClean)) {
                                             hostLog('SETTINGS', 'Switching model to: ' + TARGET_MODEL);
-                                            modelSelect.click();
-                                            await waitForEl('.mat-mdc-select-panel mat-option, mat-option, .model-option', 1500, 25);
+                                            await humanClick(modelSelect);
+                                            await waitForEl('.mat-mdc-select-panel mat-option, mat-option, .model-option', 1500, 40);
+                                            await randomDelay(180, 380);
                                             const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option, .model-option'));
                                             const match = options.find(o => {
                                                 const oText = (o.textContent || '').trim().toLowerCase();
                                                 return oText.includes(TARGET_MODEL.toLowerCase()) || oText.includes(targetClean);
                                             });
                                             if (match) {
-                                                match.click();
+                                                await humanClick(match);
                                                 hostLog('SETTINGS', 'Model switched to: ' + (match.textContent || '').trim());
                                             } else {
-                                                document.body.click();
+                                                await humanClick(document.body);
                                             }
-                                            await delay(80);
+                                            await randomDelay(220, 440);
                                         }
                                     }
                                 } catch(e) {
@@ -511,13 +621,14 @@ fun buildAiStudioPuppetScript(): String {
                                     if (thinkingSelect) {
                                         const currentVal = (thinkingSelect.textContent || '').trim().toLowerCase();
                                         if (!currentVal.includes(THINKING_LEVEL.toLowerCase())) {
-                                            thinkingSelect.click();
-                                            await waitForEl('.mat-mdc-select-panel mat-option, mat-option', 1500, 25);
+                                            await humanClick(thinkingSelect);
+                                            await waitForEl('.mat-mdc-select-panel mat-option, mat-option', 1500, 40);
+                                            await randomDelay(180, 380);
                                             const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
                                             const match = options.find(o => (o.textContent || '').trim().toLowerCase().includes(THINKING_LEVEL.toLowerCase()));
-                                            if (match) match.click();
-                                            else document.body.click();
-                                            await delay(80);
+                                            if (match) await humanClick(match);
+                                            else await humanClick(document.body);
+                                            await randomDelay(220, 440);
                                         }
                                     }
                                 } catch(e) {
@@ -561,8 +672,9 @@ fun buildAiStudioPuppetScript(): String {
                                     if (alreadyMatches) {
                                         hostLog('SYS_PROMPT', 'System instructions already active on card. Skipping.');
                                     } else if (sysCard) {
-                                        sysCard.click();
-                                        await waitForEl('ms-system-instructions', 1800, 25);
+                                        await humanClick(sysCard);
+                                        await waitForEl('ms-system-instructions', 1800, 40);
+                                        await randomDelay(220, 420);
                                         let matchedExisting = false;
 
                                         const sysSelect = document.querySelector('ms-system-instructions mat-select, .select-tooltip-wrapper mat-select');
@@ -571,26 +683,27 @@ fun buildAiStudioPuppetScript(): String {
                                             if (SYS_TITLE && curPreset === SYS_TITLE.toLowerCase()) {
                                                 matchedExisting = true;
                                             } else {
-                                                sysSelect.click();
-                                                await waitForEl('.mat-mdc-select-panel mat-option, mat-option', 1500, 25);
+                                                await humanClick(sysSelect);
+                                                await waitForEl('.mat-mdc-select-panel mat-option, mat-option', 1500, 40);
+                                                await randomDelay(180, 360);
                                                 const options = Array.from(document.querySelectorAll('.mat-mdc-select-panel mat-option, mat-option'));
                                                 if (SYS_TITLE && SYS_TITLE.length > 0) {
                                                     const match = options.find(opt => (opt.textContent || '').trim().toLowerCase() === SYS_TITLE.toLowerCase());
                                                     if (match) {
-                                                        match.click();
+                                                        await humanClick(match);
                                                         matchedExisting = true;
                                                         hostLog('SYS_PROMPT', 'Selected preset "' + SYS_TITLE + '" in 1 click.');
-                                                        await delay(80);
+                                                        await randomDelay(220, 450);
                                                     }
                                                 }
                                                 if (!matchedExisting) {
                                                     const createNewOpt = options.find(opt => (opt.textContent || '').includes('Create new instruction'));
                                                     if (createNewOpt) {
-                                                        createNewOpt.click();
-                                                        await delay(120);
+                                                        await humanClick(createNewOpt);
+                                                        await randomDelay(220, 450);
                                                     } else {
-                                                        document.body.click();
-                                                        await delay(60);
+                                                        await humanClick(document.body);
+                                                        await randomDelay(140, 280);
                                                     }
                                                 }
                                             }
@@ -599,13 +712,13 @@ fun buildAiStudioPuppetScript(): String {
                                         if (!matchedExisting && FALLBACK_ENABLED && SYS_PROMPT && SYS_PROMPT.length > 0) {
                                             const titleInput = document.querySelector('ms-system-instructions .title-row input, ms-system-instructions input[placeholder*="Title"], ms-system-instructions input');
                                             if (titleInput && SYS_TITLE && SYS_TITLE.length > 0 && titleInput.value !== SYS_TITLE) {
-                                                safeInjectText(titleInput, SYS_TITLE);
-                                                await delay(60);
+                                                await safeInjectText(titleInput, SYS_TITLE);
+                                                await randomDelay(180, 350);
                                             }
-                                            const sysTa = await waitForEl('ms-system-instructions textarea, textarea.in-run-settings, textarea[aria-label*="System"], textarea[placeholder*="instructions"]', 2000, 25);
+                                            const sysTa = await waitForEl('ms-system-instructions textarea, textarea.in-run-settings, textarea[aria-label*="System"], textarea[placeholder*="instructions"]', 2000, 40);
                                             if (sysTa && sysTa.value !== SYS_PROMPT) {
-                                                safeInjectText(sysTa, SYS_PROMPT);
-                                                await delay(150);
+                                                await safeInjectText(sysTa, SYS_PROMPT);
+                                                await randomDelay(250, 500);
                                             }
                                             let saveWait = 0;
                                             while (saveWait < 30) {
@@ -618,8 +731,9 @@ fun buildAiStudioPuppetScript(): String {
 
                                         const closeBtn = document.querySelector('mat-dialog-container button[mat-dialog-close], mat-dialog-container button[aria-label*="Close"], button[data-test-close-button]');
                                         if (closeBtn) {
-                                            closeBtn.click();
-                                            await delay(120);
+                                            await randomDelay(180, 360);
+                                            await humanClick(closeBtn);
+                                            await randomDelay(220, 420);
                                         }
                                     }
                                 } catch(e) {
@@ -638,8 +752,8 @@ fun buildAiStudioPuppetScript(): String {
                                 if (openDrawer && isElementVisible(openDrawer)) {
                                     const closeSettingsBtn = openDrawer.querySelector('button[aria-label*="Close run settings"], button[aria-label*="Close"]');
                                     if (closeSettingsBtn && isElementVisible(closeSettingsBtn)) {
-                                        closeSettingsBtn.click();
-                                        await delay(150);
+                                        await humanClick(closeSettingsBtn);
+                                        await randomDelay(220, 420);
                                     }
                                 }
                             }
@@ -664,8 +778,8 @@ fun buildAiStudioPuppetScript(): String {
                     this.isConfigured = false;
                     const newBtn = document.querySelector('a[href="/prompts/new_chat"], button[aria-label*="New chat"], button[data-test-new-chat], ms-nav-bar a[href*="new_chat"]');
                     if (newBtn && isElementVisible(newBtn)) {
-                        newBtn.click();
-                        await delay(250);
+                        await humanClick(newBtn);
+                        await randomDelay(350, 650);
                         let ticks = 0;
                         while (ticks < 60) {
                             const pa = document.querySelector('textarea[formcontrolname="promptText"], textarea[aria-label="Enter a prompt"], textarea');
@@ -740,8 +854,8 @@ fun buildAiStudioPuppetScript(): String {
                     }
 
                     if (activePromptArea && prompt && prompt.trim().length > 0) {
-                        safeInjectText(activePromptArea, prompt);
-                        await randomDelay(350, 700);
+                        await safeInjectText(activePromptArea, prompt);
+                        await randomDelay(700, 1500);
                     }
 
                     if (!checkUiGenerating()) {
@@ -754,13 +868,14 @@ fun buildAiStudioPuppetScript(): String {
                             if (checkUiGenerating()) break;
                             submitBtn = document.querySelector('ms-run-button button:not(.stoppable), button.ctrl-enter-submits:not(.stoppable), button[type="submit"]:not(.stoppable)');
                             if (submitBtn && isRunButtonReady(submitBtn)) break;
-                            await delay(25);
+                            await delay(35);
                             readyTicks++;
                         }
 
                         if (!checkUiGenerating() && submitBtn && isRunButtonReady(submitBtn)) {
-                            hostLog('RUN', 'Clicking Run button for ' + stepLabel + '...');
-                            submitBtn.click();
+                            hostLog('RUN', 'Tapping Run button for ' + stepLabel + '...');
+                            await randomDelay(160, 420);
+                            await humanClick(submitBtn);
                         } else if (!checkUiGenerating() && activePromptArea && (activePromptArea.value || '').trim().length > 0) {
                             hostLog('RUN', 'Fallback Ctrl+Enter for ' + stepLabel + '...');
                             activePromptArea.focus();
@@ -848,6 +963,13 @@ fun buildAiStudioPuppetScript(): String {
                             }
                             totalTurnTicks++;
                             idleTicks++;
+
+                            if (totalTurnTicks % 18 === 0) {
+                                try {
+                                    const scroller = document.querySelector('ms-autoscroll-container, .chat-view-container, .chat-history');
+                                    if (scroller) scroller.scrollTop += Math.floor(Math.random() * 48) - 10;
+                                } catch(_) {}
+                            }
 
                             const wire = (activeWireToken && window.__omniWire) ? window.__omniWire.getTurn(activeWireToken) : null;
 
@@ -938,10 +1060,10 @@ fun buildAiStudioPuppetScript(): String {
                                         const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
                                         const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
                                         const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
-                                        if (rerunBtn && isElementVisible(rerunBtn)) rerunBtn.click();
+                                        if (rerunBtn && isElementVisible(rerunBtn)) await humanClick(rerunBtn);
                                         else {
                                             const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
-                                            if (submitBtn) submitBtn.click();
+                                            if (submitBtn) await humanClick(submitBtn);
                                         }
                                         lastOutputText = '';
                                         currentTurnOutput = '';
@@ -1072,10 +1194,10 @@ fun buildAiStudioPuppetScript(): String {
                                     const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
                                     const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
                                     if (rerunBtn && isElementVisible(rerunBtn)) {
-                                        rerunBtn.click();
+                                        await humanClick(rerunBtn);
                                     } else {
                                         const submitBtn = document.querySelector('ms-run-button button:not(.stoppable)');
-                                        if (submitBtn) submitBtn.click();
+                                        if (submitBtn) await humanClick(submitBtn);
                                     }
                                     lastOutputText = '';
                                     contentStaticTicks = 0;
@@ -1172,10 +1294,10 @@ fun buildAiStudioPuppetScript(): String {
                                     const allTurns = document.querySelectorAll('ms-chat-turn, .chat-turn-container');
                                     const lastTurn = allTurns.length > 0 ? allTurns[allTurns.length - 1] : null;
                                     const rerunBtn = lastTurn ? lastTurn.querySelector('button[name="rerun-button"], button.rerun-button, button[aria-label*="Rerun"]') : null;
-                                    if (rerunBtn && isElementVisible(rerunBtn)) rerunBtn.click();
+                                    if (rerunBtn && isElementVisible(rerunBtn)) await humanClick(rerunBtn);
                                     else {
                                         const retrySubmit = document.querySelector('ms-run-button button:not(.stoppable)');
-                                        if (retrySubmit && isRunButtonReady(retrySubmit)) retrySubmit.click();
+                                        if (retrySubmit && isRunButtonReady(retrySubmit)) await humanClick(retrySubmit);
                                     }
                                     await delay(1200);
                                     continue;
@@ -1321,7 +1443,7 @@ fun buildAiStudioPuppetScript(): String {
                             const isLast = (stepIdx === steps.length - 1) && (currentRepeat >= maxRepeats);
                             if (!isLast) {
                                 updateStatus((stepPrefix + 'Step completed. Preparing next turn.').trim());
-                                await randomDelay(1800, 2600);
+                                await randomDelay(4500, 9000);
                             }
                         }
                     }
