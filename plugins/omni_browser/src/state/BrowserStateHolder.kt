@@ -107,6 +107,7 @@ class BrowserStateHolder(
     val activePlaybookTabIds = mutableStateListOf<String>()
     var isBackgroundOverlayHosting by mutableStateOf(false)
     private var backgroundHostOverlayView: FrameLayout? = null
+    var foregroundHeadlessContainer: FrameLayout? = null
 
     // Temporary Popup Tab & Opener Tracking
     val popupTabs = mutableSetOf<String>()
@@ -378,6 +379,11 @@ class BrowserStateHolder(
 
     fun init() {
         vaultManager.resurrectFromVault()
+        com.omni.plugin.browser.engine.AiStudioAutomator.onLivePoolChanged = {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                syncHeadlessWebViewAnchors()
+            }
+        }
 
         try {
             val prefs = context.getSharedPreferences("omni_browser_prefs", Context.MODE_PRIVATE)
@@ -2185,6 +2191,7 @@ class BrowserStateHolder(
         // Nuke selected WebViews from RAM (0 RAM footprint)
         selected.forEach { tab ->
             poolManager.pool.remove(tab.id)?.let { wv ->
+                poolManager.cleanupTabResources(tab.id, "tab_grouped")
                 try {
                     wv.stopLoading()
                     wv.onPause()
@@ -2496,6 +2503,8 @@ class BrowserStateHolder(
 
     fun trimMemory(level: Int) {
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            com.omni.plugin.browser.engine.AiStudioAutomator.purgeOrphanedAndGhostWebViews(bridge, reason = "trim_memory_$level")
+            syncHeadlessWebViewAnchors()
             if (!showSmartNotesDialog) {
                 smartNotes = emptyList()
                 smartNoteFolders = emptyList()
@@ -3469,13 +3478,72 @@ class BrowserStateHolder(
             }
         } else {
             activePlaybookTabIds.remove(tabId)
-            if (activePlaybookTabIds.isEmpty()) {
+            com.omni.plugin.browser.engine.AiStudioAutomator.purgeOrphanedAndGhostWebViews(bridge, reason = "pipeline_stopped")
+            syncHeadlessWebViewAnchors()
+            if (activePlaybookTabIds.isEmpty() && isBackgroundOverlayHosting && com.omni.plugin.browser.engine.AiStudioAutomator.liveHeadlessWebViews.isEmpty()) {
                 exitBackgroundExecutionMode()
             }
         }
     }
 
+    fun syncHeadlessWebViewAnchors() {
+        com.omni.plugin.browser.engine.AiStudioAutomator.purgeOrphanedAndGhostWebViews(bridge, reason = "anchor_sync")
+        val headlessList = com.omni.plugin.browser.engine.AiStudioAutomator.liveHeadlessWebViews.toList()
+
+        if (isBackgroundOverlayHosting) {
+            val hostBox = backgroundHostOverlayView
+            if (hostBox != null) {
+                headlessList.forEach { wv ->
+                    if (wv.parent !== hostBox) {
+                        (wv.parent as? ViewGroup)?.removeView(wv)
+                        hostBox.addView(
+                            wv,
+                            FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            )
+                        )
+                    }
+                    wv.visibility = android.view.View.VISIBLE
+                    wv.onResume()
+                    wv.resumeTimers()
+                }
+                if (hostBox.childCount == 0 && headlessList.isEmpty()) {
+                    bridge.dismissOverlay("omni_bg_webview_anchor")
+                    backgroundHostOverlayView = null
+                    isBackgroundOverlayHosting = false
+                }
+            }
+        } else {
+            val fgBox = foregroundHeadlessContainer
+            if (fgBox != null) {
+                for (i in fgBox.childCount - 1 downTo 0) {
+                    val child = fgBox.getChildAt(i)
+                    if (child is WebView && !headlessList.contains(child)) {
+                        fgBox.removeViewAt(i)
+                    }
+                }
+                headlessList.forEach { wv ->
+                    if (wv.parent !== fgBox) {
+                        (wv.parent as? ViewGroup)?.removeView(wv)
+                        fgBox.addView(
+                            wv,
+                            FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            )
+                        )
+                    }
+                    wv.visibility = android.view.View.VISIBLE
+                    wv.onResume()
+                    wv.resumeTimers()
+                }
+            }
+        }
+    }
+
     fun enterBackgroundExecutionMode() {
+        com.omni.plugin.browser.engine.AiStudioAutomator.purgeOrphanedAndGhostWebViews(bridge, reason = "on_stop")
         val headlessList = com.omni.plugin.browser.engine.AiStudioAutomator.liveHeadlessWebViews.toList()
         val playbookWvs = activePlaybookTabIds.mapNotNull { poolManager.pool[it] }
         if (playbookWvs.isEmpty() && headlessList.isEmpty()) return
@@ -3494,6 +3562,7 @@ class BrowserStateHolder(
         try {
             val hostBox = FrameLayout(context.applicationContext).apply {
                 alpha = 0.004f
+                descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             }
 
             playbookWvs.forEach { wv ->
@@ -3505,6 +3574,7 @@ class BrowserStateHolder(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                 )
+                wv.visibility = android.view.View.VISIBLE
                 wv.onResume()
                 wv.resumeTimers()
             }
@@ -3518,6 +3588,7 @@ class BrowserStateHolder(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                 )
+                wv.visibility = android.view.View.VISIBLE
                 wv.onResume()
                 wv.resumeTimers()
             }
@@ -3544,7 +3615,10 @@ class BrowserStateHolder(
     }
 
     fun exitBackgroundExecutionMode() {
-        if (!isBackgroundOverlayHosting) return
+        if (!isBackgroundOverlayHosting) {
+            syncHeadlessWebViewAnchors()
+            return
+        }
         isBackgroundOverlayHosting = false
         try {
             bridge.dismissOverlay("omni_bg_webview_anchor")
@@ -3552,8 +3626,22 @@ class BrowserStateHolder(
             backgroundHostOverlayView = null
             if (containerLayout != null) {
                 attachTabWebView(activeTabId)
+                val container = containerLayout!!
+                activePlaybookTabIds.filter { it != activeTabId }.forEach { pbId ->
+                    val pbWv = poolManager.pool[pbId]
+                    if (pbWv != null) {
+                        if (pbWv.parent !== container) {
+                            (pbWv.parent as? ViewGroup)?.removeView(pbWv)
+                            pbWv.visibility = android.view.View.INVISIBLE
+                            container.addView(pbWv, 0)
+                        }
+                        pbWv.onResume()
+                        pbWv.resumeTimers()
+                    }
+                }
             }
-            bridge.log("BG_WEBVIEW_HOST", "✅ Restored WebView(s) back into foreground container on ON_RESUME")
+            syncHeadlessWebViewAnchors()
+            bridge.log("BG_WEBVIEW_HOST", "✅ Restored WebView(s) back into foreground container & ghost anchor on ON_RESUME")
         } catch (e: Exception) {
             bridge.log("BG_WEBVIEW_ERR", "Failed restoring background WebViews: ${e.message}")
         }
