@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gemini Key Fleet Stress Bench</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1e242d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --amber: #d29922;
+      --purple: #bc8cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    h1 { margin: 0 0 4px 0; font-size: 18px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+    h2 { margin: 0 0 10px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+    .sub { color: var(--muted); font-size: 12px; margin: 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    label { font-size: 11px; font-weight: 600; color: var(--muted); }
+    input, textarea, select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 9px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 64px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .between { justify-content: space-between; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 14px;
+      padding: 4px 10px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .chip.active, .chip:hover { border-color: var(--accent); color: var(--accent); }
+    button {
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 9px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: #1f6feb; border-color: #388bfd; color: #fff; }
+    .btn-green { background: #238636; border-color: #2ea043; color: #fff; }
+    .btn-danger { background: rgba(248,81,73,0.15); border-color: var(--red); color: var(--red); }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+    .kpi {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .kpi .k-label { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+    .kpi .k-val { font-size: 20px; font-weight: 800; margin-top: 2px; }
+    .kpi .k-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .c-green { color: var(--green); }
+    .c-red { color: var(--red); }
+    .c-amber { color: var(--amber); }
+    .c-blue { color: var(--accent); }
+    .c-purple { color: var(--purple); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 660px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #21262d; text-align: left; vertical-align: top; }
+    th { background: var(--surface2); color: var(--muted); font-size: 11px; font-weight: 700; position: sticky; top: 0; }
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: ui-monospace, monospace;
+    }
+    .b-200 { background: rgba(63,185,80,0.18); color: var(--green); }
+    .b-503 { background: rgba(248,81,73,0.18); color: var(--red); }
+    .b-429 { background: rgba(210,153,34,0.18); color: var(--amber); }
+    .b-err { background: rgba(188,140,255,0.18); color: var(--purple); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .detail-cell { max-width: 320px; word-break: break-word; color: #c9d1d9; }
+    .status-line { font-size: 12px; color: var(--accent); font-weight: 600; }
+    .pw-wrap { display: flex; gap: 6px; }
+    .pw-wrap input { flex: 1; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="row between">
+      <div>
+        <h1>⚡ Gemini API Key Fleet Bench</h1>
+        <p class="sub">Leases N keys simultaneously via Supabase <span class="mono">lease_gemini_api_key()</span> and blasts requests to measure 503s & latency.</p>
+      </div>
+      <span id="run-badge" class="badge b-err">IDLE</span>
+    </div>
+  </div>
+
+  <!-- Supabase Credentials -->
+  <div class="card">
+    <div class="row between" style="margin-bottom:8px;">
+      <h2 style="margin:0;">1. Supabase Credentials (Local Only — Never Copied)</h2>
+      <button id="btn-clear-creds" type="button" class="btn-danger" style="padding:4px 9px;font-size:11px;">Clear Saved</button>
+    </div>
+    <div class="grid">
+      <div class="field">
+        <label>Supabase Project URL</label>
+        <input id="sb-url" type="url" placeholder="https://yourproject.supabase.co" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>Supabase Key (anon or service_role)</label>
+        <div class="pw-wrap">
+          <input id="sb-key" type="password" placeholder="eyJhbGciOi..." autocomplete="off" />
+          <button id="btn-toggle-key" type="button" style="padding:0 10px;">Show</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Test Configuration -->
+  <div class="card">
+    <h2>2. Stress Test Configuration</h2>
+    <div class="grid">
+      <div class="field">
+        <label>Simultaneous Keys to Lease (N)</label>
+        <input id="trial-count" type="number" min="1" max="100" value="10" />
+      </div>
+      <div class="field">
+        <label>Target Gemini Model</label>
+        <input id="model-input" type="text" value="gemini-3.8-flash" placeholder="e.g. gemini-3.8-flash" />
+      </div>
+      <div class="field">
+        <label>Endpoint Mode</label>
+        <select id="endpoint-mode">
+          <option value="generateContent" selected>Standard (generateContent)</option>
+          <option value="streamGenerateContent">Streaming SSE (streamGenerateContent)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Stagger Delay Between Sends (ms)</label>
+        <input id="stagger-ms" type="number" min="0" max="10000" value="0" />
+      </div>
+      <div class="field">
+        <label>Request Timeout (seconds)</label>
+        <input id="timeout-sec" type="number" min="5" max="180" value="30" />
+      </div>
+    </div>
+
+    <div class="chips" id="model-chips">
+      <span class="chip active" data-model="gemini-3.8-flash">gemini-3.8-flash</span>
+      <span class="chip" data-model="gemini-3.6-flash">gemini-3.6-flash</span>
+      <span class="chip" data-model="gemini-3.5-flash-lite">gemini-3.5-flash-lite</span>
+      <span class="chip" data-model="gemini-4-neon">gemini-4-neon</span>
+      <span class="chip" data-model="gemini-4-hydrogen">gemini-4-hydrogen</span>
+      <span class="chip" data-model="gemini-4-carbon">gemini-4-carbon</span>
+      <span class="chip" data-model="gemini-4-argon">gemini-4-argon</span>
+      <span class="chip" data-model="gemini-2.5-flash">gemini-2.5-flash</span>
+    </div>
+
+    <div class="field" style="margin-top:10px;">
+      <label>Test Prompt</label>
+      <textarea id="prompt-input">Reply with exactly OK and a 3-digit number.</textarea>
+    </div>
+
+    <div class="row between" style="margin-top:12px;">
+      <div class="row">
+        <button id="btn-run" type="button" class="btn-primary">🚀 Lease & Blast</button>
+        <button id="btn-abort" type="button" class="btn-danger" disabled>🛑 Abort</button>
+      </div>
+      <div class="row">
+        <button id="btn-copy" type="button" class="btn-green" disabled>📋 Copy Report</button>
+      </div>
+    </div>
+    <div id="status-line" class="status-line" style="margin-top:8px;">Ready.</div>
+  </div>
+
+  <!-- Summary KPIs -->
+  <div class="card">
+    <h2>3. Live Telemetry Summary</h2>
+    <div class="kpis">
+      <div class="kpi"><div class="k-label">Leased</div><div id="kpi-leased" class="k-val c-blue">0/0</div><div id="kpi-lease-avg" class="k-sub">Avg lease: -</div></div>
+      <div class="kpi"><div class="k-label">200 OK</div><div id="kpi-200" class="k-val c-green">0</div><div id="kpi-rate" class="k-sub">Success: 0%</div></div>
+      <div class="kpi"><div class="k-label">503 Overloaded</div><div id="kpi-503" class="k-val c-red">0</div><div id="kpi-503-pct" class="k-sub">0% of sent</div></div>
+      <div class="kpi"><div class="k-label">429 Quota</div><div id="kpi-429" class="k-val c-amber">0</div><div id="kpi-other" class="k-sub">Other err: 0</div></div>
+      <div class="kpi"><div class="k-label">Avg Latency</div><div id="kpi-avg" class="k-val c-purple">-</div><div id="kpi-p50" class="k-sub">P50: - | P95: -</div></div>
+      <div class="kpi"><div class="k-label">Min / Max</div><div id="kpi-minmax" class="k-val" style="font-size:16px;">-</div><div id="kpi-wall" class="k-sub">Wall: -</div></div>
+    </div>
+  </div>
+
+  <!-- Results Table -->
+  <div class="card">
+    <h2>4. Per-Key Trial Breakdown</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Key ID & Mask</th>
+            <th>Lease</th>
+            <th>Status</th>
+            <th>TTFT</th>
+            <th>Total</th>
+            <th>Response / Error Payload</th>
+          </tr>
+        </thead>
+        <tbody id="results-body">
+          <tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px;">No trials run yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const LS_URL = 'omni_bench_sb_url';
+  const LS_KEY = 'omni_bench_sb_key';
+  const LS_MODEL = 'omni_bench_model';
+  const LS_COUNT = 'omni_bench_count';
+
+  const sbUrlEl = document.getElementById('sb-url');
+  const sbKeyEl = document.getElementById('sb-key');
+  const countEl = document.getElementById('trial-count');
+  const modelEl = document.getElementById('model-input');
+  const modeEl = document.getElementById('endpoint-mode');
+  const staggerEl = document.getElementById('stagger-ms');
+  const timeoutEl = document.getElementById('timeout-sec');
+  const promptEl = document.getElementById('prompt-input');
+  const statusEl = document.getElementById('status-line');
+  const runBadgeEl = document.getElementById('run-badge');
+  const resultsBody = document.getElementById('results-body');
+
+  const btnRun = document.getElementById('btn-run');
+  const btnAbort = document.getElementById('btn-abort');
+  const btnCopy = document.getElementById('btn-copy');
+  const btnToggleKey = document.getElementById('btn-toggle-key');
+  const btnClearCreds = document.getElementById('btn-clear-creds');
+
+  try {
+    sbUrlEl.value = localStorage.getItem(LS_URL) || '';
+    sbKeyEl.value = localStorage.getItem(LS_KEY) || '';
+    if (localStorage.getItem(LS_MODEL)) modelEl.value = localStorage.getItem(LS_MODEL);
+    if (localStorage.getItem(LS_COUNT)) countEl.value = localStorage.getItem(LS_COUNT);
+  } catch(_) {}
+
+  function saveInputs() {
+    try {
+      localStorage.setItem(LS_URL, sbUrlEl.value.trim());
+      localStorage.setItem(LS_KEY, sbKeyEl.value.trim());
+      localStorage.setItem(LS_MODEL, modelEl.value.trim());
+      localStorage.setItem(LS_COUNT, countEl.value);
+    } catch(_) {}
+  }
+
+  [sbUrlEl, sbKeyEl, modelEl, countEl].forEach(el => el.addEventListener('change', saveInputs));
+
+  btnToggleKey.onclick = () => {
+    const isPw = sbKeyEl.type === 'password';
+    sbKeyEl.type = isPw ? 'text' : 'password';
+    btnToggleKey.textContent = isPw ? 'Hide' : 'Show';
+  };
+
+  btnClearCreds.onclick = () => {
+    sbUrlEl.value = '';
+    sbKeyEl.value = '';
+    try { localStorage.removeItem(LS_URL); localStorage.removeItem(LS_KEY); } catch(_) {}
+    statusEl.textContent = 'Cleared saved Supabase credentials.';
+  };
+
+  document.querySelectorAll('#model-chips .chip').forEach(chip => {
+    chip.onclick = () => {
+      document.querySelectorAll('#model-chips .chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      modelEl.value = chip.getAttribute('data-model');
+      saveInputs();
+    };
+  });
+
+  let activeAbortController = null;
+  let lastRunSnapshot = null;
+
+  function maskApiKey(key) {
+    if (!key || typeof key !== 'string') return 'none';
+    if (key.length <= 10) return key.slice(0, 3) + '***';
+    return key.slice(0, 6) + '...' + key.slice(-4);
+  }
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>');
+  }
+
+  function percentile(sortedArr, p) {
+    if (!sortedArr.length) return 0;
+    const idx = Math.ceil((p / 100) * sortedArr.length) - 1;
+    return sortedArr[Math.max(0, Math.min(sortedArr.length - 1, idx))];
+  }
+
+  function renderResults(trials, wallMs, requestedCount) {
+    const leased = trials.filter(t => t.keyId !== null);
+    const ok200 = trials.filter(t => t.httpStatus === 200);
+    const err503 = trials.filter(t => t.httpStatus === 503);
+    const err429 = trials.filter(t => t.httpStatus === 429);
+    const sent = trials.filter(t => t.sent);
+    const otherErr = sent.length - ok200.length - err503.length - err429.length;
+
+    const leaseTimes = leased.map(t => t.leaseMs).filter(x => x >= 0);
+    const avgLease = leaseTimes.length ? Math.round(leaseTimes.reduce((a,b) => a + b, 0) / leaseTimes.length) : 0;
+
+    const latencies = sent.map(t => t.totalMs).filter(x => x > 0).sort((a,b) => a - b);
+    const avgLat = latencies.length ? Math.round(latencies.reduce((a,b) => a + b, 0) / latencies.length) : 0;
+    const p50 = percentile(latencies, 50);
+    const p95 = percentile(latencies, 95);
+    const minLat = latencies.length ? latencies[0] : 0;
+    const maxLat = latencies.length ? latencies[latencies.length - 1] : 0;
+
+    document.getElementById('kpi-leased').textContent = leased.length + '/' + requestedCount;
+    document.getElementById('kpi-lease-avg').textContent = leaseTimes.length ? ('Avg lease: ' + avgLease + 'ms') : 'Avg lease: -';
+    document.getElementById('kpi-200').textContent = String(ok200.length);
+    const rate = sent.length ? Math.round((ok200.length / sent.length) * 100) : 0;
+    document.getElementById('kpi-rate').textContent = 'Success: ' + rate + '%';
+    document.getElementById('kpi-503').textContent = String(err503.length);
+    const pct503 = sent.length ? Math.round((err503.length / sent.length) * 100) : 0;
+    document.getElementById('kpi-503-pct').textContent = pct503 + '% of sent';
+    document.getElementById('kpi-429').textContent = String(err429.length);
+    document.getElementById('kpi-other').textContent = 'Other err: ' + Math.max(0, otherErr);
+    document.getElementById('kpi-avg').textContent = latencies.length ? (avgLat + 'ms') : '-';
+    document.getElementById('kpi-p50').textContent = latencies.length ? ('P50: ' + p50 + 'ms | P95: ' + p95 + 'ms') : 'P50: - | P95: -';
+    document.getElementById('kpi-minmax').textContent = latencies.length ? (minLat + ' / ' + maxLat + 'ms') : '-';
+    document.getElementById('kpi-wall').textContent = wallMs ? ('Wall: ' + wallMs + 'ms') : 'Wall: -';
+
+    resultsBody.innerHTML = trials.map(t => {
+      let badgeCls = 'b-err';
+      if (t.httpStatus === 200) badgeCls = 'b-200';
+      else if (t.httpStatus === 503) badgeCls = 'b-503';
+      else if (t.httpStatus === 429) badgeCls = 'b-429';
+      else if (t.phase === 'RUNNING' || t.phase === 'LEASING') badgeCls = 'b-err';
+
+      const statusLabel = t.statusLabel || (t.httpStatus ? String(t.httpStatus) : t.phase);
+      const keyInfo = t.keyId !== null ? ('id:' + t.keyId + ' • ' + t.maskedKey) : 'no key';
+      const leaseTxt = t.leaseMs >= 0 ? (t.leaseMs + 'ms') : '-';
+      const ttftTxt = t.ttftMs > 0 ? (t.ttftMs + 'ms') : '-';
+      const totalTxt = t.totalMs > 0 ? (t.totalMs + 'ms') : '-';
+      return '<tr>' +
+        '<td class="mono">#' + t.index + '</td>' +
+        '<td class="mono">' + escHtml(keyInfo) + '</td>' +
+        '<td class="mono">' + leaseTxt + '</td>' +
+        '<td><span class="badge ' + badgeCls + '">' + escHtml(statusLabel) + '</span></td>' +
+        '<td class="mono">' + ttftTxt + '</td>' +
+        '<td class="mono">' + totalTxt + '</td>' +
+        '<td class="detail-cell">' + escHtml(t.detail || '') + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  async function leaseSingleKey(sbUrl, sbKey, signal) {
+    const t0 = performance.now();
+    const res = await fetch(sbUrl + '/rest/v1/rpc/lease_gemini_api_key', {
+      method: 'POST',
+      headers: {
+        'apikey': sbKey,
+        'Authorization': 'Bearer ' + sbKey,
+        'Content-Type': 'application/json'
+      },
+      body: '{}',
+      signal
+    });
+    const leaseMs = Math.round(performance.now() - t0);
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error('RPC HTTP ' + res.status + ': ' + text.slice(0, 180));
+    }
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch(_) {}
+    const row = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (!row || !row.api_key) {
+      return { id: null, apiKey: null, leaseMs, empty: true };
+    }
+    return { id: row.id, apiKey: String(row.api_key).trim(), leaseMs, empty: false };
+  }
+
+  async function fireGeminiTrial(trial, model, mode, prompt, timeoutMs, parentSignal) {
+    const controller = new AbortController();
+    const onParentAbort = () => controller.abort('aborted');
+    if (parentSignal) {
+      if (parentSignal.aborted) controller.abort('aborted');
+      else parentSignal.addEventListener('abort', onParentAbort, { once: true });
+    }
+    const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+
+    const t0 = performance.now();
+    try {
+      const action = mode === 'streamGenerateContent' ? 'streamGenerateContent?alt=sse&' : 'generateContent?';
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':' + action + 'key=' + encodeURIComponent(trial.rawApiKey);
+      const body = JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }]
+      });
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: controller.signal
+      });
+
+      trial.httpStatus = res.status;
+      trial.statusLabel = String(res.status);
+      trial.ttftMs = Math.round(performance.now() - t0);
+
+      if (mode === 'streamGenerateContent' && res.ok && res.body && res.body.getReader) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let firstChunkMs = 0;
+        let fullText = '';
+        while (true) {
+          const step = await reader.read();
+          if (step.done) break;
+          if (!firstChunkMs) {
+            firstChunkMs = Math.round(performance.now() - t0);
+            trial.ttftMs = firstChunkMs;
+          }
+          const chunkStr = decoder.decode(step.value, { stream: true });
+          const lines = chunkStr.split(/\r?\n/);
+          for (const line of lines) {
+            if (line.startsWith('data:')) {
+              const payload = line.slice(5).trim();
+              if (!payload || payload === '[DONE]') continue;
+              try {
+                const obj = JSON.parse(payload);
+                const partTxt = obj?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+                if (partTxt) fullText += partTxt;
+              } catch(_) {}
+            }
+          }
+        }
+        trial.totalMs = Math.round(performance.now() - t0);
+        trial.detail = fullText.trim() ? fullText.trim().slice(0, 180) : '(Empty SSE stream)';
+      } else {
+        const raw = await res.text();
+        trial.totalMs = Math.round(performance.now() - t0);
+        try {
+          const json = JSON.parse(raw);
+          if (res.ok) {
+            const outTxt = json?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+            trial.detail = outTxt.trim() ? outTxt.trim().slice(0, 180) : raw.slice(0, 180);
+          } else {
+            const errObj = json?.error || json;
+            const errStatus = errObj?.status || '';
+            const errMsg = errObj?.message || raw;
+            trial.statusLabel = res.status + (errStatus ? (' ' + errStatus) : '');
+            trial.detail = String(errMsg).slice(0, 220);
+          }
+        } catch(_) {
+          trial.detail = raw.slice(0, 220);
+        }
+      }
+      trial.phase = 'DONE';
+    } catch (e) {
+      trial.totalMs = Math.round(performance.now() - t0);
+      const isTimeout = controller.signal.aborted && controller.signal.reason === 'timeout';
+      const isUserAbort = controller.signal.aborted && controller.signal.reason === 'aborted';
+      trial.httpStatus = isTimeout ? 408 : 0;
+      trial.statusLabel = isTimeout ? 'TIMEOUT' : (isUserAbort ? 'ABORTED' : 'NET_ERR');
+      trial.detail = e?.message || String(e);
+      trial.phase = 'ERR';
+    } finally {
+      clearTimeout(timer);
+      if (parentSignal) parentSignal.removeEventListener('abort', onParentAbort);
+    }
+  }
+
+  btnRun.onclick = async () => {
+    const sbUrl = sbUrlEl.value.trim().replace(/\/+$/, '');
+    const sbKey = sbKeyEl.value.trim();
+    const count = Math.max(1, Math.min(100, parseInt(countEl.value, 10) || 10));
+    const model = modelEl.value.trim() || 'gemini-3.8-flash';
+    const mode = modeEl.value;
+    const staggerMs = Math.max(0, parseInt(staggerEl.value, 10) || 0);
+    const timeoutMs = Math.max(5, parseInt(timeoutEl.value, 10) || 30) * 1000;
+    const prompt = promptEl.value.trim() || 'Reply with OK.';
+
+    if (!sbUrl || !sbKey) {
+      statusEl.textContent = '⚠️ Paste your Supabase URL and Key first.';
+      return;
+    }
+
+    saveInputs();
+    activeAbortController = new AbortController();
+    btnRun.disabled = true;
+    btnAbort.disabled = false;
+    btnCopy.disabled = true;
+    runBadgeEl.textContent = 'RUNNING';
+    runBadgeEl.className = 'badge b-429';
+
+    const trials = Array.from({ length: count }, (_, i) => ({
+      index: i + 1,
+      keyId: null,
+      maskedKey: '-',
+      rawApiKey: null,
+      leaseMs: -1,
+      sent: false,
+      httpStatus: 0,
+      statusLabel: 'LEASING',
+      ttftMs: 0,
+      totalMs: 0,
+      phase: 'LEASING',
+      detail: 'Calling lease_gemini_api_key()...'
+    }));
+    renderResults(trials, 0, count);
+    statusEl.textContent = 'Phase 1: Leasing ' + count + ' key(s) simultaneously from Supabase...';
+
+    const wallStart = performance.now();
+
+    // Phase 1: Parallel Lease
+    await Promise.all(trials.map(async (t) => {
+      try {
+        const leased = await leaseSingleKey(sbUrl, sbKey, activeAbortController.signal);
+        t.leaseMs = leased.leaseMs;
+        if (leased.empty) {
+          t.phase = 'EMPTY';
+          t.statusLabel = 'POOL_EMPTY';
+          t.detail = 'RPC returned 0 rows (no active unlocked keys available)';
+        } else {
+          t.keyId = leased.id;
+          t.rawApiKey = leased.apiKey;
+          t.maskedKey = maskApiKey(leased.apiKey);
+          t.phase = 'QUEUED';
+          t.statusLabel = 'READY';
+          t.detail = 'Leased cleanly';
+        }
+      } catch (err) {
+        t.phase = 'LEASE_ERR';
+        t.statusLabel = 'RPC_ERR';
+        t.detail = err?.message || String(err);
+      }
+      renderResults(trials, Math.round(performance.now() - wallStart), count);
+    }));
+
+    const readyTrials = trials.filter(t => t.rawApiKey);
+    if (readyTrials.length === 0) {
+      const wallMs = Math.round(performance.now() - wallStart);
+      statusEl.textContent = '❌ No keys could be leased. Check Supabase RPC / pool cooldowns.';
+      runBadgeEl.textContent = 'FAILED';
+      runBadgeEl.className = 'badge b-503';
+      btnRun.disabled = false;
+      btnAbort.disabled = true;
+      lastRunSnapshot = { timestamp: new Date().toISOString(), count, model, mode, staggerMs, wallMs, trials };
+      btnCopy.disabled = false;
+      return;
+    }
+
+    statusEl.textContent = 'Phase 2: Blasting ' + readyTrials.length + ' Gemini request(s) to ' + model + '...';
+
+    // Phase 2: Simultaneous (or staggered) Gemini requests
+    await Promise.all(readyTrials.map(async (t, idx) => {
+      if (staggerMs > 0 && idx > 0) {
+        await new Promise(r => setTimeout(r, idx * staggerMs));
+      }
+      if (activeAbortController.signal.aborted) return;
+      t.sent = true;
+      t.phase = 'RUNNING';
+      t.statusLabel = 'SENDING';
+      t.detail = 'Awaiting response...';
+      renderResults(trials, Math.round(performance.now() - wallStart), count);
+
+      await fireGeminiTrial(t, model, mode, prompt, timeoutMs, activeAbortController.signal);
+      renderResults(trials, Math.round(performance.now() - wallStart), count);
+    }));
+
+    const wallMs = Math.round(performance.now() - wallStart);
+    renderResults(trials, wallMs, count);
+    lastRunSnapshot = { timestamp: new Date().toISOString(), count, model, mode, staggerMs, wallMs, trials };
+
+    const okCount = trials.filter(t => t.httpStatus === 200).length;
+    const c503 = trials.filter(t => t.httpStatus === 503).length;
+    statusEl.textContent = 'Finished in ' + wallMs + 'ms — ' + okCount + '/' + readyTrials.length + ' succeeded, ' + c503 + ' returned 503.';
+    runBadgeEl.textContent = 'DONE';
+    runBadgeEl.className = okCount > 0 ? 'badge b-200' : 'badge b-503';
+    btnRun.disabled = false;
+    btnAbort.disabled = true;
+    btnCopy.disabled = false;
+  };
+
+  btnAbort.onclick = () => {
+    if (activeAbortController) {
+      activeAbortController.abort('aborted');
+      statusEl.textContent = '🛑 Aborted active trials.';
+    }
+  };
+
+  btnCopy.onclick = async () => {
+    if (!lastRunSnapshot) return;
+    const s = lastRunSnapshot;
+    const sent = s.trials.filter(t => t.sent);
+    const ok = s.trials.filter(t => t.httpStatus === 200);
+    const c503 = s.trials.filter(t => t.httpStatus === 503);
+    const c429 = s.trials.filter(t => t.httpStatus === 429);
+    const lats = sent.map(t => t.totalMs).filter(x => x > 0).sort((a,b) => a - b);
+    const avg = lats.length ? Math.round(lats.reduce((a,b) => a + b, 0) / lats.length) : 0;
+    const p50 = percentile(lats, 50);
+    const p95 = percentile(lats, 95);
+
+    const lines = [
+      '=== GEMINI API FLEET STRESS TEST ===',
+      'Timestamp : ' + s.timestamp,
+      'Model     : ' + s.model,
+      'Mode      : ' + s.mode,
+      'Requested : ' + s.count + ' | Leased: ' + s.trials.filter(t => t.keyId !== null).length + ' | Stagger: ' + s.staggerMs + 'ms | Wall: ' + s.wallMs + 'ms',
+      'Results   : 200 OK=' + ok.length + ' | 503 Overloaded=' + c503.length + ' | 429 Quota=' + c429.length + ' | Other=' + (sent.length - ok.length - c503.length - c429.length),
+      'Latency   : Avg=' + avg + 'ms | P50=' + p50 + 'ms | P95=' + p95 + 'ms | Min=' + (lats[0] || 0) + 'ms | Max=' + (lats[lats.length - 1] || 0) + 'ms',
+      '',
+      '--- PER-TRIAL BREAKDOWN ---'
+    ];
+    for (const t of s.trials) {
+      lines.push(
+        '#' + t.index +
+        ' | keyId=' + (t.keyId !== null ? t.keyId : 'none') + ' (' + t.maskedKey + ')' +
+        ' | lease=' + (t.leaseMs >= 0 ? t.leaseMs + 'ms' : '-') +
+        ' | status=' + t.statusLabel +
+        ' | ttft=' + (t.ttftMs > 0 ? t.ttftMs + 'ms' : '-') +
+        ' | total=' + (t.totalMs > 0 ? t.totalMs + 'ms' : '-') +
+        ' | detail=' + String(t.detail || '').replace(/\s+/g, ' ')
+      );
+    }
+
+    const reportText = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(reportText);
+      btnCopy.textContent = '✅ Copied!';
+      setTimeout(() => { btnCopy.textContent = '📋 Copy Report'; }, 1800);
+    } catch (_) {
+      const ta = document.createElement('textarea');
+      ta.value = reportText;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btnCopy.textContent = '✅ Copied!';
+      setTimeout(() => { btnCopy.textContent = '📋 Copy Report'; }, 1800);
+    }
+  };
+})();
+</script>
+</body>
+</html>
