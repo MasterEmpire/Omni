@@ -978,7 +978,7 @@ class OmniBrowser : PluginEntry() {
                     }
                 },
                 modifier = Modifier
-                    .size(280.dp, 460.dp)
+                    .fillMaxSize()
                     .graphicsLayer { alpha = 0.004f }
             )
 
