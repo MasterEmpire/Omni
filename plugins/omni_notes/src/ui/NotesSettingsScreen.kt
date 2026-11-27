@@ -461,14 +461,19 @@ fun NotesSettingsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Found $pendingImportEncryptedCount locked note(s) in this ColorNote export. Enter your password to decrypt them (or skip locked notes).",
+                        "Found $pendingImportEncryptedCount locked note(s) in this ColorNote export. They will be imported locked under your Omni Notes Master PIN.",
                         color = mutedText,
                         fontSize = 12.sp
                     )
                     OutlinedTextField(
                         value = passwordInput,
                         onValueChange = { passwordInput = it },
-                        label = { Text("ColorNote Password / PIN") },
+                        label = {
+                            Text(
+                                if (settings.masterPinHash.isNullOrBlank()) "Set Lock PIN / Password"
+                                else "ColorNote Password (Optional)"
+                            )
+                        },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = primaryText, unfocusedTextColor = primaryText)
@@ -487,7 +492,7 @@ fun NotesSettingsScreen(
                             bridge.showToast("Imported ${res.importedCount} notes (${res.decryptedCount} decrypted, ${res.lockedSkippedOrFailedCount} skipped)")
                         }
                     },
-                    enabled = passwordInput.isNotEmpty()
+                    enabled = passwordInput.isNotEmpty() || !settings.masterPinHash.isNullOrBlank()
                 ) {
                     Text("Decrypt & Import")
                 }
