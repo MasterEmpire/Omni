@@ -2,6 +2,11 @@ package com.omni.plugin.notes.ui
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.view.ActionMode
+import android.view.Menu
+import android.view.MenuItem
+import android.view.View
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,6 +44,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -52,6 +62,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,6 +120,13 @@ fun NoteEditorScreen(
 
     // Text notes open existing content in Read mode; new notes open directly in Edit mode
     var isEditMode by remember(noteId) { mutableStateOf(existingNote == null) }
+    var contentFieldValue by remember(noteId) { mutableStateOf(TextFieldValue(content)) }
+
+    LaunchedEffect(content) {
+        if (contentFieldValue.text != content) {
+            contentFieldValue = TextFieldValue(content, TextRange(content.length))
+        }
+    }
 
     // Undo / Redo Stacks for Text notes
     val undoStack = remember(noteId) { mutableStateListOf<String>() }
@@ -228,6 +248,35 @@ fun NoteEditorScreen(
         }
     }
 
+    val hostView = LocalView.current
+    val customTextToolbar = remember(hostView, noteId, nc) {
+        NoteFloatSelectionTextToolbar(
+            context = context,
+            hostView = hostView,
+            getDirectSelection = {
+                if (isEditMode && !contentFieldValue.selection.collapsed) {
+                    val textLen = contentFieldValue.text.length
+                    val min = contentFieldValue.selection.min.coerceIn(0, textLen)
+                    val max = contentFieldValue.selection.max.coerceIn(min, textLen)
+                    contentFieldValue.text.substring(min, max).takeIf { it.isNotBlank() }
+                } else null
+            },
+            onFloatSelectedText = { selected ->
+                OmniNotesPlugin.mountSnippetOverlay(
+                    context = context,
+                    bridge = bridge,
+                    noteTitle = title,
+                    snippetText = selected,
+                    color = nc
+                )
+            }
+        )
+    }
+
+    DisposableEffect(customTextToolbar) {
+        onDispose { customTextToolbar.hide() }
+    }
+
     DisposableEffect(Unit) {
         registerBackInterceptor {
             handleBackAction()
@@ -236,6 +285,7 @@ fun NoteEditorScreen(
         onDispose { }
     }
 
+    CompositionLocalProvider(LocalTextToolbar provides customTextToolbar) {
     Scaffold(
         containerColor = screenBg,
         topBar = {
@@ -592,8 +642,10 @@ fun NoteEditorScreen(
                         }
 
                         BasicTextField(
-                            value = content,
-                            onValueChange = { next ->
+                            value = contentFieldValue,
+                            onValueChange = { nextField ->
+                                contentFieldValue = nextField
+                                val next = nextField.text
                                 if (next != content) {
                                     if (undoStack.size > 40) undoStack.removeAt(0)
                                     undoStack.add(content)
@@ -1298,6 +1350,174 @@ fun NoteEditorScreen(
                 }
             }
         )
+    }
+    }
+}
+
+private class NoteFloatSelectionTextToolbar(
+    private val context: Context,
+    private val hostView: View,
+    private val getDirectSelection: () -> String?,
+    private val onFloatSelectedText: (String) -> Unit
+) : TextToolbar {
+    companion object {
+        private const val ID_COPY = 1
+        private const val ID_PASTE = 2
+        private const val ID_CUT = 3
+        private const val ID_SELECT_ALL = 4
+        private const val ID_FLOAT = 5
+    }
+
+    private var actionMode: ActionMode? = null
+    private var currentRect: Rect = Rect.Zero
+    private var onCopy: (() -> Unit)? = null
+    private var onPaste: (() -> Unit)? = null
+    private var onCut: (() -> Unit)? = null
+    private var onSelectAll: (() -> Unit)? = null
+
+    override val status: TextToolbarStatus
+        get() = if (actionMode != null) TextToolbarStatus.Shown else TextToolbarStatus.Hidden
+
+    override fun showMenu(
+        rect: Rect,
+        onCopyRequested: (() -> Unit)?,
+        onPasteRequested: (() -> Unit)?,
+        onCutRequested: (() -> Unit)?,
+        onSelectAllRequested: (() -> Unit)?
+    ) {
+        currentRect = rect
+        onCopy = onCopyRequested
+        onPaste = onPasteRequested
+        onCut = onCutRequested
+        onSelectAll = onSelectAllRequested
+
+        if (onCopy == null && onPaste == null && onCut == null && onSelectAll == null) {
+            hide()
+            return
+        }
+
+        if (actionMode == null) {
+            actionMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                hostView.startActionMode(callback, ActionMode.TYPE_FLOATING)
+            } else {
+                hostView.startActionMode(callback)
+            }
+        } else {
+            actionMode?.invalidate()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                actionMode?.invalidateContentRect()
+            }
+        }
+    }
+
+    override fun hide() {
+        actionMode?.finish()
+        actionMode = null
+    }
+
+    private fun extractSelectedText(): String? {
+        getDirectSelection()?.let { return it }
+        val copyFn = onCopy ?: return null
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        val prevClip = try { cm?.primaryClip } catch (_: Exception) { null }
+        copyFn.invoke()
+        val copied = try {
+            cm?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+        } catch (_: Exception) {
+            null
+        }
+        try {
+            if (prevClip != null) {
+                cm?.setPrimaryClip(prevClip)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                cm?.clearPrimaryClip()
+            }
+        } catch (_: Exception) {}
+        return copied?.takeIf { it.isNotBlank() }
+    }
+
+    private val callback = object : ActionMode.Callback2() {
+        override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+            if (menu == null) return false
+            populateMenu(menu)
+            return menu.size() > 0
+        }
+
+        override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+            if (menu == null) return false
+            menu.clear()
+            populateMenu(menu)
+            return menu.size() > 0
+        }
+
+        private fun populateMenu(menu: Menu) {
+            if (onCopy != null) {
+                menu.add(Menu.NONE, ID_FLOAT, 0, "📌 Float")
+                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                menu.add(Menu.NONE, ID_COPY, 1, android.R.string.copy)
+                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            }
+            if (onCut != null) {
+                menu.add(Menu.NONE, ID_CUT, 2, android.R.string.cut)
+                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            }
+            if (onPaste != null) {
+                menu.add(Menu.NONE, ID_PASTE, 3, android.R.string.paste)
+                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            }
+            if (onSelectAll != null) {
+                menu.add(Menu.NONE, ID_SELECT_ALL, 4, android.R.string.selectAll)
+                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            }
+        }
+
+        override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
+            return when (item?.itemId) {
+                ID_FLOAT -> {
+                    val selected = extractSelectedText()
+                    mode?.finish()
+                    if (!selected.isNullOrBlank()) {
+                        onFloatSelectedText(selected)
+                    }
+                    true
+                }
+                ID_COPY -> {
+                    onCopy?.invoke()
+                    mode?.finish()
+                    true
+                }
+                ID_CUT -> {
+                    onCut?.invoke()
+                    mode?.finish()
+                    true
+                }
+                ID_PASTE -> {
+                    onPaste?.invoke()
+                    mode?.finish()
+                    true
+                }
+                ID_SELECT_ALL -> {
+                    onSelectAll?.invoke()
+                    true
+                }
+                else -> false
+            }
+        }
+
+        override fun onDestroyActionMode(mode: ActionMode?) {
+            actionMode = null
+        }
+
+        override fun onGetContentRect(mode: ActionMode?, view: View?, outRect: android.graphics.Rect?) {
+            val loc = IntArray(2)
+            hostView.getLocationInWindow(loc)
+            outRect?.set(
+                (currentRect.left - loc[0]).roundToInt(),
+                (currentRect.top - loc[1]).roundToInt(),
+                (currentRect.right - loc[0]).roundToInt(),
+                (currentRect.bottom - loc[1]).roundToInt()
+            )
+        }
     }
 }
 
