@@ -103,7 +103,8 @@ class UnifiedNotesStore(
         content: String,
         existingId: String?,
         colorId: String,
-        folderId: String?
+        folderId: String?,
+        isPinned: Boolean? = null
     ): List<SmartNote> {
         synchronized(dbLock) {
             syncLatestBeforeWriteLocked()
@@ -120,6 +121,7 @@ class UnifiedNotesStore(
                     checklist = parsedChecklist,
                     colorId = colorId,
                     folderId = folderId,
+                    isPinned = isPinned ?: existing.isPinned,
                     updatedAt = now
                 )
             } else {
@@ -130,6 +132,7 @@ class UnifiedNotesStore(
                     type = "TEXT",
                     colorId = colorId,
                     folderId = folderId,
+                    isPinned = isPinned ?: false,
                     status = "ACTIVE",
                     createdAt = now,
                     updatedAt = now
@@ -145,6 +148,30 @@ class UnifiedNotesStore(
                 mirrorNotesToExternalVault(snapshotToWrite)
             }
 
+            return cachedAllNotes
+                .filter { it.status == "ACTIVE" }
+                .sortedWith(compareByDescending<SmartNote> { it.isPinned }.thenByDescending { it.updatedAt })
+        }
+    }
+
+    fun togglePin(noteId: String): List<SmartNote> {
+        synchronized(dbLock) {
+            syncLatestBeforeWriteLocked()
+            val idx = cachedAllNotes.indexOfFirst { it.id == noteId }
+            if (idx >= 0) {
+                val existing = cachedAllNotes[idx]
+                cachedAllNotes[idx] = existing.copy(
+                    isPinned = !existing.isPinned,
+                    updatedAt = System.currentTimeMillis()
+                )
+                val snapshotToWrite = cachedAllNotes.toList()
+                val target = notesDbFile
+                ioExecutor.execute {
+                    writeNotesStreaming(target, snapshotToWrite)
+                    lastLoadedDbModifiedMs = target.lastModified()
+                    mirrorNotesToExternalVault(snapshotToWrite)
+                }
+            }
             return cachedAllNotes
                 .filter { it.status == "ACTIVE" }
                 .sortedWith(compareByDescending<SmartNote> { it.isPinned }.thenByDescending { it.updatedAt })
