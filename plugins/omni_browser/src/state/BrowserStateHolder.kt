@@ -33,6 +33,29 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+class SmartNotesSessionState {
+    var isEditing by mutableStateOf(false)
+    var editingNoteId by mutableStateOf<String?>(null)
+    var editTitle by mutableStateOf("")
+    var editContent by mutableStateOf("")
+    var editColorId by mutableStateOf("yellow")
+    var editFolderId by mutableStateOf<String?>(null)
+
+    var viewingNoteId by mutableStateOf<String?>(null)
+    var viewingNoteSnapshot by mutableStateOf<SmartNote?>(null)
+
+    var searchQuery by mutableStateOf("")
+    var selectedFolderFilter by mutableStateOf<String?>(null)
+
+    var listScrollIndex by mutableIntStateOf(0)
+    var listScrollOffset by mutableIntStateOf(0)
+
+    var noteViewScrollValue by mutableIntStateOf(0)
+    var noteViewScrollMax by mutableIntStateOf(0)
+    var noteEditScrollValue by mutableIntStateOf(0)
+    var noteEditScrollMax by mutableIntStateOf(0)
+    var pendingScrollSyncMode by mutableStateOf<String?>(null)
+}
 class BrowserStateHolder(
     val context: Context,
     val bridge: HostBridge,
@@ -118,6 +141,7 @@ class BrowserStateHolder(
     var showDownloadsDialog by mutableStateOf(false)
     var showSmartNotesDialog by mutableStateOf(false)
     var smartNotes by mutableStateOf<List<SmartNote>>(emptyList())
+    val smartNotesSession = SmartNotesSessionState()
     var smartNoteFolders by mutableStateOf<List<SmartNoteFolder>>(emptyList())
     var smartNotesMasterPinHash by mutableStateOf<String?>(null)
     val unlockedSmartNoteIds = mutableStateListOf<String>()
@@ -2473,6 +2497,18 @@ class BrowserStateHolder(
                 smartNoteFolders = snap.folders
                 smartNotesMasterPinHash = snap.masterPinHash
             }
+            val activeViewId = smartNotesSession.viewingNoteId
+            if (activeViewId != null) {
+                val freshNote = snap.activeNotes.find { it.id == activeViewId }
+                if (freshNote != null) {
+                    smartNotesSession.viewingNoteSnapshot = freshNote
+                } else if (!smartNotesSession.isEditing) {
+                    smartNotesSession.viewingNoteId = null
+                    smartNotesSession.viewingNoteSnapshot = null
+                    smartNotesSession.noteViewScrollValue = 0
+                    smartNotesSession.noteViewScrollMax = 0
+                }
+            }
         }
     }
 
@@ -2556,16 +2592,41 @@ class BrowserStateHolder(
         }
         if (cleanContent.isEmpty() && cleanTitle == "Note") return
 
+        if (existingId != null && smartNotesSession.viewingNoteId == existingId) {
+            smartNotesSession.viewingNoteSnapshot?.let { cur ->
+                smartNotesSession.viewingNoteSnapshot = if (cur.type == "CHECKLIST") {
+                    cur.copy(title = cleanTitle, colorId = colorId, folderId = folderId, updatedAt = System.currentTimeMillis())
+                } else {
+                    cur.copy(title = cleanTitle, content = cleanContent, colorId = colorId, folderId = folderId, updatedAt = System.currentTimeMillis())
+                }
+            }
+        }
+
         coroutineScope.launch {
             val updated = withContext(Dispatchers.IO) {
                 unifiedNotesStore.upsertNote(cleanTitle, cleanContent, existingId, colorId, folderId)
             }
             smartNotes = updated
+            if (existingId != null && smartNotesSession.viewingNoteId == existingId) {
+                updated.find { it.id == existingId }?.let {
+                    smartNotesSession.viewingNoteSnapshot = it
+                }
+            }
             bridge.showToast("Note saved to Omni Notes!")
         }
     }
 
     fun deleteSmartNote(id: String) {
+        if (smartNotesSession.viewingNoteId == id) {
+            smartNotesSession.viewingNoteId = null
+            smartNotesSession.viewingNoteSnapshot = null
+            smartNotesSession.noteViewScrollValue = 0
+            smartNotesSession.noteViewScrollMax = 0
+        }
+        if (smartNotesSession.editingNoteId == id) {
+            smartNotesSession.isEditing = false
+            smartNotesSession.editingNoteId = null
+        }
         coroutineScope.launch {
             val updated = withContext(Dispatchers.IO) {
                 unifiedNotesStore.moveToTrash(id)
