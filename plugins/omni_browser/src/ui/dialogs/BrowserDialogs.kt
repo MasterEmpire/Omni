@@ -1314,12 +1314,13 @@ fun AddShortcutDialog(
 }
 
 @Composable
-fun RenameProfileDialog(
+fun EditProfileDialog(
     profile: BrowserProfile,
-    onSave: (String) -> Unit,
+    onSave: (name: String, colorValue: Long) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var renameText by remember(profile) { mutableStateOf(profile.name) }
+    var editName by remember(profile) { mutableStateOf(profile.name) }
+    var selectedColor by remember(profile) { mutableStateOf(profile.colorValue) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1328,36 +1329,60 @@ fun RenameProfileDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(12.dp)
+                        .size(16.dp)
                         .clip(CircleShape)
-                        .background(Color(profile.colorValue))
+                        .background(Color(selectedColor))
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Rename Profile", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Edit Profile", color = Color(0xFFE8EAED), fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
         },
         text = {
-            OutlinedTextField(
-                value = renameText,
-                onValueChange = { renameText = it },
-                label = { Text("Profile Display Name") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color(0xFFE8EAED),
-                    unfocusedTextColor = Color(0xFFE8EAED),
-                    focusedBorderColor = Color(profile.colorValue),
-                    unfocusedBorderColor = Color(0xFF5F6368)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                OutlinedTextField(
+                    value = editName,
+                    onValueChange = { editName = it },
+                    label = { Text("Profile Name") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFFE8EAED),
+                        unfocusedTextColor = Color(0xFFE8EAED),
+                        focusedBorderColor = Color(selectedColor),
+                        unfocusedBorderColor = Color(0xFF5F6368)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Column {
+                    Text("Profile Color", color = Color(selectedColor), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        com.omni.plugin.browser.models.PROFILE_PALETTE.forEach { col ->
+                            val isSel = col == selectedColor
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(col))
+                                    .border(if (isSel) 2.5.dp else 0.dp, Color.White, CircleShape)
+                                    .clickable { selectedColor = col }
+                            )
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val newName = renameText.trim().ifEmpty { profile.name }
-                    onSave(newName)
+                    val finalName = editName.trim().ifEmpty { profile.name }
+                    onSave(finalName, selectedColor)
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(profile.colorValue))
+                colors = ButtonDefaults.buttonColors(containerColor = Color(selectedColor))
             ) {
                 Text("Save", color = Color(0xFF1F2227), fontWeight = FontWeight.Bold)
             }
