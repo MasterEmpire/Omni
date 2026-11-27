@@ -1206,6 +1206,14 @@ poolManager.pool.remove(targetId)?.let { wv ->
     fun saveCurrentTabOrder() {
         vaultManager.saveSession(tabs, activeTabId, selectedProfileId)
     }
+    fun reorderProfiles(fromIndex: Int, toIndex: Int) {
+        if (fromIndex !in profiles.indices || toIndex !in profiles.indices || fromIndex == toIndex) return
+        val list = profiles.toMutableList()
+        val item = list.removeAt(fromIndex)
+        list.add(toIndex, item)
+        profiles = list
+        vaultManager.saveProfiles(list)
+    }
 
     fun navigateTo(rawInput: String) {
         val input = rawInput.trim()
