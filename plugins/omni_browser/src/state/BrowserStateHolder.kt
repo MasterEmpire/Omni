@@ -82,6 +82,7 @@ class BrowserStateHolder(
     val ideInternalPath: String get() = "http://localhost:$localServerPort/"
     val defaultShortcuts = listOf(
         ShortcutItem(title = "Local IDE", url = "http://localhost:8080/", iconText = "💻", colorValue = 0xFF58A6FF, localSourcePath = "/storage/emulated/0/Download/F/index.html", isDefault = true, isGlobalProfile = true),
+        ShortcutItem(id = "python_lab", title = "Python Lab", url = "http://localhost:8080/vault_python_lab/index.html", iconText = "🐍", colorValue = 0xFF00E5FF, isDefault = false, isGlobalProfile = true),
         ShortcutItem(title = "Google", url = "https://www.google.com", iconText = "G", colorValue = 0xFF4285F4),
         ShortcutItem(title = "YouTube", url = "https://m.youtube.com", iconText = "▶", colorValue = 0xFFEA4335),
         ShortcutItem(title = "Bot Test", url = "https://bot.sannysoft.com/", iconText = "🕵️", colorValue = 0xFF34A853),
@@ -554,6 +555,7 @@ class BrowserStateHolder(
         aiAnalytics = vaultManager.loadAiAnalytics()
         vaultManager.loadDomainUploadPaths()?.let { domainUploadPaths.putAll(it) }
         vaultManager.loadDomainZoomLevels()?.let { domainZoomLevels.putAll(it) }
+        ensurePythonLabSeeded()
 
         vaultManager.loadSession()?.let { (loadedTabs, savedActiveId, savedProfileId) ->
             val cleanedTabs = loadedTabs.filter { !it.id.startsWith("tab_landing_") }
@@ -2127,6 +2129,36 @@ poolManager.pool.remove(targetId)?.let { wv ->
                 vaultManager.syncLocalFileToVault("/storage/emulated/0/Download/F/index.html", "ide/index.html")
             }
             return "http://localhost:$localServerPort/"
+        }
+    }
+
+    fun ensurePythonLabSeeded() {
+        try {
+            val labFile = File(bridge.getPluginDir(), "ide/vault_python_lab/index.html")
+            if (!labFile.exists() || labFile.length() == 0L) {
+                labFile.parentFile?.mkdirs()
+                labFile.writeText(com.omni.plugin.browser.models.DEFAULT_PYTHON_LAB_HTML, Charsets.UTF_8)
+                bridge.log("PYTHON_LAB", "✅ Seeded permanent Python Lab into ${labFile.absolutePath}")
+            }
+            val hasPythonLab = shortcuts.any { it.id == "python_lab" || it.url.contains("vault_python_lab") }
+            if (!hasPythonLab) {
+                val pyLabItem = ShortcutItem(
+                    id = "python_lab",
+                    title = "Python Lab",
+                    url = "http://localhost:$localServerPort/vault_python_lab/index.html",
+                    iconText = "🐍",
+                    colorValue = 0xFF00E5FF,
+                    localSourcePath = null,
+                    isDefault = false,
+                    isGlobalProfile = true
+                )
+                val insertIdx = if (shortcuts.isNotEmpty()) 1 else 0
+                val updated = shortcuts.toMutableList().apply { add(insertIdx, pyLabItem) }
+                shortcuts = updated
+                vaultManager.saveShortcuts(updated)
+            }
+        } catch (e: Exception) {
+            bridge.log("PYTHON_LAB_ERR", "Failed seeding Python Lab: ${e.message}")
         }
     }
 
