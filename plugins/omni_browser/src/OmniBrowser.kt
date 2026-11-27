@@ -1566,6 +1566,7 @@ class OmniBrowser : PluginEntry() {
             if (state.showSmartNotesDialog) {
                     SmartNotesDialog(
                         bridge = bridge,
+                        session = state.smartNotesSession,
                         notes = state.smartNotes,
                         folders = state.smartNoteFolders,
                         unlockedNoteIds = state.unlockedSmartNoteIds,
