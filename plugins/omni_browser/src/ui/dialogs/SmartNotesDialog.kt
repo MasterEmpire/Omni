@@ -115,7 +115,8 @@ fun SmartNotesDialog(
     currentPageUrl: String = "about:blank",
     currentPageTitle: String = "",
     onUnlockNote: (note: SmartNote, pin: String) -> Boolean = { _, _ -> true },
-    onSaveNote: (title: String, content: String, existingId: String?, colorId: String, folderId: String?) -> Unit,
+    onSaveNote: (title: String, content: String, existingId: String?, colorId: String, folderId: String?, isPinned: Boolean) -> Unit,
+    onTogglePin: (id: String) -> Unit = {},
     onDeleteNote: (id: String) -> Unit,
     onInjectToPage: (text: String) -> Unit,
     onDismiss: () -> Unit
@@ -157,6 +158,7 @@ fun SmartNotesDialog(
         session.editColorId = note.colorId
         session.editFolderId = note.folderId
         session.pendingScrollSyncMode = "TO_EDIT"
+        session.editIsPinned = note.isPinned
         session.isEditing = true
     }
 
@@ -225,6 +227,7 @@ fun SmartNotesDialog(
                             session.editColorId = "yellow"
                             session.editFolderId = session.selectedFolderFilter
                             session.noteEditScrollValue = 0
+                            session.editIsPinned = false
                             session.noteEditScrollMax = 0
                             session.pendingScrollSyncMode = null
                             session.isEditing = true
@@ -380,8 +383,26 @@ fun SmartNotesDialog(
                                 Text("🔗 Clip Current URL", fontSize = 10.sp, color = Color(0xFF3FB950), fontWeight = FontWeight.Bold)
                             }
                         }
-                    }
 
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (session.editIsPinned) Color(0xFFE5A93C).copy(alpha = 0.22f) else Color.Transparent,
+                            border = BorderStroke(1.dp, if (session.editIsPinned) Color(0xFFE5A93C) else Color(0xFF3C4043)),
+                            modifier = Modifier
+                                .height(30.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { session.editIsPinned = !session.editIsPinned }
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+                                Text(
+                                    text = if (session.editIsPinned) "📌 Pinned" else "📌 Pin",
+                                    fontSize = 10.sp,
+                                    color = if (session.editIsPinned) Color(0xFFE5A93C) else Color(0xFF9AA0A6),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                     // Color Dots Row
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -602,14 +623,37 @@ fun SmartNotesDialog(
                             }
                         }
 
-                        Button(
-                            onClick = { enterEditFromView(note) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(30.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("✏️ Edit", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            OutlinedButton(
+                                onClick = { onTogglePin(note.id) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (note.isPinned) Color(0xFFE5A93C).copy(alpha = 0.2f) else Color.Transparent,
+                                    contentColor = if (note.isPinned) Color(0xFFE5A93C) else Color(0xFF9AA0A6)
+                                ),
+                                border = BorderStroke(1.dp, if (note.isPinned) Color(0xFFE5A93C) else Color(0xFF3C4043)),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text(
+                                    text = if (note.isPinned) "📌 Pinned" else "📌 Pin",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Button(
+                                onClick = { enterEditFromView(note) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("✏️ Edit", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -905,6 +949,7 @@ fun SmartNotesDialog(
                                                                 session.editColorId = note.colorId
                                                                 session.editFolderId = note.folderId
                                                                 session.noteEditScrollValue = 0
+                                                                session.editIsPinned = note.isPinned
                                                                 session.noteEditScrollMax = 0
                                                                 session.pendingScrollSyncMode = null
                                                                 session.isEditing = true
@@ -916,7 +961,25 @@ fun SmartNotesDialog(
                                                     }
                                                 }
 
-                                                IconButton(
+                                                                                                IconButton(
+                                                    onClick = { onTogglePin(note.id) },
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .then(
+                                                            if (note.isPinned) {
+                                                                Modifier
+                                                                    .clip(CircleShape)
+                                                                    .background(Color(0xFFE5A93C).copy(alpha = 0.22f))
+                                                            } else Modifier
+                                                        )
+                                                ) {
+                                                    Text(
+                                                        text = "📌",
+                                                        fontSize = 12.sp,
+                                                        color = if (note.isPinned) Color(0xFFE5A93C) else Color(0xFF8B949E)
+                                                    )
+                                                }
+IconButton(
                                                     onClick = { onDeleteNote(note.id) },
                                                     modifier = Modifier.size(28.dp)
                                                 ) {
@@ -942,7 +1005,8 @@ fun SmartNotesDialog(
                                 session.editContent,
                                 session.editingNoteId,
                                 session.editColorId,
-                                session.editFolderId
+                                session.editFolderId,
+                                session.editIsPinned
                             )
                             if (session.viewingNoteId != null) {
                                 session.pendingScrollSyncMode = "TO_VIEW"
