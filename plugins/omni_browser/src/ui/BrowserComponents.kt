@@ -180,7 +180,6 @@ fun OmniBrowserTopBar(
                             isAutoPilotActive = isAutoPilotActive,
                             forceDarkWebPages = forceDarkWebPages,
                             isBrowserImmersiveActive = isBrowserImmersiveActive,
-                    isBrowserImmersiveActive = isBrowserImmersiveActive,
                             dataSaverMode = dataSaverMode,
                             isCurrentTabFavorite = isCurrentTabFavorite,
                             isFocusLockActive = isFocusLockActive,
