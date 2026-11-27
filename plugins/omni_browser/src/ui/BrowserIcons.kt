@@ -266,6 +266,19 @@ object BrowserIcons {
         )
     }
 
+    val Fullscreen: ImageVector by lazy {
+        vectorIcon(
+            "Fullscreen",
+            "M16 3H21V8H19V5H16V3ZM3 3H8V5H5V8H3V3ZM19 16H21V21H16V19H19V16ZM5 16V19H8V21H3V16H5Z"
+        )
+    }
+
+    val FullscreenExit: ImageVector by lazy {
+        vectorIcon(
+            "FullscreenExit",
+            "M18 7H22V9H16V3H18V7ZM8 9H2V7H6V3H8V9ZM18 17V21H16V15H22V17H18ZM8 15V21H6V17H2V15H8Z"
+        )
+    }
     private fun vectorIcon(name: String, pathData: String): ImageVector {
         return ImageVector.Builder(
             name = name,
@@ -297,6 +310,7 @@ fun getBrowserIconForSlot(
     "smart_notes" -> BrowserIcons.Notes
     "downloads" -> BrowserIcons.Download
     "force_dark" -> if (forceDark) BrowserIcons.Sun else BrowserIcons.Moon
+    "immersive_mode" -> BrowserIcons.Fullscreen
     "data_saver" -> if (dataSaverMode == "EXTREME") BrowserIcons.Flame else BrowserIcons.Shield
     "site_cache" -> BrowserIcons.ArchiveBox
     "page_zoom" -> BrowserIcons.Zoom
@@ -328,6 +342,7 @@ val ALL_BROWSER_SLOT_LABELS: List<Pair<String, String>> = listOf(
     "reload" to "Reload",
     "new_tab" to "New Tab",
     "force_dark" to "Night / Light Mode",
+    "immersive_mode" to "Immersive Mode",
     "data_saver" to "Data-saver Mode",
     "site_cache" to "Cache This Site",
     "page_zoom" to "Page Zoom",
