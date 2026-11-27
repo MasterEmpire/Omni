@@ -367,8 +367,17 @@ class OmniNotesPlugin : PluginEntry() {
     companion object {
         private const val CHANNEL_ID = "omni_notes_reminders"
         private const val STICKY_PREFIX = "omni_note_sticky_"
+        private const val SNIPPET_PREFIX = "omni_note_snippet_"
         val activeStickyNoteIds = mutableStateListOf<String>()
-        private val stickyPositions = ConcurrentHashMap<String, Pair<Int, Int>>()
+
+        private data class StickyBounds(
+            var x: Int,
+            var y: Int,
+            var width: Int,
+            var height: Int
+        )
+
+        private val stickyBoundsMap = ConcurrentHashMap<String, StickyBounds>()
 
         fun isStickyMounted(noteId: String): Boolean = activeStickyNoteIds.contains(noteId)
 
@@ -382,8 +391,37 @@ class OmniNotesPlugin : PluginEntry() {
         }
 
         fun dismissStickyOverlay(bridge: HostBridge, noteId: String) {
-            bridge.dismissOverlay("$STICKY_PREFIX$noteId")
+            val tag = "$STICKY_PREFIX$noteId"
+            bridge.dismissOverlay(tag)
             activeStickyNoteIds.remove(noteId)
+            stickyBoundsMap.remove(tag)
+        }
+
+        fun mountSnippetOverlay(
+            context: Context,
+            bridge: HostBridge,
+            noteTitle: String,
+            snippetText: String,
+            color: com.omni.plugin.notes.model.NoteColor
+        ) {
+            val cleanSnippet = snippetText.trim()
+            if (cleanSnippet.isEmpty()) return
+
+            val snippetNote = NoteItem(
+                id = "snippet_${System.currentTimeMillis()}",
+                title = if (noteTitle.isNotBlank()) "✂️ $noteTitle" else "✂️ Pinned Snippet",
+                content = cleanSnippet,
+                type = NoteType.TEXT,
+                colorId = color.id
+            )
+            mountStickyWindowInternal(
+                context = context,
+                bridge = bridge,
+                tag = "$SNIPPET_PREFIX${System.currentTimeMillis()}",
+                note = snippetNote,
+                isReminderAlert = false,
+                isSnippet = true
+            )
         }
 
         fun mountStickyOverlay(
@@ -391,6 +429,24 @@ class OmniNotesPlugin : PluginEntry() {
             bridge: HostBridge,
             note: NoteItem,
             isReminderAlert: Boolean = false
+        ) {
+            mountStickyWindowInternal(
+                context = context,
+                bridge = bridge,
+                tag = "$STICKY_PREFIX${note.id}",
+                note = note,
+                isReminderAlert = isReminderAlert,
+                isSnippet = false
+            )
+        }
+
+        private fun mountStickyWindowInternal(
+            context: Context,
+            bridge: HostBridge,
+            tag: String,
+            note: NoteItem,
+            isReminderAlert: Boolean,
+            isSnippet: Boolean
         ) {
             if (!bridge.canDrawOverlays()) {
                 bridge.showToast("Grant 'Display over other apps' permission for floating sticky notes")
@@ -404,26 +460,40 @@ class OmniNotesPlugin : PluginEntry() {
             }
 
             val appContext = context.applicationContext
-            val density = appContext.resources.displayMetrics.density
+            val dm = appContext.resources.displayMetrics
+            val density = dm.density
+            val screenWidth = dm.widthPixels
+            val screenHeight = dm.heightPixels
             fun dp(v: Float): Int = (v * density).toInt()
 
-            val tag = "$STICKY_PREFIX${note.id}"
             val color = note.color
             val accentInt = color.accentHex.toInt()
             val bgInt = color.darkBgHex.toInt()
+            val defaultWidth = (screenWidth * 0.68f).toInt().coerceIn(dp(220f), dp(340f))
 
-            val pos = stickyPositions.getOrPut(note.id) { Pair(dp(24f), dp(140f)) }
-            var currentX = pos.first
-            var currentY = pos.second
+            val bounds = stickyBoundsMap.getOrPut(tag) {
+                val offsetStep = (stickyBoundsMap.size % 5) * dp(18f)
+                StickyBounds(
+                    x = dp(24f) + offsetStep,
+                    y = dp(130f) + offsetStep,
+                    width = defaultWidth,
+                    height = ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
 
-            val root = LinearLayout(appContext).apply {
-                orientation = LinearLayout.VERTICAL
-                background = GradientDrawable().apply {
-                    setColor(bgInt)
-                    cornerRadius = dp(14f).toFloat()
-                    setStroke(dp(1.5f), accentInt)
-                }
+            val rootBg = GradientDrawable().apply {
+                setColor(bgInt)
+                cornerRadius = dp(14f).toFloat()
+                setStroke(dp(1.5f), accentInt)
+            }
+
+            val root = android.widget.FrameLayout(appContext).apply {
+                background = rootBg
                 elevation = dp(12f).toFloat()
+            }
+
+            val contentColumn = LinearLayout(appContext).apply {
+                orientation = LinearLayout.VERTICAL
             }
 
             // Draggable Header Bar
@@ -442,7 +512,11 @@ class OmniNotesPlugin : PluginEntry() {
             }
 
             val headerTitle = TextView(appContext).apply {
-                val prefix = if (isReminderAlert) "⏰ " else "📌 "
+                val prefix = when {
+                    isReminderAlert -> "⏰ "
+                    isSnippet -> ""
+                    else -> "📌 "
+                }
                 text = prefix + note.title.ifBlank { if (note.type == NoteType.CHECKLIST) "Checklist" else "Sticky Note" }
                 setTextColor(AndroidColor.parseColor("#0D1117"))
                 textSize = 13f
@@ -475,7 +549,12 @@ class OmniNotesPlugin : PluginEntry() {
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 setPadding(dp(8f), dp(2f), dp(4f), dp(2f))
                 setOnClickListener {
-                    dismissStickyOverlay(bridge, note.id)
+                    if (isSnippet) {
+                        bridge.dismissOverlay(tag)
+                        stickyBoundsMap.remove(tag)
+                    } else {
+                        dismissStickyOverlay(bridge, note.id)
+                    }
                 }
             }
 
@@ -483,44 +562,47 @@ class OmniNotesPlugin : PluginEntry() {
             header.addView(openBtn)
             header.addView(closeBtn)
 
-            var downRawX = 0f
-            var downRawY = 0f
-            var startX = 0
-            var startY = 0
+            var moveDownRawX = 0f
+            var moveDownRawY = 0f
+            var moveStartX = 0
+            var moveStartY = 0
 
             header.setOnTouchListener { _, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
-                        startX = currentX
-                        startY = currentY
-                        downRawX = event.rawX
-                        downRawY = event.rawY
+                        moveStartX = bounds.x
+                        moveStartY = bounds.y
+                        moveDownRawX = event.rawX
+                        moveDownRawY = event.rawY
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        currentX = (startX + (event.rawX - downRawX)).toInt().coerceAtLeast(0)
-                        currentY = (startY + (event.rawY - downRawY)).toInt().coerceAtLeast(0)
-                        stickyPositions[note.id] = Pair(currentX, currentY)
-                        bridge.updateOverlay(tag, currentX, currentY)
+                        val maxX = (screenWidth - dp(48f)).coerceAtLeast(0)
+                        val maxY = (screenHeight - dp(48f)).coerceAtLeast(0)
+                        bounds.x = (moveStartX + (event.rawX - moveDownRawX)).toInt().coerceIn(0, maxX)
+                        bounds.y = (moveStartY + (event.rawY - moveDownRawY)).toInt().coerceIn(0, maxY)
+                        bridge.updateOverlay(tag, bounds.x, bounds.y, bounds.width, bounds.height)
                         true
                     }
                     else -> false
                 }
             }
 
-            root.addView(header)
+            contentColumn.addView(header)
 
-            // Scrollable Body
+            // Scrollable Body (switches to weight=1f when fixed height is active)
+            val hasFixedHeight = bounds.height > 0
             val scrollView = ScrollView(appContext).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
+                layoutParams = if (hasFixedHeight) {
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+                } else {
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                }
             }
 
             val bodyLayout = LinearLayout(appContext).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(12f), dp(10f), dp(12f), dp(12f))
+                setPadding(dp(12f), dp(10f), dp(12f), dp(16f))
             }
 
             if (note.isLocked) {
@@ -539,7 +621,7 @@ class OmniNotesPlugin : PluginEntry() {
                     }
                     bodyLayout.addView(emptyTv)
                 } else {
-                    note.checklist.take(12).forEach { entry ->
+                    note.checklist.forEach { entry ->
                         val rowTv = TextView(appContext).apply {
                             text = if (entry.isChecked) "☑ ${entry.text}" else "☐ ${entry.text}"
                             textSize = 13f
@@ -589,33 +671,171 @@ class OmniNotesPlugin : PluginEntry() {
             }
 
             scrollView.addView(bodyLayout)
-            root.addView(scrollView, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ))
+            contentColumn.addView(scrollView)
 
-            val screenWidth = appContext.resources.displayMetrics.widthPixels
-            val overlayWidth = (screenWidth * 0.68f).toInt().coerceIn(dp(220f), dp(340f))
+            root.addView(
+                contentColumn,
+                android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    if (hasFixedHeight) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+
+            // Samsung-style border & corner resize touch helpers
+            val minW = dp(160f)
+            val maxW = (screenWidth - dp(16f)).coerceAtLeast(minW)
+            val minH = dp(110f)
+            val maxH = (screenHeight - dp(60f)).coerceAtLeast(minH)
+
+            fun attachResizeListener(target: View, resizeLeft: Boolean, resizeRight: Boolean, resizeBottom: Boolean) {
+                var rDownRawX = 0f
+                var rDownRawY = 0f
+                var rStartX = 0
+                var rStartW = 0
+                var rStartH = 0
+
+                target.setOnTouchListener { _, event ->
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            rDownRawX = event.rawX
+                            rDownRawY = event.rawY
+                            rStartX = bounds.x
+                            rStartW = (if (bounds.width > 0) bounds.width else root.width).coerceIn(minW, maxW)
+                            rStartH = (if (bounds.height > 0) bounds.height else root.height).coerceIn(minH, maxH)
+                            if (bounds.height <= 0) {
+                                bounds.width = rStartW
+                                bounds.height = rStartH
+                                contentColumn.layoutParams = android.widget.FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                scrollView.layoutParams = LinearLayout.LayoutParams(
+                                    LinearLayout.LayoutParams.MATCH_PARENT,
+                                    0,
+                                    1f
+                                )
+                            }
+                            rootBg.setStroke(dp(2.5f), accentInt)
+                            bridge.vibrate(12L)
+                            true
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val dx = (event.rawX - rDownRawX).toInt()
+                            val dy = (event.rawY - rDownRawY).toInt()
+                            if (resizeRight) {
+                                bounds.width = (rStartW + dx).coerceIn(minW, maxW)
+                            }
+                            if (resizeLeft) {
+                                val newW = (rStartW - dx).coerceIn(minW, maxW)
+                                val delta = rStartW - newW
+                                bounds.x = (rStartX + delta).coerceAtLeast(0)
+                                bounds.width = newW
+                            }
+                            if (resizeBottom) {
+                                bounds.height = (rStartH + dy).coerceIn(minH, maxH)
+                            }
+                            bridge.updateOverlay(tag, bounds.x, bounds.y, bounds.width, bounds.height)
+                            true
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            rootBg.setStroke(dp(1.5f), accentInt)
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
+
+            val edgeThickness = dp(14f)
+            val cornerSize = dp(26f)
+            val headerClearance = dp(38f)
+
+            val leftEdge = View(appContext).apply {
+                attachResizeListener(this, resizeLeft = true, resizeRight = false, resizeBottom = false)
+            }
+            root.addView(
+                leftEdge,
+                android.widget.FrameLayout.LayoutParams(edgeThickness, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START).apply {
+                    topMargin = headerClearance
+                    bottomMargin = cornerSize
+                }
+            )
+
+            val rightEdge = View(appContext).apply {
+                attachResizeListener(this, resizeLeft = false, resizeRight = true, resizeBottom = false)
+            }
+            root.addView(
+                rightEdge,
+                android.widget.FrameLayout.LayoutParams(edgeThickness, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
+                    topMargin = headerClearance
+                    bottomMargin = cornerSize
+                }
+            )
+
+            val bottomEdge = View(appContext).apply {
+                attachResizeListener(this, resizeLeft = false, resizeRight = false, resizeBottom = true)
+            }
+            root.addView(
+                bottomEdge,
+                android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, edgeThickness, Gravity.BOTTOM).apply {
+                    leftMargin = cornerSize
+                    rightMargin = cornerSize
+                }
+            )
+
+            val bottomLeftCorner = View(appContext).apply {
+                attachResizeListener(this, resizeLeft = true, resizeRight = false, resizeBottom = true)
+            }
+            root.addView(
+                bottomLeftCorner,
+                android.widget.FrameLayout.LayoutParams(cornerSize, cornerSize, Gravity.BOTTOM or Gravity.START)
+            )
+
+            val bottomRightCorner = object : View(appContext) {
+                private val gripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    this.color = accentInt
+                    alpha = 190
+                    strokeWidth = dp(1.8f).toFloat()
+                    strokeCap = Paint.Cap.ROUND
+                }
+                override fun onDraw(canvas: android.graphics.Canvas) {
+                    super.onDraw(canvas)
+                    val pad = dp(5f).toFloat()
+                    val w = width.toFloat()
+                    val h = height.toFloat()
+                    canvas.drawLine(w - pad - dp(10f), h - pad, w - pad, h - pad - dp(10f), gripPaint)
+                    canvas.drawLine(w - pad - dp(5f), h - pad, w - pad, h - pad - dp(5f), gripPaint)
+                }
+            }.apply {
+                attachResizeListener(this, resizeLeft = false, resizeRight = true, resizeBottom = true)
+            }
+            root.addView(
+                bottomRightCorner,
+                android.widget.FrameLayout.LayoutParams(cornerSize, cornerSize, Gravity.BOTTOM or Gravity.END)
+            )
 
             val shown = bridge.showOverlay(
                 tag = tag,
                 view = root,
-                width = overlayWidth,
-                height = ViewGroup.LayoutParams.WRAP_CONTENT,
+                width = bounds.width,
+                height = bounds.height,
                 gravity = Gravity.TOP or Gravity.START,
-                x = currentX,
-                y = currentY,
+                x = bounds.x,
+                y = bounds.y,
                 focusable = false,
                 touchable = true,
                 autoDismissMs = if (isReminderAlert) 25_000L else 0L
             )
 
             if (shown) {
-                if (!activeStickyNoteIds.contains(note.id)) {
+                if (!isSnippet && !activeStickyNoteIds.contains(note.id)) {
                     activeStickyNoteIds.add(note.id)
                 }
                 if (!isReminderAlert) {
-                    bridge.showToast("📌 Pinned floating sticky note (drag header to move)")
+                    bridge.showToast(
+                        if (isSnippet) "✂️ Floated snippet (drag edges to resize)"
+                        else "📌 Pinned floating sticky (drag edges to resize)"
+                    )
                 }
             }
         }
