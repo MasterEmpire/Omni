@@ -239,12 +239,17 @@ fun NoteEditorScreen(
             if (event == Lifecycle.Event.ON_PAUSE && isDirty) {
                 if (persistIfNonEmpty()) {
                     isDirty = false
+                    bridge.showToast("Note saved")
                 }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            if (isDirty && persistIfNonEmpty()) {
+                isDirty = false
+                bridge.showToast("Note saved")
+            }
         }
     }
 
@@ -322,6 +327,7 @@ fun NoteEditorScreen(
                                 if (undoStack.isNotEmpty()) {
                                     redoStack.add(content)
                                     content = undoStack.removeAt(undoStack.lastIndex)
+                                    isDirty = true
                                 }
                             },
                             enabled = undoStack.isNotEmpty(),
@@ -334,6 +340,7 @@ fun NoteEditorScreen(
                                 if (redoStack.isNotEmpty()) {
                                     undoStack.add(content)
                                     content = redoStack.removeAt(redoStack.lastIndex)
+                                    isDirty = true
                                 }
                             },
                             enabled = redoStack.isNotEmpty(),
@@ -357,7 +364,10 @@ fun NoteEditorScreen(
                     // Toggle Read/Edit on Text Notes
                     if (noteType == NoteType.TEXT) {
                         IconButton(onClick = {
-                            if (isEditMode) persistIfNonEmpty()
+                            if (isEditMode && isDirty && persistIfNonEmpty()) {
+                                isDirty = false
+                                bridge.showToast("Note saved")
+                            }
                             isEditMode = !isEditMode
                         }) {
                             Icon(
