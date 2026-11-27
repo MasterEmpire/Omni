@@ -814,6 +814,9 @@ class OmniBrowser : PluginEntry() {
                     androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
                         state.exitBackgroundExecutionMode()
                         state.checkAndConsumePendingUrl()
+                        if (state.isAutoPilotUserArmed) {
+                            state.syncAutoPilotStateForCurrentTab(isExplicitUserToggle = false)
+                        }
                     }
                     androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
                         state.enterBackgroundExecutionMode()
