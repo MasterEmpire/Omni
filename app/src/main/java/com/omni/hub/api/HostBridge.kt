@@ -1044,9 +1044,30 @@ class HostBridgeImpl(
 
     override fun setImmersiveMode(enabled: Boolean) {
         Handler(Looper.getMainLooper()).post {
-            val activity = context as? android.app.Activity ?: return@post
+            var ctx: Context? = context
+            while (ctx is android.content.ContextWrapper) {
+                if (ctx is android.app.Activity) break
+                ctx = ctx.baseContext
+            }
+            val activity = ctx as? android.app.Activity ?: return@post
             val window = activity.window ?: return@post
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val lp = window.attributes
+                lp.layoutInDisplayCutoutMode = if (enabled) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    } else {
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    }
+                } else {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                }
+                window.attributes = lp
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(!enabled)
                 val controller = window.insetsController ?: return@post
                 if (enabled) {
                     controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
