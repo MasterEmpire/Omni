@@ -353,6 +353,26 @@ data class StudioPlaybook(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
+class OmniOrientationBridge(
+    private val onLockOrientation: (orientation: String) -> Unit,
+    private val onUnlockOrientation: () -> Unit,
+    private val onLog: (tag: String, message: String) -> Unit
+) {
+    @JavascriptInterface
+    fun lockOrientation(orientation: String) {
+        onLockOrientation(orientation)
+    }
+
+    @JavascriptInterface
+    fun unlockOrientation() {
+        onUnlockOrientation()
+    }
+
+    @JavascriptInterface
+    fun log(tag: String, message: String) {
+        onLog(tag, message)
+    }
+}
 class OmniVoiceBridge(
     private val onSpeak: (text: String, turnId: String, isAuto: Boolean) -> Unit,
     private val onStop: () -> Unit,
