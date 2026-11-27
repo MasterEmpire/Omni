@@ -40,6 +40,7 @@ class SmartNotesSessionState {
     var editContent by mutableStateOf("")
     var editColorId by mutableStateOf("yellow")
     var editFolderId by mutableStateOf<String?>(null)
+    var editIsPinned by mutableStateOf(false)
 
     var viewingNoteId by mutableStateOf<String?>(null)
     var viewingNoteSnapshot by mutableStateOf<SmartNote?>(null)
@@ -2593,7 +2594,8 @@ poolManager.pool.remove(targetId)?.let { wv ->
         content: String,
         existingId: String? = null,
         colorId: String = "yellow",
-        folderId: String? = null
+        folderId: String? = null,
+        isPinned: Boolean? = null
     ) {
         val cleanContent = content.trim()
         val cleanTitle = title.trim().ifEmpty {
@@ -2603,17 +2605,18 @@ poolManager.pool.remove(targetId)?.let { wv ->
 
         if (existingId != null && smartNotesSession.viewingNoteId == existingId) {
             smartNotesSession.viewingNoteSnapshot?.let { cur ->
+                val resolvedPin = isPinned ?: cur.isPinned
                 smartNotesSession.viewingNoteSnapshot = if (cur.type == "CHECKLIST") {
-                    cur.copy(title = cleanTitle, colorId = colorId, folderId = folderId, updatedAt = System.currentTimeMillis())
+                    cur.copy(title = cleanTitle, colorId = colorId, folderId = folderId, isPinned = resolvedPin, updatedAt = System.currentTimeMillis())
                 } else {
-                    cur.copy(title = cleanTitle, content = cleanContent, colorId = colorId, folderId = folderId, updatedAt = System.currentTimeMillis())
+                    cur.copy(title = cleanTitle, content = cleanContent, colorId = colorId, folderId = folderId, isPinned = resolvedPin, updatedAt = System.currentTimeMillis())
                 }
             }
         }
 
         coroutineScope.launch {
             val updated = withContext(Dispatchers.IO) {
-                unifiedNotesStore.upsertNote(cleanTitle, cleanContent, existingId, colorId, folderId)
+                unifiedNotesStore.upsertNote(cleanTitle, cleanContent, existingId, colorId, folderId, isPinned)
             }
             smartNotes = updated
             if (existingId != null && smartNotesSession.viewingNoteId == existingId) {
@@ -2622,6 +2625,38 @@ poolManager.pool.remove(targetId)?.let { wv ->
                 }
             }
             bridge.showToast("Note saved to Omni Notes!")
+        }
+    }
+
+    fun toggleSmartNotePin(id: String) {
+        val current = smartNotes.find { it.id == id }
+            ?: smartNotesSession.viewingNoteSnapshot?.takeIf { it.id == id }
+        val nextPinned = !(current?.isPinned ?: false)
+
+        if (smartNotesSession.viewingNoteId == id) {
+            smartNotesSession.viewingNoteSnapshot?.let { cur ->
+                smartNotesSession.viewingNoteSnapshot = cur.copy(
+                    isPinned = nextPinned,
+                    updatedAt = System.currentTimeMillis()
+                )
+            }
+        }
+        if (smartNotesSession.editingNoteId == id) {
+            smartNotesSession.editIsPinned = nextPinned
+        }
+
+        coroutineScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                unifiedNotesStore.togglePin(id)
+            }
+            smartNotes = updated
+            if (smartNotesSession.viewingNoteId == id) {
+                updated.find { it.id == id }?.let {
+                    smartNotesSession.viewingNoteSnapshot = it
+                }
+            }
+            bridge.vibrate(20L)
+            bridge.showToast(if (nextPinned) "📌 Pinned note to top" else "Unpinned note")
         }
     }
 
