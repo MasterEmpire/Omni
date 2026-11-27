@@ -947,154 +947,177 @@ fun ProfilesManagerDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = Color(0xFF1E222A),
-            border = BorderStroke(1.dp, Color(0xFF30363D)),
+        Box(
             modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .heightIn(max = 560.dp)
-                .padding(vertical = 24.dp)
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                ),
+            contentAlignment = Alignment.BottomCenter
         ) {
-            Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Account Profiles", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Text("Drag to reorder • Tap to switch account", color = Color(0xFF8B949E), fontSize = 10.sp)
-                    }
+            Surface(
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                color = Color(0xFF1E222A),
+                border = BorderStroke(1.dp, Color(0xFF30363D)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.86f)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    )
+                    .navigationBarsPadding()
+            ) {
+                Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(bottom = 8.dp)
+                            .width(38.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color(0xFF484F58))
+                    )
 
-                    TextButton(
-                        onClick = onOpenHealthDeck,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.height(28.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("📊 Health Deck", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Column {
+                            Text("Account Profiles (${profiles.size})", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Drag handle to reorder • Tap to switch", color = Color(0xFF8B949E), fontSize = 10.sp)
+                        }
+
+                        TextButton(
+                            onClick = onOpenHealthDeck,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("📊 Health Deck", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
-                }
 
-                HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.padding(vertical = 8.dp))
+                    HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.padding(vertical = 6.dp))
 
-                LazyColumn(
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.weight(1f).fillMaxWidth()
-                ) {
-                    itemsIndexed(profiles, key = { _, prof -> prof.id }) { idx, prof ->
-                        ReorderableItem(reorderState, key = prof.id) { isDragging ->
-                            val elevation by animateDpAsState(if (isDragging) 12.dp else 0.dp)
-                            val isSelected = prof.id == selectedProfileId
-                            val aData = aiAnalytics[prof.id]
-                            val qTime = aData?.lastQuotaHitTimestamp ?: 0L
-                            val isVerifyLocked = aData?.needsVerification ?: false
-                            val isQuotaActive = isQuotaCurrentlyActive(qTime, now)
-                            val todayCount = aData?.effectivePromptsToday(today) ?: 0
-                            val totalCount = aData?.totalPromptsLifetime ?: 0
-                            val repeatStrikes = (aData?.totalVerificationStrikes ?: 0) > 1
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.weight(1f).fillMaxWidth()
+                    ) {
+                        itemsIndexed(profiles, key = { _, prof -> prof.id }) { idx, prof ->
+                            ReorderableItem(reorderState, key = prof.id) { isDragging ->
+                                val elevation by animateDpAsState(if (isDragging) 12.dp else 0.dp)
+                                val isSelected = prof.id == selectedProfileId
+                                val aData = aiAnalytics[prof.id]
+                                val qTime = aData?.lastQuotaHitTimestamp ?: 0L
+                                val isVerifyLocked = aData?.needsVerification ?: false
+                                val isQuotaActive = isQuotaCurrentlyActive(qTime, now)
+                                val todayCount = aData?.effectivePromptsToday(today) ?: 0
+                                val totalCount = aData?.totalPromptsLifetime ?: 0
+                                val repeatStrikes = (aData?.totalVerificationStrikes ?: 0) > 1
 
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isDragging) Color(0xFF21262D) else if (isSelected) Color(prof.colorValue).copy(alpha = 0.16f) else Color(0xFF16181D),
-                                border = BorderStroke(
-                                    if (isSelected) 1.5.dp else 1.dp,
-                                    if (isSelected) Color(prof.colorValue) else Color(0xFF30363D)
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .graphicsLayer { shadowElevation = elevation.toPx() }
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { onSelectProfile(prof.id) }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isDragging) Color(0xFF21262D) else if (isSelected) Color(prof.colorValue).copy(alpha = 0.16f) else Color(0xFF16181D),
+                                    border = BorderStroke(
+                                        if (isSelected) 1.5.dp else 1.dp,
+                                        if (isSelected) Color(prof.colorValue) else Color(0xFF30363D)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .graphicsLayer { shadowElevation = elevation.toPx() }
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onSelectProfile(prof.id) }
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .draggableHandle(),
-                                        contentAlignment = Alignment.Center
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(
-                                            BrowserIcons.DragHandle,
-                                            contentDescription = "Drag to reorder",
-                                            tint = if (isDragging) Color(prof.colorValue) else Color(0xFF8B949E),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .draggableHandle(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                BrowserIcons.DragHandle,
+                                                contentDescription = "Drag to reorder",
+                                                tint = if (isDragging) Color(prof.colorValue) else Color(0xFF8B949E),
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
 
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFF21262D),
-                                        modifier = Modifier.padding(horizontal = 4.dp)
-                                    ) {
                                         Text(
                                             "#${idx + 1}",
                                             color = Color(0xFF8B949E),
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            modifier = Modifier.padding(horizontal = 4.dp)
                                         )
-                                    }
 
-                                    Box(
-                                        modifier = Modifier
-                                            .size(14.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(prof.colorValue))
-                                    )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(prof.colorValue))
+                                        )
 
-                                    Spacer(Modifier.width(8.dp))
+                                        Spacer(Modifier.width(8.dp))
 
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                prof.name,
-                                                color = Color.White,
-                                                fontSize = 13.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                            )
-                                            if (isSelected) {
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("• Active", color = Color(prof.colorValue), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    prof.name,
+                                                    color = Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (isSelected) {
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("• Active", color = Color(prof.colorValue), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
+
+                                            val strikes = aData?.totalVerificationStrikes ?: 0
+                                            val statusText = when {
+                                                isVerifyLocked -> "🔒 Verify Gate" + if (repeatStrikes) " (🚨 ${strikes}x strike!)" else ""
+                                                isQuotaActive -> "🔴 Quota Hit"
+                                                else -> "🟢 $todayCount today ($totalCount total)"
+                                            }
+                                            Text(
+                                                text = statusText,
+                                                color = when {
+                                                    isVerifyLocked -> Color(0xFFFF6D00)
+                                                    isQuotaActive -> Color(0xFFF85149)
+                                                    else -> Color(0xFF3FB950)
+                                                },
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1
+                                            )
                                         }
 
-                                                                    val strikes = aData?.totalVerificationStrikes ?: 0
-                            val statusText = when {
-                                isVerifyLocked -> "🔒 Verify Gate" + if (repeatStrikes) " (🚨 ${strikes}x strike!)" else ""
-                                isQuotaActive -> "🔴 Quota Hit"
-                                else -> "🟢 $todayCount today ($totalCount total)"
-                            }
-                                        Text(
-                                            text = statusText,
-                                            color = when {
-                                                isVerifyLocked -> Color(0xFFFF6D00)
-                                                isQuotaActive -> Color(0xFFF85149)
-                                                else -> Color(0xFF3FB950)
-                                            },
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        IconButton(
-                                            onClick = { onEditProfile(prof) },
-                                            modifier = Modifier.size(28.dp)
-                                        ) {
-                                            Text("✏️", fontSize = 12.sp)
-                                        }
-
-                                        if (prof.id != "default" && profiles.size > 1) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
                                             IconButton(
-                                                onClick = { onDeleteProfile(prof) },
-                                                modifier = Modifier.size(28.dp)
+                                                onClick = { onEditProfile(prof) },
+                                                modifier = Modifier.size(26.dp)
                                             ) {
-                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFF28B82), modifier = Modifier.size(15.dp))
+                                                Text("✏️", fontSize = 12.sp)
+                                            }
+
+                                            if (prof.id != "default" && profiles.size > 1) {
+                                                IconButton(
+                                                    onClick = { onDeleteProfile(prof) },
+                                                    modifier = Modifier.size(26.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFF28B82), modifier = Modifier.size(15.dp))
+                                                }
                                             }
                                         }
                                     }
@@ -1102,28 +1125,28 @@ fun ProfilesManagerDialog(
                             }
                         }
                     }
-                }
 
-                HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.padding(vertical = 8.dp))
+                    HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.padding(vertical = 6.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = onAddProfile,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Add Account", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
+                        Button(
+                            onClick = onAddProfile,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Add Account", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
 
-                    TextButton(onClick = onDismiss) {
-                        Text("Close", color = Color(0xFF9AA0A6))
+                        TextButton(onClick = onDismiss) {
+                            Text("Close", color = Color(0xFF9AA0A6))
+                        }
                     }
                 }
             }
