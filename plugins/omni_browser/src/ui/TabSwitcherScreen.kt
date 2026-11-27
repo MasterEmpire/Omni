@@ -84,6 +84,7 @@ fun TabSwitcherScreen(
     onRestoreTabGroup: (String) -> Unit = {},
     onRestoreSingleGroupedTab: (String, GroupedTabItem) -> Unit = { _, _ -> },
     onDeleteTabGroup: (String) -> Unit = {},
+    onReorderProfiles: (Int, Int) -> Unit = { _, _ -> },
     onSelectProfile: (String) -> Unit,
     onAddProfile: () -> Unit,
     onRenameProfile: (BrowserProfile) -> Unit,
@@ -105,7 +106,7 @@ fun TabSwitcherScreen(
     var activeSegment by remember { mutableStateOf("tabs") }
     var showFavoritesOnly by remember { mutableStateOf(false) }
     var showTabMenu by remember { mutableStateOf(false) }
-    var profileMenuExpanded by remember { mutableStateOf(false) }
+    var showProfilesDialog by remember { mutableStateOf(false) }
     var profileToDelete by remember { mutableStateOf<BrowserProfile?>(null) }
     var showHealthDeckDialog by remember { mutableStateOf(false) }
     val currentProfile = profiles.find { it.id == selectedProfileId } ?: profiles.firstOrNull() ?: BrowserProfile("default", "Account 1", 0xFF2979FF)
@@ -295,7 +296,7 @@ fun TabSwitcherScreen(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(16.dp))
                                     .combinedClickable(
-                                        onClick = { profileMenuExpanded = true },
+                                        onClick = { showProfilesDialog = true },
                                         onLongClick = {
                                             bridge?.vibrate(30L)
                                             onRenameProfile(currentProfile)
@@ -323,12 +324,6 @@ fun TabSwitcherScreen(
                                     )
                                 }
                             }
-
-                                        DropdownMenu(
-                expanded = profileMenuExpanded,
-                onDismissRequest = { profileMenuExpanded = false },
-                modifier = Modifier.background(Color(0xFF282C34))
-            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -450,20 +445,6 @@ fun TabSwitcherScreen(
 
                                 HorizontalDivider(color = Color(0xFF3C4043))
 
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF8AB4F8), modifier = Modifier.size(16.dp))
-                                            Spacer(Modifier.width(8.dp))
-                                            Text("Add Profile", color = Color(0xFF8AB4F8), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    },
-                                    onClick = {
-                                        profileMenuExpanded = false
-                                        onAddProfile()
-                                    }
-                                )
-                            }
                         }
                     }
 
@@ -640,17 +621,43 @@ fun TabSwitcherScreen(
                 }
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                state = gridState,
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+            val scope = rememberCoroutineScope()
+            var isGridScrollingActive by remember { mutableStateOf(false) }
+
+            LaunchedEffect(gridState.isScrollInProgress) {
+                if (gridState.isScrollInProgress) {
+                    isGridScrollingActive = true
+                } else {
+                    kotlinx.coroutines.delay(2200)
+                    isGridScrollingActive = false
+                }
+            }
+
+            val canJumpUp by remember {
+                derivedStateOf { gridState.firstVisibleItemIndex > 1 || gridState.firstVisibleItemScrollOffset > 0 }
+            }
+            val canJumpDown by remember {
+                derivedStateOf { gridState.canScrollForward }
+            }
+            val showJumpArrows by remember {
+                derivedStateOf { isGridScrollingActive && (canJumpUp || canJumpDown) && displayedTabs.size > 4 }
+            }
+
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .nestedScroll(tabsGridScrollConnection)
             ) {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    state = gridState,
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 64.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(tabsGridScrollConnection)
+                ) {
                 items(displayedTabs, key = { it.id }) { tab ->
                     val isActive = tab.id == activeTabId
                     val isSelectedInMode = selectedTabIds.contains(tab.id)
@@ -909,6 +916,164 @@ fun TabSwitcherScreen(
                     }
                 }
             }
+
+                // Smart Floating Fast Jump Controls (Up / Down)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showJumpArrows,
+                    enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.8f),
+                    exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.8f),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 16.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(22.dp),
+                        color = Color(0xFF161B22).copy(alpha = 0.92f),
+                        border = BorderStroke(1.2.dp, Color(0xFF58A6FF).copy(alpha = 0.65f)),
+                        shadowElevation = 10.dp
+                    ) {
+                        Column(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(3.dp)
+                        ) {
+                            if (canJumpUp) {
+                                IconButton(
+                                    onClick = {
+                                        bridge?.vibrate(20L)
+                                        scope.launch { gridState.animateScrollToItem(0) }
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Scroll to Top", tint = Color(0xFF58A6FF), modifier = Modifier.size(20.dp))
+                                }
+                            }
+                            if (canJumpUp && canJumpDown) {
+                                HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.width(20.dp))
+                            }
+                            if (canJumpDown) {
+                                IconButton(
+                                    onClick = {
+                                        bridge?.vibrate(20L)
+                                        scope.launch { gridState.animateScrollToItem((displayedTabs.size - 1).coerceAtLeast(0)) }
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Scroll to Bottom", tint = Color(0xFF58A6FF), modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    "verifications" -> {
+                        if (allVerificationEvents.isEmpty()) {
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("🛡️", fontSize = 36.sp)
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("Zero Verification Locks Recorded", color = Color(0xFFE8EAED), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text("Every verification gate and repeat lock across all profiles will appear here.", color = Color(0xFF8B949E), fontSize = 11.sp)
+                                }
+                            }
+                        } else {
+                            val fmt = remember { SimpleDateFormat("MMM d, HH:mm:ss", Locale.US) }
+                            LazyColumn(
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f).fillMaxWidth()
+                            ) {
+                                items(allVerificationEvents.size, key = { idx -> "v_${allVerificationEvents[idx].first}_${allVerificationEvents[idx].second.timestamp}_$idx" }) { idx ->
+                                    val (profId, ev) = allVerificationEvents[idx]
+                                    val prof = profileMap[profId]
+                                    val pColor = Color(prof?.colorValue ?: 0xFFFF6D00)
+                                    val isUnlocked = ev.unlockedAt > 0L
+                                    val aData = aiAnalytics[profId]
+                                    val totalStrikes = aData?.totalVerificationStrikes ?: 1
+                                    val isRepeat = totalStrikes > 1
+
+                                    Card(
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E222A)),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (!isUnlocked) Color(0xFFFF5252).copy(alpha = 0.75f)
+                                            else if (isRepeat) Color(0xFFFF9100).copy(alpha = 0.5f)
+                                            else Color(0xFF3FB950).copy(alpha = 0.4f)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(pColor))
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(prof?.name ?: profId, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    if (isRepeat) {
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = Color(0xFFFF3D00).copy(alpha = 0.22f)
+                                                        ) {
+                                                            Text("🚨 Repeat Strike (${totalStrikes}x)", color = Color(0xFFFF5252), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                        }
+                                                    }
+                                                }
+
+                                                if (!isUnlocked) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = Color(0xFF238636),
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .clickable { onClearVerificationLock(profId) }
+                                                    ) {
+                                                        Text("Approve & Unlock", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                                                    }
+                                                } else {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = Color(0xFF21262D)
+                                                    ) {
+                                                        Text("Resolved", color = Color(0xFF3FB950), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                                                    }
+                                                }
+                                            }
+
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = "🔒 Locked: ${fmt.format(Date(ev.timestamp))} (${formatTimeAgo(ev.timestamp)})" +
+                                                    if (isUnlocked) "\n✅ Unlocked: ${fmt.format(Date(ev.unlockedAt))} (${formatTimeAgo(ev.unlockedAt)})"
+                                                    else "\n⚠️ CURRENTLY LOCKED",
+                                                color = if (!isUnlocked) Color(0xFFFFAB40) else Color(0xFF8B949E),
+                                                fontSize = 10.sp,
+                                                lineHeight = 14.sp
+                                            )
+
+                                            if (ev.reason.isNotBlank()) {
+                                                Spacer(Modifier.height(4.dp))
+                                                Text(
+                                                    text = "Reason: ${ev.reason}",
+                                                    color = Color(0xFFF28B82),
+                                                    fontSize = 10.sp,
+                                                    maxLines = 3,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+            }
         }
     }
 
@@ -917,6 +1082,36 @@ fun TabSwitcherScreen(
             tabCount = selectedTabIds.size,
             onConfirm = onConfirmCreateGroup,
             onDismiss = onDismissGroupNamingDialog
+        )
+    }
+
+    if (showProfilesDialog) {
+        ProfilesManagerDialog(
+            profiles = profiles,
+            selectedProfileId = selectedProfileId,
+            aiAnalytics = aiAnalytics,
+            onSelectProfile = {
+                onSelectProfile(it)
+                showProfilesDialog = false
+            },
+            onAddProfile = {
+                showProfilesDialog = false
+                onAddProfile()
+            },
+            onEditProfile = { prof ->
+                showProfilesDialog = false
+                onRenameProfile(prof)
+            },
+            onDeleteProfile = { prof ->
+                showProfilesDialog = false
+                profileToDelete = prof
+            },
+            onReorderProfiles = onReorderProfiles,
+            onOpenHealthDeck = {
+                showProfilesDialog = false
+                showHealthDeckDialog = true
+            },
+            onDismiss = { showProfilesDialog = false }
         )
     }
 
@@ -978,6 +1173,213 @@ fun TabSwitcherScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ProfilesManagerDialog(
+    profiles: List<BrowserProfile>,
+    selectedProfileId: String,
+    aiAnalytics: Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics>,
+    onSelectProfile: (String) -> Unit,
+    onAddProfile: () -> Unit,
+    onEditProfile: (BrowserProfile) -> Unit,
+    onDeleteProfile: (BrowserProfile) -> Unit,
+    onReorderProfiles: (Int, Int) -> Unit,
+    onOpenHealthDeck: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val listState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+        onReorderProfiles(from.index, to.index)
+    }
+    val now = remember { System.currentTimeMillis() }
+    val today = remember(now) { getAnalyticsTodayKey(now) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF1E222A),
+            border = BorderStroke(1.dp, Color(0xFF30363D)),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .heightIn(max = 560.dp)
+                .padding(vertical = 24.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Account Profiles", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("Drag to reorder • Tap to switch account", color = Color(0xFF8B949E), fontSize = 10.sp)
+                    }
+
+                    TextButton(
+                        onClick = onOpenHealthDeck,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("📊 Health Deck", color = Color(0xFF58A6FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.padding(vertical = 8.dp))
+
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                ) {
+                    itemsIndexed(profiles, key = { _, prof -> prof.id }) { idx, prof ->
+                        ReorderableItem(reorderState, key = prof.id) { isDragging ->
+                            val elevation by animateDpAsState(if (isDragging) 12.dp else 0.dp)
+                            val isSelected = prof.id == selectedProfileId
+                            val aData = aiAnalytics[prof.id]
+                            val qTime = aData?.lastQuotaHitTimestamp ?: 0L
+                            val isVerifyLocked = aData?.needsVerification ?: false
+                            val isQuotaActive = isQuotaCurrentlyActive(qTime, now)
+                            val todayCount = aData?.effectivePromptsToday(today) ?: 0
+                            val totalCount = aData?.totalPromptsLifetime ?: 0
+                            val repeatStrikes = (aData?.totalVerificationStrikes ?: 0) > 1
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isDragging) Color(0xFF21262D) else if (isSelected) Color(prof.colorValue).copy(alpha = 0.16f) else Color(0xFF16181D),
+                                border = BorderStroke(
+                                    if (isSelected) 1.5.dp else 1.dp,
+                                    if (isSelected) Color(prof.colorValue) else Color(0xFF30363D)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer { shadowElevation = elevation.toPx() }
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onSelectProfile(prof.id) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .draggableHandle(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            BrowserIcons.DragHandle,
+                                            contentDescription = "Drag to reorder",
+                                            tint = if (isDragging) Color(prof.colorValue) else Color(0xFF8B949E),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF21262D),
+                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    ) {
+                                        Text(
+                                            "#${idx + 1}",
+                                            color = Color(0xFF8B949E),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(prof.colorValue))
+                                    )
+
+                                    Spacer(Modifier.width(8.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                prof.name,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                            if (isSelected) {
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("• Active", color = Color(prof.colorValue), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+
+                                        val statusText = when {
+                                            isVerifyLocked -> "🔒 Verify Gate" + if (repeatStrikes) " (🚨 ${aData.totalVerificationStrikes}x strike!)" else ""
+                                            isQuotaActive -> "🔴 Quota Hit"
+                                            else -> "🟢 $todayCount today ($totalCount total)"
+                                        }
+                                        Text(
+                                            text = statusText,
+                                            color = when {
+                                                isVerifyLocked -> Color(0xFFFF6D00)
+                                                isQuotaActive -> Color(0xFFF85149)
+                                                else -> Color(0xFF3FB950)
+                                            },
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = { onEditProfile(prof) },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Text("✏️", fontSize = 12.sp)
+                                        }
+
+                                        if (prof.id != "default" && profiles.size > 1) {
+                                            IconButton(
+                                                onClick = { onDeleteProfile(prof) },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFF28B82), modifier = Modifier.size(15.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.padding(vertical = 8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = onAddProfile,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Add Account", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    TextButton(onClick = onDismiss) {
+                        Text("Close", color = Color(0xFF9AA0A6))
+                    }
+                }
+            }
+        }
+    }
+}
 @Composable
 fun GroupNamingDialog(
     tabCount: Int,
@@ -1435,6 +1837,13 @@ fun AiStudioHealthDashboardDialog(
                     )
                 }
 
+                // All verify events sorted newest -> oldest
+                val allVerificationEvents = remember(allAnalyticsList) {
+                    allAnalyticsList.flatMap { (profId, a) ->
+                        a.verificationHistory.map { ev -> profId to ev }
+                    }.sortedByDescending { it.second.timestamp }
+                }
+
                 // Sub-Navigation Tabs
                 Row(
                     modifier = Modifier
@@ -1447,8 +1856,9 @@ fun AiStudioHealthDashboardDialog(
                 ) {
                     listOf(
                         Triple("overview", "Overview", Color(0xFF58A6FF)),
-                        Triple("history", "Daily Archive (${allRecordedDays.size})", Color(0xFF3FB950)),
-                        Triple("quotas", "Quota Ledger (${allQuotaEvents.size})", Color(0xFFF85149))
+                        Triple("history", "Daily (${allRecordedDays.size})", Color(0xFF3FB950)),
+                        Triple("quotas", "Quotas (${allQuotaEvents.size})", Color(0xFFF85149)),
+                        Triple("verifications", "Verify (${allVerificationEvents.size})", Color(0xFFFF6D00))
                     ).forEach { (tabKey, tabTitle, tabCol) ->
                         val isSel = activeTab == tabKey
                         Surface(
@@ -1794,6 +2204,35 @@ fun AiStudioHealthDashboardDialog(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
+                                        val verifyStrikesCount = a.totalVerificationStrikes
+                                        val isRepeat = a.isRepeatVerifyStrike
+                                        if (verifyStrikesCount > 0) {
+                                            Spacer(Modifier.height(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (isRepeat) Color(0xFFFF3D00).copy(alpha = 0.16f) else Color(0xFFFF6D00).copy(alpha = 0.12f),
+                                                border = BorderStroke(1.dp, if (isRepeat) Color(0xFFFF3D00).copy(alpha = 0.7f) else Color(0xFFFF6D00).copy(alpha = 0.45f)),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(8.dp)) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(if (isRepeat) "🚨 REPEAT VERIFY STRIKE" else "🔒 VERIFY AUDIT", color = if (isRepeat) Color(0xFFFF5252) else Color(0xFFFFAB40), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Text("($verifyStrikesCount strike${if (verifyStrikesCount == 1) "" else "s"} total)", color = Color(0xFF8B949E), fontSize = 9.sp)
+                                                    }
+                                                    a.verificationHistory.takeLast(3).reversed().forEachIndexed { sIdx, sEv ->
+                                                        val strikeNum = verifyStrikesCount - sIdx
+                                                        val unText = if (sEv.unlockedAt > 0L) " • Unlocked ${formatTimeAgo(sEv.unlockedAt)}" else " • Currently Locked"
+                                                        Text(
+                                                            "  #$strikeNum: Locked ${formatTimeAgo(sEv.timestamp)}$unText",
+                                                            color = Color(0xFFE8EAED),
+                                                            fontSize = 9.sp
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         if (isVerifyLocked) {
                                             Spacer(Modifier.height(4.dp))
                                             Text(
@@ -1936,7 +2375,7 @@ fun AiStudioHealthDashboardDialog(
                         }
                     }
 
-                    else -> {
+                    "quotas" -> {
                         if (allQuotaEvents.isEmpty()) {
                             Box(
                                 modifier = Modifier.weight(1f).fillMaxWidth(),
