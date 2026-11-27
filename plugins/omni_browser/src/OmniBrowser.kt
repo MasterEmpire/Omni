@@ -848,10 +848,17 @@ class OmniBrowser : PluginEntry() {
             state.showAutomationDialog, state.showAutomationResultDialog, state.editingProfile,
             state.editingShortcut, state.isAddingShortcut, state.isHomeOverlayOpen,
             state.canGoBack, state.currentUrl, state.currentWebView, state.showMenu,
-            state.showDownloadBanner
+            state.showDownloadBanner, state.customFullscreenView, state.isBrowserImmersiveMode
         ) {
             bridge.setOnBackPressedHandler { state.handleBackPressed() }
             onDispose { bridge.setOnBackPressedHandler(null) }
+        }
+
+        DisposableEffect(Unit) {
+            onDispose {
+                bridge.setImmersiveMode(false)
+                bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+            }
         }
 
         // --- UI Rendering ---
@@ -901,6 +908,7 @@ class OmniBrowser : PluginEntry() {
                     state.showDownloadsDialog = true
                 }
                 "force_dark" -> state.toggleForceDark()
+                "immersive_mode" -> state.toggleBrowserImmersiveMode()
                 "data_saver" -> state.toggleDataSaver()
                 "site_cache" -> state.toggleCurrentSiteCache()
                 "page_zoom" -> state.showZoomBar = true
@@ -986,50 +994,53 @@ class OmniBrowser : PluginEntry() {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color(0xFF1F2227))
-                    .statusBarsPadding()
+                    .then(if (state.isBrowserImmersiveMode) Modifier else Modifier.statusBarsPadding())
                     .imePadding()
             ) {
-                OmniBrowserTopBar(
-                    currentUrl = state.currentUrl,
-                    urlInputText = state.urlInputText,
-                    onUrlTextChange = {
-                        state.onSearchInputChanged(it)
-                    },
-                    onNavigate = {
-                        state.navigateTo(it)
-                        state.dismissSearch()
-                        focusManager.clearFocus()
-                    },
-                    profColor = profColor,
-                    tabCount = state.tabs.size,
-                    topLeftItems = state.topLeftItems,
-                    topBarItems = state.topBarItems,
-                    isHomeOverlayOpen = state.isHomeOverlayOpen,
-                    isSearchFocused = state.isSearchFocused,
-                    onSearchFocusChange = { focused ->
-                        if (focused && !state.isTabSwitcherOpen) {
-                            state.isSearchFocused = true
-                            state.onSearchInputChanged(state.urlInputText)
-                        } else {
+                if (!state.isBrowserImmersiveMode) {
+                    OmniBrowserTopBar(
+                        currentUrl = state.currentUrl,
+                        urlInputText = state.urlInputText,
+                        onUrlTextChange = {
+                            state.onSearchInputChanged(it)
+                        },
+                        onNavigate = {
+                            state.navigateTo(it)
                             state.dismissSearch()
-                        }
-                    },
-                    onActionClick = { dispatchSlotAction(it) },
-                    onActionLongClick = { dispatchSlotLongClick(it) },
-                    isAutoPilotActive = state.isLiveAutoPilotEnabled,
-                    isDataSaverActive = state.isEffectiveDataSaver(),
-                    forceDarkWebPages = state.forceDarkWebPages,
-                    dataSaverMode = state.dataSaverMode,
-                    isCurrentTabFavorite = activeTab?.isFavorite == true,
-                    isFocusLockActive = isFocusLockActive(context),
-                    activeDownloadsCount = state.trackedDownloadIds.size,
-                    canGoBack = state.canGoBack,
-                    canGoForward = state.canGoForward,
-                    onTopBarDragStart = { state.onTopBarDragStart() },
-                    onTopBarDrag = { state.onTopBarDrag(it) },
-                    onTopBarDragEnd = { state.onTopBarDragEnd() },
-                    onTopBarDragCancel = { state.onTopBarDragCancel() }
-                )
+                            focusManager.clearFocus()
+                        },
+                        profColor = profColor,
+                        tabCount = state.tabs.size,
+                        topLeftItems = state.topLeftItems,
+                        topBarItems = state.topBarItems,
+                        isHomeOverlayOpen = state.isHomeOverlayOpen,
+                        isSearchFocused = state.isSearchFocused,
+                        onSearchFocusChange = { focused ->
+                            if (focused && !state.isTabSwitcherOpen) {
+                                state.isSearchFocused = true
+                                state.onSearchInputChanged(state.urlInputText)
+                            } else {
+                                state.dismissSearch()
+                            }
+                        },
+                        onActionClick = { dispatchSlotAction(it) },
+                        onActionLongClick = { dispatchSlotLongClick(it) },
+                        isAutoPilotActive = state.isLiveAutoPilotEnabled,
+                        isDataSaverActive = state.isEffectiveDataSaver(),
+                        forceDarkWebPages = state.forceDarkWebPages,
+                        isBrowserImmersiveActive = state.isBrowserImmersiveMode,
+                        dataSaverMode = state.dataSaverMode,
+                        isCurrentTabFavorite = activeTab?.isFavorite == true,
+                        isFocusLockActive = isFocusLockActive(context),
+                        activeDownloadsCount = state.trackedDownloadIds.size,
+                        canGoBack = state.canGoBack,
+                        canGoForward = state.canGoForward,
+                        onTopBarDragStart = { state.onTopBarDragStart() },
+                        onTopBarDrag = { state.onTopBarDrag(it) },
+                        onTopBarDragEnd = { state.onTopBarDragEnd() },
+                        onTopBarDragCancel = { state.onTopBarDragCancel() }
+                    )
+                }
 
                 AnimatedVisibility(
                     visible = state.isLoading,
@@ -1196,7 +1207,7 @@ class OmniBrowser : PluginEntry() {
                     }
                 }
 
-                if (!isImeVisible && !state.isBottomBarCollapsed) {
+                if (!isImeVisible && !state.isBottomBarCollapsed && !state.isBrowserImmersiveMode) {
                     OmniBottomBar(
                         bottomBarItems = state.bottomBarItems,
                         profColor = profColor,
@@ -1207,6 +1218,7 @@ class OmniBrowser : PluginEntry() {
                         isHomeOverlayOpen = state.isHomeOverlayOpen,
                         isAutoPilotActive = state.isLiveAutoPilotEnabled,
                         forceDarkWebPages = state.forceDarkWebPages,
+                        isBrowserImmersiveActive = state.isBrowserImmersiveMode,
                         dataSaverMode = state.dataSaverMode,
                         isCurrentTabFavorite = activeTab?.isFavorite == true,
                         isFocusLockActive = isFocusLockActive(context),
@@ -1237,6 +1249,8 @@ class OmniBrowser : PluginEntry() {
                     onToggleFavoriteTab = { state.toggleTabFavorite(state.activeTabId) },
                     forceDarkWebPages = state.forceDarkWebPages,
                     onToggleForceDark = { state.toggleForceDark() },
+                    isBrowserImmersiveActive = state.isBrowserImmersiveMode,
+                    onToggleImmersiveMode = { state.toggleBrowserImmersiveMode() },
                     isFocusLockActive = isFocusLockActive(context),
                     onToggleFocusLock = { state.toggleFocusLock() },
                     onBackClick = {
@@ -1938,7 +1952,7 @@ class OmniBrowser : PluginEntry() {
                     .zIndex(34f)
             )
             BottomBarExpandFab(
-                visible = state.isBottomBarCollapsed && !isImeVisible && !state.isTabSwitcherOpen && !state.showSettingsDialog,
+                visible = state.isBottomBarCollapsed && !isImeVisible && !state.isTabSwitcherOpen && !state.showSettingsDialog && !state.isBrowserImmersiveMode,
                 profColor = profColor,
                 isAutoPilotActive = state.isLiveAutoPilotEnabled,
                 onExpand = { state.isBottomBarCollapsed = false },
@@ -1952,6 +1966,70 @@ class OmniBrowser : PluginEntry() {
                     .padding(end = 12.dp, bottom = 12.dp)
                     .zIndex(33f)
             )
+
+            ImmersiveFloatingControlsPill(
+                visible = state.isBrowserImmersiveMode && state.customFullscreenView == null && !state.isTabSwitcherOpen && !state.showSettingsDialog,
+                onRotateClick = { state.toggleFullscreenRotation() },
+                onExitClick = { state.toggleBrowserImmersiveMode() },
+                draggable = true,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 12.dp, end = 12.dp)
+                    .zIndex(55f)
+            )
+
+            if (state.customFullscreenView != null) {
+                val fsView = state.customFullscreenView!!
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                        .zIndex(60f)
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            FrameLayout(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                (fsView.parent as? ViewGroup)?.removeView(fsView)
+                                addView(
+                                    fsView,
+                                    ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                )
+                            }
+                        },
+                        update = { frame ->
+                            if (fsView.parent !== frame) {
+                                (fsView.parent as? ViewGroup)?.removeView(fsView)
+                                frame.removeAllViews()
+                                frame.addView(
+                                    fsView,
+                                    ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    ImmersiveFloatingControlsPill(
+                        visible = true,
+                        onRotateClick = { state.toggleFullscreenRotation() },
+                        onExitClick = { state.exitCustomFullscreen() },
+                        draggable = true,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 12.dp, end = 12.dp)
+                    )
+                }
+            }
 
             UndoBanner(
                 visible = state.showUndoBanner,
