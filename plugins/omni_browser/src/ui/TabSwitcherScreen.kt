@@ -61,6 +61,14 @@ import com.omni.hub.api.OmniLogger
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -324,127 +332,6 @@ fun TabSwitcherScreen(
                                     )
                                 }
                             }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Account Profiles", color = Color(0xFF9AA0A6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    TextButton(
-                        onClick = {
-                            profileMenuExpanded = false
-                            showHealthDeckDialog = true
-                        },
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                        modifier = Modifier.height(24.dp)
-                    ) {
-                        Text("📊 Health Deck", color = Color(0xFF58A6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                HorizontalDivider(color = Color(0xFF3C4043))
-
-                                profiles.forEach { prof ->
-                                    val isSelected = prof.id == selectedProfileId
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(9.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(prof.colorValue))
-                                                )
-                                                Spacer(Modifier.width(8.dp))
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        prof.name,
-                                                        color = if (isSelected) Color(prof.colorValue) else Color(0xFFE8EAED),
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        fontSize = 13.sp
-                                                    )
-                                                    val aData = aiAnalytics[prof.id]
-                                                    val now = System.currentTimeMillis()
-                                                    val today = getAnalyticsTodayKey(now)
-                                                    val qTime = aData?.lastQuotaHitTimestamp ?: 0L
-                                                    val isVerifyLocked = aData?.needsVerification ?: false
-                                                    val isQuotaActive = isQuotaCurrentlyActive(qTime, now)
-                                                    val todayCount = aData?.effectivePromptsToday(today) ?: 0
-                                                    val totalCount = aData?.totalPromptsLifetime ?: 0
-                                                    val healthText = when {
-                                                        isVerifyLocked -> "🔒 Verify Required • $todayCount today ($totalCount total)"
-                                                        isQuotaActive -> {
-                                                            val diffH = ((now - qTime) / 3_600_000L).coerceAtLeast(0)
-                                                            val agoStr = if (diffH == 0L) {
-                                                                "${((now - qTime) / 60_000L).coerceAtLeast(1)}m"
-                                                            } else {
-                                                                "${diffH}h"
-                                                            }
-                                                            "🔴 Quota Hit ($agoStr ago) • $todayCount today ($totalCount total)"
-                                                        }
-                                                        todayCount >= 40 -> "🟡 Busy • $todayCount today ($totalCount total)"
-                                                        todayCount > 0 -> "🟢 Fresh • $todayCount today ($totalCount total)"
-                                                        else -> "🟢 Ready • 0 today" + if (totalCount > 0) " ($totalCount total)" else ""
-                                                    }
-                                                    val healthColor = when {
-                                                        isVerifyLocked -> Color(0xFFFF6D00)
-                                                        isQuotaActive -> Color(0xFFF85149)
-                                                        todayCount >= 40 -> Color(0xFFD29922)
-                                                        else -> Color(0xFF3FB950)
-                                                    }
-                                                    Text(
-                                                        text = healthText,
-                                                        color = healthColor,
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-                                        },
-                                        onClick = {
-                                            onSelectProfile(prof.id)
-                                            profileMenuExpanded = false
-                                        },
-                                        trailingIcon = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                IconButton(
-                                                    onClick = {
-                                                        profileMenuExpanded = false
-                                                        onRenameProfile(prof)
-                                                    },
-                                                    modifier = Modifier.size(24.dp)
-                                                ) {
-                                                    Text("✏️", fontSize = 12.sp)
-                                                }
-
-                                                if (prof.id != "default" && profiles.size > 1) {
-                                                    Spacer(Modifier.width(4.dp))
-                                                    IconButton(
-                                                        onClick = {
-                                                            profileMenuExpanded = false
-                                                            profileToDelete = prof
-                                                        },
-                                                        modifier = Modifier.size(24.dp)
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Default.Delete,
-                                                            contentDescription = "Delete Profile",
-                                                            tint = Color(0xFFF28B82),
-                                                            modifier = Modifier.size(15.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    )
-                                }
-
-                                HorizontalDivider(color = Color(0xFF3C4043))
-
                         }
                     }
 
@@ -918,10 +805,10 @@ fun TabSwitcherScreen(
             }
 
                 // Smart Floating Fast Jump Controls (Up / Down)
-                androidx.compose.animation.AnimatedVisibility(
+                AnimatedVisibility(
                     visible = showJumpArrows,
-                    enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.8f),
-                    exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.8f),
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 16.dp, bottom = 16.dp)
@@ -933,7 +820,7 @@ fun TabSwitcherScreen(
                         shadowElevation = 10.dp
                     ) {
                         Column(
-                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.padding(3.dp)
                         ) {
                             if (canJumpUp) {
@@ -963,115 +850,6 @@ fun TabSwitcherScreen(
                             }
                         }
                     }
-
-                    "verifications" -> {
-                        if (allVerificationEvents.isEmpty()) {
-                            Box(
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("🛡️", fontSize = 36.sp)
-                                    Spacer(Modifier.height(8.dp))
-                                    Text("Zero Verification Locks Recorded", color = Color(0xFFE8EAED), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                                    Text("Every verification gate and repeat lock across all profiles will appear here.", color = Color(0xFF8B949E), fontSize = 11.sp)
-                                }
-                            }
-                        } else {
-                            val fmt = remember { SimpleDateFormat("MMM d, HH:mm:ss", Locale.US) }
-                            LazyColumn(
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.weight(1f).fillMaxWidth()
-                            ) {
-                                items(allVerificationEvents.size, key = { idx -> "v_${allVerificationEvents[idx].first}_${allVerificationEvents[idx].second.timestamp}_$idx" }) { idx ->
-                                    val (profId, ev) = allVerificationEvents[idx]
-                                    val prof = profileMap[profId]
-                                    val pColor = Color(prof?.colorValue ?: 0xFFFF6D00)
-                                    val isUnlocked = ev.unlockedAt > 0L
-                                    val aData = aiAnalytics[profId]
-                                    val totalStrikes = aData?.totalVerificationStrikes ?: 1
-                                    val isRepeat = totalStrikes > 1
-
-                                    Card(
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E222A)),
-                                        border = BorderStroke(
-                                            1.dp,
-                                            if (!isUnlocked) Color(0xFFFF5252).copy(alpha = 0.75f)
-                                            else if (isRepeat) Color(0xFFFF9100).copy(alpha = 0.5f)
-                                            else Color(0xFF3FB950).copy(alpha = 0.4f)
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Column(modifier = Modifier.padding(10.dp)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(pColor))
-                                                    Spacer(Modifier.width(6.dp))
-                                                    Text(prof?.name ?: profId, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                                    if (isRepeat) {
-                                                        Spacer(Modifier.width(6.dp))
-                                                        Surface(
-                                                            shape = RoundedCornerShape(6.dp),
-                                                            color = Color(0xFFFF3D00).copy(alpha = 0.22f)
-                                                        ) {
-                                                            Text("🚨 Repeat Strike (${totalStrikes}x)", color = Color(0xFFFF5252), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-                                                        }
-                                                    }
-                                                }
-
-                                                if (!isUnlocked) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        color = Color(0xFF238636),
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .clickable { onClearVerificationLock(profId) }
-                                                    ) {
-                                                        Text("Approve & Unlock", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
-                                                    }
-                                                } else {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        color = Color(0xFF21262D)
-                                                    ) {
-                                                        Text("Resolved", color = Color(0xFF3FB950), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
-                                                    }
-                                                }
-                                            }
-
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(
-                                                text = "🔒 Locked: ${fmt.format(Date(ev.timestamp))} (${formatTimeAgo(ev.timestamp)})" +
-                                                    if (isUnlocked) "\n✅ Unlocked: ${fmt.format(Date(ev.unlockedAt))} (${formatTimeAgo(ev.unlockedAt)})"
-                                                    else "\n⚠️ CURRENTLY LOCKED",
-                                                color = if (!isUnlocked) Color(0xFFFFAB40) else Color(0xFF8B949E),
-                                                fontSize = 10.sp,
-                                                lineHeight = 14.sp
-                                            )
-
-                                            if (ev.reason.isNotBlank()) {
-                                                Spacer(Modifier.height(4.dp))
-                                                Text(
-                                                    text = "Reason: ${ev.reason}",
-                                                    color = Color(0xFFF28B82),
-                                                    fontSize = 10.sp,
-                                                    maxLines = 3,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    else -> {}
                 }
             }
         }
@@ -1314,11 +1092,12 @@ fun ProfilesManagerDialog(
                                             }
                                         }
 
-                                        val statusText = when {
-                                            isVerifyLocked -> "🔒 Verify Gate" + if (repeatStrikes) " (🚨 ${aData.totalVerificationStrikes}x strike!)" else ""
-                                            isQuotaActive -> "🔴 Quota Hit"
-                                            else -> "🟢 $todayCount today ($totalCount total)"
-                                        }
+                                                                    val strikes = aData?.totalVerificationStrikes ?: 0
+                            val statusText = when {
+                                isVerifyLocked -> "🔒 Verify Gate" + if (repeatStrikes) " (🚨 ${strikes}x strike!)" else ""
+                                isQuotaActive -> "🔴 Quota Hit"
+                                else -> "🟢 $todayCount today ($totalCount total)"
+                            }
                                         Text(
                                             text = statusText,
                                             color = when {
@@ -2428,6 +2207,114 @@ fun AiStudioHealthDashboardDialog(
                                                     text = ev.reason,
                                                     color = Color(0xFFF28B82),
                                                     fontSize = 11.sp,
+                                                    maxLines = 3,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    "verifications" -> {
+                        if (allVerificationEvents.isEmpty()) {
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("🛡️", fontSize = 36.sp)
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("Zero Verification Locks Recorded", color = Color(0xFFE8EAED), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text("Every verification gate and repeat lock across all profiles will appear here.", color = Color(0xFF8B949E), fontSize = 11.sp)
+                                }
+                            }
+                        } else {
+                            val fmt = remember { SimpleDateFormat("MMM d, HH:mm:ss", Locale.US) }
+                            LazyColumn(
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f).fillMaxWidth()
+                            ) {
+                                items(allVerificationEvents.size, key = { idx -> "v_${allVerificationEvents[idx].first}_${allVerificationEvents[idx].second.timestamp}_$idx" }) { idx ->
+                                    val (profId, ev) = allVerificationEvents[idx]
+                                    val prof = profileMap[profId]
+                                    val pColor = Color(prof?.colorValue ?: 0xFFFF6D00)
+                                    val isUnlocked = ev.unlockedAt > 0L
+                                    val aData = aiAnalytics[profId]
+                                    val totalStrikes = aData?.totalVerificationStrikes ?: 1
+                                    val isRepeat = totalStrikes > 1
+
+                                    Card(
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E222A)),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (!isUnlocked) Color(0xFFFF5252).copy(alpha = 0.75f)
+                                            else if (isRepeat) Color(0xFFFF9100).copy(alpha = 0.5f)
+                                            else Color(0xFF3FB950).copy(alpha = 0.4f)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(pColor))
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(prof?.name ?: profId, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    if (isRepeat) {
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = Color(0xFFFF3D00).copy(alpha = 0.22f)
+                                                        ) {
+                                                            Text("🚨 Repeat Strike (${totalStrikes}x)", color = Color(0xFFFF5252), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                        }
+                                                    }
+                                                }
+
+                                                if (!isUnlocked) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = Color(0xFF238636),
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .clickable { onClearVerificationLock(profId) }
+                                                    ) {
+                                                        Text("Approve & Unlock", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                                                    }
+                                                } else {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = Color(0xFF21262D)
+                                                    ) {
+                                                        Text("Resolved", color = Color(0xFF3FB950), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                                                    }
+                                                }
+                                            }
+
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = "🔒 Locked: ${fmt.format(Date(ev.timestamp))} (${formatTimeAgo(ev.timestamp)})" +
+                                                    if (isUnlocked) "\n✅ Unlocked: ${fmt.format(Date(ev.unlockedAt))} (${formatTimeAgo(ev.unlockedAt)})"
+                                                    else "\n⚠️ CURRENTLY LOCKED",
+                                                color = if (!isUnlocked) Color(0xFFFFAB40) else Color(0xFF8B949E),
+                                                fontSize = 10.sp,
+                                                lineHeight = 14.sp
+                                            )
+
+                                            if (ev.reason.isNotBlank()) {
+                                                Spacer(Modifier.height(4.dp))
+                                                Text(
+                                                    text = "Reason: ${ev.reason}",
+                                                    color = Color(0xFFF28B82),
+                                                    fontSize = 10.sp,
                                                     maxLines = 3,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
