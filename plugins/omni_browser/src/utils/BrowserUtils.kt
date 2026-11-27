@@ -395,6 +395,80 @@ val BLOB_INTERCEPTOR_SCRIPT = """
 })();
 """.trimIndent()
 
+val SCREEN_ORIENTATION_POLYFILL = """
+(function() {
+    if (window.__omniOrientationHooked) return;
+    window.__omniOrientationHooked = true;
+
+    window.__omniDetectFullscreenOrientation = function() {
+        try {
+            var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+            var vid = null;
+            if (fsEl) {
+                if (fsEl.tagName === 'VIDEO') vid = fsEl;
+                else if (fsEl.querySelector) vid = fsEl.querySelector('video');
+            }
+            if (!vid) {
+                var vids = Array.from(document.querySelectorAll('video'));
+                vid = vids.find(function(v) { return !v.paused && v.videoWidth > 0; }) ||
+                      vids.find(function(v) { return v.videoWidth > 0; });
+            }
+            if (vid && vid.videoWidth > 0 && vid.videoHeight > 0) {
+                return (vid.videoWidth >= vid.videoHeight) ? 'LANDSCAPE' : 'PORTRAIT';
+            }
+        } catch(_) {}
+        return 'AUTO';
+    };
+
+    try {
+        var lockFn = function(orientation) {
+            try {
+                if (window.OmniOrientationBridge && window.OmniOrientationBridge.lockOrientation) {
+                    window.OmniOrientationBridge.lockOrientation(String(orientation || 'any'));
+                }
+            } catch(_) {}
+            return Promise.resolve();
+        };
+        var unlockFn = function() {
+            try {
+                if (window.OmniOrientationBridge && window.OmniOrientationBridge.unlockOrientation) {
+                    window.OmniOrientationBridge.unlockOrientation();
+                }
+            } catch(_) {}
+        };
+
+        if (typeof ScreenOrientation !== 'undefined' && ScreenOrientation.prototype) {
+            try {
+                Object.defineProperty(ScreenOrientation.prototype, 'lock', {
+                    value: lockFn,
+                    configurable: true,
+                    writable: true
+                });
+                Object.defineProperty(ScreenOrientation.prototype, 'unlock', {
+                    value: unlockFn,
+                    configurable: true,
+                    writable: true
+                });
+            } catch(_) {}
+        }
+
+        if (window.screen && window.screen.orientation) {
+            try {
+                Object.defineProperty(window.screen.orientation, 'lock', {
+                    value: lockFn,
+                    configurable: true,
+                    writable: true
+                });
+                Object.defineProperty(window.screen.orientation, 'unlock', {
+                    value: unlockFn,
+                    configurable: true,
+                    writable: true
+                });
+            } catch(_) {}
+        }
+    } catch(_) {}
+})();
+""".trimIndent()
 val DATA_SAVER_POLYFILL = """
 (function() {
     try {
