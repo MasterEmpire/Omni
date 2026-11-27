@@ -1587,9 +1587,10 @@ class OmniBrowser : PluginEntry() {
                         currentPageUrl = state.currentUrl,
                         currentPageTitle = state.pageTitle,
                         onUnlockNote = { note, pin -> state.verifySmartNotePin(note, pin) },
-                        onSaveNote = { title, content, id, colorId, folderId ->
-                            state.saveSmartNote(title, content, id, colorId, folderId)
+                        onSaveNote = { title, content, id, colorId, folderId, isPinned ->
+                            state.saveSmartNote(title, content, id, colorId, folderId, isPinned)
                         },
+                        onTogglePin = { id: String -> state.toggleSmartNotePin(id) },
                         onDeleteNote = { id: String -> state.deleteSmartNote(id) },
                         onInjectToPage = { text: String -> state.injectTextToActivePage(text) },
                         onDismiss = { state.showSmartNotesDialog = false }
