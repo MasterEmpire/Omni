@@ -76,6 +76,11 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.core.content.FileProvider
+import java.io.File
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -119,6 +124,7 @@ fun NotesHomeScreen(
     var editingFolder by remember { mutableStateOf<NoteFolder?>(null) }
     var showMasterPinDialog by remember { mutableStateOf(false) }
     var pendingBatchLockIds by remember { mutableStateOf<Set<String>?>(null) }
+    var showBatchShareDialog by remember { mutableStateOf(false) }
 
     DisposableEffect(drawerState.isOpen, isSearchOpen, showFabMenu, selectedColorFilter, isSelectionMode, activeFolderId, unfiledOnly, selectedSection) {
         registerBackInterceptor {
@@ -689,20 +695,7 @@ fun NotesHomeScreen(
                                             if (unlocked.isEmpty()) {
                                                 bridge.showToast("🔒 Locked notes cannot be batch-shared")
                                             } else {
-                                                val combined = unlocked.joinToString("\n\n──────────\n\n") { n ->
-                                                    val body = if (n.type == NoteType.CHECKLIST) {
-                                                        n.checklist.joinToString("\n") { "${if (it.isChecked) "[x]" else "[ ]"} ${it.text}" }
-                                                    } else n.content
-                                                    if (n.title.isNotBlank()) "${n.title}\n\n$body" else body
-                                                }
-                                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                                    type = "text/plain"
-                                                    putExtra(Intent.EXTRA_TEXT, combined.trim())
-                                                }
-                                                context.startActivity(Intent.createChooser(sendIntent, "Share Notes").apply {
-                                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                })
-                                                selectedNoteIds = emptySet()
+                                                showBatchShareDialog = true
                                             }
                                         },
                                         shape = RoundedCornerShape(10.dp),
@@ -1475,6 +1468,176 @@ fun NotesHomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showFolderEditorDialog = false }) {
+                    Text("Cancel", color = mutedText)
+                }
+            }
+        )
+    }
+
+    if (showBatchShareDialog) {
+        val selectedList = displayNotes.filter { selectedNoteIds.contains(it.id) }
+        val unlockedToShare = selectedList.filter { !it.isLocked }
+        val lockedSkipped = selectedList.size - unlockedToShare.size
+
+        fun exportAndShare(asZip: Boolean) {
+            showBatchShareDialog = false
+            selectedNoteIds = emptySet()
+            scope.launch {
+                try {
+                    val (outFile, mimeType) = withContext(Dispatchers.IO) {
+                        val shareDir = File(context.cacheDir, "shared_notes").apply { mkdirs() }
+                        val cutoff = System.currentTimeMillis() - 3_600_000L
+                        shareDir.listFiles()?.forEach { old ->
+                            if (old.isFile && old.lastModified() < cutoff) old.delete()
+                        }
+
+                        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+
+                        fun formatNoteForFile(n: NoteItem): String {
+                            val mainBody = if (n.type == NoteType.CHECKLIST) {
+                                n.checklist.joinToString("\n") { "${if (it.isChecked) "[x]" else "[ ]"} ${it.text}" }
+                            } else if (n.marginContent.isNotBlank()) {
+                                "${n.content}\n\n[Margin Notes]\n${n.marginContent}"
+                            } else {
+                                n.content
+                            }
+                            return if (n.title.isNotBlank()) "${n.title}\n\n${mainBody.trim()}" else mainBody.trim()
+                        }
+
+                        if (asZip) {
+                            val zipFile = File(shareDir, "OmniNotes_${unlockedToShare.size}notes_$ts.zip")
+                            val usedNames = mutableSetOf<String>()
+                            ZipOutputStream(FileOutputStream(zipFile)).use { zos ->
+                                unlockedToShare.forEachIndexed { idx, note ->
+                                    val baseRaw = note.title.trim()
+                                        .ifBlank { "Note_${idx + 1}" }
+                                        .replace(Regex("[\\\\/:*?\"<>|\\r\\n]+"), "_")
+                                        .take(48)
+                                        .trimEnd('.', ' ')
+                                        .ifBlank { "Note_${idx + 1}" }
+                                    var entryName = "$baseRaw.txt"
+                                    var dup = 2
+                                    while (!usedNames.add(entryName.lowercase(Locale.US))) {
+                                        entryName = "${baseRaw}_$dup.txt"
+                                        dup++
+                                    }
+                                    zos.putNextEntry(ZipEntry(entryName))
+                                    zos.write(formatNoteForFile(note).toByteArray(Charsets.UTF_8))
+                                    zos.closeEntry()
+                                }
+                            }
+                            Pair(zipFile, "application/zip")
+                        } else {
+                            val txtFile = File(shareDir, "OmniNotes_Dump_$ts.txt")
+                            val combined = buildString {
+                                unlockedToShare.forEachIndexed { idx, note ->
+                                    val heading = note.title.trim().ifBlank { "Untitled ${idx + 1}" }
+                                    appendLine("==========================================")
+                                    appendLine("[${idx + 1}/${unlockedToShare.size}] $heading")
+                                    appendLine("==========================================")
+                                    val body = if (note.type == NoteType.CHECKLIST) {
+                                        note.checklist.joinToString("\n") { "${if (it.isChecked) "[x]" else "[ ]"} ${it.text}" }
+                                    } else if (note.marginContent.isNotBlank()) {
+                                        "${note.content}\n\n[Margin Notes]\n${note.marginContent}"
+                                    } else {
+                                        note.content
+                                    }
+                                    appendLine(body.trim())
+                                    if (idx < unlockedToShare.lastIndex) {
+                                        appendLine()
+                                        appendLine()
+                                    }
+                                }
+                            }
+                            txtFile.writeText(combined, Charsets.UTF_8)
+                            Pair(txtFile, "text/plain")
+                        }
+                    }
+
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = mimeType
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, outFile.name)
+                        clipData = android.content.ClipData.newRawUri(outFile.name, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = Intent.createChooser(sendIntent, "Share ${unlockedToShare.size} Notes").apply {
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(chooser)
+                } catch (e: Exception) {
+                    bridge.showToast("Share failed: ${e.message}")
+                }
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showBatchShareDialog = false },
+            containerColor = surfaceColor,
+            title = {
+                Text(
+                    "📤 Share ${unlockedToShare.size} Note${if (unlockedToShare.size == 1) "" else "s"}",
+                    color = primaryText,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (lockedSkipped > 0) {
+                        Text(
+                            "🔒 $lockedSkipped locked note(s) will be excluded from export.",
+                            color = Color(0xFFE5A93C),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF58A6FF).copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, Color(0xFF58A6FF).copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { exportAndShare(asZip = true) }
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("📦 Share as ZIP Archive (.zip)", color = Color(0xFF58A6FF), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "Packs each note as its own .txt file inside a single ZIP",
+                                color = mutedText,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF3FB950).copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, Color(0xFF3FB950).copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { exportAndShare(asZip = false) }
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("📄 Dump All to Single Text File (.txt)", color = Color(0xFF3FB950), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "Combines all selected notes into one continuous .txt document",
+                                color = mutedText,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showBatchShareDialog = false }) {
                     Text("Cancel", color = mutedText)
                 }
             }
