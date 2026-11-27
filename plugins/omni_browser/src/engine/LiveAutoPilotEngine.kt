@@ -757,56 +757,47 @@ object LiveAutoPilotEngine {
                     let dispatchedAny = false;
 
                     // 1. Detect & Auto-Bridge CXP Patch Markup to Conduit IDE
-                    if (!targetDomTurn || targetDomTurn.getAttribute('data-omni-cxp-executed') !== 'true') {
-                        const cxpPayload = extractCxpBlock(rawText);
-                        if (cxpPayload) {
-                            const cxpHash = 'cxp_' + hashPayload(cxpPayload);
-                            if (targetDomTurn) targetDomTurn.setAttribute('data-omni-cxp-executed', 'true');
-                            if (!window.__omniDispatchedHashes.has(cxpHash)) {
-                                window.__omniDispatchedHashes.add(cxpHash);
-                                dispatchedAny = true;
-                                if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
-                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [' + sourceTag + '] Valid CXP burger extracted (' + cxpPayload.length + ' chars, hash=' + cxpHash + '). Beaming to Conduit IDE...');
-                                }
-                                if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
-                                    window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
-                                }
+                    const cxpPayload = extractCxpBlock(rawText);
+                    if (cxpPayload) {
+                        const cxpHash = 'cxp_' + hashPayload(cxpPayload);
+                        if (!window.__omniDispatchedHashes.has(cxpHash)) {
+                            window.__omniDispatchedHashes.add(cxpHash);
+                            dispatchedAny = true;
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.log) {
+                                window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📦 [' + sourceTag + '] Valid CXP burger extracted (' + cxpPayload.length + ' chars, hash=' + cxpHash + '). Beaming to Conduit IDE...');
+                            }
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.dispatchCxpToIde) {
+                                window.OmniIdeBridge.dispatchCxpToIde(cxpPayload);
                             }
                         }
                     }
 
                     // 2. Detect & Auto-Bridge Python Tool Execution to Nexus
-                    if (!targetDomTurn || targetDomTurn.getAttribute('data-omni-executed') !== 'true') {
-                        const pythonScript = extractPythonBlock(rawText);
-                        if (pythonScript) {
-                            const pyHash = 'py_' + hashPayload(pythonScript);
-                            if (targetDomTurn) targetDomTurn.setAttribute('data-omni-executed', 'true');
-                            if (!window.__omniDispatchedHashes.has(pyHash)) {
-                                window.__omniDispatchedHashes.add(pyHash);
-                                dispatchedAny = true;
-                                if (window.OmniPythonBridge && window.OmniPythonBridge.executeFromLivePage) {
-                                    window.OmniPythonBridge.log('LIVE_AUTO', '[' + sourceTag + '] Captured Python block (' + pythonScript.length + ' chars). Executing on Nexus...');
-                                    window.OmniPythonBridge.executeFromLivePage(pythonScript);
-                                }
+                    const pythonScript = extractPythonBlock(rawText);
+                    if (pythonScript) {
+                        const pyHash = 'py_' + hashPayload(pythonScript);
+                        if (!window.__omniDispatchedHashes.has(pyHash)) {
+                            window.__omniDispatchedHashes.add(pyHash);
+                            dispatchedAny = true;
+                            if (window.OmniPythonBridge && window.OmniPythonBridge.executeFromLivePage) {
+                                window.OmniPythonBridge.log('LIVE_AUTO', '[' + sourceTag + '] Captured Python block (' + pythonScript.length + ' chars). Executing on Nexus...');
+                                window.OmniPythonBridge.executeFromLivePage(pythonScript);
                             }
                         }
                     }
 
                     // 3. Detect & Auto-Bridge Project File Pulling to Conduit IDE
-                    if (!targetDomTurn || targetDomTurn.getAttribute('data-omni-pull-executed') !== 'true') {
-                        const pullPayload = extractPullFilesBlock(rawText);
-                        if (pullPayload) {
-                            const pullHash = 'pull_' + hashPayload(pullPayload);
-                            if (targetDomTurn) targetDomTurn.setAttribute('data-omni-pull-executed', 'true');
-                            if (!window.__omniDispatchedHashes.has(pullHash)) {
-                                window.__omniDispatchedHashes.add(pullHash);
-                                dispatchedAny = true;
-                                if (window.OmniIdeBridge && window.OmniIdeBridge.requestFilePull) {
-                                    if (window.OmniIdeBridge.log) {
-                                        window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📂 [' + sourceTag + '] Captured pull_files request (' + pullPayload.length + ' chars). Beaming to Conduit IDE...');
-                                    }
-                                    window.OmniIdeBridge.requestFilePull(pullPayload);
+                    const pullPayload = extractPullFilesBlock(rawText);
+                    if (pullPayload) {
+                        const pullHash = 'pull_' + hashPayload(pullPayload);
+                        if (!window.__omniDispatchedHashes.has(pullHash)) {
+                            window.__omniDispatchedHashes.add(pullHash);
+                            dispatchedAny = true;
+                            if (window.OmniIdeBridge && window.OmniIdeBridge.requestFilePull) {
+                                if (window.OmniIdeBridge.log) {
+                                    window.OmniIdeBridge.log('AUTOPILOT_PIPELINE', '📂 [' + sourceTag + '] Captured pull_files request (' + pullPayload.length + ' chars). Beaming to Conduit IDE...');
                                 }
+                                window.OmniIdeBridge.requestFilePull(pullPayload);
                             }
                         }
                     }
@@ -815,6 +806,13 @@ object LiveAutoPilotEngine {
 
                 function processAutoPilotTick(forceImmediate, logDiagnostics) {
                     if (!window.__omniLiveAutoPilotActive) return;
+
+                    if (forceImmediate) {
+                        try {
+                            const scroller = document.querySelector('ms-autoscroll-container, .chat-view-container, .chat-history');
+                            if (scroller) scroller.scrollTop = scroller.scrollHeight;
+                        } catch(_) {}
+                    }
 
                     const allModelContainers = Array.from(document.querySelectorAll('.chat-turn-container.model, ms-chat-turn .chat-turn-container.model, [data-turn-role="Model"], [data-turn-role="model" i], ms-chat-turn'))
                         .filter(el => {
@@ -862,15 +860,18 @@ object LiveAutoPilotEngine {
                             }
                             // Do NOT return early here: allow DOM Fallback to catch subsequent turns if wire missed them!
                         }
-                        if (latestWire.active && !(forceImmediate && !checkUiGenerating())) {
+                        if (latestWire.active) {
                             const wireLen = (latestWire.output ? latestWire.output.length : 0) + (latestWire.thoughts ? latestWire.thoughts.length : 0);
                             if (window.__omniTrackedWireId !== latestWire.id || wireLen !== window.__omniTrackedWireLen) {
+                                const isNewWire = window.__omniTrackedWireId !== latestWire.id;
                                 window.__omniTrackedWireId = latestWire.id;
                                 window.__omniTrackedWireLen = wireLen;
-                                window.__omniLastWireActivityAt = Date.now();
+                                window.__omniLastWireActivityAt = isNewWire ? (latestWire.startedAt || Date.now()) : Date.now();
                             }
-                            const isWireStale = (Date.now() - (window.__omniLastWireActivityAt || latestWire.startedAt || Date.now())) > 12000;
-                            if (!isWireStale || checkUiGenerating()) {
+                            const uiStillGen = checkUiGenerating();
+                            const idleMs = Date.now() - (window.__omniLastWireActivityAt || latestWire.startedAt || Date.now());
+                            const staleLimit = uiStillGen ? 12000 : 2500;
+                            if (!forceImmediate && (uiStillGen || idleMs <= staleLimit)) {
                                 return; // Actively streaming over wire; wait for exact stream close
                             }
                         }
