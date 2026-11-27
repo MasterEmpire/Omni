@@ -129,6 +129,12 @@ class BrowserStateHolder(
     var currentWebView: WebView? = null
     val activePlaybookTabIds = mutableStateListOf<String>()
     var isBackgroundOverlayHosting by mutableStateOf(false)
+    var customFullscreenView by mutableStateOf<android.view.View?>(null)
+    var customFullscreenTabId by mutableStateOf<String?>(null)
+    private var customFullscreenCallback: WebChromeClient.CustomViewCallback? = null
+    var isFullscreenLandscape by mutableStateOf(false)
+    private var hasExplicitOrientationLock by mutableStateOf(false)
+    var isBrowserImmersiveMode by mutableStateOf(false)
     private var backgroundHostOverlayView: FrameLayout? = null
     var foregroundHeadlessContainer: FrameLayout? = null
 
@@ -159,7 +165,7 @@ class BrowserStateHolder(
     var activeMediaTabId by mutableStateOf<String?>(null)
 
     // Menu Layout State
-    val defaultActiveMenu = listOf("force_dark", "data_saver", "site_cache", "page_zoom", "favorite_tab", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
+    val defaultActiveMenu = listOf("force_dark", "immersive_mode", "data_saver", "site_cache", "page_zoom", "favorite_tab", "focus_lock", "copy_url", "dom_snapshot", "full_source", "local_ide", "autopilot", "studio_lab", "ai_automator", "smart_notes", "downloads", "recents", "diagnostics", "settings", "exit")
     var activeMenuItems by mutableStateOf(defaultActiveMenu)
     var isDumpingSource by mutableStateOf(false)
     var sourceDumpStatus by mutableStateOf("")
@@ -1059,7 +1065,10 @@ class BrowserStateHolder(
         }
 
         tabProgressMap.remove(targetId)
-        poolManager.pool.remove(targetId)?.let { wv ->
+                if (customFullscreenTabId == targetId) {
+            onHideCustomView(targetId)
+        }
+poolManager.pool.remove(targetId)?.let { wv ->
         activePlaybookTabIds.remove(targetId)
         if (activePlaybookTabIds.isEmpty() && isBackgroundOverlayHosting) {
             exitBackgroundExecutionMode()
@@ -2992,6 +3001,14 @@ class BrowserStateHolder(
 
     fun handleBackPressed(): Boolean {
         return when {
+            customFullscreenView != null -> {
+                exitCustomFullscreen()
+                true
+            }
+            isBrowserImmersiveMode -> {
+                toggleBrowserImmersiveMode()
+                true
+            }
             isSearchFocused -> {
                 dismissSearch()
                 true
@@ -3371,6 +3388,9 @@ class BrowserStateHolder(
 
     override fun onRenderProcessKilled(tabId: String) {
         bridge.log("RENDER_WATCHDOG", "🛡️ Tab [$tabId] died alone in its sandbox. Poison URL suppressed.")
+        if (customFullscreenTabId == tabId) {
+            onHideCustomView(tabId)
+        }
         tabProgressMap.remove(tabId)
         poolManager.pool.remove(tabId)
         tabs = tabs.map { if (it.id == tabId) it.copy(url = "about:blank", title = "Tab Recovered") else it }
@@ -3527,6 +3547,127 @@ class BrowserStateHolder(
         isHomeOverlayOpen = false
         isTabSwitcherOpen = false
         createNewTab(targetUrl = url, targetProfileId = targetProf, insertAtIndex = insertAt)
+    }
+    fun toggleBrowserImmersiveMode() {
+        isBrowserImmersiveMode = !isBrowserImmersiveMode
+        bridge.setImmersiveMode(isBrowserImmersiveMode || customFullscreenView != null)
+        bridge.vibrate(25L)
+        bridge.showToast(if (isBrowserImmersiveMode) "⛶ Immersive Mode ON" else "Immersive Mode OFF")
+    }
+
+    override fun onShowCustomView(tabId: String, view: android.view.View, callback: WebChromeClient.CustomViewCallback) {
+        if (customFullscreenView != null) {
+            try { customFullscreenCallback?.onCustomViewHidden() } catch (_: Exception) {}
+        }
+        customFullscreenView = view
+        customFullscreenTabId = tabId
+        customFullscreenCallback = callback
+        bridge.setImmersiveMode(true)
+        bridge.log("FULLSCREEN", "⛶ Entered HTML5 fullscreen on tab [$tabId]")
+
+        if (!hasExplicitOrientationLock) {
+            val wv = poolManager.pool[tabId] ?: currentWebView
+            if (wv != null) {
+                wv.evaluateJavascript("window.__omniDetectFullscreenOrientation ? window.__omniDetectFullscreenOrientation() : 'AUTO'") { res ->
+                    if (customFullscreenView == null || hasExplicitOrientationLock) return@evaluateJavascript
+                    val mode = res?.replace("\"", "")?.trim() ?: "AUTO"
+                    when (mode) {
+                        "LANDSCAPE" -> {
+                            isFullscreenLandscape = true
+                            bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
+                        }
+                        "PORTRAIT" -> {
+                            isFullscreenLandscape = false
+                            bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT)
+                        }
+                        else -> {
+                            isFullscreenLandscape = false
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onHideCustomView(tabId: String) {
+        if (customFullscreenView == null) return
+        val cb = customFullscreenCallback
+        customFullscreenView = null
+        customFullscreenTabId = null
+        customFullscreenCallback = null
+        hasExplicitOrientationLock = false
+        isFullscreenLandscape = false
+        try { cb?.onCustomViewHidden() } catch (_: Exception) {}
+        bridge.setImmersiveMode(isBrowserImmersiveMode)
+        bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+        bridge.log("FULLSCREEN", "Exited HTML5 fullscreen on tab [$tabId]")
+    }
+
+    fun exitCustomFullscreen() {
+        val tabId = customFullscreenTabId ?: activeTabId
+        val wv = poolManager.pool[tabId] ?: currentWebView
+        wv?.evaluateJavascript("try { if (document.fullscreenElement) document.exitFullscreen(); else if (document.webkitFullscreenElement) document.webkitExitFullscreen(); } catch(_) {}", null)
+        onHideCustomView(tabId)
+    }
+
+    fun toggleFullscreenRotation() {
+        val nextLandscape = !isFullscreenLandscape
+        isFullscreenLandscape = nextLandscape
+        hasExplicitOrientationLock = true
+        bridge.setScreenOrientation(
+            if (nextLandscape) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        )
+        bridge.vibrate(25L)
+    }
+
+    override fun onOrientationLockRequested(tabId: String, orientation: String) {
+        val norm = orientation.trim().lowercase(Locale.US)
+        bridge.log("ORIENTATION", "Site requested orientation lock [$norm] on tab [$tabId]")
+        when {
+            norm == "landscape-primary" -> {
+                hasExplicitOrientationLock = true
+                isFullscreenLandscape = true
+                bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+            }
+            norm == "landscape-secondary" -> {
+                hasExplicitOrientationLock = true
+                isFullscreenLandscape = true
+                bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)
+            }
+            norm.startsWith("landscape") -> {
+                hasExplicitOrientationLock = true
+                isFullscreenLandscape = true
+                bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
+            }
+            norm == "portrait-primary" -> {
+                hasExplicitOrientationLock = true
+                isFullscreenLandscape = false
+                bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
+            }
+            norm == "portrait-secondary" -> {
+                hasExplicitOrientationLock = true
+                isFullscreenLandscape = false
+                bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT)
+            }
+            norm.startsWith("portrait") -> {
+                hasExplicitOrientationLock = true
+                isFullscreenLandscape = false
+                bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT)
+            }
+            else -> {
+                hasExplicitOrientationLock = false
+                isFullscreenLandscape = false
+                bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+            }
+        }
+    }
+
+    override fun onOrientationUnlockRequested(tabId: String) {
+        bridge.log("ORIENTATION", "Site unlocked orientation on tab [$tabId]")
+        hasExplicitOrientationLock = false
+        isFullscreenLandscape = false
+        bridge.setScreenOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
     }
     override fun onPlaybookPipelineStateChanged(tabId: String, active: Boolean) {
         if (active) {
