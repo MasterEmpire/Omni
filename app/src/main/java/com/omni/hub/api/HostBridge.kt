@@ -152,6 +152,7 @@ interface HostBridge {
     fun executePython(
         code: String,
         onOutput: (String) -> Unit = {},
+        onInputRequested: (prompt: String, provideInput: (String) -> Unit) -> Unit = { _, _ -> },
         onComplete: (success: Boolean, output: String) -> Unit
     )
     // --- Global Cross-Plugin IPC Bridge ---
@@ -415,18 +416,23 @@ object NexusPythonClient {
     private const val MSG_STREAM_OUTPUT = 101
     private const val MSG_EXECUTION_SUCCESS = 102
     private const val MSG_EXECUTION_ERROR = 103
+    private const val MSG_REQUEST_INPUT = 104
+    private const val MSG_PROVIDE_INPUT = 105
 
     private const val KEY_CODE = "key_code"
     private const val KEY_EXEC_ID = "key_exec_id"
     private const val KEY_OUTPUT_CHUNK = "key_chunk"
     private const val KEY_FINAL_RESULT = "key_result"
     private const val KEY_ERROR_MESSAGE = "key_error"
+    private const val KEY_INPUT_PROMPT = "key_prompt"
+    private const val KEY_INPUT_VALUE = "key_input_value"
 
     @Volatile private var serviceMessenger: android.os.Messenger? = null
     @Volatile private var isBound = false
 
     private data class RequestCallbacks(
         val onOutput: (String) -> Unit,
+        val onInputRequested: (String, (String) -> Unit) -> Unit,
         val onComplete: (Boolean, String) -> Unit
     )
 
@@ -443,6 +449,24 @@ object NexusPythonClient {
                 MSG_STREAM_OUTPUT -> {
                     val chunk = bundle.getString(KEY_OUTPUT_CHUNK) ?: ""
                     callbacks.onOutput(chunk)
+                }
+                MSG_REQUEST_INPUT -> {
+                    val prompt = bundle.getString(KEY_INPUT_PROMPT) ?: ""
+                    callbacks.onInputRequested(prompt) { userInput ->
+                        serviceMessenger?.let { sm ->
+                            try {
+                                val inputMsg = android.os.Message.obtain(null, MSG_PROVIDE_INPUT).apply {
+                                    data = android.os.Bundle().apply {
+                                        putString(KEY_EXEC_ID, execId)
+                                        putString(KEY_INPUT_VALUE, userInput)
+                                    }
+                                }
+                                sm.send(inputMsg)
+                            } catch (e: Exception) {
+                                OmniLogger.log("NEXUS_IPC_ERR", "Failed sending input to Nexus: ${e.message}")
+                            }
+                        }
+                    }
                 }
                 MSG_EXECUTION_SUCCESS -> {
                     val result = bundle.getString(KEY_FINAL_RESULT) ?: ""
@@ -562,6 +586,7 @@ object NexusPythonClient {
         context: Context,
         code: String,
         onOutput: (String) -> Unit,
+        onInputRequested: (String, (String) -> Unit) -> Unit = { _, _ -> },
         onComplete: (Boolean, String) -> Unit
     ) {
         OmniLogger.log("NEXUS_IPC", "🚀 execute() requested for Python script (${code.length} chars)")
@@ -572,7 +597,7 @@ object NexusPythonClient {
         }
 
         val execId = "exec_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}"
-        pendingRequests[execId] = RequestCallbacks(onOutput, onComplete)
+        pendingRequests[execId] = RequestCallbacks(onOutput, onInputRequested, onComplete)
 
         ensureBound(context) { messenger ->
             try {
@@ -1458,9 +1483,10 @@ class HostBridgeImpl(
     override fun executePython(
         code: String,
         onOutput: (String) -> Unit,
+        onInputRequested: (prompt: String, provideInput: (String) -> Unit) -> Unit,
         onComplete: (Boolean, String) -> Unit
     ) {
-        NexusPythonClient.execute(context, code, onOutput, onComplete)
+        NexusPythonClient.execute(context, code, onOutput, onInputRequested, onComplete)
     }
     override fun isPluginAvailable(pluginId: String): Boolean {
         return try {
