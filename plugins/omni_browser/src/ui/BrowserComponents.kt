@@ -67,6 +67,7 @@ fun OmniBrowserTopBar(
     isAutoPilotActive: Boolean = false,
     isDataSaverActive: Boolean = false,
     forceDarkWebPages: Boolean = false,
+    isBrowserImmersiveActive: Boolean = false,
     dataSaverMode: String = "MEDIUM",
     isCurrentTabFavorite: Boolean = false,
     isFocusLockActive: Boolean = false,
@@ -178,6 +179,8 @@ fun OmniBrowserTopBar(
                             isHomeOverlayOpen = isHomeOverlayOpen,
                             isAutoPilotActive = isAutoPilotActive,
                             forceDarkWebPages = forceDarkWebPages,
+                            isBrowserImmersiveActive = isBrowserImmersiveActive,
+                    isBrowserImmersiveActive = isBrowserImmersiveActive,
                             dataSaverMode = dataSaverMode,
                             isCurrentTabFavorite = isCurrentTabFavorite,
                             isFocusLockActive = isFocusLockActive,
@@ -367,6 +370,7 @@ fun OmniBrowserTopBar(
                             isAutoPilotActive = isAutoPilotActive,
                             forceDarkWebPages = forceDarkWebPages,
                             dataSaverMode = dataSaverMode,
+                        isBrowserImmersiveActive = isBrowserImmersiveActive,
                             isCurrentTabFavorite = isCurrentTabFavorite,
                             isFocusLockActive = isFocusLockActive,
                             activeDownloadsCount = activeDownloadsCount,
@@ -393,6 +397,7 @@ fun NavSlotGlyph(
     isHomeOverlayOpen: Boolean,
     isAutoPilotActive: Boolean,
     forceDarkWebPages: Boolean,
+    isBrowserImmersiveActive: Boolean = false,
     dataSaverMode: String = "MEDIUM",
     isCurrentTabFavorite: Boolean = false,
     isFocusLockActive: Boolean = false,
@@ -416,6 +421,7 @@ fun NavSlotGlyph(
         slotId == "menu" && showMenuActiveTint -> profColor
         slotId == "autopilot" && isAutoPilotActive -> Color(0xFF00E5FF)
         slotId == "force_dark" && forceDarkWebPages -> Color(0xFFFDD663)
+        slotId == "immersive_mode" && isBrowserImmersiveActive -> Color(0xFF00E5FF)
         slotId == "favorite_tab" && isCurrentTabFavorite -> Color(0xFFFFD600)
         slotId == "focus_lock" && isFocusLockActive -> Color(0xFFF85149)
         slotId == "data_saver" && dataSaverMode == "EXTREME" -> Color(0xFF3FB950)
@@ -526,6 +532,7 @@ fun OmniBottomBar(
     isAutoPilotActive: Boolean,
     forceDarkWebPages: Boolean,
     dataSaverMode: String = "MEDIUM",
+    isBrowserImmersiveActive: Boolean = false,
     isCurrentTabFavorite: Boolean = false,
     isFocusLockActive: Boolean = false,
     activeDownloadsCount: Int,
@@ -633,6 +640,71 @@ fun BottomBarExpandFab(
                             .size(7.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF00E5FF))
+                    )
+                }
+            }
+        }
+    }
+}
+@Composable
+fun ImmersiveFloatingControlsPill(
+    visible: Boolean,
+    onRotateClick: () -> Unit,
+    onExitClick: () -> Unit,
+    draggable: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    var dragOffsetX by remember { mutableFloatStateOf(0f) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(initialScale = 0.8f),
+        exit = fadeOut() + scaleOut(targetScale = 0.8f),
+        modifier = modifier.offset {
+            IntOffset(dragOffsetX.roundToInt(), dragOffsetY.roundToInt())
+        }
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color.Black.copy(alpha = 0.45f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+            shadowElevation = 6.dp,
+            modifier = if (draggable) {
+                Modifier.pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        dragOffsetX += dragAmount.x
+                        dragOffsetY += dragAmount.y
+                    }
+                }
+            } else Modifier
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            ) {
+                IconButton(
+                    onClick = onRotateClick,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        BrowserIcons.Reload,
+                        contentDescription = "Rotate Screen",
+                        tint = Color.White.copy(alpha = 0.88f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                IconButton(
+                    onClick = onExitClick,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        BrowserIcons.FullscreenExit,
+                        contentDescription = "Exit Fullscreen",
+                        tint = Color.White.copy(alpha = 0.88f),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
@@ -852,6 +924,8 @@ fun BrowserMenuOverlay(
     onToggleFavoriteTab: () -> Unit = {},
     forceDarkWebPages: Boolean = false,
     onToggleForceDark: () -> Unit = {},
+    isBrowserImmersiveActive: Boolean = false,
+    onToggleImmersiveMode: () -> Unit = {},
     isFocusLockActive: Boolean = false,
     onToggleFocusLock: () -> Unit = {},
     isLiveAutoPilotEnabled: Boolean = false,
@@ -915,6 +989,7 @@ fun BrowserMenuOverlay(
 
     fun getGridTileColor(id: String): Color? = when (id) {
         "force_dark" -> if (forceDarkWebPages) Color(0xFFFDD663) else null
+        "immersive_mode" -> if (isBrowserImmersiveActive) Color(0xFF00E5FF) else null
         "data_saver" -> when (dataSaverMode) {
             "EXTREME" -> Color(0xFF3FB950)
             "MEDIUM" -> Color(0xFF58A6FF)
@@ -942,6 +1017,7 @@ fun BrowserMenuOverlay(
 
     fun getGridTileLabel(id: String): String = when (id) {
         "force_dark" -> if (forceDarkWebPages) "Light Mode" else "Night Mode"
+        "immersive_mode" -> if (isBrowserImmersiveActive) "Exit Full" else "Immersive"
         "data_saver" -> when (dataSaverMode) {
             "EXTREME" -> "Data: Ext"
             "MEDIUM" -> "Data: Med"
@@ -978,6 +1054,7 @@ fun BrowserMenuOverlay(
         onDismiss()
         when (id) {
             "force_dark" -> onToggleForceDark()
+            "immersive_mode" -> onToggleImmersiveMode()
             "data_saver" -> onToggleDataSaver()
             "site_cache" -> onToggleSiteCache()
             "page_zoom" -> onOpenZoom()
