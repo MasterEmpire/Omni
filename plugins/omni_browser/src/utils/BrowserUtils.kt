@@ -3043,11 +3043,7 @@ fun openDownloadedFile(context: android.content.Context, file: java.io.File, bri
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val chooser = android.content.Intent.createChooser(intent, "Open with...").apply {
-            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(chooser)
+        context.startActivity(intent)
     } catch (e: android.content.ActivityNotFoundException) {
         bridge.showToast("No installed app found to open .${file.extension} files")
     } catch (e: Exception) {
