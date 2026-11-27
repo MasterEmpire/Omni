@@ -53,6 +53,10 @@ interface WebViewEventListener {
     fun onVoiceStopRequested()
     fun onPlaybookPipelineStateChanged(tabId: String, active: Boolean)
     fun onOpenTabWithProfileRequested(url: String, profileId: String?)
+    fun onShowCustomView(tabId: String, view: android.view.View, callback: WebChromeClient.CustomViewCallback)
+    fun onHideCustomView(tabId: String)
+    fun onOrientationLockRequested(tabId: String, orientation: String)
+    fun onOrientationUnlockRequested(tabId: String)
 }
 
 
@@ -342,6 +346,7 @@ class WebViewPoolManager(
                 try {
                     WebViewCompat.addDocumentStartJavaScript(this, BLOB_INTERCEPTOR_SCRIPT, setOf("*"))
                     WebViewCompat.addDocumentStartJavaScript(this, BACKGROUND_MEDIA_SCRIPT, setOf("*"))
+                    WebViewCompat.addDocumentStartJavaScript(this, SCREEN_ORIENTATION_POLYFILL, setOf("*"))
                 } catch (_: Exception) {}
             }
 
@@ -494,6 +499,20 @@ class WebViewPoolManager(
                 onLog = { tag, msg -> bridge.log(tag, msg) }
             )
             addJavascriptInterface(voiceBridge, "OmniVoiceBridge")
+            val orientationBridge = com.omni.plugin.browser.models.OmniOrientationBridge(
+                onLockOrientation = { orientation ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onOrientationLockRequested(tabId, orientation)
+                    }
+                },
+                onUnlockOrientation = {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onOrientationUnlockRequested(tabId)
+                    }
+                },
+                onLog = { tag, msg -> bridge.log(tag, msg) }
+            )
+            addJavascriptInterface(orientationBridge, "OmniOrientationBridge")
 
             val rawUA = settings.userAgentString
             val cleanMobileUA = rawUA.replace("; wv", "").replace(Regex("Version/[0-9.]+ "), "")
@@ -595,6 +614,22 @@ class WebViewPoolManager(
                 ): Boolean {
                     listener.onOpenFileChooser(filePathCallback, fileChooserParams)
                     return true
+                }
+
+                override fun onShowCustomView(view: android.view.View?, callback: CustomViewCallback?) {
+                    if (view == null || callback == null) {
+                        super.onShowCustomView(view, callback)
+                        return
+                    }
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onShowCustomView(tabId, view, callback)
+                    }
+                }
+
+                override fun onHideCustomView() {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        listener.onHideCustomView(tabId)
+                    }
                 }
             }
 
@@ -734,6 +769,7 @@ class WebViewPoolManager(
                     view?.evaluateJavascript(BOT_BYPASS_POLYFILL, null)
                     view?.evaluateJavascript(BLOB_INTERCEPTOR_SCRIPT, null)
                     view?.evaluateJavascript(BACKGROUND_MEDIA_SCRIPT, null)
+                    view?.evaluateJavascript(SCREEN_ORIENTATION_POLYFILL, null)
                     if (url != null && (url.contains("localhost:$localPort") || url.contains("127.0.0.1:$localPort"))) {
                         view?.evaluateJavascript(PLAYBOOK_KEEPALIVE_SCRIPT, null)
                     }
