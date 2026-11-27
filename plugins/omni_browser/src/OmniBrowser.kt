@@ -1971,17 +1971,6 @@ class OmniBrowser : PluginEntry() {
                     .zIndex(33f)
             )
 
-            ImmersiveFloatingControlsPill(
-                visible = state.isBrowserImmersiveMode && state.customFullscreenView == null && !state.isTabSwitcherOpen && !state.showSettingsDialog,
-                onRotateClick = { state.toggleFullscreenRotation() },
-                onExitClick = { state.toggleBrowserImmersiveMode() },
-                draggable = true,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 12.dp, end = 12.dp)
-                    .zIndex(55f)
-            )
-
             if (state.customFullscreenView != null) {
                 val fsView = state.customFullscreenView!!
                 Box(
