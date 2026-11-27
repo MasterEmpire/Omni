@@ -207,11 +207,20 @@ class VaultManager(
                 val map = vault.loadAiAnalytics().toMutableMap()
                 val cur = map[profileId] ?: com.omni.plugin.browser.models.ProfileAiAnalytics(profileId = profileId)
                 val wasAlreadyLocked = cur.needsVerification
+
+                val newRecord = com.omni.plugin.browser.models.VerificationEventRecord(
+                    timestamp = now,
+                    reason = cleanReason,
+                    unlockedAt = 0L
+                )
+                val updatedHistory = cur.verificationHistory + newRecord
+
                 val updated = cur.copy(
                     needsVerification = true,
-                    verificationRequiredAt = if (cur.verificationRequiredAt > 0L) cur.verificationRequiredAt else now,
+                    verificationRequiredAt = if (cur.verificationRequiredAt > 0L && wasAlreadyLocked) cur.verificationRequiredAt else now,
                     verificationReason = cleanReason,
-                    lastActiveDay = today
+                    lastActiveDay = today,
+                    verificationHistory = updatedHistory
                 )
                 map[profileId] = updated
                 vault.saveAiAnalytics(map)
@@ -225,14 +234,33 @@ class VaultManager(
             bridge: HostBridge,
             profileId: String
         ): Map<String, com.omni.plugin.browser.models.ProfileAiAnalytics> {
+            val now = System.currentTimeMillis()
             synchronized(analyticsLock) {
                 val vault = VaultManager(context, bridge)
                 val map = vault.loadAiAnalytics().toMutableMap()
                 val cur = map[profileId] ?: return map
+
+                val updatedHistory = if (cur.verificationHistory.isNotEmpty()) {
+                    cur.verificationHistory.mapIndexed { idx, ev ->
+                        if (idx == cur.verificationHistory.lastIndex && ev.unlockedAt == 0L) {
+                            ev.copy(unlockedAt = now)
+                        } else ev
+                    }
+                } else {
+                    listOf(
+                        com.omni.plugin.browser.models.VerificationEventRecord(
+                            timestamp = if (cur.verificationRequiredAt > 0L) cur.verificationRequiredAt else now,
+                            reason = cur.verificationReason,
+                            unlockedAt = now
+                        )
+                    )
+                }
+
                 map[profileId] = cur.copy(
                     needsVerification = false,
                     verificationRequiredAt = 0L,
-                    verificationReason = ""
+                    verificationReason = "",
+                    verificationHistory = updatedHistory
                 )
                 vault.saveAiAnalytics(map)
                 onAnalyticsUpdatedListener?.invoke(map)
@@ -851,6 +879,14 @@ class VaultManager(
                         put("reason", q.reason)
                     })
                 }
+                val vArr = JSONArray()
+                a.verificationHistory.forEach { v ->
+                    vArr.put(JSONObject().apply {
+                        put("timestamp", v.timestamp)
+                        put("reason", v.reason)
+                        put("unlockedAt", v.unlockedAt)
+                    })
+                }
                 val obj = JSONObject().apply {
                     put("profileId", a.profileId)
                     put("tabsOpenedToday", a.tabsOpenedToday)
@@ -867,6 +903,7 @@ class VaultManager(
                     put("verificationReason", a.verificationReason)
                     put("dailyHistory", dhObj)
                     put("quotaHistory", qArr)
+                    put("verificationHistory", vArr)
                 }
                 arr.put(obj)
             }
@@ -927,6 +964,26 @@ class VaultManager(
                 if (lastQTime > 0L && qList.none { it.timestamp == lastQTime }) {
                     qList.add(com.omni.plugin.browser.models.QuotaEventRecord(lastQTime, lastQReason))
                 }
+                val vList = mutableListOf<com.omni.plugin.browser.models.VerificationEventRecord>()
+                obj.optJSONArray("verificationHistory")?.let { vArr ->
+                    for (vIdx in 0 until vArr.length()) {
+                        val vObj = vArr.optJSONObject(vIdx)
+                        if (vObj != null) {
+                            vList.add(
+                                com.omni.plugin.browser.models.VerificationEventRecord(
+                                    timestamp = vObj.optLong("timestamp", 0L),
+                                    reason = vObj.optString("reason", ""),
+                                    unlockedAt = vObj.optLong("unlockedAt", 0L)
+                                )
+                            )
+                        }
+                    }
+                }
+                val currentReqAt = obj.optLong("verificationRequiredAt", 0L)
+                val currentReqReason = obj.optString("verificationReason", "")
+                if (currentReqAt > 0L && vList.none { it.timestamp == currentReqAt }) {
+                    vList.add(com.omni.plugin.browser.models.VerificationEventRecord(currentReqAt, currentReqReason, 0L))
+                }
                 val totalTabs = maxOf(obj.optInt("totalTabsLifetime", 0), historyMap.values.sumOf { it.tabsOpened })
                 val totalQuotaHits = maxOf(obj.optInt("totalQuotaHitsLifetime", 0), qList.size)
                 val totalPrompts = maxOf(obj.optInt("totalPromptsLifetime", 0), historyMap.values.sumOf { it.prompts })
@@ -943,10 +1000,11 @@ class VaultManager(
                     lastQuotaReason = lastQReason,
                     lastActiveDay = legacyDay,
                     needsVerification = obj.optBoolean("needsVerification", false),
-                    verificationRequiredAt = obj.optLong("verificationRequiredAt", 0L),
-                    verificationReason = obj.optString("verificationReason", ""),
+                    verificationRequiredAt = currentReqAt,
+                    verificationReason = currentReqReason,
                     dailyHistory = historyMap,
-                    quotaHistory = qList
+                    quotaHistory = qList,
+                    verificationHistory = vList
                 )
             }
             map
