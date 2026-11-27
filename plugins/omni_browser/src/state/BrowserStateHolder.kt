@@ -3408,25 +3408,52 @@ poolManager.pool.remove(targetId)?.let { wv ->
                 try {
                     val domain = extractDomain(currentUrl)
                     val rememberedPath = domainUploadPaths[domain]?.takeIf { java.io.File(it).exists() }
-                    val nexusIntent = Intent("com.conduit.nexus.action.PICK_FILE").apply {
-                        setPackage("com.conduit.nexus")
-                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
-                        putExtra("extra_picker_mode", true)
-                        if (!rememberedPath.isNullOrEmpty()) {
-                            putExtra("extra_initial_path", rememberedPath)
-                            bridge.log("FILE_CHOOSER", "📍 Landing Nexus in remembered path for $domain: $rememberedPath")
+                    val rawAccepts = fileChooserParams?.acceptTypes
+                        ?.flatMap { it.split(",") }
+                        ?.map { it.trim() }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
+                    val normalizedMimes = rawAccepts.mapNotNull { token ->
+                        when {
+                            token.contains("/") -> token
+                            token.startsWith(".") -> android.webkit.MimeTypeMap.getSingleton()
+                                .getMimeTypeFromExtension(token.removePrefix(".").lowercase(Locale.US))
+                            else -> null
                         }
-                        val types = fileChooserParams?.acceptTypes?.filter { it.isNotBlank() }
-                        if (!types.isNullOrEmpty()) {
-                            type = types.first()
-                            if (types.size > 1) {
-                                putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+                    }.distinct()
+                    val primaryMime = if (normalizedMimes.size == 1) normalizedMimes.first() else "*/*"
+
+                    fun buildNexusPickerIntent(actionName: String): Intent {
+                        return Intent(actionName).apply {
+                            setPackage("com.conduit.nexus")
+                            if (actionName == Intent.ACTION_GET_CONTENT) {
+                                addCategory(Intent.CATEGORY_OPENABLE)
                             }
-                        } else {
-                            type = "*/*"
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+                            putExtra("extra_picker_mode", true)
+                            if (!rememberedPath.isNullOrEmpty()) {
+                                putExtra("extra_initial_path", rememberedPath)
+                            }
+                            type = primaryMime
+                            if (normalizedMimes.size > 1) {
+                                putExtra(Intent.EXTRA_MIME_TYPES, normalizedMimes.toTypedArray())
+                            }
                         }
                     }
-                    launcher(nexusIntent)
+
+                    val pm = context.packageManager
+                    val customIntent = buildNexusPickerIntent("com.conduit.nexus.action.PICK_FILE")
+                    val resolvedIntent = if (customIntent.resolveActivity(pm) != null) {
+                        customIntent
+                    } else {
+                        bridge.log("FILE_CHOOSER", "⚠️ PICK_FILE unresolved on installed Nexus; using scoped ACTION_GET_CONTENT bridge")
+                        buildNexusPickerIntent(Intent.ACTION_GET_CONTENT)
+                    }
+
+                    if (!rememberedPath.isNullOrEmpty()) {
+                        bridge.log("FILE_CHOOSER", "📍 Landing Nexus in remembered path for $domain: $rememberedPath")
+                    }
+                    launcher(resolvedIntent)
                     return
                 } catch (e: Exception) {
                     bridge.log("FILE_CHOOSER_WARN", "Nexus launch attempt failed: ${e.message}. Falling back.")
