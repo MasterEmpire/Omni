@@ -309,6 +309,7 @@ val OMNI_STUDIO_LAB_CLIENT_SCRIPT = """
 })();
 """.trimIndent()
 val DEFAULT_PYTHON_LAB_HTML = """
+<!-- omni-python-lab-v2 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -324,62 +325,110 @@ val DEFAULT_PYTHON_LAB_HTML = """
     </style>
 </head>
 <body class="flex flex-col h-screen overflow-hidden text-sm">
-    <!-- Top Navigation Bar -->
-    <header class="flex items-center justify-between px-3 py-2 bg-[#161B22] border-b border-[#30363D] shrink-0">
-        <div class="flex items-center gap-2">
-            <span class="text-xl">🐍</span>
-            <div>
-                <div class="flex items-center gap-2">
-                    <h1 class="font-bold text-[#00E5FF] tracking-wide">Python Lab</h1>
-                    <span id="status-pill" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#21262D] text-[#8B949E] border border-[#30363D]">Idle</span>
-                </div>
-                <p class="text-[10px] text-[#8B949E]">Conduit Nexus Microkernel • Python 3.11</p>
-            </div>
+    <!-- Slim Single-Row Header -->
+    <header class="flex items-center justify-between px-2.5 h-11 bg-[#161B22] border-b border-[#30363D] shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+            <button id="btn-sidebar-toggle" title="Open Sidebar" class="relative flex items-center justify-center w-8 h-8 rounded-lg bg-[#21262D] border border-[#30363D] text-[#E8EAED] active:scale-95 transition">
+                <span class="text-base leading-none">☰</span>
+                <span id="sidebar-unread-dot" class="hidden absolute top-1 right-1 w-2 h-2 rounded-full bg-[#00E5FF]"></span>
+            </button>
+            <span class="text-base">🐍</span>
+            <span id="active-view-label" class="font-bold text-xs text-[#00E5FF] truncate">Editor</span>
+            <span id="status-pill" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#21262D] text-[#8B949E] border border-[#30363D] shrink-0">Idle</span>
         </div>
-        <div class="flex items-center gap-1.5">
-            <button id="btn-run" class="flex items-center gap-1 px-3 py-1.5 font-bold rounded-lg bg-[#00E5FF] text-[#0D1117] hover:bg-[#33EAFF] active:scale-95 transition">
+        <div class="flex items-center gap-1.5 shrink-0">
+            <button id="btn-quick-console" title="Toggle Console" class="relative px-2 py-1 text-[11px] font-semibold rounded-lg bg-[#21262D] text-[#C9D1D9] border border-[#30363D] active:scale-95 transition">
+                <span>📺</span>
+                <span id="unread-dot" class="hidden inline-block w-1.5 h-1.5 rounded-full bg-[#00E5FF] ml-0.5"></span>
+            </button>
+            <button id="btn-run" class="flex items-center gap-1 px-3 py-1 font-bold text-xs rounded-lg bg-[#00E5FF] text-[#0D1117] hover:bg-[#33EAFF] active:scale-95 transition">
                 <span>▶</span> <span>Run</span>
             </button>
-            <button id="btn-stop" class="hidden px-2.5 py-1.5 font-bold rounded-lg bg-[#F85149] text-white hover:bg-[#FF7B72] active:scale-95 transition">
+            <button id="btn-stop" class="hidden px-2.5 py-1 font-bold text-xs rounded-lg bg-[#F85149] text-white hover:bg-[#FF7B72] active:scale-95 transition">
                 ■ Stop
             </button>
         </div>
     </header>
 
-    <!-- Sub-Header Tabs & Quick Controls -->
-    <nav class="flex items-center justify-between px-3 py-1.5 bg-[#12161C] border-b border-[#21262D] shrink-0">
-        <div class="flex items-center gap-1">
-            <button data-tab="editor" class="tab-btn px-2.5 py-1 rounded-md text-xs font-bold bg-[#1F242C] text-[#00E5FF] border border-[#30363D]">💻 Editor</button>
-            <button data-tab="console" class="tab-btn px-2.5 py-1 rounded-md text-xs font-semibold text-[#8B949E] hover:text-white">📺 Console <span id="unread-dot" class="hidden inline-block w-1.5 h-1.5 rounded-full bg-[#00E5FF]"></span></button>
-            <button data-tab="repl" class="tab-btn px-2.5 py-1 rounded-md text-xs font-semibold text-[#8B949E] hover:text-white">⚡ REPL</button>
-            <button data-tab="library" class="tab-btn px-2.5 py-1 rounded-md text-xs font-semibold text-[#8B949E] hover:text-white">📚 Library</button>
-            <button data-tab="tools" class="tab-btn px-2.5 py-1 rounded-md text-xs font-semibold text-[#8B949E] hover:text-white">⚙️ Tools</button>
+    <!-- Slide-Out Sidebar Backdrop -->
+    <div id="sidebar-backdrop" class="hidden fixed inset-0 bg-black/60 z-40"></div>
+
+    <!-- Organized Slide-Out Sidebar Drawer -->
+    <aside id="sidebar-drawer" class="fixed top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-[#161B22] border-r border-[#30363D] z-50 transform -translate-x-full transition-transform duration-200 flex flex-col">
+        <div class="flex items-center justify-between px-3.5 h-11 border-b border-[#30363D] shrink-0">
+            <div class="flex items-center gap-2">
+                <span class="text-base">🐍</span>
+                <span class="font-bold text-xs text-[#00E5FF] tracking-wide">Python Lab</span>
+            </div>
+            <button id="btn-sidebar-close" class="w-7 h-7 flex items-center justify-center rounded-md bg-[#21262D] text-[#8B949E] hover:text-white text-xs font-bold">✕</button>
         </div>
-        <button id="btn-wakelock" title="Keep CPU awake in background" class="px-2 py-0.5 text-[10px] font-bold rounded bg-[#21262D] text-[#8B949E] border border-[#30363D]">⚡ WakeLock: OFF</button>
-    </nav>
+
+        <div class="flex-1 overflow-y-auto p-3 space-y-4">
+            <!-- Section 1: Workspace Views -->
+            <div class="space-y-1.5">
+                <div class="px-1 text-[10px] font-bold uppercase tracking-wider text-[#8B949E]">Workspace</div>
+                <div class="space-y-1">
+                    <button data-tab="editor" class="tab-btn w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-bold bg-[#1F242C] text-[#00E5FF] border border-[#30363D]">
+                        <span>💻 Code Editor</span>
+                    </button>
+                    <button data-tab="console" class="tab-btn w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-semibold text-[#C9D1D9] hover:bg-[#21262D]">
+                        <span>📺 Console Output</span>
+                        <span id="sidebar-console-dot" class="hidden w-2 h-2 rounded-full bg-[#00E5FF]"></span>
+                    </button>
+                    <button data-tab="repl" class="tab-btn w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-semibold text-[#C9D1D9] hover:bg-[#21262D]">
+                        <span>⚡ Interactive REPL</span>
+                    </button>
+                    <button data-tab="library" class="tab-btn w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-semibold text-[#C9D1D9] hover:bg-[#21262D]">
+                        <span>📚 Scripts Library</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Section 2: Editor Actions -->
+            <div class="space-y-1.5 border-t border-[#21262D] pt-3">
+                <div class="px-1 text-[10px] font-bold uppercase tracking-wider text-[#8B949E]">Editor Actions</div>
+                <div class="grid grid-cols-2 gap-1.5">
+                    <button id="btn-paste" class="px-2.5 py-2 rounded-lg bg-[#21262D] text-[#8AB4F8] text-xs font-semibold text-left hover:bg-[#30363D]">📋 Paste</button>
+                    <button id="btn-copy-code" class="px-2.5 py-2 rounded-lg bg-[#21262D] text-[#8AB4F8] text-xs font-semibold text-left hover:bg-[#30363D]">📄 Copy</button>
+                    <button id="btn-save-lib" class="px-2.5 py-2 rounded-lg bg-[#21262D] text-[#3FB950] text-xs font-semibold text-left hover:bg-[#30363D]">💾 Save</button>
+                    <button id="btn-clear-code" class="px-2.5 py-2 rounded-lg bg-[#21262D] text-[#F85149] text-xs font-semibold text-left hover:bg-[#30363D]">🗑️ Clear</button>
+                </div>
+            </div>
+
+            <!-- Section 3: Snippets -->
+            <div class="space-y-1.5 border-t border-[#21262D] pt-3">
+                <div class="px-1 text-[10px] font-bold uppercase tracking-wider text-[#8B949E]">Quick Snippets</div>
+                <div class="space-y-1">
+                    <button data-snippet="hello" class="snippet-btn w-full px-2.5 py-1.5 rounded-lg bg-[#21262D]/70 text-[#C9D1D9] text-xs text-left hover:bg-[#30363D] hover:text-[#00E5FF]">👋 Interactive Stdin Demo</button>
+                    <button data-snippet="storage" class="snippet-btn w-full px-2.5 py-1.5 rounded-lg bg-[#21262D]/70 text-[#C9D1D9] text-xs text-left hover:bg-[#30363D] hover:text-[#00E5FF]">📂 Storage & Filesystem Walk</button>
+                    <button data-snippet="diag" class="snippet-btn w-full px-2.5 py-1.5 rounded-lg bg-[#21262D]/70 text-[#C9D1D9] text-xs text-left hover:bg-[#30363D] hover:text-[#00E5FF]">🔍 Device & Kernel Diagnostics</button>
+                    <button data-snippet="bench" class="snippet-btn w-full px-2.5 py-1.5 rounded-lg bg-[#21262D]/70 text-[#C9D1D9] text-xs text-left hover:bg-[#30363D] hover:text-[#00E5FF]">⏱️ Prime Sieve Benchmark</button>
+                    <button data-snippet="http" class="snippet-btn w-full px-2.5 py-1.5 rounded-lg bg-[#21262D]/70 text-[#C9D1D9] text-xs text-left hover:bg-[#30363D] hover:text-[#00E5FF]">🌐 Network & Public IP Fetcher</button>
+                </div>
+            </div>
+
+            <!-- Section 4: Runtime & Power Settings -->
+            <div class="space-y-1.5 border-t border-[#21262D] pt-3">
+                <div class="px-1 text-[10px] font-bold uppercase tracking-wider text-[#8B949E]">Settings & Power</div>
+                <div class="space-y-1.5">
+                    <button id="toggle-wakelock-btn" class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg bg-[#21262D] border border-[#30363D] text-xs font-semibold text-white">
+                        <span>⚡ Background WakeLock</span>
+                        <span id="wakelock-badge" class="text-[10px] font-bold text-[#8B949E]">OFF</span>
+                    </button>
+                    <button id="toggle-awake-btn" class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg bg-[#21262D] border border-[#30363D] text-xs font-semibold text-white">
+                        <span>📱 Keep Screen Awake</span>
+                        <span id="awake-badge" class="text-[10px] font-bold text-[#8B949E]">OFF</span>
+                    </button>
+                    <button id="btn-flush-runtime" class="w-full px-2.5 py-2 rounded-lg bg-[#DA3633]/20 border border-[#F85149]/40 text-[#F85149] text-xs font-bold text-left hover:bg-[#DA3633]/30">🧹 Flush & Reset Runtime</button>
+                </div>
+            </div>
+        </div>
+    </aside>
 
     <!-- Main Screen Container -->
     <main class="flex-1 relative overflow-hidden bg-[#0D1117]">
         <!-- TAB 1: Code Editor -->
         <section id="tab-editor" class="tab-content flex flex-col h-full">
-            <!-- Editor Toolbar -->
-            <div class="flex items-center justify-between px-3 py-1.5 bg-[#161B22]/60 border-b border-[#21262D] text-xs shrink-0 overflow-x-auto gap-2">
-                <div class="flex items-center gap-1.5 shrink-0">
-                    <button id="btn-paste" class="px-2 py-1 rounded bg-[#21262D] text-[#8AB4F8] hover:bg-[#30363D]">📋 Paste</button>
-                    <button id="btn-copy-code" class="px-2 py-1 rounded bg-[#21262D] text-[#8AB4F8] hover:bg-[#30363D]">📄 Copy</button>
-                    <button id="btn-save-lib" class="px-2 py-1 rounded bg-[#21262D] text-[#3FB950] hover:bg-[#30363D]">💾 Save</button>
-                    <button id="btn-clear-code" class="px-2 py-1 rounded bg-[#21262D] text-[#F85149] hover:bg-[#30363D]">🗑️ Clear</button>
-                </div>
-                <div class="flex items-center gap-1.5 shrink-0 text-[11px]">
-                    <span class="text-[#8B949E]">Snippets:</span>
-                    <button data-snippet="storage" class="snippet-btn px-1.5 py-0.5 rounded bg-[#21262D] text-[#C9D1D9] hover:text-[#00E5FF]">📂 Storage</button>
-                    <button data-snippet="input" class="snippet-btn px-1.5 py-0.5 rounded bg-[#21262D] text-[#C9D1D9] hover:text-[#00E5FF]">💬 Stdin</button>
-                    <button data-snippet="bench" class="snippet-btn px-1.5 py-0.5 rounded bg-[#21262D] text-[#C9D1D9] hover:text-[#00E5FF]">⏱️ Bench</button>
-                    <button data-snippet="net" class="snippet-btn px-1.5 py-0.5 rounded bg-[#21262D] text-[#C9D1D9] hover:text-[#00E5FF]">🌐 HTTP</button>
-                </div>
-            </div>
-
-            <!-- Code Input Area with Line Numbers -->
             <div class="flex-1 flex overflow-hidden relative">
                 <div id="line-numbers" class="w-10 pt-3 pb-3 pr-2 text-right text-[11px] font-mono text-[#484F58] select-none bg-[#0D1117] border-r border-[#21262D] overflow-hidden">1</div>
                 <textarea id="code-input" spellcheck="false" class="flex-1 h-full p-3 bg-transparent text-[#E8EAED] font-mono text-xs outline-none resize-none leading-5" placeholder="# Write or paste Python code here...&#10;print('Hello from Nexus!')"></textarea>
@@ -399,10 +448,8 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 </div>
             </div>
 
-            <!-- Terminal Output Display -->
             <pre id="console-output" class="flex-1 p-3 text-xs font-mono text-[#81C784] overflow-y-auto whitespace-pre-wrap select-text leading-5">Python Lab Ready. Tap [▶ Run] to execute code on Nexus.</pre>
 
-            <!-- Interactive STDIN Drawer -->
             <div id="stdin-bar" class="hidden flex items-center gap-2 p-2.5 bg-[#161B22] border-t-2 border-[#00E5FF] shadow-lg shrink-0">
                 <span class="text-xs font-bold text-[#00E5FF] shrink-0 flex items-center gap-1">
                     <span class="animate-pulse">💬</span> <span id="stdin-prompt">INPUT ></span>
@@ -431,32 +478,11 @@ val DEFAULT_PYTHON_LAB_HTML = """
             <div class="flex items-center justify-between border-b border-[#30363D] pb-2">
                 <div>
                     <h2 class="font-bold text-white text-sm">📚 Saved Scripts & Templates</h2>
-                    <p class="text-[11px] text-[#8B949E]">Click any script to load into the editor</p>
+                    <p class="text-[11px] text-[#8B949E]">Tap Load to open any script in the editor</p>
                 </div>
                 <button id="btn-new-script" class="px-2.5 py-1 rounded bg-[#238636] text-white font-bold text-xs hover:bg-[#2EA043]">+ New</button>
             </div>
             <div id="library-list" class="space-y-2"></div>
-        </section>
-
-        <!-- TAB 5: Hardware & Tools -->
-        <section id="tab-tools" class="tab-content hidden flex flex-col h-full p-4 overflow-y-auto space-y-4">
-            <h2 class="font-bold text-white text-base border-b border-[#30363D] pb-2">⚙️ Kernel & Hardware Tools</h2>
-            <div class="space-y-3 text-xs">
-                <div class="p-3 rounded-lg bg-[#161B22] border border-[#30363D] space-y-2">
-                    <h3 class="font-bold text-[#00E5FF]">⚡ Power & Execution Shield</h3>
-                    <p class="text-[#8B949E]">Keeps Python scripts crunching data in background even when your screen locks or turns off.</p>
-                    <div class="flex items-center gap-2 pt-1">
-                        <button id="toggle-wakelock-btn" class="px-3 py-1.5 rounded-lg bg-[#21262D] border border-[#30363D] font-bold text-white">Enable Background WakeLock</button>
-                        <button id="toggle-awake-btn" class="px-3 py-1.5 rounded-lg bg-[#21262D] border border-[#30363D] font-bold text-white">Keep Screen Awake</button>
-                    </div>
-                </div>
-
-                <div class="p-3 rounded-lg bg-[#161B22] border border-[#30363D] space-y-2">
-                    <h3 class="font-bold text-[#F85149]">🧹 Flush Python Runtime</h3>
-                    <p class="text-[#8B949E]">Forces garbage collection and clears global scope if a script gets stuck in memory.</p>
-                    <button id="btn-flush-runtime" class="px-3 py-1.5 rounded-lg bg-[#DA3633] text-white font-bold hover:bg-[#F85149]">Flush & Reset Runtime</button>
-                </div>
-            </div>
         </section>
     </main>
 
@@ -473,15 +499,40 @@ val DEFAULT_PYTHON_LAB_HTML = """
             var consoleOutput = document.getElementById('console-output');
             var outputMeta = document.getElementById('output-meta');
             var statusPill = document.getElementById('status-pill');
+            var activeViewLabel = document.getElementById('active-view-label');
             var unreadDot = document.getElementById('unread-dot');
+            var sidebarUnreadDot = document.getElementById('sidebar-unread-dot');
+            var sidebarConsoleDot = document.getElementById('sidebar-console-dot');
             var btnRun = document.getElementById('btn-run');
             var btnStop = document.getElementById('btn-stop');
             var stdinBar = document.getElementById('stdin-bar');
             var stdinPrompt = document.getElementById('stdin-prompt');
             var stdinInput = document.getElementById('stdin-input');
             var btnStdinSubmit = document.getElementById('btn-stdin-submit');
+            var sidebarDrawer = document.getElementById('sidebar-drawer');
+            var sidebarBackdrop = document.getElementById('sidebar-backdrop');
 
-            // Built-in starter templates
+            var VIEW_TITLES = {
+                editor: 'Editor',
+                console: 'Console',
+                repl: 'REPL',
+                library: 'Library'
+            };
+
+            function openSidebar() {
+                sidebarBackdrop.classList.remove('hidden');
+                sidebarDrawer.classList.remove('-translate-x-full');
+            }
+
+            function closeSidebar() {
+                sidebarDrawer.classList.add('-translate-x-full');
+                sidebarBackdrop.classList.add('hidden');
+            }
+
+            document.getElementById('btn-sidebar-toggle').addEventListener('click', openSidebar);
+            document.getElementById('btn-sidebar-close').addEventListener('click', closeSidebar);
+            sidebarBackdrop.addEventListener('click', closeSidebar);
+
             var STARTER_TEMPLATES = [
                 {
                     id: 'tmpl_hello',
@@ -510,19 +561,24 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 }
             ];
 
-            // Tab Switching
             document.querySelectorAll('.tab-btn').forEach(function(btn) {
                 btn.addEventListener('click', function() {
                     switchTab(btn.getAttribute('data-tab'));
+                    closeSidebar();
                 });
+            });
+
+            document.getElementById('btn-quick-console').addEventListener('click', function() {
+                switchTab(activeTab === 'console' ? 'editor' : 'console');
             });
 
             function switchTab(tabId) {
                 activeTab = tabId;
+                activeViewLabel.innerText = VIEW_TITLES[tabId] || 'Python Lab';
                 document.querySelectorAll('.tab-btn').forEach(function(b) {
                     var isCur = b.getAttribute('data-tab') === tabId;
-                    b.className = 'tab-btn px-2.5 py-1 rounded-md text-xs font-semibold ' +
-                        (isCur ? 'bg-[#1F242C] text-[#00E5FF] border border-[#30363D] font-bold' : 'text-[#8B949E] hover:text-white');
+                    b.className = 'tab-btn w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs ' +
+                        (isCur ? 'font-bold bg-[#1F242C] text-[#00E5FF] border border-[#30363D]' : 'font-semibold text-[#C9D1D9] hover:bg-[#21262D]');
                 });
                 document.querySelectorAll('.tab-content').forEach(function(c) {
                     c.classList.add('hidden');
@@ -531,10 +587,11 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 if (target) target.classList.remove('hidden');
                 if (tabId === 'console') {
                     unreadDot.classList.add('hidden');
+                    sidebarUnreadDot.classList.add('hidden');
+                    sidebarConsoleDot.classList.add('hidden');
                 }
             }
 
-            // Line numbers sync & Tab indent
             function updateLineNumbers() {
                 var lines = codeInput.value.split('\n').length;
                 var arr = [];
@@ -557,12 +614,10 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 }
             });
 
-            // Initial code load from localStorage or default
             var savedCode = localStorage.getItem('nexus_py_code');
             codeInput.value = savedCode !== null ? savedCode : STARTER_TEMPLATES[0].code;
             updateLineNumbers();
 
-            // Run Script Execution
             btnRun.addEventListener('click', function() {
                 executeCode(codeInput.value);
             });
@@ -579,8 +634,8 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 isRunning = true;
                 btnRun.classList.add('hidden');
                 btnStop.classList.remove('hidden');
-                statusPill.innerText = 'Running...';
-                statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#1F6FEB]/20 text-[#58A6FF] border border-[#58A6FF]/40';
+                statusPill.innerText = 'Running';
+                statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#1F6FEB]/20 text-[#58A6FF] border border-[#58A6FF]/40 shrink-0';
                 consoleOutput.innerText = '';
                 outputMeta.innerText = '0 chars';
                 stdinBar.classList.add('hidden');
@@ -589,22 +644,24 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 switchTab('console');
 
                 var totalChars = 0;
-                var hasReceivedAny = false;
 
                 window.Omni.python.run(
                     code,
                     function(chunk) {
-                        hasReceivedAny = true;
                         consoleOutput.innerText += chunk;
                         totalChars += chunk.length;
                         outputMeta.innerText = totalChars + ' chars';
                         consoleOutput.scrollTop = consoleOutput.scrollHeight;
-                        if (activeTab !== 'console') unreadDot.classList.remove('hidden');
+                        if (activeTab !== 'console') {
+                            unreadDot.classList.remove('hidden');
+                            sidebarUnreadDot.classList.remove('hidden');
+                            sidebarConsoleDot.classList.remove('hidden');
+                        }
                     },
                     function(prompt, provide) {
                         currentProvideInput = provide;
-                        statusPill.innerText = 'Waiting for input...';
-                        statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#E5A93C]/20 text-[#E5A93C] border border-[#E5A93C]/40';
+                        statusPill.innerText = 'Input';
+                        statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#E5A93C]/20 text-[#E5A93C] border border-[#E5A93C]/40 shrink-0';
                         stdinPrompt.innerText = (prompt || 'INPUT').trim() + ' >';
                         stdinInput.value = '';
                         stdinBar.classList.remove('hidden');
@@ -631,14 +688,14 @@ val DEFAULT_PYTHON_LAB_HTML = """
 
                 if (success) {
                     statusPill.innerText = 'Ready';
-                    statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#238636]/20 text-[#3FB950] border border-[#3FB950]/40';
+                    statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#238636]/20 text-[#3FB950] border border-[#3FB950]/40 shrink-0';
                     if (result && !consoleOutput.innerText.includes(result)) {
                         consoleOutput.innerText += '\n' + result;
                     }
                     if (window.Omni) window.Omni.toast('Execution finished');
                 } else {
                     statusPill.innerText = 'Error';
-                    statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#DA3633]/20 text-[#F85149] border border-[#F85149]/40';
+                    statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#DA3633]/20 text-[#F85149] border border-[#F85149]/40 shrink-0';
                     consoleOutput.innerText += '\n❌ ' + result;
                     if (window.Omni) window.Omni.toast('Script error');
                 }
@@ -646,7 +703,6 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 consoleOutput.scrollTop = consoleOutput.scrollHeight;
             }
 
-            // Stdin submission
             function submitStdin() {
                 if (!currentProvideInput) return;
                 var val = stdinInput.value;
@@ -654,8 +710,8 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 var fn = currentProvideInput;
                 currentProvideInput = null;
                 stdinBar.classList.add('hidden');
-                statusPill.innerText = 'Running...';
-                statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#1F6FEB]/20 text-[#58A6FF] border border-[#58A6FF]/40';
+                statusPill.innerText = 'Running';
+                statusPill.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-[#1F6FEB]/20 text-[#58A6FF] border border-[#58A6FF]/40 shrink-0';
                 fn(val);
             }
 
@@ -667,7 +723,6 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 }
             });
 
-            // Stop / Flush
             btnStop.addEventListener('click', function() {
                 if (window.Omni) {
                     window.Omni.python.run('import sys; sys.exit(0)', function(){}, function(){});
@@ -676,25 +731,26 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 finishRun(false, 'Halted by user');
             });
 
-            // Snippet insertion
             document.querySelectorAll('.snippet-btn').forEach(function(b) {
                 b.addEventListener('click', function() {
                     var sType = b.getAttribute('data-snippet');
-                    var match = STARTER_TEMPLATES.find(function(t) { return t.id.includes(sType); });
+                    var match = STARTER_TEMPLATES.find(function(t) { return t.id.indexOf(sType) !== -1; });
                     if (match) {
                         codeInput.value = match.code;
                         updateLineNumbers();
+                        switchTab('editor');
+                        closeSidebar();
                         if (window.Omni) window.Omni.toast('Loaded ' + match.title);
                     }
                 });
             });
 
-            // Copy / Paste in Editor
             document.getElementById('btn-copy-code').addEventListener('click', function() {
                 if (window.Omni) {
                     window.Omni.copy(codeInput.value);
                     window.Omni.toast('Copied code to clipboard');
                 }
+                closeSidebar();
             });
             document.getElementById('btn-paste').addEventListener('click', function() {
                 if (window.Omni) {
@@ -702,18 +758,21 @@ val DEFAULT_PYTHON_LAB_HTML = """
                     if (clip) {
                         codeInput.value = clip;
                         updateLineNumbers();
+                        switchTab('editor');
                         window.Omni.toast('Pasted from clipboard');
                     } else {
                         window.Omni.toast('Clipboard is empty');
                     }
                 }
+                closeSidebar();
             });
             document.getElementById('btn-clear-code').addEventListener('click', function() {
                 codeInput.value = '';
                 updateLineNumbers();
+                switchTab('editor');
+                closeSidebar();
             });
 
-            // Console buttons
             document.getElementById('btn-copy-output').addEventListener('click', function() {
                 if (window.Omni) {
                     window.Omni.copy(consoleOutput.innerText);
@@ -725,7 +784,6 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 outputMeta.innerText = '0 chars';
             });
 
-            // REPL Runner
             var replInput = document.getElementById('repl-input');
             var replHistory = document.getElementById('repl-history');
             document.getElementById('btn-repl-send').addEventListener('click', runReplLine);
@@ -758,7 +816,6 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 replHistory.innerText = 'Python 3.11 interactive REPL ready.\n>>> ';
             });
 
-            // Scripts Library
             function renderLibrary() {
                 var libList = document.getElementById('library-list');
                 libList.innerHTML = '';
@@ -815,6 +872,7 @@ val DEFAULT_PYTHON_LAB_HTML = """
                 });
                 localStorage.setItem('nexus_user_scripts', JSON.stringify(userScripts));
                 renderLibrary();
+                closeSidebar();
                 if (window.Omni) window.Omni.toast('Saved to Library');
             });
 
@@ -826,38 +884,36 @@ val DEFAULT_PYTHON_LAB_HTML = """
 
             renderLibrary();
 
-            // WakeLock & Power Controls
-            var btnWakeLockTop = document.getElementById('btn-wakelock');
             var toggleWakeLockBtn = document.getElementById('toggle-wakelock-btn');
+            var wakeLockBadge = document.getElementById('wakelock-badge');
             var toggleAwakeBtn = document.getElementById('toggle-awake-btn');
+            var awakeBadge = document.getElementById('awake-badge');
 
-            function toggleWakeLock() {
+            toggleWakeLockBtn.addEventListener('click', function() {
                 isWakeLockOn = !isWakeLockOn;
                 if (isWakeLockOn) {
                     if (window.Omni && window.Omni.wakeLock) window.Omni.wakeLock.acquire('PythonLab');
-                    btnWakeLockTop.innerText = '⚡ WakeLock: ON';
-                    btnWakeLockTop.className = 'px-2 py-0.5 text-[10px] font-bold rounded bg-[#00E5FF]/20 text-[#00E5FF] border border-[#00E5FF]/40';
-                    toggleWakeLockBtn.innerText = 'Disable Background WakeLock';
-                    toggleWakeLockBtn.className = 'px-3 py-1.5 rounded-lg bg-[#00E5FF]/20 border border-[#00E5FF] font-bold text-[#00E5FF]';
+                    wakeLockBadge.innerText = 'ON';
+                    wakeLockBadge.className = 'text-[10px] font-bold text-[#00E5FF]';
+                    toggleWakeLockBtn.className = 'w-full flex items-center justify-between px-2.5 py-2 rounded-lg bg-[#00E5FF]/15 border border-[#00E5FF] text-xs font-semibold text-[#00E5FF]';
                     if (window.Omni) window.Omni.toast('Background WakeLock engaged');
                 } else {
                     if (window.Omni && window.Omni.wakeLock) window.Omni.wakeLock.release();
-                    btnWakeLockTop.innerText = '⚡ WakeLock: OFF';
-                    btnWakeLockTop.className = 'px-2 py-0.5 text-[10px] font-bold rounded bg-[#21262D] text-[#8B949E] border border-[#30363D]';
-                    toggleWakeLockBtn.innerText = 'Enable Background WakeLock';
-                    toggleWakeLockBtn.className = 'px-3 py-1.5 rounded-lg bg-[#21262D] border border-[#30363D] font-bold text-white';
+                    wakeLockBadge.innerText = 'OFF';
+                    wakeLockBadge.className = 'text-[10px] font-bold text-[#8B949E]';
+                    toggleWakeLockBtn.className = 'w-full flex items-center justify-between px-2.5 py-2 rounded-lg bg-[#21262D] border border-[#30363D] text-xs font-semibold text-white';
                     if (window.Omni) window.Omni.toast('WakeLock released');
                 }
-            }
-
-            btnWakeLockTop.addEventListener('click', toggleWakeLock);
-            toggleWakeLockBtn.addEventListener('click', toggleWakeLock);
+            });
 
             toggleAwakeBtn.addEventListener('click', function() {
                 isKeepAwakeOn = !isKeepAwakeOn;
                 if (window.Omni && window.Omni.screen) window.Omni.screen.keepAwake(isKeepAwakeOn);
-                toggleAwakeBtn.innerText = isKeepAwakeOn ? 'Release Keep Screen Awake' : 'Keep Screen Awake';
-                toggleAwakeBtn.className = isKeepAwakeOn ? 'px-3 py-1.5 rounded-lg bg-[#3FB950]/20 border border-[#3FB950] font-bold text-[#3FB950]' : 'px-3 py-1.5 rounded-lg bg-[#21262D] border border-[#30363D] font-bold text-white';
+                awakeBadge.innerText = isKeepAwakeOn ? 'ON' : 'OFF';
+                awakeBadge.className = isKeepAwakeOn ? 'text-[10px] font-bold text-[#3FB950]' : 'text-[10px] font-bold text-[#8B949E]';
+                toggleAwakeBtn.className = isKeepAwakeOn
+                    ? 'w-full flex items-center justify-between px-2.5 py-2 rounded-lg bg-[#3FB950]/15 border border-[#3FB950] text-xs font-semibold text-[#3FB950]'
+                    : 'w-full flex items-center justify-between px-2.5 py-2 rounded-lg bg-[#21262D] border border-[#30363D] text-xs font-semibold text-white';
                 if (window.Omni) window.Omni.toast(isKeepAwakeOn ? 'Screen keep awake ON' : 'Screen keep awake OFF');
             });
 
@@ -867,6 +923,7 @@ val DEFAULT_PYTHON_LAB_HTML = """
                         window.Omni.toast('Runtime Flushed & Reset');
                     });
                 }
+                closeSidebar();
             });
         })();
     </script>
