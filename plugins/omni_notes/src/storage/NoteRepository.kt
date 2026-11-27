@@ -885,15 +885,95 @@ object NoteRepository {
         }
     }
 
-    private fun decryptColorNoteText(base64Cipher: String, password: String): String? {
-        if (password.isEmpty() || base64Cipher.isBlank()) return null
-        val cipherBytes = try {
-            Base64.decode(base64Cipher.trim(), Base64.DEFAULT)
-        } catch (_: Exception) {
-            return null
-        }
-        if (cipherBytes.isEmpty() || cipherBytes.size % 16 != 0) return null
+    private fun derivePkcs12Sha256Key(
+        password: String,
+        salt: ByteArray,
+        iterations: Int = 20,
+        keyLen: Int = 32
+    ): ByteArray {
+        val u = 32
+        val v = 64
+        val d = ByteArray(v) { 1 }
+        val sLen = if (salt.isEmpty()) 0 else ((salt.size + v - 1) / v) * v
+        val s = ByteArray(sLen) { i -> salt[i % salt.size] }
 
+        val pwBytes = if (password.isEmpty()) {
+            ByteArray(0)
+        } else {
+            ByteArray(password.length * 2 + 2).also { out ->
+                for (i in password.indices) {
+                    val code = password[i].code
+                    out[i * 2] = (code ushr 8).toByte()
+                    out[i * 2 + 1] = (code and 0xFF).toByte()
+                }
+            }
+        }
+        val pLen = if (pwBytes.isEmpty()) 0 else ((pwBytes.size + v - 1) / v) * v
+        val p = ByteArray(pLen) { i -> pwBytes[i % pwBytes.size] }
+
+        val combined = ByteArray(s.size + p.size)
+        System.arraycopy(s, 0, combined, 0, s.size)
+        System.arraycopy(p, 0, combined, s.size, p.size)
+
+        val digest = MessageDigest.getInstance("SHA-256")
+        val c = (keyLen + u - 1) / u
+        val dKey = ByteArray(c * u)
+
+        for (i in 0 until c) {
+            digest.reset()
+            digest.update(d)
+            digest.update(combined)
+            var a = digest.digest()
+            for (iter in 1 until iterations) {
+                digest.reset()
+                a = digest.digest(a)
+            }
+            System.arraycopy(a, 0, dKey, i * u, u)
+            if (i + 1 < c) {
+                val b = ByteArray(v) { idx -> a[idx % a.size] }
+                var offset = 0
+                while (offset < combined.size) {
+                    var carry = 1
+                    for (j in v - 1 downTo 0) {
+                        val sum = (combined[offset + j].toInt() and 0xFF) + (b[j].toInt() and 0xFF) + carry
+                        combined[offset + j] = (sum and 0xFF).toByte()
+                        carry = sum ushr 8
+                    }
+                    offset += v
+                }
+            }
+        }
+        return dKey.copyOf(keyLen)
+    }
+
+    private fun tryDecryptAes256Pbe(cipherBytes: ByteArray, password: String): String? {
+        val salt = "ColorNote Fixed Salt".toByteArray(Charsets.UTF_8)
+        val zeroIv = ByteArray(16)
+
+        // 1. Try native BC PBE provider if available
+        try {
+            val factory = javax.crypto.SecretKeyFactory.getInstance("PBEWITHSHA256AND256BITAES-CBC-BC", "BC")
+            val secret = factory.generateSecret(javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, 20))
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(secret.encoded, "AES"), IvParameterSpec(zeroIv))
+            val plain = String(cipher.doFinal(cipherBytes), Charsets.UTF_8)
+            if (!plain.contains('\uFFFD')) return plain
+        } catch (_: Exception) {}
+
+        // 2. Pure-Kotlin RFC 7292 PKCS#12 SHA-256 fallback (works on all Android versions)
+        try {
+            val key = derivePkcs12Sha256Key(password, salt, iterations = 20, keyLen = 32)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(zeroIv))
+            val plain = String(cipher.doFinal(cipherBytes), Charsets.UTF_8)
+            if (!plain.contains('\uFFFD')) return plain
+        } catch (_: Exception) {}
+
+        return null
+    }
+
+    private fun tryDecryptMd5Openssl(cipherBytes: ByteArray, password: String): String? {
+        if (password.isEmpty()) return null
         val pwBytes = password.toByteArray(Charsets.UTF_8)
         val salt = "ColorNote Fixed Salt".toByteArray(Charsets.UTF_8)
         val md5 = MessageDigest.getInstance("MD5")
@@ -914,6 +994,30 @@ object NoteRepository {
                 val plain = String(cipher.doFinal(cipherBytes), Charsets.UTF_8)
                 if (!plain.contains('\uFFFD')) return plain
             } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    private fun decryptColorNoteText(base64Cipher: String, password: String, encryptionMode: Int): String? {
+        if (base64Cipher.isBlank()) return null
+        val cipherBytes = try {
+            Base64.decode(base64Cipher.trim(), Base64.DEFAULT)
+        } catch (_: Exception) {
+            return null
+        }
+        if (cipherBytes.isEmpty() || cipherBytes.size % 16 != 0) return null
+
+        val candidates = if (encryptionMode == 1) {
+            listOf("ColorNote Password", password).distinct().filter { it.isNotEmpty() }
+        } else {
+            listOf(password, "ColorNote Password").distinct().filter { it.isNotEmpty() }
+        }
+
+        for (pw in candidates) {
+            tryDecryptAes256Pbe(cipherBytes, pw)?.let { return it }
+        }
+        for (pw in candidates) {
+            tryDecryptMd5Openssl(cipherBytes, pw)?.let { return it }
         }
         return null
     }
@@ -993,10 +1097,13 @@ object NoteRepository {
                 else -> NoteStatus.ACTIVE
             }
 
-            val isEncrypted = obj.optInt("encrypted", 0) != 0
+            val encryptionMode = obj.optInt("encrypted", 0)
+            val isEncrypted = encryptionMode != 0
             val rawNoteBody = obj.optString("note", "")
             val resolvedBody = if (isEncrypted) {
-                val decoded = if (!decryptPassword.isNullOrEmpty()) decryptColorNoteText(rawNoteBody, decryptPassword) else null
+                val decoded = if (decryptPassword != null) {
+                    decryptColorNoteText(rawNoteBody, decryptPassword, encryptionMode)
+                } else null
                 if (decoded != null) {
                     decryptedOk++
                     decoded
@@ -1036,8 +1143,10 @@ object NoteRepository {
             var importedCount = 0
             parsedItems.forEach { item ->
                 val current = existingById[item.id]
-                if (current == null || item.updatedAtMs >= current.updatedAtMs) {
-                    existingById[item.id] = if (current != null) item.copy(sortIndex = current.sortIndex) else item
+                if (current == null || item.updatedAtMs > current.updatedAtMs) {
+                    existingById[item.id] = if (current != null) {
+                        item.copy(sortIndex = current.sortIndex, folderId = current.folderId)
+                    } else item
                     importedCount++
                 }
             }
