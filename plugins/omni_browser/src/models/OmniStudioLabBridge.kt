@@ -40,7 +40,15 @@ class OmniStudioLabBridge(
     private var savedSystemBrightnessMode: Int? = null
     private var dimmerStatusTextView: android.widget.TextView? = null
     private var lastDimmerTapMs: Long = 0L
+    private val activeInputCallbacks = java.util.concurrent.ConcurrentHashMap<String, (String) -> Unit>()
+
+    @JavascriptInterface
+    fun pythonProvideInput(callId: String, value: String) {
+        activeInputCallbacks.remove(callId)?.invoke(value)
+    }
+
     fun cleanupOnTabLifecycle(reason: String) {
+        activeInputCallbacks.clear()
         mainHandler.post {
             val aiCount = automator.sessions.size
             val gptCount = chatGptAutomator.sessions.size
@@ -1062,7 +1070,15 @@ class OmniStudioLabBridge(
                 onOutput = { chunk ->
                     progress(callId, chunk)
                 },
+                onInputRequested = { prompt, provide ->
+                    activeInputCallbacks[callId] = provide
+                    mainHandler.post {
+                        val escaped = JSONObject.quote(prompt)
+                        getActiveWebView()?.evaluateJavascript("if (window.__omniRpcInput) { window.__omniRpcInput('$callId', $escaped); }", null)
+                    }
+                },
                 onComplete = { success, output ->
+                    activeInputCallbacks.remove(callId)
                     if (success) resolve(callId, output)
                     else reject(callId, output)
                 }
