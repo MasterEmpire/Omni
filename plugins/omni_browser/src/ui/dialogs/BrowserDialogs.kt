@@ -92,27 +92,7 @@ fun DownloadsManagerDialog(
     val context = LocalContext.current
 
     fun openDownloadedFile(file: File) {
-        try {
-            if (!file.exists()) {
-                bridge.showToast("File no longer exists on storage")
-                return
-            }
-            val mime = resolveMimeType(file)
-            val contentUri = getShareableUri(context, file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(contentUri, mime)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            val chooser = Intent.createChooser(intent, "Open with...").apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(chooser)
-        } catch (e: android.content.ActivityNotFoundException) {
-            bridge.showToast("No installed app found to open .${file.extension} files")
-        } catch (e: Exception) {
-            bridge.showToast("Could not open file: ${e.message}")
-        }
+        com.omni.plugin.browser.utils.openDownloadedFile(context, file, bridge)
     }
 
     fun shareDownloadedFile(file: File) {
