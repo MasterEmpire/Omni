@@ -2143,10 +2143,13 @@ poolManager.pool.remove(targetId)?.let { wv ->
     fun ensurePythonLabSeeded() {
         try {
             val labFile = File(bridge.getPluginDir(), "ide/vault_python_lab/index.html")
-            if (!labFile.exists() || labFile.length() == 0L) {
+            val needsSeed = !labFile.exists() || labFile.length() == 0L ||
+                !runCatching { labFile.readText(Charsets.UTF_8).contains("omni-python-lab-v2") }.getOrDefault(false)
+            if (needsSeed) {
                 labFile.parentFile?.mkdirs()
                 labFile.writeText(com.omni.plugin.browser.models.DEFAULT_PYTHON_LAB_HTML, Charsets.UTF_8)
-                bridge.log("PYTHON_LAB", "✅ Seeded permanent Python Lab into ${labFile.absolutePath}")
+                vaultManager.autoMirrorVaultToDocuments()
+                bridge.log("PYTHON_LAB", "✅ Seeded/upgraded Python Lab v2 into ${labFile.absolutePath}")
             }
             val hasPythonLab = shortcuts.any { it.id == "python_lab" || it.url.contains("vault_python_lab") }
             if (!hasPythonLab) {
