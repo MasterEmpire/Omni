@@ -248,6 +248,12 @@ data class QuotaEventRecord(
     val reason: String = ""
 )
 
+data class VerificationEventRecord(
+    val timestamp: Long,
+    val reason: String = "",
+    val unlockedAt: Long = 0L
+)
+
 data class ProfileAiAnalytics(
     val profileId: String,
     val tabsOpenedToday: Int = 0,
@@ -263,8 +269,11 @@ data class ProfileAiAnalytics(
     val verificationRequiredAt: Long = 0L,
     val verificationReason: String = "",
     val dailyHistory: Map<String, DailyAiStats> = emptyMap(),
-    val quotaHistory: List<QuotaEventRecord> = emptyList()
+    val quotaHistory: List<QuotaEventRecord> = emptyList(),
+    val verificationHistory: List<VerificationEventRecord> = emptyList()
 ) {
+    val totalVerificationStrikes: Int get() = verificationHistory.size
+    val isRepeatVerifyStrike: Boolean get() = verificationHistory.size > 1
     fun effectivePromptsToday(today: String): Int =
         dailyHistory[today]?.prompts ?: if (lastActiveDay == today) promptsSentToday else 0
 
