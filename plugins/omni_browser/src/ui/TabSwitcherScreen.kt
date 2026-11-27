@@ -806,52 +806,22 @@ fun TabSwitcherScreen(
             }
 
                 // Smart Floating Fast Jump Controls (Up / Down)
-                AnimatedVisibility(
+                TabSwitcherJumpControls(
                     visible = showJumpArrows,
-                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                    canJumpUp = canJumpUp,
+                    canJumpDown = canJumpDown,
+                    onJumpTop = {
+                        bridge?.vibrate(20L)
+                        scope.launch { gridState.animateScrollToItem(0) }
+                    },
+                    onJumpBottom = {
+                        bridge?.vibrate(20L)
+                        scope.launch { gridState.animateScrollToItem((displayedTabs.size - 1).coerceAtLeast(0)) }
+                    },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 16.dp, bottom = 16.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(22.dp),
-                        color = Color(0xFF161B22).copy(alpha = 0.92f),
-                        border = BorderStroke(1.2.dp, Color(0xFF58A6FF).copy(alpha = 0.65f)),
-                        shadowElevation = 10.dp
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(3.dp)
-                        ) {
-                            if (canJumpUp) {
-                                IconButton(
-                                    onClick = {
-                                        bridge?.vibrate(20L)
-                                        scope.launch { gridState.animateScrollToItem(0) }
-                                    },
-                                    modifier = Modifier.size(34.dp)
-                                ) {
-                                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Scroll to Top", tint = Color(0xFF58A6FF), modifier = Modifier.size(20.dp))
-                                }
-                            }
-                            if (canJumpUp && canJumpDown) {
-                                HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.width(20.dp))
-                            }
-                            if (canJumpDown) {
-                                IconButton(
-                                    onClick = {
-                                        bridge?.vibrate(20L)
-                                        scope.launch { gridState.animateScrollToItem((displayedTabs.size - 1).coerceAtLeast(0)) }
-                                    },
-                                    modifier = Modifier.size(34.dp)
-                                ) {
-                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Scroll to Bottom", tint = Color(0xFF58A6FF), modifier = Modifier.size(20.dp))
-                                }
-                            }
-                        }
-                    }
-                }
+                )
             }
         }
     }
@@ -2373,6 +2343,54 @@ private fun ProfileStatPill(
             Text(label, color = Color(0xFF8B949E), fontSize = 9.sp, maxLines = 1)
             Text(value, color = accent, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             Text(sub, color = Color(0xFF9AA0A6), fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+@Composable
+private fun TabSwitcherJumpControls(
+    visible: Boolean,
+    canJumpUp: Boolean,
+    canJumpDown: Boolean,
+    onJumpTop: () -> Unit,
+    onJumpBottom: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(initialScale = 0.8f),
+        exit = fadeOut() + scaleOut(targetScale = 0.8f),
+        modifier = modifier
+    ) {
+        Surface(
+            shape = RoundedCornerShape(22.dp),
+            color = Color(0xFF161B22).copy(alpha = 0.92f),
+            border = BorderStroke(1.2.dp, Color(0xFF58A6FF).copy(alpha = 0.65f)),
+            shadowElevation = 10.dp
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(3.dp)
+            ) {
+                if (canJumpUp) {
+                    IconButton(
+                        onClick = onJumpTop,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Scroll to Top", tint = Color(0xFF58A6FF), modifier = Modifier.size(20.dp))
+                    }
+                }
+                if (canJumpUp && canJumpDown) {
+                    HorizontalDivider(color = Color(0xFF30363D), modifier = Modifier.width(20.dp))
+                }
+                if (canJumpDown) {
+                    IconButton(
+                        onClick = onJumpBottom,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Scroll to Bottom", tint = Color(0xFF58A6FF), modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
         }
     }
 }
