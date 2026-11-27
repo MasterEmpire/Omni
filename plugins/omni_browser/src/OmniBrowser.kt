@@ -1354,6 +1354,7 @@ class OmniBrowser : PluginEntry() {
                     onRestoreTabGroup = { state.restoreTabGroup(it) },
                     onRestoreSingleGroupedTab = { gId, item -> state.restoreSingleGroupedTab(gId, item) },
                     onDeleteTabGroup = { state.deleteTabGroup(it) },
+                    onReorderProfiles = { from, to -> state.reorderProfiles(from, to) },
                     onSelectProfile = {
                         state.changeSelectedProfile(it)
                     },
@@ -1842,10 +1843,12 @@ class OmniBrowser : PluginEntry() {
 
                 if (state.editingProfile != null) {
                     val targetProf = state.editingProfile!!
-                    RenameProfileDialog(
+                    EditProfileDialog(
                         profile = targetProf,
-                        onSave = { newName ->
-                            val updated = state.profiles.map { if (it.id == targetProf.id) it.copy(name = newName) else it }
+                        onSave = { newName, newColor ->
+                            val updated = state.profiles.map {
+                                if (it.id == targetProf.id) it.copy(name = newName, colorValue = newColor) else it
+                            }
                             state.profiles = updated
                             state.vaultManager.saveProfiles(updated)
                             state.editingProfile = null
